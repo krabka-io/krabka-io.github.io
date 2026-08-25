@@ -1,0 +1,188 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  currentSlug: string;
+}
+
+const { title, description, currentSlug } = Astro.props;
+
+const docSections = [
+  {
+    category: 'Start Here',
+    items: [
+      { label: 'Introduction', slug: '/docs' },
+      { label: 'Quickstart Guide', slug: '/docs/quickstart' },
+      { label: 'Ecosystem Architecture', slug: '/docs/architecture' },
+    ],
+  },
+  {
+    category: 'Core Broker',
+    items: [
+      { label: 'Broker Engine', slug: '/docs/broker' },
+      { label: 'KRaft Consensus', slug: '/docs/kraft' },
+      { label: 'Tiered Storage', slug: '/docs/tiered-storage' },
+      { label: 'Storage Formatting', slug: '/docs/formatting' },
+    ],
+  },
+  {
+    category: 'Polyglot Streams',
+    items: [
+      { label: 'Go Streams & Arrow', slug: '/docs/streams-go' },
+      { label: 'Java Streams & Arrow', slug: '/docs/streams-java' },
+      { label: 'Rust Streams & Client', slug: '/docs/streams-rs' },
+      { label: 'Barrier Cuts & Epochs', slug: '/docs/barriers' },
+      { label: 'Schema Registry & Serdes', slug: '/docs/schema-registry' },
+    ],
+  },
+  {
+    category: 'Connect & CDC',
+    items: [
+      { label: 'PostgreSQL CDC Source', slug: '/docs/connect-postgres' },
+      { label: 'Cluster Replicator', slug: '/docs/replicator' },
+    ],
+  },
+  {
+    category: 'Operations & K8s',
+    items: [
+      { label: 'Kubernetes Operator', slug: '/docs/operator' },
+      { label: 'Operator CRD Reference', slug: '/docs/crds' },
+      { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
+    ],
+  },
+  {
+    category: 'Observability',
+    items: [
+      { label: 'OpenTelemetry & PromQL', slug: '/docs/observability' },
+    ],
+  },
+];
+
+// Find active category
+const activeCategory = docSections.find((sec) =>
+  sec.items.some((item) => item.slug === currentSlug || (item.slug === '/docs' && currentSlug === '/docs/'))
+)?.category || 'Docs';
+
+const breadcrumbData = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://krabka.io"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://krabka.io/docs"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": activeCategory,
+      "item": `https://krabka.io${currentSlug}`
+    },
+    {
+      "@type": "ListItem",
+      "position": 4,
+      "name": title,
+      "item": `https://krabka.io${currentSlug}`
+    }
+  ]
+};
+---
+
+<BaseLayout
+  title={`${title} | Krabka Documentation`}
+  description={description}
+  type="article"
+>
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbData)} slot="head" />
+
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+    <div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
+      
+      <!-- Sticky Left Sidebar -->
+      <aside class="lg:col-span-3">
+        <div class="sticky top-24 space-y-6 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3">
+          <div class="pb-2 border-b border-white/10">
+            <span class="text-xs font-bold uppercase tracking-wider text-krab-400 font-sans">
+              Documentation Hub
+            </span>
+          </div>
+
+          <nav class="space-y-6 text-sm font-sans" aria-label="Docs navigation">
+            {docSections.map((sec) => (
+              <div>
+                <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">
+                  {sec.category}
+                </h4>
+                <ul class="space-y-1">
+                  {sec.items.map((item) => {
+                    const isActive = currentSlug === item.slug || (item.slug === '/docs' && currentSlug === '/docs/');
+                    return (
+                      <li>
+                        <a
+                          href={item.slug}
+                          class={`block px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                            isActive
+                              ? 'bg-krab-500/15 text-krab-400 font-bold border border-krab-500/30'
+                              : 'text-gray-300 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          {item.label}
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </nav>
+        </div>
+      </aside>
+
+      <!-- Main Docs Content -->
+      <main class="lg:col-span-9 space-y-4">
+        <!-- Breadcrumbs UI -->
+        <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs font-sans text-gray-400 pb-2">
+          <a href="/" class="hover:text-white transition-colors">Home</a>
+          <span>/</span>
+          <a href="/docs" class="hover:text-white transition-colors">Docs</a>
+          <span>/</span>
+          <span class="text-gray-400">{activeCategory}</span>
+          <span>/</span>
+          <span class="text-krab-400 font-semibold">{title}</span>
+        </nav>
+
+        <div class="frosted-card rounded-2xl p-8 lg:p-10 border border-white/10 space-y-6">
+          <slot />
+        </div>
+      </main>
+
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy';
+          }, 2000);
+        }
+      }
+    });
+  });
+</script>

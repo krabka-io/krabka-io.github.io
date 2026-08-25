@@ -1,0 +1,120 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const goInstallCode = `go get github.com/krabka-io/krabka-streams-go`;
+
+const goCode = `package main
+
+import (
+	"context"
+	"github.com/krabka-io/krabka-streams-go/columnar"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+)
+
+func main() {
+	mem := memory.NewGoAllocator()
+	codec := columnar.NewBlobCodec(mem)
+	topology := columnar.NewTopology(mem)
+	
+	source, _ := topology.AddSource("source", []string{"transactions"}, codec)
+	large, _ := topology.AddOperator("large",
+		columnar.Filter(mem, func(batch arrow.Record, row int) bool {
+			return batch.Column(1).(*array.Int64).Value(row) > 4
+		}), source)
+	topology.AddSink("archive", "large-transactions", codec, large)
+	
+	built, err := topology.Build()
+	if err != nil { panic(err) }
+	
+	_ = built
+}`;
+---
+
+<DocsLayout
+  title="Go Streams & Arrow"
+  description="Go client library for stream processing with Krabka: Apache Arrow batch processing, schema registry, and barrier cuts."
+  currentSlug="/docs/streams-go"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Go Streams & Arrow</h1>
+        <p class="text-gray-400 mt-2 text-base">
+          Stream processing in Go featuring Apache Arrow batch acceleration and barrier cuts via <code class="text-krab-300 font-mono text-xs">krabka-streams-go</code>.
+        </p>
+      </div>
+
+      <a
+        href="https://krabka-io.github.io/krabka-streams-go/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center gap-2 rounded-xl bg-krab-500/20 border border-krab-500/40 px-4 py-2 text-xs font-bold text-krab-300 hover:bg-krab-500/30 hover:text-white transition-all shrink-0 font-sans"
+      >
+        <span>Full Go API Reference</span>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </a>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Installation (Go 1.26+):</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={goInstallCode}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>$ {goInstallCode}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Packages</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Package</th>
+              <th class="py-3 px-4">Purpose</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">schema</td><td class="py-2.5 px-4">Registry client, cache, and Avro/Protobuf/JSON Schema serdes</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">columnar</td><td class="py-2.5 px-4">Apache Arrow batch processing, topologies, and barrier cuts</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">columnarschema</td><td class="py-2.5 px-4">Avro and Protobuf Arrow memory bridges</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Columnar Processing Example</h2>
+      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Topology Definition:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={goCode}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>{goCode}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Automatic GoDoc & API Reference</h2>
+      <p>
+        The complete interactive API reference for Go is generated with Bazel and published automatically to GitHub Pages:
+      </p>
+      <div class="pt-2">
+        <a
+          href="https://krabka-io.github.io/krabka-streams-go/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-2 text-xs font-semibold text-white transition-all"
+        >
+          <span>Open krabka-streams-go API Reference</span>
+          <svg class="h-3.5 w-3.5 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</DocsLayout>

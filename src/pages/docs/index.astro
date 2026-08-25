@@ -1,0 +1,58 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const snippet = `docker run -d -p 9092:9092 krabka/broker:latest`;
+---
+
+<DocsLayout
+  title="Introduction"
+  description="Krabka is an open-source, byte-exact Apache Kafka wire-protocol broker, native KRaft consensus engine, and polyglot streaming platform written in Rust."
+  currentSlug="/docs"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Krabka Documentation</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        The complete technical guide to building, operating, and streaming with Krabka.
+      </p>
+    </div>
+
+    <div class="prose prose-invert max-w-none text-gray-300 space-y-4 text-sm leading-relaxed">
+      <p>
+        <strong class="text-white">Krabka</strong> is a clean-sheet, memory-safe implementation of the Apache Kafka streaming platform. Designed to eliminate the operational overhead, memory pressure, and garbage collection pauses of the JVM, Krabka delivers byte-exact wire-protocol parity across all Kafka APIs while operating in a fraction of the memory.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-4">Key Architectural Pillars</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 not-prose">
+        <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
+          <h3 class="text-sm font-bold text-white">Byte-Exact Wire Parity</h3>
+          <p class="text-xs text-gray-400">Codecs generated directly from upstream Apache Kafka JSON schemas. Compatible with standard <code class="font-mono text-krab-300">kafka-clients</code>, JVM CLI tools, and existing producer/consumer applications.</p>
+        </div>
+        <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
+          <h3 class="text-sm font-bold text-white">Native KRaft Quorum</h3>
+          <p class="text-xs text-gray-400">Metadata is replicated via a native Raft implementation (<code class="font-mono text-krab-300">crabka-raft</code>) implementing the KIP-595 RPC protocol with zero ZooKeeper dependency.</p>
+        </div>
+        <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
+          <h3 class="text-sm font-bold text-white">Tiered Storage Engine</h3>
+          <p class="text-xs text-gray-400">Asynchronously offload sealed partition segments to Amazon S3, Google Cloud Storage, or MinIO with local NVMe caching.</p>
+        </div>
+        <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
+          <h3 class="text-sm font-bold text-white">Polyglot Streams & Arrow</h3>
+          <p class="text-xs text-gray-400">Native stream processing libraries for Go, Java, and Rust featuring zero-copy Apache Arrow batch processing and barrier cuts.</p>
+        </div>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-4">Quick Run</h2>
+      <div class="not-prose bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Start local broker:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={snippet}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>$ {snippet}</code></pre>
+      </div>
+    </div>
+  </div>
+</DocsLayout>

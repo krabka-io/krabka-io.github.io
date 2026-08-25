@@ -1,0 +1,40 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const o11yDemo = `git clone https://github.com/krabka-io/krabka-o11y-demo
+cd krabka-o11y-demo
+docker compose up -d`;
+---
+
+<DocsLayout
+  title="OpenTelemetry & PromQL"
+  description="Metrics, distributed traces, continuous profiling, and Grafana dashboards for Krabka clusters."
+  currentSlug="/docs/observability"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Observability & Telemetry</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        Full-signal telemetry without third-party agent sidecars via <code class="text-krab-300 font-mono text-xs">crabka-telemetry</code> and <code class="text-krab-300 font-mono text-xs">krabka-o11y</code>.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <p>
+        The observability engine natively outputs Prometheus metrics on <code class="font-mono text-krab-300 text-xs">/metrics</code>, exports spans via OpenTelemetry gRPC/HTTP OTLP pipelines, and provides pprof runtime profiling endpoints.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Runnable Demo Stack</h2>
+      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Run Demo Stack:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={o11yDemo}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>{o11yDemo}</code></pre>
+      </div>
+    </div>
+  </div>
+</DocsLayout>

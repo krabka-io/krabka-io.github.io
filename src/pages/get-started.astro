@@ -1,0 +1,337 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const deploySnippets = {
+  docker: `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml
+docker compose up -d`,
+  helm: `helm repo add krabka https://krabka.io/charts
+helm repo update
+helm install krabka-operator krabka/krabka-operator --namespace krabka-system --create-namespace
+kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml`,
+  binary: `curl -fsSL https://krabka.io/install.sh | bash
+krabka-broker format --cluster-id krabka-local-01
+krabka-broker run --config ./krabka.toml`,
+  cargo: `cargo install krabka-broker krabka-cli --locked
+krabka format --cluster-id krabka-dev-01
+krabka-broker --node-id 1 --bind 0.0.0.0:9092`
+};
+
+const clientSnippets = {
+  rust: `// Add to Cargo.toml: krabka-client = "1.0"
+use krabka_client::producer::{FutureProducer, ProducerRecord};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let producer = FutureProducer::builder()
+        .bootstrap_servers("localhost:9092")
+        .build()?;
+
+    producer.send(
+        ProducerRecord::to("quickstart-events")
+            .key("user-1")
+            .payload(b"Hello Krabka from Rust!"),
+    ).await?;
+
+    println!("Record successfully delivered to Krabka cluster.");
+    Ok(())
+}`,
+  go: `// go get github.com/krabka-io/krabka-streams-go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/krabka-io/krabka-streams-go/client"
+)
+
+func main() {
+    p, err := client.NewProducer(client.Config{
+        BootstrapServers: []string{"localhost:9092"},
+    })
+    if err != nil { panic(err) }
+
+    err = p.Produce(context.Background(), "quickstart-events", []byte("user-1"), []byte("Hello Krabka from Go!"))
+    if err != nil { panic(err) }
+    fmt.Println("Produced message to Krabka!")
+}`,
+  java: `// Works unmodified with the standard Apache Kafka Java Producer!
+import org.apache.kafka.clients.producer.*;
+import java.util.Properties;
+
+public class App {
+    public static void main(String[] args) {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "localhost:9092");
+        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+
+        Producer<String, String> producer = new KafkaProducer<>(props);
+        producer.send(new ProducerRecord<>("quickstart-events", "user-1", "Hello Krabka from Java!"));
+        producer.close();
+    }
+}`,
+  cli: `kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning`
+};
+---
+
+<BaseLayout
+  title="Get Started | Krabka"
+  description="Run a 3-node KRaft Krabka cluster locally with Docker Compose, deploy to Kubernetes via Helm, or produce and consume records with Rust, Go, and Java."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="text-left border-b border-white/10 pb-8 mb-12">
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Get Started in Under 2 Minutes
+      </h1>
+      <p class="mt-4 text-lg text-gray-300">
+        Choose your deployment target and verify Kafka wire compatibility with your favorite language.
+      </p>
+    </div>
+
+    <!-- Step 1: Deploy Cluster -->
+    <div class="mb-14">
+      <div class="flex items-center gap-3 mb-6">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">1</span>
+        <h2 class="text-2xl font-bold text-white">Start a Krabka Cluster</h2>
+      </div>
+
+      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
+        <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist">
+          <button class="deploy-tab-btn active rounded-lg px-3.5 py-1.5 text-sm font-semibold bg-krab-500 text-white" data-target="docker">
+            Docker Compose
+          </button>
+          <button class="deploy-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="helm">
+            Kubernetes (Helm)
+          </button>
+          <button class="deploy-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="binary">
+            Standalone Binary
+          </button>
+          <button class="deploy-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="cargo">
+            Cargo CLI
+          </button>
+        </div>
+
+        <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200 relative">
+          <div id="deploy-docker" class="deploy-panel block">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Start 3-node KRaft cluster</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.docker}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-krab-300 bg-black/40 p-4 rounded-xl border border-white/5"><code>{deploySnippets.docker}</code></pre>
+          </div>
+
+          <div id="deploy-helm" class="deploy-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Install Operator and CRD</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.helm}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-krab-300 bg-black/40 p-4 rounded-xl border border-white/5"><code>{deploySnippets.helm}</code></pre>
+          </div>
+
+          <div id="deploy-binary" class="deploy-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Download & format cluster</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.binary}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-krab-300 bg-black/40 p-4 rounded-xl border border-white/5"><code>{deploySnippets.binary}</code></pre>
+          </div>
+
+          <div id="deploy-cargo" class="deploy-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Install with Cargo</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.cargo}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-krab-300 bg-black/40 p-4 rounded-xl border border-white/5"><code>{deploySnippets.cargo}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Produce & Consume Test -->
+    <div class="mb-14">
+      <div class="flex items-center gap-3 mb-6">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">2</span>
+        <h2 class="text-2xl font-bold text-white">Produce and Consume Your First Records</h2>
+      </div>
+
+      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
+        <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist">
+          <button class="client-tab-btn active rounded-lg px-3.5 py-1.5 text-sm font-semibold bg-krab-500 text-white" data-target="c-rust">
+            Rust
+          </button>
+          <button class="client-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="c-go">
+            Go
+          </button>
+          <button class="client-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="c-java">
+            Java
+          </button>
+          <button class="client-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5" data-target="c-cli">
+            Kafka CLI
+          </button>
+        </div>
+
+        <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
+          <div id="client-c-rust" class="client-panel block">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Async FutureProducer snippet</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-gray-200 bg-black/40 p-4 rounded-xl border border-white/5"><code>{clientSnippets.rust}</code></pre>
+          </div>
+
+          <div id="client-c-go" class="client-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Go client produce snippet</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.go}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-gray-200 bg-black/40 p-4 rounded-xl border border-white/5"><code>{clientSnippets.go}</code></pre>
+          </div>
+
+          <div id="client-c-java" class="client-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Standard Kafka Java client</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.java}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-gray-200 bg-black/40 p-4 rounded-xl border border-white/5"><code>{clientSnippets.java}</code></pre>
+          </div>
+
+          <div id="client-c-cli" class="client-panel hidden">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>CLI producer/consumer</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.cli}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-gray-200 bg-black/40 p-4 rounded-xl border border-white/5"><code>{clientSnippets.cli}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Inspect & Monitor -->
+    <div>
+      <div class="flex items-center gap-3 mb-6">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">3</span>
+        <h2 class="text-2xl font-bold text-white">Inspect Telemetry & Dashboards</h2>
+      </div>
+
+      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-4">
+        <p class="text-gray-300 leading-relaxed font-sans">
+          The quickstart stack includes <strong class="text-white">krabka-o11y</strong> and a pre-configured Grafana instance watching cluster metrics, traces, and partition watermarks.
+        </p>
+
+        <div class="flex flex-wrap gap-4 pt-2">
+          <a
+            href="http://localhost:3000"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/15 transition-colors border border-white/10"
+          >
+            <span>Open Local Grafana Dashboard</span>
+            <svg class="ml-2 h-4 w-4 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+          <a
+            href="/docs"
+            class="inline-flex items-center rounded-xl bg-krab-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-krab-600 transition-colors"
+          >
+            Explore Complete Documentation
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  // Copy button handler
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy';
+          }, 2000);
+        }
+      }
+    });
+  });
+
+  // Deploy tabs switcher
+  const deployBtns = document.querySelectorAll('.deploy-tab-btn');
+  const deployPanels = document.querySelectorAll('.deploy-panel');
+  deployBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-target');
+      deployBtns.forEach(b => {
+        b.classList.remove('bg-krab-500', 'text-white');
+        b.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
+      });
+      btn.classList.add('bg-krab-500', 'text-white');
+      btn.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
+
+      deployPanels.forEach(p => {
+        if (p.id === `deploy-${target}`) {
+          p.classList.remove('hidden');
+          p.classList.add('block');
+        } else {
+          p.classList.add('hidden');
+          p.classList.remove('block');
+        }
+      });
+    });
+  });
+
+  // Client tabs switcher
+  const clientBtns = document.querySelectorAll('.client-tab-btn');
+  const clientPanels = document.querySelectorAll('.client-panel');
+  clientBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-target');
+      clientBtns.forEach(b => {
+        b.classList.remove('bg-krab-500', 'text-white');
+        b.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
+      });
+      btn.classList.add('bg-krab-500', 'text-white');
+      btn.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
+
+      clientPanels.forEach(p => {
+        if (p.id === `client-${target}`) {
+          p.classList.remove('hidden');
+          p.classList.add('block');
+        } else {
+          p.classList.add('hidden');
+          p.classList.remove('block');
+        }
+      });
+    });
+  });
+</script>

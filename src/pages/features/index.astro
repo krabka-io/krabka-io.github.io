@@ -1,0 +1,183 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const comparisons = [
+  { feature: 'Runtime', krabka: 'Native Rust Binary (tokio async)', kafka: 'JVM (OpenJDK 21) + GC' },
+  { feature: 'Broker Memory Working Set', krabka: '114–622 MiB RSS', kafka: '2.5–5.5 GiB Heap + Off-Heap' },
+  { feature: 'Cold Start to Ready', krabka: '1.2 seconds', kafka: '8–9 seconds' },
+  { feature: 'Memory Safety', krabka: 'Safe Rust (unsafe forbidden)', kafka: 'JVM-managed / manual tuning' },
+  { feature: 'Metadata Consensus', krabka: 'Native KRaft quorum (KIP-595 wire)', kafka: 'KRaft' },
+  { feature: 'Kafka Wire Protocol', krabka: 'Apache Kafka 4.3 (byte-exact codecs)', kafka: 'Apache Kafka 4.3' },
+  { feature: 'Admin Tooling', krabka: 'Standard kafka-*.sh CLI tools', kafka: 'Standard kafka-*.sh CLI tools' },
+  { feature: 'Connect & CDC', krabka: 'Built-in Postgres CDC worker & replicator', kafka: 'Separate Kafka Connect cluster' },
+  { feature: 'License', krabka: 'Apache License 2.0', kafka: 'Apache License 2.0' },
+];
+
+const modules = [
+  {
+    title: 'Native KRaft Consensus Quorum',
+    tag: 'krabka-broker',
+    slug: '/features/kraft',
+    desc: 'Metadata lives in a native Rust Raft consensus quorum from day one (crabka-raft & crabka-kraft-core). Implements KIP-595 wire interoperability with split broker/controller roles, dynamic quorum reconfiguration, and zero ZooKeeper dependencies.',
+    points: [
+      'Byte-exact KRaft metadata records & in-memory image',
+      'Dynamic voter addition and decommission without cluster restart',
+      'Fast leader elections with sub-second failover',
+    ],
+  },
+  {
+    title: 'Tiered Storage with NVMe Caching',
+    tag: 'krabka-broker',
+    slug: '/features/tiered-storage',
+    desc: 'Decouple compute from storage (crabka-remote-storage & crabka-object-store). Stream older partition segments automatically into cloud object storage (Amazon S3, Google Cloud Storage, or MinIO) backed by the __remote_log_metadata topic.',
+    points: [
+      'Infinite partition retention at cloud object-storage costs',
+      'Local write-ahead log with async cloud offloading',
+      'Zero impact on real-time produce throughput',
+    ],
+  },
+  {
+    title: 'Krabka Connect & Postgres CDC',
+    tag: 'krabka-connect',
+    slug: '/features/connect',
+    desc: 'Built-in change data capture (CDC) and connector runtime. Stream PostgreSQL WAL mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation.',
+    points: [
+      'PostgreSQL logical replication worker over pgoutput',
+      'High-throughput distributed replicator (MirrorMaker 2 compatible)',
+      'Schema-aware record transformations and checkpoints',
+    ],
+  },
+  {
+    title: 'Polyglot Stream Processing & Arrow',
+    tag: 'krabka-streams-*',
+    slug: '/features/streams',
+    desc: 'Purpose-built stream processing engines for Rust, Go, and Java. Native support for Apache Arrow columnar memory enables zero-copy record batch decoding and barrier cut snapshots (KIP-1071 streams group protocol).',
+    points: [
+      'Native Rust Streams (tokio async pipeline & state stores)',
+      'Go Streams with Arrow batch acceleration & barrier cuts',
+      'Java client with Schema Registry and Arrow columnar serdes',
+    ],
+  },
+  {
+    title: 'Kubernetes Native Operator',
+    tag: 'krabka-operator',
+    slug: '/features/operator',
+    desc: 'Manage your streaming fleet declaratively. Reconciles custom resources in group krabka.io/v1alpha1 for Kafka clusters, node pools, topics, users, listeners, connectors, schema registry, and automated cluster partition rebalancing.',
+    points: [
+      'CRDs for Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaConnector',
+      'Automated pod rolling updates with zero downtime',
+      'Integrated partition reassignment and rebalancing engine',
+    ],
+  },
+  {
+    title: 'Full-Signal Observability',
+    tag: 'krabka-o11y',
+    slug: '/features/observability',
+    desc: 'Telemetry is a first-class citizen (crabka-telemetry). Emits OpenTelemetry traces, PromQL metrics, continuous CPU/memory profiles, and structured JSON/logfmt logs with zero external sidecars required.',
+    points: [
+      'Native PromQL metrics endpoints on /metrics',
+      'Distributed request tracing with OpenTelemetry & W3C trace-context',
+      'Pre-built Grafana 11 dashboards in krabka-o11y-demo',
+    ],
+  },
+];
+---
+
+<BaseLayout
+  title="Features & Architecture Overview | Krabka"
+  description="Explore the modular architectural superpowers of Krabka: Native KRaft consensus, Tiered Storage, Postgres CDC, Polyglot Arrow Streams, Kubernetes Operator, and Observability."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="text-left border-b border-white/10 pb-8 mb-12 max-w-3xl">
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Architectural Superpowers
+      </h1>
+      <p class="mt-4 text-lg text-gray-300">
+        Every layer of Krabka is written in memory-safe Rust to maximize CPU efficiency, minimize latency jitter, and simplify cloud-native operations.
+      </p>
+    </div>
+
+    <!-- 1. Krabka vs JVM Comparison Table (Put First) -->
+    <div class="mb-20">
+      <div class="mb-6">
+        <h2 class="text-2xl font-bold text-white">Krabka vs JVM Apache Kafka</h2>
+        <p class="mt-1 text-gray-400 text-sm">
+          A side-by-side comparison of runtime characteristics and operational footprint.
+        </p>
+      </div>
+
+      <div class="frosted-card rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400 font-sans">
+              <tr>
+                <th scope="col" class="py-4 px-6">Feature</th>
+                <th scope="col" class="py-4 px-6 text-krab-400 font-bold">Krabka</th>
+                <th scope="col" class="py-4 px-6 text-gray-400">Apache Kafka (JVM)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5 font-sans">
+              {comparisons.map((row) => (
+                <tr class="hover:bg-white/5 transition-colors">
+                  <td class="py-3.5 px-6 font-semibold text-white">{row.feature}</td>
+                  <td class="py-3.5 px-6 text-krab-300 font-medium">{row.krabka}</td>
+                  <td class="py-3.5 px-6 text-gray-400">{row.kafka}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Modular Architecture Grid (6 Modules) -->
+    <div class="mb-16">
+      <div class="mb-8">
+        <h2 class="text-2xl font-bold text-white">Modular Subsystems Deep Dive</h2>
+        <p class="mt-1 text-gray-400 text-sm">
+          Explore the individual architectures, crates, and implementation specifics of each module.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {modules.map((m) => (
+          <a
+            href={m.slug}
+            class="frosted-card group rounded-2xl p-7 flex flex-col justify-between hover:border-krab-500/50 hover:bg-slate-900/90 transition-all"
+          >
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <span class="rounded-full bg-krab-500/10 border border-krab-500/30 px-2.5 py-0.5 text-xs font-mono text-krab-400">
+                  {m.tag}
+                </span>
+                <span class="text-xs font-semibold text-krab-400 group-hover:text-krab-300 flex items-center gap-1 font-sans">
+                  Deep Dive &rarr;
+                </span>
+              </div>
+
+              <h3 class="text-xl font-bold text-white mb-3 group-hover:text-krab-400 transition-colors">
+                {m.title}
+              </h3>
+
+              <p class="text-sm text-gray-400 leading-relaxed mb-6">
+                {m.desc}
+              </p>
+            </div>
+
+            <ul class="space-y-2 border-t border-white/5 pt-4 text-xs font-medium text-gray-300 font-sans">
+              {m.points.map((pt) => (
+                <li class="flex items-start gap-2">
+                  <svg class="h-4 w-4 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>{pt}</span>
+                </li>
+              ))}
+            </ul>
+          </a>
+        ))}
+      </div>
+    </div>
+
+  </div>
+</BaseLayout>

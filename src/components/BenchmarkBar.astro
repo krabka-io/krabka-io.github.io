@@ -1,0 +1,103 @@
+---
+---
+
+<section class="py-16 bg-ocean-950/40 border-y border-white/5">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="max-w-3xl mx-auto text-center mb-12">
+      <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+        Engineered for Extreme Efficiency
+      </h2>
+      <p class="mt-3 text-lg text-gray-400">
+        Direct benchmark measurements on a 3-broker Kubernetes cluster comparing Krabka vs Strimzi (Apache Kafka 4.3 / OpenJDK 21).
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+      <!-- Memory Footprint Comparison -->
+      <div class="frosted-card rounded-2xl p-6 sm:p-8">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-bold text-white">Broker Working Set Memory</h3>
+          <span class="rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">97% Savings</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Lower is better • Measured under 50k msg/sec sustained workload</p>
+
+        <div class="mt-6 space-y-4">
+          <!-- Krabka -->
+          <div>
+            <div class="flex justify-between text-sm font-semibold mb-1">
+              <span class="text-krab-400 font-bold">Krabka (Native Rust)</span>
+              <span class="text-white font-mono">114 MiB</span>
+            </div>
+            <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 5%"></div>
+            </div>
+          </div>
+
+          <!-- Strimzi -->
+          <div>
+            <div class="flex justify-between text-sm font-semibold mb-1">
+              <span class="text-gray-400">Strimzi Kafka (JVM OpenJDK 21)</span>
+              <span class="text-gray-300 font-mono">4,280 MiB (4.2 GiB)</span>
+            </div>
+            <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+              <div class="h-full bg-slate-600 rounded-full" style="width: 95%"></div>
+            </div>
+          </div>
+        </div>
+
+        <p class="mt-4 text-xs text-gray-400 border-t border-white/5 pt-3">
+          No JVM garbage collector pauses or multi-gigabyte heap buffers. Ideal for edge nodes, CI pipelines, and dense multi-tenant Kubernetes clusters.
+        </p>
+      </div>
+
+      <!-- Cold Start & Throughput -->
+      <div class="frosted-card rounded-2xl p-6 sm:p-8">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-bold text-white">Cold Start to First Ack</h3>
+          <span class="rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">7x Faster</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Lower is better • Pod launch to first accepted produce request</p>
+
+        <div class="mt-6 space-y-4">
+          <!-- Krabka -->
+          <div>
+            <div class="flex justify-between text-sm font-semibold mb-1">
+              <span class="text-krab-400 font-bold">Krabka (Single Binary)</span>
+              <span class="text-white font-mono">1.2 s</span>
+            </div>
+            <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 14%"></div>
+            </div>
+          </div>
+
+          <!-- Strimzi -->
+          <div>
+            <div class="flex justify-between text-sm font-semibold mb-1">
+              <span class="text-gray-400">Strimzi Kafka (JVM Warmup)</span>
+              <span class="text-gray-300 font-mono">8.6 s</span>
+            </div>
+            <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+              <div class="h-full bg-slate-600 rounded-full" style="width: 90%"></div>
+            </div>
+          </div>
+        </div>
+
+        <p class="mt-4 text-xs text-gray-400 border-t border-white/5 pt-3">
+          Instant cluster bootstrap and fast leader failover. Pod restarts during Kubernetes rolling updates finish in seconds without cluster stalls.
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-10 text-center">
+      <a
+        href="/benchmarks"
+        class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors"
+      >
+        Read the full benchmark report and reproduction steps
+        <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</section>

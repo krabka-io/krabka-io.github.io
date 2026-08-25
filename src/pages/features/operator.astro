@@ -1,0 +1,132 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const crdSnippet = `apiVersion: krabka.io/v1alpha1
+kind: Kafka
+metadata:
+  name: streaming-production
+  namespace: streaming
+spec:
+  replicas: 5
+  version: "1.0.0"
+  storage:
+    tiered:
+      enabled: true
+      bucket: "s3://krabka-cloud-lake"
+      region: "us-west-2"
+  resources:
+    limits:
+      cpu: "4"
+      memory: "2Gi"
+    requests:
+      cpu: "1"
+      memory: "512Mi"
+  listeners:
+    - name: tls-internal
+      port: 9092
+      type: internal
+      tls: true
+    - name: external-loadbalancer
+      port: 9094
+      type: loadbalancer`;
+---
+
+<BaseLayout
+  title="Kubernetes Native Operator | Krabka"
+  description="Declarative cluster provisioning, CRDs (Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaConnector), automated rolling updates, and partition rebalancing with krabka-operator."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="mb-8">
+      <a href="/features" class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
+        &larr; Back to Features Overview
+      </a>
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Kubernetes Native Operator
+      </h1>
+      <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
+        Deploy, scale, and rebalance Krabka clusters natively on Kubernetes. The operator watches custom resource definitions (CRDs in group <code class="text-krab-300 font-mono text-sm">krabka.io/v1alpha1</code>) to automate node pool provisioning, rolling updates, user auth, and partition balancing.
+      </p>
+    </div>
+
+    <div class="space-y-8">
+      
+      <!-- Section A: CRD Architecture -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Declarative Custom Resources (<code class="text-krab-400 font-mono text-xl">krabka.io/v1alpha1</code>)</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          The operator provides a comprehensive set of CRDs for end-to-end declarative management via GitOps (ArgoCD / Flux):
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 text-xs font-sans">
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">Kafka</strong>
+            <p class="text-gray-400 mt-1">Declares cluster topology, storage backends, listeners, quotas, and authorizers.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaNodePool</strong>
+            <p class="text-gray-400 mt-1">Dedicated pools of broker or controller nodes with distinct CPU/RAM and disk sizing.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaTopic</strong>
+            <p class="text-gray-400 mt-1">Declares partitions, replication factors, and segment retention configurations.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaUser</strong>
+            <p class="text-gray-400 mt-1">Automates SCRAM-SHA-512 credential generation and ACL authorization rules.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaRebalance</strong>
+            <p class="text-gray-400 mt-1">Plans and executes automated partition migration to eliminate broker CPU and disk skew.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaConnector</strong>
+            <p class="text-gray-400 mt-1">Provisions PostgreSQL CDC and external connectors in the worker runtime.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section B: CRD Code Sample -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold text-white font-sans">Sample Kafka Cluster CRD</h2>
+          <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={crdSnippet}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy CRD</span>
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{crdSnippet}</code></pre>
+      </div>
+
+      <!-- Section C: Zero-Downtime Rolling Restarts & Automation -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Zero-Downtime Upgrades & Automated Rebalancing</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          When upgrading versions or resizing node pools, the operator performs phased rolling restarts. It verifies ISR health, orchestrates clean leader partition handoffs, and ensures zero dropped produce requests during pod cycling.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="mt-12 pt-8 border-t border-white/10 flex justify-between items-center font-sans text-sm">
+      <a href="/features/streams" class="text-gray-400 hover:text-white">&larr; Polyglot Streams</a>
+      <a href="/features/observability" class="text-krab-400 hover:text-krab-300 font-semibold">Observability &rarr;</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy CRD';
+          }, 2000);
+        }
+      }
+    });
+  });
+</script>

@@ -1,0 +1,150 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const reproSnippet = `git clone https://github.com/krabka-io/krabka-o11y-demo
+cd krabka-o11y-demo/benchmarks
+./run-suite.sh --cluster-type gke --target krabka --workload omb-standard`;
+---
+
+<BaseLayout
+  title="Benchmarks & Performance | Krabka"
+  description="Reproducible benchmark results comparing Krabka against Strimzi (Apache Kafka on OpenJDK 21) across memory working set, throughput per CPU core, and tail latency."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="text-left border-b border-white/10 pb-8 mb-16">
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Benchmark Results & Methodology
+      </h1>
+      <p class="mt-4 text-lg text-gray-300">
+        Empirical measurements comparing Krabka against Strimzi (Apache Kafka 4.3 on OpenJDK 21) under identical Kubernetes cluster topologies.
+      </p>
+    </div>
+
+    <!-- Cluster Hardware Config -->
+    <div class="frosted-card rounded-2xl p-6 mb-12 border border-white/10">
+      <h2 class="text-lg font-bold text-white mb-3">Test Environment Topology</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-sans">
+        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+          <div class="text-gray-400">Compute</div>
+          <div class="font-bold text-white mt-1">3x c3-standard-8 (GCP)</div>
+          <div class="text-gray-500">8 vCPUs, 32GB RAM per node</div>
+        </div>
+        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+          <div class="text-gray-400">Storage</div>
+          <div class="font-bold text-white mt-1">Local NVMe SSD (ext4)</div>
+          <div class="text-gray-500">Direct I/O write-ahead logs</div>
+        </div>
+        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+          <div class="text-gray-400">Benchmark Tool</div>
+          <div class="font-bold text-white mt-1">OpenMessaging Benchmark</div>
+          <div class="text-gray-500">50,000 to 500,000 msg/sec</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Benchmark 1: Memory Footprint -->
+    <div class="mb-14">
+      <h3 class="text-2xl font-bold text-white mb-3">1. Memory Working Set Footprint</h3>
+      <p class="text-gray-400 text-sm mb-6">
+        Resident Set Size (RSS) memory consumption measured across idle state, sustained produce workload (50k msg/s), and multi-consumer fanout.
+      </p>
+
+      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-6">
+        <div>
+          <div class="flex justify-between text-sm font-semibold mb-1">
+            <span class="text-krab-400 font-bold">Krabka Broker (RSS)</span>
+            <span class="text-white font-mono">114.2 MiB</span>
+          </div>
+          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 4%"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex justify-between text-sm font-semibold mb-1">
+            <span class="text-gray-400">Strimzi Kafka JVM (Heap + Off-Heap)</span>
+            <span class="text-gray-300 font-mono">4,280 MiB</span>
+          </div>
+          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div class="h-full bg-slate-600 rounded-full" style="width: 96%"></div>
+          </div>
+        </div>
+
+        <div class="text-xs text-gray-400 pt-2 border-t border-white/5 font-sans">
+          <strong>Key Insight:</strong> Krabka operates in a fraction of the memory because it avoids JVM object header bloat, uses zero-copy byte buffers with Tokio, and avoids speculative GC buffer reservations.
+        </div>
+      </div>
+    </div>
+
+    <!-- Benchmark 2: Pod Recovery & Startup Time -->
+    <div class="mb-14">
+      <h3 class="text-2xl font-bold text-white mb-3">2. Cold Start & Failover Time</h3>
+      <p class="text-gray-400 text-sm mb-6">
+        Elapsed time from Kubernetes pod launch until the broker joins the KRaft quorum and acknowledges its first produce request.
+      </p>
+
+      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-6">
+        <div>
+          <div class="flex justify-between text-sm font-semibold mb-1">
+            <span class="text-krab-400 font-bold">Krabka Startup Time</span>
+            <span class="text-white font-mono">1.2 seconds</span>
+          </div>
+          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 14%"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex justify-between text-sm font-semibold mb-1">
+            <span class="text-gray-400">Strimzi JVM Startup Time</span>
+            <span class="text-gray-300 font-mono">8.6 seconds</span>
+          </div>
+          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div class="h-full bg-slate-600 rounded-full" style="width: 86%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Benchmark 3: Reproduction with Copy Button -->
+    <div class="frosted-card rounded-2xl p-8 border border-white/10">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-xl font-bold text-white mb-1">Reproducing the Benchmarks</h3>
+          <p class="text-gray-400 text-sm">
+            All benchmarking scripts and Terraform recipes are open source in the <code class="font-mono text-gray-200">krabka-o11y-demo</code> repository.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans"
+          data-copy={reproSnippet}
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+          <span>Copy Commands</span>
+        </button>
+      </div>
+
+      <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{reproSnippet}</code></pre>
+    </div>
+
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy Commands';
+          }, 2000);
+        }
+      }
+    });
+  });
+</script>

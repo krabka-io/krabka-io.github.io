@@ -1,0 +1,93 @@
+---
+import Navbar from '../components/Navbar.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/custom.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  type?: 'website' | 'article';
+  image?: string;
+}
+
+const {
+  title = "Krabka | Kafka Without the JVM - Native Rust Streaming Engine",
+  description = "A byte-exact Kafka wire-protocol broker, native KRaft consensus quorum, and polyglot streaming engine in Rust. 1/10th the memory, zero JVM, instant start.",
+  type = "website",
+  image = "/og-image.png",
+} = Astro.props;
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site || 'https://krabka.io');
+const socialImageURL = new URL(image, Astro.site || 'https://krabka.io');
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Krabka",
+  "operatingSystem": "Linux, macOS, Windows",
+  "applicationCategory": "DeveloperApplication",
+  "description": description,
+  "url": "https://krabka.io",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "krabka-io",
+    "url": "https://github.com/krabka-io"
+  }
+};
+---
+
+<!doctype html>
+<html lang="en" class="dark scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonicalURL.href} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+    <!-- Primary Meta Tags -->
+    <title>{title}</title>
+    <meta name="title" content={title} />
+    <meta name="description" content={description} />
+    <meta name="keywords" content="kafka, apache kafka, rust kafka, kraft consensus, streaming broker, event streaming, apache arrow, kubernetes operator, cdc, postgres cdc, tiered storage, low latency streaming" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="theme-color" content="#080d1a" />
+
+    <!-- Open Graph / Facebook / LinkedIn -->
+    <meta property="og:type" content={type} />
+    <meta property="og:url" content={canonicalURL.href} />
+    <meta property="og:site_name" content="Krabka" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={socialImageURL.href} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Krabka - Native-Rust Apache Kafka Engine" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content={canonicalURL.href} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImageURL.href} />
+    <meta name="twitter:image:alt" content="Krabka - Native-Rust Apache Kafka Engine" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
+  </head>
+  <body class="min-h-screen flex flex-col bg-ocean-950 text-gray-100 selection:bg-krab-500/30 selection:text-krab-200">
+    <Navbar />
+    <main class="flex-grow">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

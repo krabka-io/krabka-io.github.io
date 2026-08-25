@@ -1,0 +1,27 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Barrier Cuts & Epochs"
+  description="Understanding Krabka barrier cuts, alignment, epoch-keyed state snapshots, and KIP-1071 streams group coordination."
+  currentSlug="/docs/barriers"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Barrier Cuts & Epoch Snapshots</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        Coordinated state snapshots across multi-partition streaming topologies.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <p>
+        A Krabka broker injects epoch-stamped marker records into every partition of a named barrier group, publishing the resulting cut on the internal topic <code class="font-mono text-krab-300 text-xs">__barrier_state</code>.
+      </p>
+      <p>
+        A cut is an exact, coordinated point in every input stream simultaneously. Stream runners snapshot their state at the cut and commit the cut offsets, enabling exact replay and recovery to specific historical epochs.
+      </p>
+    </div>
+  </div>
+</DocsLayout>

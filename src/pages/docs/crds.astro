@@ -1,0 +1,52 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const crds = [
+  { kind: 'Kafka', desc: 'A cluster: brokers, controllers, storage, tuning, authorization' },
+  { kind: 'KafkaNodePool', desc: 'A pool of nodes with its own roles, replicas, and compute resources' },
+  { kind: 'KafkaTopic', desc: 'A topic, partition count, replica assignment, and configuration' },
+  { kind: 'KafkaUser', desc: 'A principal, its ACL permissions, and SCRAM/mTLS credentials' },
+  { kind: 'KafkaListener', desc: 'An advertised listener, ports, and TLS configuration' },
+  { kind: 'KafkaConnector', desc: 'A Connect source or sink connector instance' },
+  { kind: 'KafkaRebalance', desc: 'A partition reassignment plan and automated cluster rebalancing' },
+  { kind: 'KafkaSchemaRegistry', desc: 'A schema registry deployment and ingress' },
+  { kind: 'KafkaGrpcGateway', desc: 'A gRPC gateway deployment' },
+  { kind: 'KafkaClusterCa', desc: 'The cluster CA and automated certificate renewal policy' },
+];
+---
+
+<DocsLayout
+  title="Operator CRD Reference"
+  description="Custom Resource Definition (CRD) specification for group krabka.io/v1alpha1."
+  currentSlug="/docs/crds"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Operator CRD Reference</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        All custom resource definitions in group <code class="font-mono text-krab-300">krabka.io/v1alpha1</code>.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Kind</th>
+              <th class="py-3 px-4">What It Declares</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {crds.map((c) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-krab-300">{c.kind}</td>
+                <td class="py-3 px-4 text-gray-300">{c.desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</DocsLayout>

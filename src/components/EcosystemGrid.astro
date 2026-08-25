@@ -1,0 +1,145 @@
+---
+const repos = [
+  {
+    name: 'krabka-broker',
+    category: 'Core',
+    language: 'Rust',
+    desc: 'Apache Kafka-compatible broker with KRaft consensus and S3/GCS tiered storage.',
+    github: 'https://github.com/krabka-io/krabka-broker',
+  },
+  {
+    name: 'krabka-protocol',
+    category: 'Core',
+    language: 'Rust',
+    desc: 'Byte-for-byte Apache Kafka wire protocol codecs, KRaft metadata records, and SASL/TLS.',
+    github: 'https://github.com/krabka-io/krabka-protocol',
+  },
+  {
+    name: 'krabka-client-rs',
+    category: 'Clients',
+    language: 'Rust',
+    desc: 'High-performance native Rust Kafka client: FutureProducer, StreamConsumer, and Admin API.',
+    github: 'https://github.com/krabka-io/krabka-client-rs',
+  },
+  {
+    name: 'krabka-streams-rs',
+    category: 'Streaming',
+    language: 'Rust',
+    desc: 'Native Kafka Streams for Rust with state stores, windowing, and schema registry serdes.',
+    github: 'https://github.com/krabka-io/krabka-streams-rs',
+  },
+  {
+    name: 'krabka-streams-go',
+    category: 'Streaming',
+    language: 'Go',
+    desc: 'Go stream processing library with built-in Apache Arrow zero-copy record batching.',
+    github: 'https://github.com/krabka-io/krabka-streams-go',
+  },
+  {
+    name: 'krabka-streams-java',
+    category: 'Streaming',
+    language: 'Java',
+    desc: 'Java stream processing library with Kafka Streams, schema registry serdes, and Apache Arrow.',
+    github: 'https://github.com/krabka-io/krabka-streams-java',
+  },
+  {
+    name: 'krabka-operator',
+    category: 'Operations',
+    language: 'Rust',
+    desc: 'Kubernetes operator managing Kafka clusters, node pools, listeners, topics, and users.',
+    github: 'https://github.com/krabka-io/krabka-operator',
+  },
+  {
+    name: 'krabka-connect',
+    category: 'Integration',
+    language: 'Rust',
+    desc: 'Connector framework, PostgreSQL CDC source, distributed worker runtime, and replicator.',
+    github: 'https://github.com/krabka-io/krabka-connect',
+  },
+  {
+    name: 'krabka-o11y',
+    category: 'Observability',
+    language: 'Rust',
+    desc: 'Full-signal telemetry engine: metrics, traces, profiles, logs and PromQL / TraceQL queriers.',
+    github: 'https://github.com/krabka-io/krabka-o11y',
+  },
+  {
+    name: 'krabka-o11y-demo',
+    category: 'Observability',
+    language: 'Demo',
+    desc: 'Runnable Grafana observability stack with pre-built dashboards for streaming telemetry.',
+    github: 'https://github.com/krabka-io/krabka-o11y-demo',
+  },
+  {
+    name: 'krabka-cli',
+    category: 'Tools',
+    language: 'Rust',
+    desc: 'Operator & admin CLI: cluster formatting, topic inspection, and git-style plugin subcommands.',
+    github: 'https://github.com/krabka-io/krabka-cli',
+  },
+];
+---
+
+<section class="py-16">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
+      <div>
+        <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+          The Krabka Ecosystem
+        </h2>
+        <p class="mt-2 text-lg text-gray-400">
+          Eleven purpose-built, modular repositories working in unison.
+        </p>
+      </div>
+
+      <a
+        href="https://github.com/krabka-io"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors"
+      >
+        View Organization on GitHub
+        <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </a>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {repos.map((repo) => (
+        <a
+          href={repo.github}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="frosted-card group rounded-2xl p-6 transition-all hover:border-krab-500/50 hover:bg-slate-900/90 flex flex-col justify-between"
+        >
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="rounded bg-white/5 px-2 py-0.5 text-xs font-medium text-gray-400 border border-white/10">
+                {repo.category}
+              </span>
+              <span class="text-xs font-semibold text-krab-400">
+                {repo.language}
+              </span>
+            </div>
+
+            <h3 class="mt-3 text-base font-bold text-white group-hover:text-krab-400 transition-colors">
+              {repo.name}
+            </h3>
+
+            <p class="mt-2 text-sm text-gray-400 leading-relaxed">
+              {repo.desc}
+            </p>
+          </div>
+
+          <div class="mt-5 flex items-center text-xs font-semibold text-gray-300 group-hover:text-white pt-2 border-t border-white/5">
+            <span>github.com/krabka-io/{repo.name}</span>
+            <svg class="ml-auto h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </a>
+      ))}
+    </div>
+  </div>
+</section>

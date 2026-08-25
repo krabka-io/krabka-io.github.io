@@ -1,0 +1,28 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Schema Registry & Serdes"
+  description="Confluent-compatible schema registry client, Avro, Protobuf, and JSON Schema serialization."
+  currentSlug="/docs/schema-registry"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Schema Registry & Serdes</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        Non-blocking schema caching and serialization across Avro, Protobuf, and JSON Schema.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <p>
+        The Krabka schema clients implement the Confluent wire format with zero I/O on the hot serialization path:
+      </p>
+      <ul class="list-disc list-inside space-y-2 text-gray-400 pl-2">
+        <li><strong>Prewarming:</strong> Cache writer and reader schemas ahead of processing to ensure startup validity.</li>
+        <li><strong>Non-blocking fetch:</strong> Unknown writer schema IDs encountered mid-stream trigger single background fetches with retriable error contracts.</li>
+      </ul>
+    </div>
+  </div>
+</DocsLayout>

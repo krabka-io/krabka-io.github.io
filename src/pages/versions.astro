@@ -1,0 +1,257 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const wireMatrix = [
+  { kafka: 'Kafka 2.8', wire: 'Compatible', kraft: 'KIP-595 v0', status: 'Supported' },
+  { kafka: 'Kafka 3.0 – 3.2', wire: 'Compatible', kraft: 'KIP-595 v1', status: 'Supported' },
+  { kafka: 'Kafka 3.3 – 3.6', wire: 'Compatible', kraft: 'KRaft GA (v2)', status: 'Supported' },
+  { kafka: 'Kafka 3.7 – 3.9', wire: 'Compatible', kraft: 'KRaft Reconfig', status: 'Supported' },
+  { kafka: 'Kafka 4.0 – 4.3', wire: 'Byte-Exact Target', kraft: 'KRaft Native (v4)', status: 'Full Parity' },
+];
+
+const ecosystemRepos = [
+  {
+    repo: 'krabka-broker',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Linux / macOS / Win (x86_64, aarch64)',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-broker/releases',
+  },
+  {
+    repo: 'krabka-protocol',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Rust (no_std friendly core)',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-protocol/releases',
+  },
+  {
+    repo: 'krabka-client-rs',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Rust async tokio',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-client-rs/releases',
+  },
+  {
+    repo: 'krabka-streams-rs',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Rust stream runtime',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-streams-rs/releases',
+  },
+  {
+    repo: 'krabka-streams-go',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Go 1.22+ / Apache Arrow v17',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-streams-go/releases',
+  },
+  {
+    repo: 'krabka-streams-java',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Java 17+ / OpenJDK 21',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-streams-java/releases',
+  },
+  {
+    repo: 'krabka-operator',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Kubernetes 1.28+',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-operator/releases',
+  },
+  {
+    repo: 'krabka-connect',
+    version: 'v0.9.0',
+    status: 'Beta',
+    target: 'PostgreSQL 14–18 CDC / Rust',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-connect/releases',
+  },
+  {
+    repo: 'krabka-o11y',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'OpenTelemetry / Prometheus',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-o11y/releases',
+  },
+  {
+    repo: 'krabka-o11y-demo',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'Docker Compose / Grafana 11',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-o11y-demo/releases',
+  },
+  {
+    repo: 'krabka-cli',
+    version: 'v1.0.0',
+    status: 'Stable',
+    target: 'CLI (cross-platform binary)',
+    slsa: true,
+    changelog: 'https://github.com/krabka-io/krabka-cli/releases',
+  },
+];
+
+const slsaSnippet = `# Verify container image signature with Sigstore
+cosign verify ghcr.io/krabka-io/krabka-broker:latest \\
+  --certificate-identity-regexp '^https://github.com/krabka-io/' \\
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Verify SLSA build provenance
+gh attestation verify krabka-broker-linux-amd64.tar.gz --repo krabka-io/krabka-broker`;
+---
+
+<BaseLayout
+  title="Versions & Compatibility Matrix | Krabka"
+  description="Release streams, Apache Kafka wire-protocol compatibility matrix, and package version tracker for all 11 krabka-io repositories."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="text-left border-b border-white/10 pb-8 mb-16 max-w-3xl">
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Release Streams & Matrix
+      </h1>
+      <p class="mt-4 text-lg text-gray-300">
+        Transparent compatibility standards across Apache Kafka wire-protocol versions and the Krabka package ecosystem.
+      </p>
+    </div>
+
+    <!-- Section 1: Wire Compatibility Matrix -->
+    <div class="mb-20">
+      <h2 class="text-2xl font-bold text-white mb-4">Apache Kafka Wire Compatibility</h2>
+      <p class="text-gray-400 text-sm mb-6">
+        Every release undergoes differential byte-level fuzz testing against the official <code class="font-mono text-gray-200">kafka-clients</code> reference suite.
+      </p>
+
+      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
+            <tr>
+              <th class="py-4 px-6">Kafka Release Stream</th>
+              <th class="py-4 px-6">Wire Protocol Level</th>
+              <th class="py-4 px-6">KRaft Metadata Layer</th>
+              <th class="py-4 px-6">Compatibility Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {wireMatrix.map((row) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3.5 px-6 font-semibold text-white">{row.kafka}</td>
+                <td class="py-3.5 px-6 text-gray-300 font-mono text-xs">{row.wire}</td>
+                <td class="py-3.5 px-6 text-gray-400 font-mono text-xs">{row.kraft}</td>
+                <td class="py-3.5 px-6">
+                  <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                    {row.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 2: Ecosystem Packages -->
+    <div class="mb-20">
+      <h2 class="text-2xl font-bold text-white mb-4">Ecosystem Package Registry</h2>
+      <p class="text-gray-400 text-sm mb-6">
+        Current versions and target runtimes across all eleven repositories in the <code class="font-mono text-gray-200">krabka-io</code> organization.
+      </p>
+
+      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
+            <tr>
+              <th class="py-4 px-6">Repository</th>
+              <th class="py-4 px-6">Latest Release</th>
+              <th class="py-4 px-6">Lifecycle</th>
+              <th class="py-4 px-6">Target Runtime</th>
+              <th class="py-4 px-6">Provenance</th>
+              <th class="py-4 px-6 text-right">Changelog</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {ecosystemRepos.map((item) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3.5 px-6 font-bold text-white font-mono text-xs">
+                  <a href={`https://github.com/krabka-io/${item.repo}`} target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">
+                    {item.repo}
+                  </a>
+                </td>
+                <td class="py-3.5 px-6 font-mono text-xs text-krab-300 font-semibold">{item.version}</td>
+                <td class="py-3.5 px-6">
+                  <span class={`rounded px-2 py-0.5 text-xs font-semibold ${item.status === 'Stable' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                    {item.status}
+                  </span>
+                </td>
+                <td class="py-3.5 px-6 text-gray-400 text-xs">{item.target}</td>
+                <td class="py-3.5 px-6">
+                  <span class="inline-flex items-center gap-1 rounded bg-white/5 border border-white/10 px-2 py-0.5 text-[11px] font-mono text-gray-300">
+                    <svg class="h-3 w-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    SLSA L3
+                  </span>
+                </td>
+                <td class="py-3.5 px-6 text-right">
+                  <a href={item.changelog} target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-krab-400 hover:text-krab-300">
+                    Release Notes &rarr;
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 3: Supply Chain Security with Copy Button -->
+    <div id="slsa" class="frosted-card rounded-2xl p-8 border border-white/10">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-xl font-bold text-white mb-1">Cryptographic Supply-Chain Verification</h3>
+          <p class="text-gray-400 text-sm">
+            All release binaries, Helm charts, and container images are signed keylessly with Cosign and published with SLSA Level 3 build provenance.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans"
+          data-copy={slsaSnippet}
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+          <span>Copy Snippet</span>
+        </button>
+      </div>
+
+      <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{slsaSnippet}</code></pre>
+    </div>
+
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy Snippet';
+          }, 2000);
+        }
+      }
+    });
+  });
+</script>

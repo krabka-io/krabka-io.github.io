@@ -1,0 +1,127 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const arrowGoSnippet = `package main
+
+import (
+	"context"
+	"github.com/krabka-io/krabka-streams-go/columnar"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+)
+
+func main() {
+	mem := memory.NewGoAllocator()
+	codec := columnar.NewBlobCodec(mem)
+	topology := columnar.NewTopology(mem)
+	
+	source, _ := topology.AddSource("source", []string{"transactions"}, codec)
+	large, _ := topology.AddOperator("large",
+		columnar.Filter(mem, func(batch arrow.Record, row int) bool {
+			return batch.Column(1).(*array.Int64).Value(row) > 4
+		}), source)
+	topology.AddSink("archive", "large-transactions", codec, large)
+	
+	built, err := topology.Build()
+	if err != nil { panic(err) }
+	
+	_ = built
+}`;
+---
+
+<BaseLayout
+  title="Polyglot Streams & Apache Arrow | Krabka"
+  description="Native stream processing for Rust, Go, and Java with Apache Arrow zero-copy memory batching and barrier cuts in Krabka."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="mb-8">
+      <a href="/features" class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
+        &larr; Back to Features Overview
+      </a>
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Polyglot Streams & Apache Arrow
+      </h1>
+      <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
+        Purpose-built streaming engines for Rust, Go, and Java. Native integration with Apache Arrow columnar memory enables zero-copy deserialization straight into AI/ML dataframes and analytic pipelines, with barrier cuts and KIP-1071 streams group protocol.
+      </p>
+    </div>
+
+    <div class="space-y-8">
+      
+      <!-- Section A: Polyglot Engines -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Multi-Language Streaming Runtimes</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          Instead of wrapping JVM foreign function interfaces or subprocess pipes, Krabka delivers native stream processing libraries for major cloud languages:
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs font-sans">
+          <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+            <h3 class="text-base font-bold text-white">krabka-streams-rs</h3>
+            <p class="text-gray-400 leading-relaxed">Async stream builder on Tokio. In-memory and disk-backed state stores with schema registry serdes.</p>
+          </div>
+          <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+            <h3 class="text-base font-bold text-white">krabka-streams-go</h3>
+            <p class="text-gray-400 leading-relaxed">High-concurrency Go stream pipelines with native Apache Arrow zero-copy record batch decoding and barrier cut snapshots.</p>
+          </div>
+          <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+            <h3 class="text-base font-bold text-white">krabka-streams-java</h3>
+            <p class="text-xs text-gray-400 leading-relaxed">Drop-in compatibility with JVM Kafka Streams 4.x with Arrow vector batch serdes and columnar operators.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section B: Arrow Columnar Memory -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Apache Arrow Columnar Processing</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          Decoded record batches are structured directly into Apache Arrow columnar formats with 5 reserved metadata columns (<code class="font-mono text-xs text-krab-300">__key</code>, <code class="font-mono text-xs text-krab-300">__timestamp</code>, <code class="font-mono text-xs text-krab-300">__partition</code>, <code class="font-mono text-xs text-krab-300">__offset</code>, and <code class="font-mono text-xs text-krab-300">__headers</code>). This allows analytical filters, vector transformations, and DuckDB/Polars queries to execute with zero-copy SIMD acceleration.
+        </p>
+      </div>
+
+      <!-- Section C: Go Streams Code Sample -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold text-white font-sans">Go Streams with Apache Arrow Columnar Batching</h2>
+          <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={arrowGoSnippet}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy Code</span>
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{arrowGoSnippet}</code></pre>
+      </div>
+
+      <!-- Section D: Barrier Cuts & Coordination -->
+      <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Barrier Cuts & KIP-1071 Streams Coordination</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          Krabka implements the next-generation <strong class="text-white">KIP-1071</strong> streams group coordination protocol. The broker periodically publishes epoch markers across partitions to generate a <strong class="text-white">barrier cut</strong> on <code class="font-mono text-xs text-krab-300">__barrier_state</code>, enabling atomic snapshotting of multi-stream application state.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="mt-12 pt-8 border-t border-white/10 flex justify-between items-center font-sans text-sm">
+      <a href="/features/connect" class="text-gray-400 hover:text-white">&larr; Postgres CDC</a>
+      <a href="/features/operator" class="text-krab-400 hover:text-krab-300 font-semibold">Kubernetes Operator &rarr;</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const textToCopy = btn.getAttribute('data-copy');
+      if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy);
+        const span = btn.querySelector('span');
+        if (span) {
+          span.textContent = 'Copied!';
+          setTimeout(() => {
+            span.textContent = 'Copy Code';
+          }, 2000);
+        }
+      }
+    });
+  });
+</script>

@@ -1,0 +1,56 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const repoHierarchy = [
+  { repo: 'krabka-protocol', role: 'Wire codecs, KRaft metadata records, SASL/TLS, compression (snappy/lz4/zstd)' },
+  { repo: 'krabka-client-rs', role: 'Tokio async Kafka client (Producer, Consumer, Admin)' },
+  { repo: 'krabka-broker', role: 'Broker engine, KRaft consensus (crabka-raft), on-disk log (crabka-log), tiered storage' },
+  { repo: 'krabka-streams-rs', role: 'Rust stream runtime with schema registry serdes' },
+  { repo: 'krabka-streams-go', role: 'Go stream processing with Apache Arrow batch memory & barrier cuts' },
+  { repo: 'krabka-streams-java', role: 'Java stream processing with Kafka Streams 4.x and columnar operators' },
+  { repo: 'krabka-operator', role: 'Kubernetes operator reconciling krabka.io/v1alpha1 custom resources' },
+  { repo: 'krabka-connect', role: 'Connector framework, PostgreSQL CDC over pgoutput, worker runtime & replicator' },
+  { repo: 'krabka-o11y', role: 'OpenTelemetry, PromQL metrics, pprof continuous profiling, OCSF audit logs' },
+  { repo: 'krabka-cli', role: 'Admin and cluster formatting CLI tool' },
+];
+---
+
+<DocsLayout
+  title="Ecosystem Architecture"
+  description="Architecture and dependency hierarchy of the eleven modular repositories across the krabka-io organization."
+  currentSlug="/docs/architecture"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Ecosystem Architecture</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        Modular dependency layers across the <code class="font-mono text-krab-300">krabka-io</code> ecosystem.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300">
+      <p>
+        Krabka is architected as 11 decoupled repositories with strict dependency layering. The broker sits on top of <code class="font-mono text-krab-300">krabka-protocol</code> and <code class="font-mono text-krab-300">krabka-client-rs</code> without cyclic dependencies.
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Repository</th>
+              <th class="py-3 px-4">Subsystems & Purpose</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {repoHierarchy.map((r) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-white text-xs">{r.repo}</td>
+                <td class="py-3 px-4 text-gray-300">{r.role}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</DocsLayout>
