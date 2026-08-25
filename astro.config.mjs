@@ -4,7 +4,6 @@ import sitemap from '@astrojs/sitemap';
 
 export default defineConfig({
   site: 'https://krabka-io.github.io',
-  base: '/krabka-website',
   integrations: [
     tailwind({
       applyBaseStyles: false,
