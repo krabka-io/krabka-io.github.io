@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import GrafanaPreview from '../components/GrafanaPreview.astro';
 import { getPath } from '../utils/paths';
 
 const deploySnippets = {
@@ -232,37 +233,20 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-e
       </div>
     </div>
 
-    <!-- Step 3: Inspect & Monitor -->
-    <div>
+    <!-- Step 3: Inspect & Monitor (Interactive Mock Grafana Dashboard) -->
+    <div class="mb-8">
       <div class="flex items-center gap-3 mb-6">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">3</span>
         <h2 class="text-2xl font-bold text-white">Inspect Telemetry & Dashboards</h2>
       </div>
 
-      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-4">
+      <div class="space-y-4">
         <p class="text-gray-300 leading-relaxed font-sans">
-          The quickstart stack includes <strong class="text-white">krabka-o11y</strong> and a pre-configured Grafana instance watching cluster metrics, traces, and partition watermarks.
+          The quickstart stack includes <strong class="text-white">krabka-o11y</strong> and a pre-configured Grafana instance tracking real-time produce throughput, memory working set, latency histograms, and KRaft quorum state.
         </p>
 
-        <div class="flex flex-wrap gap-4 pt-2">
-          <a
-            href="http://localhost:3000"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/15 transition-colors border border-white/10"
-          >
-            <span>Open Local Grafana Dashboard</span>
-            <svg class="ml-2 h-4 w-4 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
-          <a
-            href={getPath('/docs')}
-            class="inline-flex items-center rounded-xl bg-krab-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-krab-600 transition-colors"
-          >
-            Explore Complete Documentation
-          </a>
-        </div>
+        <!-- Live Visual Grafana Dashboard Mockup -->
+        <GrafanaPreview />
       </div>
     </div>
   </div>

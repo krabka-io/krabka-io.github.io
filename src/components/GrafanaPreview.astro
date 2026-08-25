@@ -1,0 +1,185 @@
+---
+import { getPath } from '../utils/paths';
+---
+
+<div class="rounded-2xl overflow-hidden border border-white/15 bg-slate-950 shadow-2xl font-sans">
+  
+  <!-- Grafana Top Navigation Bar matching krabka-o11y-demo -->
+  <div class="flex flex-wrap items-center justify-between border-b border-white/10 bg-slate-900/90 px-4 py-2.5 gap-3 text-xs">
+    <div class="flex items-center gap-3">
+      <!-- Grafana Icon -->
+      <div class="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold shadow-sm">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+        </svg>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-gray-400">Dashboards /</span>
+        <span class="font-bold text-white">Crabka — Overview</span>
+        <span class="rounded bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">
+          LIVE
+        </span>
+      </div>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center gap-2 text-gray-400">
+      <span class="hidden sm:inline-flex items-center gap-1 rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px]">
+        <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        Prometheus: Connected
+      </span>
+      <span class="rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] font-mono text-gray-300">
+        Last 15m • 5s refresh
+      </span>
+    </div>
+  </div>
+
+  <!-- Dashboard 4-Panel Grid from provisioned crabka-overview & crabka-broker -->
+  <div class="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/95">
+    
+    <!-- Panel 1: Messages In / Ingest Req/s -->
+    <div class="rounded-xl border border-white/10 bg-slate-900/70 p-4 flex flex-col justify-between">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-300">Messages in (msg/s)</span>
+        <span class="text-[10px] text-gray-500 uppercase font-mono">sum(rate(kafka_server_brokertopicmetrics_messagesin_total[1m]))</span>
+      </div>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-2xl sm:text-3xl font-extrabold text-white font-mono">54,280</span>
+        <span class="text-xs font-semibold text-emerald-400">msg/sec</span>
+      </div>
+      <!-- SVG Ingest Rate Sparkline -->
+      <div class="h-16 w-full relative">
+        <svg class="h-full w-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 200 50">
+          <defs>
+            <linearGradient id="tp-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>
+              <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>
+            </linearGradient>
+          </defs>
+          <path d="M 0 35 Q 25 15, 50 25 T 100 20 T 150 15 T 200 12 L 200 50 L 0 50 Z" fill="url(#tp-grad)"/>
+          <path d="M 0 35 Q 25 15, 50 25 T 100 20 T 150 15 T 200 12" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Panel 2: Memory Working Set by Service (crabka-runtime.json) -->
+    <div class="rounded-xl border border-white/10 bg-slate-900/70 p-4 flex flex-col justify-between">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-300">Memory working set (RSS)</span>
+        <span class="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">container_memory_working_set_bytes</span>
+      </div>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-2xl sm:text-3xl font-extrabold text-white font-mono">114.2</span>
+        <span class="text-xs font-semibold text-gray-400">MiB / broker</span>
+      </div>
+      <!-- SVG Stable Flatline Memory Curve -->
+      <div class="h-16 w-full relative">
+        <svg class="h-full w-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 200 50">
+          <defs>
+            <linearGradient id="mem-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#34d399" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#34d399" stop-opacity="0.0"/>
+            </linearGradient>
+          </defs>
+          <path d="M 0 28 L 30 27 L 70 29 L 110 28 L 150 27 L 200 28 L 200 50 L 0 50 Z" fill="url(#mem-grad)"/>
+          <path d="M 0 28 L 30 27 L 70 29 L 110 28 L 150 27 L 200 28" fill="none" stroke="#34d399" stroke-width="2"/>
+          <!-- Dotted Line for JVM reference -->
+          <line x1="0" y1="6" x2="200" y2="6" stroke="#f87171" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.6"/>
+          <text x="195" y="12" text-anchor="end" font-size="7" fill="#f87171" font-family="monospace">JVM Strimzi (4.2 GiB)</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Panel 3: Produce / Fetch Request Latency -->
+    <div class="rounded-xl border border-white/10 bg-slate-900/70 p-4 flex flex-col justify-between">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-300">Produce request latency</span>
+        <span class="text-[10px] text-gray-500 uppercase font-mono">histogram_quantile(0.99, kafka_network_requestmetrics_totaltimems)</span>
+      </div>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-2xl sm:text-3xl font-extrabold text-white font-mono">840</span>
+        <span class="text-xs font-semibold text-amber-400">µs (p99)</span>
+      </div>
+      <!-- Latency Distribution Bars -->
+      <div class="space-y-1.5 pt-1 text-[11px] font-mono">
+        <div class="flex items-center justify-between text-gray-400">
+          <span>p50: 310 µs</span>
+          <span>p95: 540 µs</span>
+          <span class="text-white font-bold">p99: 840 µs</span>
+        </div>
+        <div class="h-2.5 w-full bg-white/5 rounded-full overflow-hidden flex gap-0.5">
+          <div class="h-full bg-emerald-500 rounded-l-full" style="width: 50%"></div>
+          <div class="h-full bg-sky-500" style="width: 35%"></div>
+          <div class="h-full bg-amber-500 rounded-r-full" style="width: 15%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 4: Active Controller & Partitions Health (crabka-broker.json) -->
+    <div class="rounded-xl border border-white/10 bg-slate-900/70 p-4 flex flex-col justify-between">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-300">Broker & Partition Health</span>
+        <span class="text-[10px] text-emerald-400 font-semibold font-mono">KRaft Quorum Active</span>
+      </div>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-2xl sm:text-3xl font-extrabold text-white font-mono">0</span>
+        <span class="text-xs font-semibold text-emerald-400">Offline / Under-Replicated Partitions</span>
+      </div>
+      <!-- Node Quorum Badges -->
+      <div class="grid grid-cols-3 gap-2 text-[10px] font-mono">
+        <div class="bg-black/40 p-2 rounded border border-white/5 text-center">
+          <div class="flex items-center justify-center gap-1 text-emerald-400 font-bold">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+            Node-1
+          </div>
+          <div class="text-gray-500 mt-0.5">Active Controller</div>
+        </div>
+        <div class="bg-black/40 p-2 rounded border border-white/5 text-center">
+          <div class="flex items-center justify-center gap-1 text-emerald-400 font-bold">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+            Node-2
+          </div>
+          <div class="text-gray-500 mt-0.5">KRaft Voter</div>
+        </div>
+        <div class="bg-black/40 p-2 rounded border border-white/5 text-center">
+          <div class="flex items-center justify-center gap-1 text-emerald-400 font-bold">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+            Node-3
+          </div>
+          <div class="text-gray-500 mt-0.5">KRaft Voter</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Details Bar with local credentials & docs link -->
+  <div class="border-t border-white/10 bg-slate-900/80 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400">
+    <div class="flex items-center gap-2">
+      <span class="text-gray-500">Live Grafana 11 instance:</span>
+      <code class="text-krab-300 font-mono bg-black/40 px-2 py-0.5 rounded border border-white/5">http://localhost:3000</code>
+      <span class="text-gray-500">(user: <strong class="text-gray-300">admin</strong> / pass: <strong class="text-gray-300">admin</strong>)</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <a
+        href="https://github.com/krabka-io/krabka-o11y-demo"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-gray-300 hover:text-white font-medium inline-flex items-center gap-1"
+      >
+        <span>krabka-o11y-demo</span>
+        <svg class="h-3 w-3 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+        </svg>
+      </a>
+      <span>•</span>
+      <a
+        href={getPath('/docs/observability')}
+        class="text-krab-400 hover:text-krab-300 font-semibold"
+      >
+        Observability Docs &rarr;
+      </a>
+    </div>
+  </div>
+
+</div>
