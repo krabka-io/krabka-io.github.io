@@ -1,5 +1,6 @@
 ---
 import BaseLayout from './BaseLayout.astro';
+import { getPath } from '../utils/paths';
 
 interface Props {
   title: string;
@@ -73,25 +74,25 @@ const breadcrumbData = {
       "@type": "ListItem",
       "position": 1,
       "name": "Home",
-      "item": "https://krabka.io"
+      "item": "https://krabka-io.github.io/krabka-website/"
     },
     {
       "@type": "ListItem",
       "position": 2,
       "name": "Docs",
-      "item": "https://krabka.io/docs"
+      "item": "https://krabka-io.github.io/krabka-website/docs"
     },
     {
       "@type": "ListItem",
       "position": 3,
       "name": activeCategory,
-      "item": `https://krabka.io${currentSlug}`
+      "item": `https://krabka-io.github.io/krabka-website${currentSlug}`
     },
     {
       "@type": "ListItem",
       "position": 4,
       "name": title,
-      "item": `https://krabka.io${currentSlug}`
+      "item": `https://krabka-io.github.io/krabka-website${currentSlug}`
     }
   ]
 };
@@ -124,11 +125,12 @@ const breadcrumbData = {
                 </h4>
                 <ul class="space-y-1">
                   {sec.items.map((item) => {
-                    const isActive = currentSlug === item.slug || (item.slug === '/docs' && currentSlug === '/docs/');
+                    const itemUrl = getPath(item.slug);
+                    const isActive = Astro.url.pathname === itemUrl || (item.slug === '/docs' && Astro.url.pathname === getPath('/docs'));
                     return (
                       <li>
                         <a
-                          href={item.slug}
+                          href={itemUrl}
                           class={`block px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                             isActive
                               ? 'bg-krab-500/15 text-krab-400 font-bold border border-krab-500/30'
@@ -151,9 +153,9 @@ const breadcrumbData = {
       <main class="lg:col-span-9 space-y-4">
         <!-- Breadcrumbs UI -->
         <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs font-sans text-gray-400 pb-2">
-          <a href="/" class="hover:text-white transition-colors">Home</a>
+          <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
           <span>/</span>
-          <a href="/docs" class="hover:text-white transition-colors">Docs</a>
+          <a href={getPath('/docs')} class="hover:text-white transition-colors">Docs</a>
           <span>/</span>
           <span class="text-gray-400">{activeCategory}</span>
           <span>/</span>

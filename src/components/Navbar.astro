@@ -1,31 +1,32 @@
 ---
 import Logo from './Logo.astro';
+import { getPath } from '../utils/paths';
 
 const currentPath = Astro.url.pathname;
 
 const featureSubLinks = [
-  { name: 'All Features Overview', href: '/features' },
-  { name: 'Native KRaft Consensus', href: '/features/kraft' },
-  { name: 'Tiered Storage Engine', href: '/features/tiered-storage' },
-  { name: 'Postgres CDC & Connect', href: '/features/connect' },
-  { name: 'Polyglot Streams & Arrow', href: '/features/streams' },
-  { name: 'Kubernetes Operator', href: '/features/operator' },
-  { name: 'Full-Signal Observability', href: '/features/observability' },
+  { name: 'All Features Overview', href: getPath('/features') },
+  { name: 'Native KRaft Consensus', href: getPath('/features/kraft') },
+  { name: 'Tiered Storage Engine', href: getPath('/features/tiered-storage') },
+  { name: 'Postgres CDC & Connect', href: getPath('/features/connect') },
+  { name: 'Polyglot Streams & Arrow', href: getPath('/features/streams') },
+  { name: 'Kubernetes Operator', href: getPath('/features/operator') },
+  { name: 'Full-Signal Observability', href: getPath('/features/observability') },
 ];
 
 const navLinks = [
-  { name: 'Get Started', href: '/get-started' },
-  { name: 'Features', href: '/features', hasDropdown: true },
-  { name: 'Versions', href: '/versions' },
-  { name: 'Benchmarks', href: '/benchmarks' },
-  { name: 'Docs', href: '/docs' },
+  { name: 'Get Started', href: getPath('/get-started') },
+  { name: 'Features', href: getPath('/features'), hasDropdown: true },
+  { name: 'Versions', href: getPath('/versions') },
+  { name: 'Benchmarks', href: getPath('/benchmarks') },
+  { name: 'Docs', href: getPath('/docs') },
 ];
 ---
 
 <header class="sticky top-0 z-50 w-full border-b border-white/10 bg-ocean-950/95 backdrop-blur-md transition-colors">
   <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
     <div class="flex items-center gap-8">
-      <a href="/" class="flex items-center gap-3 transition-opacity hover:opacity-90">
+      <a href={getPath('/')} class="flex items-center gap-3 transition-opacity hover:opacity-90">
         <Logo className="w-8 h-8" />
         <span class="text-xl font-bold tracking-tight text-white">Krabka</span>
       </a>
@@ -33,11 +34,11 @@ const navLinks = [
       <nav class="hidden md:flex items-center gap-1">
         {navLinks.map((link) => {
           if (link.hasDropdown) {
-            const isFeaturesActive = currentPath.startsWith('/features');
+            const isFeaturesActive = currentPath.includes('/features');
             return (
               <div class="relative group">
                 <a
-                  href="/features"
+                  href={getPath('/features')}
                   class={`inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
                     isFeaturesActive
                       ? 'text-krab-500 bg-white/5'
@@ -55,7 +56,7 @@ const navLinks = [
                   <div class="rounded-xl p-1.5 shadow-2xl border border-slate-700 bg-slate-900 divide-y divide-slate-800">
                     <div class="pb-1">
                       <a
-                        href="/features"
+                        href={getPath('/features')}
                         class="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-bold text-krab-400 hover:bg-slate-800 transition-colors"
                       >
                         <span>All Features Overview</span>
@@ -78,7 +79,7 @@ const navLinks = [
             );
           }
 
-          const isActive = currentPath === link.href || (link.href !== '/' && currentPath.startsWith(link.href));
+          const isActive = currentPath === link.href || (link.href !== getPath('/') && currentPath.startsWith(link.href));
           return (
             <a
               href={link.href}
@@ -126,7 +127,7 @@ const navLinks = [
   <!-- Mobile Menu Dropdown -->
   <div id="mobile-menu" class="hidden md:hidden border-t border-white/10 bg-slate-900 px-4 pt-2 pb-4 space-y-1">
     <a
-      href="/get-started"
+      href={getPath('/get-started')}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Get Started
@@ -145,19 +146,19 @@ const navLinks = [
       </div>
     </div>
     <a
-      href="/versions"
+      href={getPath('/versions')}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Versions
     </a>
     <a
-      href="/benchmarks"
+      href={getPath('/benchmarks')}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Benchmarks
     </a>
     <a
-      href="/docs"
+      href={getPath('/docs')}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Docs

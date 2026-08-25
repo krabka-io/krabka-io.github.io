@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getPath } from '../../utils/paths';
 
 const o11yDemoRun = `# Launch the runnable full-signal Grafana observability stack
 git clone https://github.com/krabka-io/krabka-o11y-demo
@@ -15,7 +16,7 @@ docker compose up -d
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
-      <a href="/features" class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
+      <a href={getPath('/features')} class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
         &larr; Back to Features Overview
       </a>
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
@@ -77,8 +78,8 @@ docker compose up -d
     </div>
 
     <div class="mt-12 pt-8 border-t border-white/10 flex justify-between items-center font-sans text-sm">
-      <a href="/features/operator" class="text-gray-400 hover:text-white">&larr; Kubernetes Operator</a>
-      <a href="/features" class="text-krab-400 hover:text-krab-300 font-semibold">Features Overview &rarr;</a>
+      <a href={getPath('/features/operator')} class="text-gray-400 hover:text-white">&larr; Kubernetes Operator</a>
+      <a href={getPath('/features')} class="text-krab-400 hover:text-krab-300 font-semibold">Features Overview &rarr;</a>
     </div>
   </div>
 </BaseLayout>

@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getPath } from '../../utils/paths';
 
 const comparisons = [
   { feature: 'Runtime', krabka: 'Native Rust Binary (tokio async)', kafka: 'JVM (OpenJDK 21) + GC' },
@@ -17,7 +18,7 @@ const modules = [
   {
     title: 'Native KRaft Consensus Quorum',
     tag: 'krabka-broker',
-    slug: '/features/kraft',
+    slug: getPath('/features/kraft'),
     desc: 'Metadata lives in a native Rust Raft consensus quorum from day one (crabka-raft & crabka-kraft-core). Implements KIP-595 wire interoperability with split broker/controller roles, dynamic quorum reconfiguration, and zero ZooKeeper dependencies.',
     points: [
       'Byte-exact KRaft metadata records & in-memory image',
@@ -28,7 +29,7 @@ const modules = [
   {
     title: 'Tiered Storage with NVMe Caching',
     tag: 'krabka-broker',
-    slug: '/features/tiered-storage',
+    slug: getPath('/features/tiered-storage'),
     desc: 'Decouple compute from storage (crabka-remote-storage & crabka-object-store). Stream older partition segments automatically into cloud object storage (Amazon S3, Google Cloud Storage, or MinIO) backed by the __remote_log_metadata topic.',
     points: [
       'Infinite partition retention at cloud object-storage costs',
@@ -39,7 +40,7 @@ const modules = [
   {
     title: 'Krabka Connect & Postgres CDC',
     tag: 'krabka-connect',
-    slug: '/features/connect',
+    slug: getPath('/features/connect'),
     desc: 'Built-in change data capture (CDC) and connector runtime. Stream PostgreSQL WAL mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation.',
     points: [
       'PostgreSQL logical replication worker over pgoutput',
@@ -50,7 +51,7 @@ const modules = [
   {
     title: 'Polyglot Stream Processing & Arrow',
     tag: 'krabka-streams-*',
-    slug: '/features/streams',
+    slug: getPath('/features/streams'),
     desc: 'Purpose-built stream processing engines for Rust, Go, and Java. Native support for Apache Arrow columnar memory enables zero-copy record batch decoding and barrier cut snapshots (KIP-1071 streams group protocol).',
     points: [
       'Native Rust Streams (tokio async pipeline & state stores)',
@@ -61,7 +62,7 @@ const modules = [
   {
     title: 'Kubernetes Native Operator',
     tag: 'krabka-operator',
-    slug: '/features/operator',
+    slug: getPath('/features/operator'),
     desc: 'Manage your streaming fleet declaratively. Reconciles custom resources in group krabka.io/v1alpha1 for Kafka clusters, node pools, topics, users, listeners, connectors, schema registry, and automated cluster partition rebalancing.',
     points: [
       'CRDs for Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaConnector',
@@ -72,7 +73,7 @@ const modules = [
   {
     title: 'Full-Signal Observability',
     tag: 'krabka-o11y',
-    slug: '/features/observability',
+    slug: getPath('/features/observability'),
     desc: 'Telemetry is a first-class citizen (crabka-telemetry). Emits OpenTelemetry traces, PromQL metrics, continuous CPU/memory profiles, and structured JSON/logfmt logs with zero external sidecars required.',
     points: [
       'Native PromQL metrics endpoints on /metrics',
@@ -87,7 +88,7 @@ const modules = [
   title="Features & Architecture Overview | Krabka"
   description="Explore the modular architectural superpowers of Krabka: Native KRaft consensus, Tiered Storage, Postgres CDC, Polyglot Arrow Streams, Kubernetes Operator, and Observability."
 >
-  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
     <div class="text-left border-b border-white/10 pb-8 mb-12 max-w-3xl">
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
         Architectural Superpowers
