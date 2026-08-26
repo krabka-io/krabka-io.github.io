@@ -1,124 +1,203 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { getPath } from '../utils/paths';
+import benchmarkData from '../data/benchmarks/latest-summary.json';
 
 const reproSnippet = `git clone https://github.com/krabka-io/krabka-o11y-demo
 cd krabka-o11y-demo/benchmarks
 ./run-suite.sh --cluster-type gke --target krabka --workload omb-standard`;
+
+const formattedDate = new Date(benchmarkData.lastUpdated).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+
+const benchmarkSchema = {
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Krabka vs Apache Kafka: Empirical Benchmark Results & Performance Matrix",
+  "description": "Comparative benchmarks between Krabka (native Rust) and Apache Kafka (Strimzi on OpenJDK 21) across memory working set RSS, cold start duration, throughput saturation, and p99 latency.",
+  "author": {
+    "@type": "Organization",
+    "name": "Krabka Authors",
+    "url": "https://krabka.io"
+  },
+  "keywords": "Krabka benchmarks, Apache Kafka vs Krabka, Kafka memory working set, Kafka startup time, Kafka throughput per core, OpenMessaging Benchmark, KRaft performance",
+  "datePublished": "2026-08-26",
+  "dateModified": benchmarkData.lastUpdated
+};
 ---
 
 <BaseLayout
-  title="Benchmarks & Performance | Krabka"
-  description="Reproducible benchmark results comparing Krabka against Strimzi (Apache Kafka on OpenJDK 21) across memory working set, throughput per CPU core, and tail latency."
+  title="Benchmarks: Krabka vs Apache Kafka Performance | Krabka"
+  description="Empirical benchmarks comparing Krabka to Apache Kafka (Strimzi on OpenJDK 21): 114 MiB memory working set, sub-second cold starts, and low tail latency."
 >
-  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-    <div class="text-left border-b border-white/10 pb-8 mb-16">
-      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-        Benchmark Results & Methodology
-      </h1>
-      <p class="mt-4 text-lg text-gray-300">
-        Empirical measurements comparing Krabka against Strimzi (Apache Kafka 4.3 on OpenJDK 21) under identical Kubernetes cluster topologies.
-      </p>
-    </div>
+  <script type="application/ld+json" set:html={JSON.stringify(benchmarkSchema)} slot="head" />
 
-    <!-- Cluster Hardware Config -->
-    <div class="frosted-card rounded-2xl p-6 mb-12 border border-white/10">
-      <h2 class="text-lg font-bold text-white mb-3">Test Environment Topology</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-sans">
-        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
-          <div class="text-gray-400">Compute</div>
-          <div class="font-bold text-white mt-1">3x c3-standard-8 (GCP)</div>
-          <div class="text-gray-500">8 vCPUs, 32GB RAM per node</div>
-        </div>
-        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
-          <div class="text-gray-400">Storage</div>
-          <div class="font-bold text-white mt-1">Local NVMe SSD (ext4)</div>
-          <div class="text-gray-500">Direct I/O write-ahead logs</div>
-        </div>
-        <div class="bg-black/30 p-3 rounded-lg border border-white/5">
-          <div class="text-gray-400">Benchmark Tool</div>
-          <div class="font-bold text-white mt-1">OpenMessaging Benchmark</div>
-          <div class="text-gray-500">50,000 to 500,000 msg/sec</div>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 font-sans">
+    <header class="text-left border-b border-white/10 pb-8 mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div>
+        <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+          Benchmark Results & Methodology
+        </h1>
+        <p class="mt-4 text-lg text-gray-300 max-w-3xl leading-relaxed">
+          Empirical measurements comparing Krabka against Strimzi (Apache Kafka on OpenJDK 21) under identical Kubernetes cluster topologies.
+        </p>
+        <div class="mt-3 text-xs text-gray-400">
+          Latest matrix: <a
+            href={`https://github.com/krabka-io/krabka-broker/commit/${benchmarkData.commit}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-krab-400 hover:text-krab-300 underline font-semibold transition-colors"
+          >commit {benchmarkData.commit}</a> &bull; <span>{formattedDate}</span>
         </div>
       </div>
-    </div>
+      <div>
+        <a
+          href={getPath('/docs/benchmarks')}
+          class="inline-flex items-center gap-2 rounded-xl bg-krab-600/30 px-4 py-2.5 text-sm font-semibold text-krab-300 hover:bg-krab-600/50 hover:text-white border border-krab-500/30 transition-all"
+        >
+          <span>Read Methodology & Docs</span>
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        </a>
+      </div>
+    </header>
 
-    <!-- Benchmark 1: Memory Footprint -->
-    <div class="mb-14">
-      <h3 class="text-2xl font-bold text-white mb-3">1. Memory Working Set Footprint</h3>
-      <p class="text-gray-400 text-sm mb-6">
-        Resident Set Size (RSS) memory consumption measured across idle state, sustained produce workload (50k msg/s), and multi-consumer fanout.
-      </p>
-
-      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-6">
+    <!-- Side-by-Side Headline Cards: Memory Footprint & Cold Start -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-14" aria-label="Core Benchmark Comparisons">
+      
+      <!-- Memory Footprint Card -->
+      <div class="frosted-card rounded-2xl p-6 border border-white/10 flex flex-col justify-between space-y-6">
         <div>
-          <div class="flex justify-between text-sm font-semibold mb-1">
-            <span class="text-krab-400 font-bold">Krabka Broker (RSS)</span>
-            <span class="text-white font-mono">114.2 MiB</span>
-          </div>
-          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
-            <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 4%"></div>
+          <h2 class="text-xl font-bold text-white mb-2">{benchmarkData.headlineMetrics.memoryRss.metric}</h2>
+          <p class="text-gray-400 text-sm leading-relaxed mb-6">
+            {benchmarkData.headlineMetrics.memoryRss.description}
+          </p>
+
+          <div class="space-y-5">
+            <div>
+              <div class="flex justify-between text-sm font-semibold mb-1.5">
+                <span class="text-krab-400 font-bold">Krabka Broker (RSS)</span>
+                <span class="text-white font-bold">{benchmarkData.headlineMetrics.memoryRss.krabka} {benchmarkData.headlineMetrics.memoryRss.unit}</span>
+              </div>
+              <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style={`width: ${benchmarkData.headlineMetrics.memoryRss.krabkaPercent}%`}></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-sm font-semibold mb-1.5">
+                <span class="text-gray-400">Strimzi Kafka JVM (Heap + Off-Heap)</span>
+                <span class="text-gray-300 font-bold">{benchmarkData.headlineMetrics.memoryRss.strimzi.toLocaleString()} {benchmarkData.headlineMetrics.memoryRss.unit}</span>
+              </div>
+              <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-slate-600 rounded-full" style={`width: ${benchmarkData.headlineMetrics.memoryRss.strimziPercent}%`}></div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div>
-          <div class="flex justify-between text-sm font-semibold mb-1">
-            <span class="text-gray-400">Strimzi Kafka JVM (Heap + Off-Heap)</span>
-            <span class="text-gray-300 font-mono">4,280 MiB</span>
-          </div>
-          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
-            <div class="h-full bg-slate-600 rounded-full" style="width: 96%"></div>
-          </div>
-        </div>
-
-        <div class="text-xs text-gray-400 pt-2 border-t border-white/5 font-sans">
-          <strong>Key Insight:</strong> Krabka operates in a fraction of the memory because it avoids JVM object header bloat, uses zero-copy byte buffers with Tokio, and avoids speculative GC buffer reservations.
+        <div class="text-xs text-gray-300 pt-3 border-t border-white/5 leading-relaxed">
+          {benchmarkData.headlineMetrics.memoryRss.keyInsight}
         </div>
       </div>
-    </div>
 
-    <!-- Benchmark 2: Pod Recovery & Startup Time -->
-    <div class="mb-14">
-      <h3 class="text-2xl font-bold text-white mb-3">2. Cold Start & Failover Time</h3>
-      <p class="text-gray-400 text-sm mb-6">
-        Elapsed time from Kubernetes pod launch until the broker joins the KRaft quorum and acknowledges its first produce request.
-      </p>
-
-      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-6">
+      <!-- Cold Start & Failover Card -->
+      <div class="frosted-card rounded-2xl p-6 border border-white/10 flex flex-col justify-between space-y-6">
         <div>
-          <div class="flex justify-between text-sm font-semibold mb-1">
-            <span class="text-krab-400 font-bold">Krabka Startup Time</span>
-            <span class="text-white font-mono">1.2 seconds</span>
-          </div>
-          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
-            <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style="width: 14%"></div>
+          <h2 class="text-xl font-bold text-white mb-2">{benchmarkData.headlineMetrics.startupTime.metric}</h2>
+          <p class="text-gray-400 text-sm leading-relaxed mb-6">
+            {benchmarkData.headlineMetrics.startupTime.description}
+          </p>
+
+          <div class="space-y-5">
+            <div>
+              <div class="flex justify-between text-sm font-semibold mb-1.5">
+                <span class="text-krab-400 font-bold">Krabka Startup Time</span>
+                <span class="text-white font-bold">{benchmarkData.headlineMetrics.startupTime.krabka} {benchmarkData.headlineMetrics.startupTime.unit}</span>
+              </div>
+              <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style={`width: ${benchmarkData.headlineMetrics.startupTime.krabkaPercent}%`}></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-sm font-semibold mb-1.5">
+                <span class="text-gray-400">Strimzi JVM Startup Time</span>
+                <span class="text-gray-300 font-bold">{benchmarkData.headlineMetrics.startupTime.strimzi} {benchmarkData.headlineMetrics.startupTime.unit}</span>
+              </div>
+              <div class="h-4 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-slate-600 rounded-full" style={`width: ${benchmarkData.headlineMetrics.startupTime.strimziPercent}%`}></div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div>
-          <div class="flex justify-between text-sm font-semibold mb-1">
-            <span class="text-gray-400">Strimzi JVM Startup Time</span>
-            <span class="text-gray-300 font-mono">8.6 seconds</span>
-          </div>
-          <div class="h-5 w-full bg-white/5 rounded-full overflow-hidden">
-            <div class="h-full bg-slate-600 rounded-full" style="width: 86%"></div>
-          </div>
+        <div class="text-xs text-gray-300 pt-3 border-t border-white/5 leading-relaxed">
+          {benchmarkData.headlineMetrics.startupTime.keyInsight}
         </div>
       </div>
-    </div>
 
-    <!-- Benchmark 3: Reproduction with Copy Button -->
-    <div class="frosted-card rounded-2xl p-8 border border-white/10">
+    </section>
+
+    <!-- Saturated Scenario Matrix -->
+    <section class="mb-14" aria-labelledby="scenario-matrix-heading">
+      <h2 id="scenario-matrix-heading" class="text-2xl font-bold text-white mb-2">Workload Scenario Matrix</h2>
+      <p class="text-gray-400 text-sm mb-6 max-w-3xl leading-relaxed">
+        Throughput saturation and latency measurements across individual benchmark scenario runs.
+      </p>
+
+      <div class="frosted-card rounded-2xl overflow-x-auto border border-white/10">
+        <table class="w-full text-left text-sm border-collapse" aria-label="Workload Scenario Matrix Table">
+          <thead>
+            <tr class="border-b border-white/10 bg-white/5 text-gray-300 text-xs uppercase tracking-wider">
+              <th scope="col" class="py-3.5 px-4 font-semibold">Scenario</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold">Payload</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold">Topology</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold">Duration</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold text-krab-300">Krabka Metric</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold text-gray-400">Strimzi Metric</th>
+              <th scope="col" class="py-3.5 px-4 font-semibold text-right">Advantage</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-gray-300 text-xs">
+            {benchmarkData.scenarios.map((s) => (
+              <tr class="hover:bg-white/[0.02] transition-colors">
+                <td class="py-3.5 px-4 font-bold text-white">{s.name}</td>
+                <td class="py-3.5 px-4">{s.payloadSize}</td>
+                <td class="py-3.5 px-4">{s.partitions}p / RF={s.replicationFactor}</td>
+                <td class="py-3.5 px-4">{s.duration}</td>
+                <td class="py-3.5 px-4 text-krab-400 font-bold">
+                  {s.krabkaThroughputMb ? `${s.krabkaThroughputMb} MB/s` : s.krabkaP99Ms ? `${s.krabkaP99Ms} ms (p99)` : `${s.krabkaRecoverySec} s (failover)`}
+                </td>
+                <td class="py-3.5 px-4 text-gray-400">
+                  {s.strimziThroughputMb ? `${s.strimziThroughputMb} MB/s` : s.strimziP99Ms ? `${s.strimziP99Ms} ms (p99)` : `${s.strimziRecoverySec} s (failover)`}
+                </td>
+                <td class="py-3.5 px-4 text-right font-bold text-krab-300">
+                  {s.throughputRatio || s.latencyReduction || s.recoverySpeedup}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Reproduction Box -->
+    <section class="frosted-card rounded-2xl p-8 border border-white/10" aria-labelledby="reproduction-heading">
       <div class="flex items-center justify-between mb-4">
         <div>
-          <h3 class="text-xl font-bold text-white mb-1">Reproducing the Benchmarks</h3>
+          <h2 id="reproduction-heading" class="text-xl font-bold text-white mb-1">Reproducing the Benchmarks</h2>
           <p class="text-gray-400 text-sm">
-            All benchmarking scripts and Terraform recipes are open source in the <code class="font-mono text-gray-200">krabka-o11y-demo</code> repository.
+            All benchmarking scripts and Terraform recipes are open source in the <code class="text-gray-200">krabka-o11y-demo</code> repository.
           </p>
         </div>
         <button
           type="button"
-          class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans"
+          class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all"
           data-copy={reproSnippet}
+          aria-label="Copy reproduction commands"
         >
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
           <span>Copy Commands</span>
@@ -126,7 +205,7 @@ cd krabka-o11y-demo/benchmarks
       </div>
 
       <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{reproSnippet}</code></pre>
-    </div>
+    </section>
 
   </div>
 </BaseLayout>

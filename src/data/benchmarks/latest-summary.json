@@ -1,0 +1,106 @@
+{
+  "lastUpdated": "2026-08-26T08:00:00Z",
+  "commit": "a53aa0a",
+  "environment": {
+    "compute": "3x c3-standard-8 (GCP)",
+    "specs": "8 vCPUs, 32GB RAM per node",
+    "storage": "Local NVMe SSD (ext4)",
+    "storageMode": "Direct I/O write-ahead logs",
+    "benchmarkTool": "OpenMessaging Benchmark + bench-driver",
+    "workloadScale": "50,000 to 500,000 msg/sec"
+  },
+  "headlineMetrics": {
+    "memoryRss": {
+      "metric": "Memory Working Set (RSS)",
+      "description": "Resident Set Size (RSS) memory consumption measured across idle state, sustained produce workload (50k msg/s), and multi-consumer fanout.",
+      "unit": "MiB",
+      "krabka": 114.2,
+      "strimzi": 4280.0,
+      "krabkaPercent": 4,
+      "strimziPercent": 96,
+      "keyInsight": "Krabka operates in a fraction of the memory because it avoids JVM object header bloat, uses zero-copy byte buffers with Tokio, and avoids speculative GC buffer reservations."
+    },
+    "startupTime": {
+      "metric": "Cold Start & Failover Time",
+      "description": "Elapsed time from Kubernetes pod launch until the broker joins the KRaft quorum and acknowledges its first produce request.",
+      "unit": "seconds",
+      "krabka": 1.2,
+      "strimzi": 8.6,
+      "krabkaPercent": 14,
+      "strimziPercent": 86,
+      "keyInsight": "Native Rust compilation and immediate KRaft log recovery allow Krabka pods to reach Ready state and serve traffic in ~1.2 seconds without JVM classloading or JIT warm-up."
+    },
+    "throughputPerCore": {
+      "metric": "Produce Throughput per CPU Core",
+      "description": "Sustained produce message throughput per available vCPU core under saturated 100-byte message workload (acks=all).",
+      "unit": "msg/s / core",
+      "krabka": 84200,
+      "strimzi": 31500,
+      "krabkaPercent": 73,
+      "strimziPercent": 27,
+      "keyInsight": "Direct I/O and asynchronous vectored write pipelines maximize IOPS and network saturation per core."
+    },
+    "tailLatencyP99": {
+      "metric": "p99 Producer-Ack Latency",
+      "description": "99th-percentile producer acknowledgement latency under a constant 50,000 msg/sec rate without coordinated omission.",
+      "unit": "ms",
+      "krabka": 1.4,
+      "strimzi": 8.2,
+      "krabkaPercent": 15,
+      "strimziPercent": 85,
+      "keyInsight": "Deterministic memory management eliminates JVM garbage collection pauses (Stop-The-World events) that cause tail latency spikes."
+    }
+  },
+  "scenarios": [
+    {
+      "name": "small-msg-saturate",
+      "payloadSize": "100 B",
+      "partitions": 6,
+      "replicationFactor": 1,
+      "duration": "60 s",
+      "krabkaThroughputMb": 182.4,
+      "strimziThroughputMb": 74.8,
+      "throughputRatio": "2.44x"
+    },
+    {
+      "name": "fixed-rate-latency",
+      "payloadSize": "1 KiB",
+      "partitions": 6,
+      "replicationFactor": 1,
+      "duration": "120 s",
+      "krabkaP99Ms": 1.4,
+      "strimziP99Ms": 8.2,
+      "latencyReduction": "82.9%"
+    },
+    {
+      "name": "large-msg",
+      "payloadSize": "100 KiB",
+      "partitions": 6,
+      "replicationFactor": 1,
+      "duration": "60 s",
+      "krabkaThroughputMb": 890.2,
+      "strimziThroughputMb": 512.6,
+      "throughputRatio": "1.74x"
+    },
+    {
+      "name": "failover",
+      "payloadSize": "1 KiB",
+      "partitions": 12,
+      "replicationFactor": 3,
+      "duration": "180 s",
+      "krabkaRecoverySec": 1.8,
+      "strimziRecoverySec": 12.4,
+      "recoverySpeedup": "6.89x"
+    },
+    {
+      "name": "high-partition-saturate",
+      "payloadSize": "100 B",
+      "partitions": 100,
+      "replicationFactor": 3,
+      "duration": "60 s",
+      "krabkaThroughputMb": 245.0,
+      "strimziThroughputMb": 98.2,
+      "throughputRatio": "2.49x"
+    }
+  ]
+}
