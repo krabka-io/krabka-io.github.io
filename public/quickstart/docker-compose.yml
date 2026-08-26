@@ -1,7 +1,11 @@
 name: krabka-quickstart
 
 services:
-  # One-shot: initialize KRaft metadata properties on fresh volume
+  # One-shot: initialize KRaft metadata properties on fresh volume.
+  # NOTE: Uses busybox as a lightweight interim bootstrap helper.
+  # Once ghcr.io/krabka-io/krabka-cli is published, switch this service to:
+  #   image: ghcr.io/krabka-io/krabka-cli:latest
+  #   command: ["krabka", "format", "--log-dir", "/data", "--standalone", "--node-id", "1", "--controller-listener", "localhost:9093"]
   broker-init:
     image: mirror.gcr.io/library/busybox:1.38
     restart: "no"
