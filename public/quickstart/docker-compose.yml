@@ -1,12 +1,30 @@
 name: krabka-quickstart
 
 services:
+  # One-shot: initialize KRaft metadata properties on fresh volume
+  broker-init:
+    image: mirror.gcr.io/library/busybox:1.38
+    restart: "no"
+    command:
+      - "sh"
+      - "-c"
+      - |
+        test -f /data/meta.properties.json || cat <<'EOF' > /data/meta.properties.json
+        {
+          "cluster_id": "00000000-0000-0000-0000-000000000000",
+          "directory_id": "00000000-0000-0000-0000-000000000001",
+          "version": 1
+        }
+        EOF
+        chown -R 65532:65532 /data
+    volumes:
+      - broker-data:/data
+
   # Krabka standalone KRaft controller & broker node
   broker:
     image: ghcr.io/krabka-io/crabka-broker:latest
     restart: unless-stopped
     command:
-      - "crabka-broker"
       - "--listen-addr=0.0.0.0:9092"
       - "--advertised-listener=localhost:9092"
       - "--log-dir=/data"
@@ -19,6 +37,9 @@ services:
       - "9404:9404"
     volumes:
       - broker-data:/data
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
 
 volumes:
   broker-data:
