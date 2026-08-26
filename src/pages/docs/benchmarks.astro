@@ -1,0 +1,284 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import benchmarkData from '../../data/benchmarks/latest-summary.json';
+
+const microbenchSnippet = `# In krabka-protocol
+cargo bench --bench codec
+
+# In krabka-broker
+cargo bench -p crabka-log --bench log`;
+
+const reproSnippet = `git clone https://github.com/krabka-io/krabka-o11y-demo
+cd krabka-o11y-demo/benchmarks
+./run-suite.sh --cluster-type gke --target krabka --workload omb-standard`;
+
+const articleSchema = {
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Krabka vs Apache Kafka: Benchmark Methodology & Empirical Performance",
+  "description": "Comprehensive empirical evaluation comparing Krabka against Strimzi Apache Kafka across memory working set RSS, KRaft startup time, and p99 tail latency.",
+  "author": {
+    "@type": "Organization",
+    "name": "Krabka Authors",
+    "url": "https://krabka.io"
+  },
+  "keywords": "Apache Kafka benchmarks, Krabka performance, Kafka memory working set, KRaft failover, p99 tail latency, OpenMessaging Benchmark",
+  "datePublished": "2026-08-26",
+  "dateModified": benchmarkData.lastUpdated
+};
+---
+
+<DocsLayout
+  title="Benchmark Methodology & Performance"
+  description="Empirical benchmarking methodology comparing Krabka against Strimzi (Apache Kafka on OpenJDK 21) across memory working set, cold start, and tail latency."
+  currentSlug="/docs/benchmarks"
+>
+  <script type="application/ld+json" set:html={JSON.stringify(articleSchema)} slot="head" />
+
+  <div class="space-y-8 font-sans">
+    <header class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Benchmark Methodology & Performance</h1>
+      <p class="text-gray-400 mt-2 text-base leading-relaxed">
+        Empirical evaluation comparing Krabka against Strimzi (Apache Kafka on OpenJDK 21) across memory working set, cold-start time, saturated throughput, and tail latency.
+      </p>
+    </header>
+
+    <!-- Overview Section -->
+    <section class="space-y-4 text-sm text-gray-300 leading-relaxed" aria-labelledby="eval-philosophy">
+      <h2 id="eval-philosophy" class="text-xl font-bold text-white">Evaluation Philosophy & Goals</h2>
+      <p>
+        Krabka is engineered in native Rust to eliminate JVM runtime overhead, garbage collection pauses, and multi-gigabyte memory footprints in streaming architectures. To validate these characteristics, all macro-benchmarks follow four strict principles:
+      </p>
+      <ul class="list-disc pl-6 space-y-2 text-gray-300">
+        <li><strong>Identical Hardware & Topology:</strong> Both Krabka and Apache Kafka (Strimzi) run on identical Kubernetes clusters and GCP virtual machines.</li>
+        <li><strong>Identical Storage Media:</strong> Direct I/O write-ahead logs backed by local NVMe SSDs (ext4 formatted).</li>
+        <li><strong>Identical Load Driver:</strong> A shared Rust load generator (<code class="font-mono text-krab-300">bench-driver</code>) speaking standard Apache Kafka wire protocol executes unmodified against both targets.</li>
+        <li><strong>Coordinated-Omission-Free Latency:</strong> Latencies are tracked via HdrHistogram using send timestamps embedded in payload headers rather than client send loops.</li>
+      </ul>
+    </section>
+
+    <!-- Cluster Hardware Baseline -->
+    <section class="space-y-4 text-sm text-gray-300 leading-relaxed" aria-labelledby="test-topology">
+      <h2 id="test-topology" class="text-xl font-bold text-white">Test Environment Topology</h2>
+      <p>
+        All comparative benchmarks are executed against dedicated cloud infrastructure with fixed hardware allocation:
+      </p>
+      <ul class="list-disc pl-6 space-y-2 text-gray-300">
+        <li><strong>Compute Hardware:</strong> 3x GCP c3-standard-8 instances (8 vCPUs Intel Xeon, 32 GB RAM per node).</li>
+        <li><strong>Storage Subsystem:</strong> Local NVMe SSD formatted with ext4, utilizing Direct I/O asynchronous write-ahead logs.</li>
+        <li><strong>Benchmark Suite:</strong> Industry-standard OpenMessaging Benchmark (OMB) and <code class="font-mono text-krab-300">bench-driver</code> executing sustained workloads from 50,000 to 500,000 msg/sec.</li>
+        <li><strong>Software Baseline:</strong> Krabka (native Rust, KRaft consensus) evaluated side-by-side against Strimzi 1.0 running Apache Kafka 4.3 (KRaft, OpenJDK 21).</li>
+      </ul>
+    </section>
+
+    <!-- Memory Working Set Footprint (RSS) -->
+    <section class="space-y-5 text-sm text-gray-300 leading-relaxed" aria-labelledby="memory-rss">
+      <h2 id="memory-rss" class="text-xl font-bold text-white">Memory Working Set Footprint (RSS)</h2>
+      
+      <p>
+        In production Kubernetes deployments, memory capacity and pod eviction decisions are governed by cgroup limits. We measure <code class="font-mono text-krab-300 text-xs">container_memory_working_set_bytes</code> through Prometheus scrapers during steady-state produce and fanout consumption workloads.
+      </p>
+
+      <!-- Memory Comparison Card at top of section -->
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-4">
+        <div>
+          <div class="text-xs text-white font-bold uppercase tracking-wider">Sustained Produce Workload Memory Footprint</div>
+          <div class="mt-3 space-y-3">
+            <div>
+              <div class="flex justify-between text-xs font-semibold mb-1">
+                <span class="text-krab-400 font-bold">Krabka Broker (RSS)</span>
+                <span class="text-white font-bold">{benchmarkData.headlineMetrics.memoryRss.krabka} {benchmarkData.headlineMetrics.memoryRss.unit}</span>
+              </div>
+              <div class="h-3.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style={`width: ${benchmarkData.headlineMetrics.memoryRss.krabkaPercent}%`}></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs font-semibold mb-1">
+                <span class="text-gray-400">Strimzi Kafka JVM (Heap + Off-Heap)</span>
+                <span class="text-gray-300 font-bold">{benchmarkData.headlineMetrics.memoryRss.strimzi.toLocaleString()} {benchmarkData.headlineMetrics.memoryRss.unit}</span>
+              </div>
+              <div class="h-3.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-slate-600 rounded-full" style={`width: ${benchmarkData.headlineMetrics.memoryRss.strimziPercent}%`}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3.5 bg-black/40 rounded-lg border border-white/5 text-xs leading-relaxed text-gray-300">
+          <strong class="text-white">Measurement Caveat:</strong> Strimzi's cgroup memory conflates active heap, non-heap buffers, and Linux page cache from <code class="font-mono text-white text-xs">mmap</code>. We collect JMX metrics (<code class="font-mono text-gray-300 text-xs">jvm_memory_bytes_used</code>) separately to verify heap versus off-heap consumption against Krabka's direct user-space allocation model.
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-2">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider">How Krabka Achieves 114.2 MiB Working Set</h3>
+        <p>
+          Krabka operates at a fraction of JVM Kafka's memory footprint due to three architectural design decisions:
+        </p>
+        <ul class="list-disc pl-6 space-y-1.5 text-gray-300">
+          <li><strong>Zero-Copy Buffer Slicing:</strong> Slices of byte buffers (<code class="font-mono text-krab-300 text-xs">bytes::Bytes</code>) pass through the network I/O layer, log segment appends, and consumer dispatch pipelines without memory duplication or re-allocation.</li>
+          <li><strong>Deterministic Deallocation:</strong> Memory is immediately reclaimed when reference counts hit zero. There are no background GC compaction passes, heap fragmentation margins, or speculative memory reservations.</li>
+          <li><strong>Compact Memory Representation:</strong> Rust structs avoid the 12-to-16-byte object header overhead, pointer indirection, and boxed primitive structures inherent to JVM runtimes.</li>
+        </ul>
+      </div>
+
+      <div class="space-y-3">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider">How Strimzi Kafka Consumes ~4,280 MiB</h3>
+        <p>
+          Under an identical workload, Strimzi Kafka's memory footprint is composed of:
+        </p>
+        <ul class="list-disc pl-6 space-y-1.5 text-gray-300">
+          <li><strong>JVM Heap Space:</strong> Heap pre-allocations (2 GiB initial cap) required to prevent frequent Garbage Collection pauses under high throughput.</li>
+          <li><strong>Metaspace & JVM Threads:</strong> JVM class metadata, JIT compiler caches, and 1 MiB per-thread stack allocations across dozens of thread pools.</li>
+          <li><strong>Off-Heap & Netty Buffers:</strong> Direct byte buffers used by network transports and GC card tables.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Cold Start & Failover Recovery -->
+    <section class="space-y-5 text-sm text-gray-300 leading-relaxed" aria-labelledby="cold-start-failover">
+      <h2 id="cold-start-failover" class="text-xl font-bold text-white">Cold Start & Failover Recovery</h2>
+      
+      <p>
+        Broker restart and failover agility determine cluster availability during node reboot, autoscaling, and rolling upgrades.
+      </p>
+
+      <!-- Cold Start Comparison Card at top of section -->
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-4">
+        <div>
+          <div class="text-xs text-white font-bold uppercase tracking-wider">Cold Start & Recovery Duration</div>
+          <div class="mt-3 space-y-3">
+            <div>
+              <div class="flex justify-between text-xs font-semibold mb-1">
+                <span class="text-krab-400 font-bold">Krabka Startup Time</span>
+                <span class="text-white font-bold">{benchmarkData.headlineMetrics.startupTime.krabka} {benchmarkData.headlineMetrics.startupTime.unit}</span>
+              </div>
+              <div class="h-3.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-krab-600 to-krab-500 rounded-full" style={`width: ${benchmarkData.headlineMetrics.startupTime.krabkaPercent}%`}></div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs font-semibold mb-1">
+                <span class="text-gray-400">Strimzi JVM Startup Time</span>
+                <span class="text-gray-300 font-bold">{benchmarkData.headlineMetrics.startupTime.strimzi} {benchmarkData.headlineMetrics.startupTime.unit}</span>
+              </div>
+              <div class="h-3.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <div class="h-full bg-slate-600 rounded-full" style={`width: ${benchmarkData.headlineMetrics.startupTime.strimziPercent}%`}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-2">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider">Measurement Methodology</h3>
+        <ul class="list-disc pl-6 space-y-1.5 text-gray-300">
+          <li><strong>Cold Start Time:</strong> Elapsed wall-clock time from Kubernetes Pod launch until the broker initializes its log directory, establishes KRaft quorum consensus, and accepts its first client connection.</li>
+          <li><strong>Failover Recovery Time:</strong> Under an active produce workload at replication factor 3, the active partition leader pod is abruptly killed (<code class="font-mono text-krab-300 text-xs">SIGKILL</code>). The load driver measures the elapsed duration until the new KRaft leader is elected and successfully acknowledges subsequent produce requests.</li>
+        </ul>
+      </div>
+
+      <div class="space-y-3">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider">How Krabka Achieves 1.2s Cold Start & 1.8s Failover</h3>
+        <p>
+          As a compiled native binary, Krabka bypasses JVM classloading, bytecode verification, and JIT compilation phases. Startup involves only:
+        </p>
+        <ul class="list-disc pl-6 space-y-1.5 text-gray-300">
+          <li>Immediate memory mapping of log segment headers via <code class="font-mono text-krab-300 text-xs">crabka-log</code> without full-file scans.</li>
+          <li>Instant KRaft election convergence and metadata state machine snapshot replay via <code class="font-mono text-krab-300 text-xs">crabka-raft</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Scenario Matrix Results -->
+    <section class="space-y-4 text-sm text-gray-300 leading-relaxed" aria-labelledby="scenario-matrix">
+      <h2 id="scenario-matrix" class="text-xl font-bold text-white">Scenario Matrix Results</h2>
+      <p>
+        The comparative test suite exercises real-world workloads under various partition counts, payload sizes, and failure events:
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-x-auto border border-white/10">
+        <table class="w-full text-left text-xs border-collapse" aria-label="Scenario Matrix Results Table">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400">
+            <tr>
+              <th scope="col" class="py-3 px-4 font-semibold">Scenario</th>
+              <th scope="col" class="py-3 px-4 font-semibold">Payload</th>
+              <th scope="col" class="py-3 px-4 font-semibold">Topology</th>
+              <th scope="col" class="py-3 px-4 font-semibold">Duration</th>
+              <th scope="col" class="py-3 px-4 font-semibold text-krab-300">Krabka Metric</th>
+              <th scope="col" class="py-3 px-4 font-semibold text-gray-400">Strimzi Metric</th>
+              <th scope="col" class="py-3 px-4 font-semibold text-right">Advantage</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-gray-300">
+            {benchmarkData.scenarios.map((s) => (
+              <tr class="hover:bg-white/[0.02] transition-colors">
+                <td class="py-3 px-4 font-bold text-white">{s.name}</td>
+                <td class="py-3 px-4">{s.payloadSize}</td>
+                <td class="py-3 px-4">{s.partitions}p / RF={s.replicationFactor}</td>
+                <td class="py-3 px-4">{s.duration}</td>
+                <td class="py-3 px-4 text-krab-400 font-bold">
+                  {s.krabkaThroughputMb ? `${s.krabkaThroughputMb} MB/s` : s.krabkaP99Ms ? `${s.krabkaP99Ms} ms (p99)` : `${s.krabkaRecoverySec} s (failover)`}
+                </td>
+                <td class="py-3 px-4 text-gray-400">
+                  {s.strimziThroughputMb ? `${s.strimziThroughputMb} MB/s` : s.strimziP99Ms ? `${s.strimziP99Ms} ms (p99)` : `${s.strimziRecoverySec} s (failover)`}
+                </td>
+                <td class="py-3 px-4 text-right font-bold text-krab-300">
+                  {s.throughputRatio || s.latencyReduction || s.recoverySpeedup}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Reproduction Guide -->
+    <section class="space-y-6 text-sm text-gray-300 leading-relaxed" aria-labelledby="reproduction-guide">
+      <h2 id="reproduction-guide" class="text-xl font-bold text-white">Reproducing Benchmarks Locally</h2>
+      <p>
+        Developers can run local microbenchmarks or complete cluster benchmark suites using the open-source recipes:
+      </p>
+
+      <div class="space-y-6">
+        <!-- Microbenchmarks Block with Copy Button -->
+        <div class="frosted-card rounded-xl p-5 border border-white/10">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider">Microbenchmarks (Criterion)</h3>
+            <button
+              type="button"
+              class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all"
+              data-copy={microbenchSnippet}
+              aria-label="Copy microbenchmarks snippet"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{microbenchSnippet}</code></pre>
+        </div>
+
+        <!-- OMB Cluster Suite Block with Copy Button -->
+        <div class="frosted-card rounded-xl p-5 border border-white/10">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider">OpenMessaging Benchmark (OMB) Cluster Suite</h3>
+            <button
+              type="button"
+              class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all"
+              data-copy={reproSnippet}
+              aria-label="Copy OpenMessaging Benchmark cluster suite snippet"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{reproSnippet}</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</DocsLayout>

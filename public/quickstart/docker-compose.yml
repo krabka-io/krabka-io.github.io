@@ -1,0 +1,35 @@
+name: krabka-quickstart
+
+services:
+  # One-shot: format the broker KRaft storage before start
+  broker-format:
+    image: ghcr.io/robot-head/crabka-demo:latest
+    restart: "no"
+    entrypoint: ["sh", "-c", "test -f /data/meta.properties.json || crabka format --log-dir /data --standalone --node-id 1 --controller-listener localhost:9093"]
+    volumes:
+      - broker-data:/data
+
+  # Krabka broker node in standalone combined controller+broker role
+  broker:
+    image: ghcr.io/robot-head/crabka-demo:latest
+    restart: unless-stopped
+    command:
+      - "crabka-broker"
+      - "--listen-addr=0.0.0.0:9092"
+      - "--advertised-listener=localhost:9092"
+      - "--log-dir=/data"
+      - "--process-roles=controller,broker"
+    environment:
+      RUST_LOG: "info"
+      CRABKA_METRICS_LISTEN_ADDR: "0.0.0.0:9404"
+    ports:
+      - "9092:9092"
+      - "9404:9404"
+    volumes:
+      - broker-data:/data
+    depends_on:
+      broker-format:
+        condition: service_completed_successfully
+
+volumes:
+  broker-data:
