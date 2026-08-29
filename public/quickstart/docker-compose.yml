@@ -26,7 +26,7 @@ services:
 
   # Krabka standalone KRaft controller & broker node
   broker:
-    image: ghcr.io/krabka-io/crabka-broker:latest
+    image: ghcr.io/krabka-io/krabka-broker:latest
     restart: unless-stopped
     command:
       - "--listen-addr=0.0.0.0:9092"
@@ -35,7 +35,7 @@ services:
       - "--process-roles=controller,broker"
     environment:
       RUST_LOG: "info"
-      CRABKA_METRICS_LISTEN_ADDR: "0.0.0.0:9404"
+      KRABKA_METRICS_LISTEN_ADDR: "0.0.0.0:9404"
     ports:
       - "9092:9092"
       - "9404:9404"
