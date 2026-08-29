@@ -25,7 +25,7 @@ segment_upload_timeout_secs = 60`;
         Tiered Storage with NVMe Caching
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Decouple broker compute from storage capacity (<code class="text-krab-300 font-mono text-sm">crabka-remote-storage</code> and <code class="text-krab-300 font-mono text-sm">crabka-object-store</code>). Store petabytes of historical streaming data cost-effectively in S3, GCS, or MinIO while serving real-time consumer fetches from NVMe flash.
+        Decouple broker compute from storage capacity (<code class="text-krab-300 font-mono text-sm">krabka-remote-storage</code> and <code class="text-krab-300 font-mono text-sm">krabka-object-store</code>). Store petabytes of historical streaming data cost-effectively in S3, GCS, or MinIO while serving real-time consumer fetches from NVMe flash.
       </p>
     </div>
 
@@ -40,11 +40,11 @@ segment_upload_timeout_secs = 60`;
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-5 rounded-xl border border-white/5 space-y-2">
             <h3 class="text-sm font-bold text-krab-400 font-sans">Hot Tier (Local NVMe Direct I/O)</h3>
-            <p class="text-gray-300 leading-relaxed">Active write-ahead log (WAL) segments are appended and indexed directly on local NVMe SSDs via <code class="font-mono text-krab-300">crabka-log</code>, optimizing for microsecond-level produce acknowledgments.</p>
+            <p class="text-gray-300 leading-relaxed">Active write-ahead log (WAL) segments are appended and indexed directly on local NVMe SSDs via <code class="font-mono text-krab-300">krabka-log</code>, optimizing for microsecond-level produce acknowledgments.</p>
           </div>
           <div class="bg-black/30 p-5 rounded-xl border border-white/5 space-y-2">
             <h3 class="text-sm font-bold text-krab-400 font-sans">Cold Tier (Object Storage Offloading)</h3>
-            <p class="text-gray-300 leading-relaxed">Once a segment reaches size or time limits, background workers compute CRC32C checksums and stream the segment into Amazon S3, Google Cloud Storage, or MinIO via <code class="font-mono text-krab-300">crabka-remote-storage</code>.</p>
+            <p class="text-gray-300 leading-relaxed">Once a segment reaches size or time limits, background workers compute CRC32C checksums and stream the segment into Amazon S3, Google Cloud Storage, or MinIO via <code class="font-mono text-krab-300">krabka-remote-storage</code>.</p>
           </div>
         </div>
       </div>
@@ -53,7 +53,7 @@ segment_upload_timeout_secs = 60`;
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Topic-Backed Remote Log Metadata Manager</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Segment catalog state is tracked durably in the internal compacted topic <code class="font-mono text-krab-300 text-xs">__remote_log_metadata</code> (<code class="font-mono text-xs text-gray-200">crabka-remote-storage-topic</code>). This design guarantees that metadata lifecycle, replication, and failovers are managed natively by the KRaft quorum without requiring external relational databases or DynamoDB tables.
+          Segment catalog state is tracked durably in the internal compacted topic <code class="font-mono text-krab-300 text-xs">__remote_log_metadata</code> (<code class="font-mono text-xs text-gray-200">krabka-remote-storage-topic</code>). This design guarantees that metadata lifecycle, replication, and failovers are managed natively by the KRaft quorum without requiring external relational databases or DynamoDB tables.
         </p>
       </div>
 

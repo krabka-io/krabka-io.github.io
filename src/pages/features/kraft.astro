@@ -22,7 +22,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
 
 <BaseLayout
   title="Native KRaft Consensus Quorum | Krabka"
-  description="Deep dive into Krabka's native Rust KRaft metadata quorum engine (crabka-raft & crabka-kraft-core), KIP-595 wire compatibility, and dynamic quorum reconfiguration."
+  description="Deep dive into Krabka's native Rust KRaft metadata quorum engine (krabka-raft & krabka-kraft-core), KIP-595 wire compatibility, and dynamic quorum reconfiguration."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
@@ -33,7 +33,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
         Native KRaft Consensus Quorum
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Krabka implements the Apache Kafka KRaft consensus protocol directly in memory-safe Rust (<code class="text-krab-300 font-mono text-sm">crabka-raft</code> and <code class="text-krab-300 font-mono text-sm">crabka-kraft-core</code>), delivering instantaneous leader elections, metadata compaction, and zero ZooKeeper baggage.
+        Krabka implements the Apache Kafka KRaft consensus protocol directly in memory-safe Rust (<code class="text-krab-300 font-mono text-sm">krabka-raft</code> and <code class="text-krab-300 font-mono text-sm">krabka-kraft-core</code>), delivering instantaneous leader elections, metadata compaction, and zero ZooKeeper baggage.
       </p>
     </div>
 
@@ -53,7 +53,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
             <strong class="text-white font-bold">Dynamic Reconfiguration</strong>
-            <p class="text-gray-400 leading-relaxed">Add or decommission controller voters on live clusters through <code class="font-mono text-krab-300">crabka-voters</code> without restarting the metadata quorum.</p>
+            <p class="text-gray-400 leading-relaxed">Add or decommission controller voters on live clusters through <code class="font-mono text-krab-300">krabka-voters</code> without restarting the metadata quorum.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
             <strong class="text-white font-bold">Sub-Second Failover</strong>
@@ -78,7 +78,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">In-Memory Metadata Image & Snapshots</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Metadata logs are periodically compacted into zero-copy in-memory snapshot states (<code class="font-mono text-xs text-krab-300">crabka-metadata</code>). When a new node joins or an existing broker reconnects after a network partition, snapshot catch-up finishes in milliseconds instead of replaying thousands of historical log batches.
+          Metadata logs are periodically compacted into zero-copy in-memory snapshot states (<code class="font-mono text-xs text-krab-300">krabka-metadata</code>). When a new node joins or an existing broker reconnects after a network partition, snapshot catch-up finishes in milliseconds instead of replaying thousands of historical log batches.
         </p>
       </div>
 
@@ -86,7 +86,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Formally Verified Kernels & Deterministic Seeding</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Core consensus invariants and quota token buckets are mathematically verified using the <strong class="text-white">Creusot</strong> deductive verification tool (<code class="font-mono text-xs text-krab-300">crabka-verified</code>, <code class="font-mono text-xs text-krab-300">crabka-throttle</code>). Log directories are seeded deterministically with <code class="font-mono text-xs text-krab-300">crabka-format</code>.
+          Core consensus invariants and quota token buckets are mathematically verified using the <strong class="text-white">Creusot</strong> deductive verification tool (<code class="font-mono text-xs text-krab-300">krabka-verified</code>, <code class="font-mono text-xs text-krab-300">krabka-throttle</code>). Log directories are seeded deterministically with <code class="font-mono text-xs text-krab-300">krabka-format</code>.
         </p>
         <div class="bg-black/40 p-3.5 rounded-xl border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between">
           <span>$ {formatCmd}</span>
