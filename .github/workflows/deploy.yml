@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +34,8 @@ jobs:
 
       - name: Build static website
         run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
