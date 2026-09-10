@@ -1,32 +1,36 @@
 name: krabka-quickstart
 
 services:
-  # One-shot: initialize KRaft metadata properties on fresh volume.
-  # NOTE: Uses busybox as a lightweight interim bootstrap helper.
-  # Once ghcr.io/krabka-io/krabka-cli is published, switch this service to:
-  #   image: ghcr.io/krabka-io/krabka-cli:latest
-  #   command: ["krabka", "format", "--log-dir", "/data", "--standalone", "--node-id", "1", "--controller-listener", "localhost:9093"]
-  broker-init:
+  broker-permissions:
     image: mirror.gcr.io/library/busybox:1.38
     restart: "no"
-    command:
-      - "sh"
-      - "-c"
-      - |
-        test -f /data/meta.properties.json || cat <<'EOF' > /data/meta.properties.json
-        {
-          "cluster_id": "00000000-0000-0000-0000-000000000000",
-          "directory_id": "00000000-0000-0000-0000-000000000001",
-          "version": 1
-        }
-        EOF
-        chown -R 65532:65532 /data
+    command: ["chown", "-R", "65532:65532", "/data"]
     volumes:
       - broker-data:/data
 
+  # One-shot: initialize KRaft metadata on a fresh writable volume.
+  broker-format:
+    image: ghcr.io/krabka-io/krabka-broker@sha256:886fbe511a0cadacec0c352fe10b295063b3807c0df133d2fce4ea804f4fffcd
+    platform: linux/amd64
+    restart: "no"
+    entrypoint: ["/usr/bin/krabka-format"]
+    command:
+      - "--log-dir=/data"
+      - "--cluster-id=3d70a78c-bb3a-4af5-a767-51e31f403c62"
+      - "--standalone"
+      - "--node-id=1"
+      - "--controller-listener=localhost:9093"
+      - "--ignore-formatted"
+    volumes:
+      - broker-data:/data
+    depends_on:
+      broker-permissions:
+        condition: service_completed_successfully
+
   # Krabka standalone KRaft controller & broker node
   broker:
-    image: ghcr.io/krabka-io/krabka-broker:latest
+    image: ghcr.io/krabka-io/krabka-broker@sha256:886fbe511a0cadacec0c352fe10b295063b3807c0df133d2fce4ea804f4fffcd
+    platform: linux/amd64
     restart: unless-stopped
     command:
       - "--listen-addr=0.0.0.0:9092"
@@ -42,7 +46,7 @@ services:
     volumes:
       - broker-data:/data
     depends_on:
-      broker-init:
+      broker-format:
         condition: service_completed_successfully
 
 volumes:
