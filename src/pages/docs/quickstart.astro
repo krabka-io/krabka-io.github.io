@@ -21,7 +21,7 @@ helm install krabka-operator krabka/krabka-operator --version 0.4.0 \\
   --namespace krabka-system --create-namespace \\
   --set image.repository=ghcr.io/krabka-io/krabka-operator \\
   --set-string image.digest=sha256:861796f11b63798f07cd8cfbcb0fa41376259cb6fce07b1e80e15e93de3a377b
-kubectl rollout status deployment/krabka-operator -n krabka-system --timeout=5m
+kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
 
 kubectl apply -f https://krabka-io.github.io/quickstart/krabka-cluster.yaml
 kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
