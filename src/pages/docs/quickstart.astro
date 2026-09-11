@@ -37,10 +37,10 @@ KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238
 kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
   /bin/bash -lc "printf 'milestone-20-qualified\\n' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart && /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart --from-beginning --max-messages 1"
 
-helm uninstall krabka-rebalancer
 kubectl delete kafkatopic/quickstart
 kubectl delete kafkanodepool/brokers
 kubectl delete kafka/m20-quickstart
+helm uninstall krabka-rebalancer
 helm uninstall krabka-operator -n krabka-system
 kubectl delete -f https://krabka-io.github.io/quickstart/crds.yaml`;
 ---
