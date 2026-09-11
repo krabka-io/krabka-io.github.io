@@ -1,0 +1,33 @@
+apiVersion: krabka.io/v1alpha1
+kind: Kafka
+metadata:
+  name: m20-quickstart
+spec:
+  kafkaVersion: "4.0.0"
+  metricsConfig: {}
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  labels:
+    krabka.io/cluster: m20-quickstart
+spec:
+  roles: [Controller, Broker]
+  replicas: 1
+  nodeIdStart: 0
+  image: ghcr.io/krabka-io/krabka-broker@sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0
+  storage:
+    type: PersistentClaim
+    size: 1Gi
+    deleteClaim: true
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: quickstart
+  labels:
+    krabka.io/cluster: m20-quickstart
+spec:
+  partitions: 1
+  replicas: 1

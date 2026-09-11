@@ -1,0 +1,134 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const components = [
+  ['krabka-broker', '986cf6693eebf820c9088e4687a26e1934f50b9b', 'image sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0'],
+  ['krabka-protocol', 'b79bf4965075a96ab88f2612f0b7cb9c86d2097b', 'source'],
+  ['krabka-client-rs', 'f0c86c1ccdecd1776e32349764d7d2efe5dae347', 'source'],
+  ['krabka-schema-registry', 'd7cb5501ea57b0e8ee38953841a7b27762fedb77', 'source'],
+  ['krabka-streams-rs', '375faae45e895ca2afc0622904994a8538fc3593', 'source'],
+  ['krabka-streams-java', 'd623cecec0fa59188390151110cb1c76c3a244af', 'source'],
+  ['krabka-streams-go', 'f4b7124fd3612c84fac87df805b3bd9356ee2883', 'source'],
+  ['krabka-connect', '5cc1bfb806a5288afddc72c2da11510078acd262', 'source'],
+  ['krabka-operator', '0d08946add2ae2d4786f8b6b3ad91f0fb23cc588', 'chart sha256:bc7b1378be63676e546fa1e2c91e4633337176a69f9b0f6ac1909fb850aeff75; image sha256:861796f11b63798f07cd8cfbcb0fa41376259cb6fce07b1e80e15e93de3a377b'],
+  ['krabka-cli', '09edae1c0af58038c664b5d1d0fae9bd85f25257', 'binary sha256:c39d85bd62bdf51a34f38e8f7b48a75d42cad0bc01281013b3d2432245dd60c9'],
+  ['krabka-o11y', '12bce8a0093208a1e49f0258ad23b848c19e6a8b', 'image sha256:1f278b3e776feb246953ea6a4ed6474be11f392e4a3a3d41819a038b52b0b23a'],
+  ['krabka-o11y-demo', 'fadddcfb46da03a51792ab744cc8070e7fd8b779', 'compose sha256:50b7c328fccc1c71a74164a5c9df57bb6629168b08f7ef0a617abf777d37af13'],
+  ['krabka-rebalancer', 'f932eab4004349417806eefec738ef0b20ad26f4', 'chart sha256:6c924ea43772b77a92674a7825c71bb915d7621b9d15734f5eecaeb49e1ad700; image sha256:706b3b51a521d97d4166d98a1f39e045b5dfa1508b155bce174161c4bc009b11'],
+];
+
+const gates = [
+  {
+    name: 'Installation',
+    issue: 523,
+    evidence: [
+      ['Compose smoke test', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-compose-qualified.log'],
+      ['Helm smoke test', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-helm-qualified.tar.gz'],
+      ['Ecosystem compatibility', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-m19-final.tar.gz'],
+      ['Go Apache/Krabka reference matrix', 'https://github.com/krabka-io/krabka-streams-go/actions/runs/34361055012'],
+      ['Java Apache/Krabka reference matrix', 'https://github.com/krabka-io/krabka-streams-java/actions/runs/34361081564'],
+    ],
+  },
+  {
+    name: 'Operator lifecycle',
+    issue: 524,
+    evidence: [
+      ['Upgrade, disruption, evacuation, and certificate rotation', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-operator-lifecycle.tar.gz'],
+    ],
+  },
+  {
+    name: 'CLI administration',
+    issue: 525,
+    evidence: [
+      ['Three-node administrative command matrix', 'https://github.com/krabka-io/krabka-cli/releases/download/v0.4.0/milestone-20-cli-admin-qualified.log'],
+    ],
+  },
+  {
+    name: 'Observability recovery',
+    issue: 526,
+    evidence: [
+      ['Recovery drill and telemetry bundle', 'https://github.com/krabka-io/krabka-o11y-demo/releases/download/m20-recovery-fadddcf/m20-observability-recovery-fadddcf.tar.gz'],
+    ],
+  },
+];
+---
+
+<DocsLayout
+  title="Milestone 20 Qualification"
+  description="Reproducible evidence for the qualified Krabka Milestone 20 ecosystem stack."
+  currentSlug="/docs/qualification"
+>
+  <div class="space-y-8 font-sans">
+    <header class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Milestone 20 Qualification</h1>
+      <p class="mt-2 text-base leading-relaxed text-gray-400">
+        The immutable linux/amd64 stack passed installation, operator lifecycle, CLI administration, and observability recovery gates.
+      </p>
+    </header>
+
+    <section class="space-y-3" aria-labelledby="qualified-components">
+      <h2 id="qualified-components" class="text-xl font-bold text-white">Immutable component set</h2>
+      <p class="text-sm text-gray-400">Qualified for <code class="text-krab-300">linux/amd64</code>. Source-only rows are built into or exercised against the published artifacts.</p>
+      <div class="overflow-hidden rounded-xl border border-white/10">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm" aria-label="Milestone 20 immutable component set">
+            <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
+              <tr>
+                <th scope="col" class="px-5 py-3">Repository</th>
+                <th scope="col" class="px-5 py-3">Revision</th>
+                <th scope="col" class="px-5 py-3">Artifact digest</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+              {components.map(([repository, revision, artifact]) => (
+                <tr>
+                  <th scope="row" class="px-5 py-4 font-semibold text-white">
+                    <a class="hover:text-krab-400" href={`https://github.com/krabka-io/${repository}/commit/${revision}`}>{repository}</a>
+                  </th>
+                  <td class="px-5 py-4 font-mono text-xs text-gray-300">{revision}</td>
+                  <td class="px-5 py-4 font-mono text-xs text-gray-400">{artifact}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="overflow-hidden rounded-xl border border-white/10">
+      <table class="w-full text-left text-sm" aria-label="Milestone 20 qualification gates">
+        <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
+          <tr>
+            <th scope="col" class="px-5 py-3">Gate</th>
+            <th scope="col" class="px-5 py-3">Status</th>
+            <th scope="col" class="px-5 py-3">Evidence</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {gates.map((gate) => (
+            <tr>
+              <th scope="row" class="px-5 py-4 font-semibold text-white">
+                <a class="hover:text-krab-400" href={`https://github.com/krabka-io/krabka-broker/issues/${gate.issue}`}>
+                  {gate.name}
+                </a>
+              </th>
+              <td class="px-5 py-4 text-emerald-400">Passed</td>
+              <td class="px-5 py-4">
+                <ul class="space-y-1">
+                  {gate.evidence.map(([label, url]) => (
+                    <li><a class="text-krab-400 hover:text-krab-300" href={url}>{label}</a></li>
+                  ))}
+                </ul>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-sm text-gray-300">
+      Revisions, image and package digests, and per-check SHA-256 values are recorded in the
+      <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/krabka-broker/blob/main/qualification/milestone-20.json">final qualification manifest</a>.
+    </p>
+  </div>
+</DocsLayout>
