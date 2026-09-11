@@ -6,7 +6,7 @@ docker compose up -d
 
 KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
 docker run --rm --network host "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh \\
-  --bootstrap-server localhost:9092 --create --topic quickstart
+  --bootstrap-server localhost:9092 --create --topic quickstart --partitions 1 --replication-factor 1
 printf 'milestone-20-qualified\\n' | docker run --rm -i --network host "$KAFKA_TOOLS" \\
   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart
 docker run --rm --network host "$KAFKA_TOOLS" /opt/kafka/bin/kafka-console-consumer.sh \\
