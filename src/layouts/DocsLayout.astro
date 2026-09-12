@@ -3,12 +3,30 @@ import BaseLayout from './BaseLayout.astro';
 import { getPath } from '../utils/paths';
 
 interface Props {
-  title: string;
-  description: string;
-  currentSlug: string;
+  title?: string;
+  description?: string;
+  currentSlug?: string;
+  // A markdown page under src/pages sets `layout` to this file and passes the
+  // three props in its frontmatter instead.
+  frontmatter?: { title: string; description: string; currentSlug: string };
 }
 
-const { title, description, currentSlug } = Astro.props;
+const { frontmatter } = Astro.props;
+const title = frontmatter?.title ?? Astro.props.title ?? '';
+const description = frontmatter?.description ?? Astro.props.description ?? '';
+const currentSlug = frontmatter?.currentSlug ?? Astro.props.currentSlug ?? '';
+// An .astro page styles its own body. A markdown page has no classes of its
+// own, so the typography plugin styles it here.
+const proseClass = frontmatter
+  ? `prose prose-invert prose-sm max-w-none
+     prose-headings:text-white prose-headings:font-bold
+     prose-a:text-krab-400 hover:prose-a:text-krab-300 prose-a:no-underline
+     prose-strong:text-white
+     prose-code:text-krab-300 prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+     prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-xl
+     prose-table:text-xs prose-th:text-gray-400 prose-th:uppercase prose-th:tracking-wider
+     prose-td:align-top prose-hr:border-white/10`
+  : '';
 
 const docSections = [
   {
@@ -180,7 +198,14 @@ const breadcrumbData = {
         </nav>
 
         <div class="frosted-card rounded-2xl p-8 lg:p-10 border border-white/10 space-y-6">
-          <slot />
+          {frontmatter && (
+            <div class="border-b border-white/10 pb-4">
+              <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
+            </div>
+          )}
+          <div class={proseClass}>
+            <slot />
+          </div>
         </div>
       </main>
 

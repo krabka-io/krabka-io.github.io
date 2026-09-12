@@ -1,8 +1,8 @@
 ---
-layout: ../../layouts/ProseLayout.astro
+layout: ../../layouts/DocsLayout.astro
 title: Kafka KIP Matrix
 description: Krabka's implementation status against every Apache Kafka Improvement Proposal that defines the compatibility surface - the wire protocol, storage, replication, KRaft, security, quotas, admin APIs and share groups.
-lead: Krabka against the Apache Kafka Improvement Proposals that define the compatibility contract.
+currentSlug: /docs/kip-matrix
 ---
 
 This document tracks Krabka's implementation status against the Apache Kafka
