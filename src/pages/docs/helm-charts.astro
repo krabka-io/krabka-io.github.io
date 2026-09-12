@@ -10,9 +10,16 @@ helm search repo krabka`;
 const install = `helm install krabka-operator krabka/krabka-operator \\
   --namespace krabka-system --create-namespace`;
 
-const verify = `# Import the chart signing public key from krabka-io/tooling.
-curl -fsSL https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc \\
-  | gpg --dearmor > krabka-keyring.gpg
+const keyUid = 'Krabka Charts <charts@krabka.dev>';
+const keyFingerprint = '74A6 7D5C F9AE 199A 45D2  2E42 594B D543 4544 D339';
+
+const verify = `# Import the chart signing public key, then check the fingerprint
+# against the one published on this page before you trust it.
+gpg --import krabka-charts.pub.asc
+gpg --fingerprint charts@krabka.dev
+
+# Helm needs a binary keyring, not an armored file.
+gpg --export charts@krabka.dev > krabka-keyring.gpg
 
 helm install krabka-operator krabka/krabka-operator \\
   --verify --keyring ./krabka-keyring.gpg`;
@@ -108,6 +115,16 @@ const charts = [
         <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,
         under <code class="font-mono text-krab-300">charts/</code>. It is never stored on this site.
       </p>
+
+      <div class="frosted-card rounded-xl border border-white/10 p-4 not-prose space-y-1.5">
+        <div class="text-xs uppercase tracking-wider text-gray-400 font-sans">Chart signing key</div>
+        <div class="font-mono text-sm text-white">{keyUid}</div>
+        <div class="font-mono text-xs text-krab-300 break-all">{keyFingerprint}</div>
+        <p class="text-xs text-gray-400 pt-1">
+          Check this fingerprint against the key you import. Any earlier Krabka chart key is revoked
+          and must not be used.
+        </p>
+      </div>
 
       <div class="not-prose bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
         <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">

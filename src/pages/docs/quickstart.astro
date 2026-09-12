@@ -27,11 +27,11 @@ kubectl apply -f https://krabka-io.github.io/quickstart/krabka-cluster.yaml
 kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
 kubectl wait --for=condition=Ready kafkatopic/quickstart --timeout=5m
 
-helm install krabka-rebalancer krabka/crabka-rebalancer --version 0.4.0 \\
+helm install krabka-rebalancer krabka/krabka-rebalancer --version 0.4.0 \\
   --set bootstrapServers=m20-quickstart-broker-headless.default.svc.cluster.local:9092 \\
   --set image.repository=ghcr.io/krabka-io/krabka-rebalancer \\
   --set-string image.digest=sha256:706b3b51a521d97d4166d98a1f39e045b5dfa1508b155bce174161c4bc009b11
-kubectl rollout status deployment/krabka-rebalancer-crabka-rebalancer --timeout=5m
+kubectl rollout status deployment/krabka-rebalancer-krabka-rebalancer --timeout=5m
 
 KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
 kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
