@@ -1,0 +1,138 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+
+const repoUrl = 'https://krabka-io.github.io/charts';
+
+const addRepo = `helm repo add krabka ${repoUrl}
+helm repo update
+helm search repo krabka`;
+
+const install = `helm install krabka-operator krabka/krabka-operator \\
+  --namespace krabka-system --create-namespace`;
+
+const verify = `# Import the chart signing public key from krabka-io/tooling.
+curl -fsSL https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc \\
+  | gpg --dearmor > krabka-keyring.gpg
+
+helm install krabka-operator krabka/krabka-operator \\
+  --verify --keyring ./krabka-keyring.gpg`;
+
+const charts = [
+  { name: 'krabka-operator', repo: 'krabka-operator', purpose: 'The Kubernetes operator. It reconciles Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaRebalance and SchemaRegistry resources.' },
+  { name: 'krabka-rebalancer', repo: 'krabka-rebalancer', purpose: 'The partition rebalancer. It answers KafkaRebalance requests with a partition assignment plan.' },
+  { name: 'krabka-schema-registry', repo: 'krabka-schema-registry', purpose: 'The Confluent-API-compatible schema registry. It stores schemas in the compacted _schemas topic.' },
+];
+---
+
+<DocsLayout
+  title="Helm Chart Repository"
+  description="One Helm repository URL for every Krabka chart. The site aggregates the charts published by the component repositories into a single index.yaml."
+  currentSlug="/docs/helm-charts"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Helm Chart Repository</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        One repository URL for every Krabka chart.
+      </p>
+    </div>
+
+    <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+      <p>
+        Krabka charts are built in the repository that owns each component. The site aggregates them
+        into one Helm repository, so you add a single URL and get every chart from it.
+      </p>
+
+      <div class="not-prose bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Add the repository:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={addRepo}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>{addRepo}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Charts in the index</h2>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Chart</th>
+              <th class="py-3 px-4">Source repository</th>
+              <th class="py-3 px-4">What it installs</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {charts.map((c) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-white text-xs whitespace-nowrap">{c.name}</td>
+                <td class="py-3 px-4">
+                  <a class="text-krab-400 hover:text-krab-300" href={`https://github.com/krabka-io/${c.repo}`}>
+                    krabka-io/{c.repo}
+                  </a>
+                </td>
+                <td class="py-3 px-4 text-gray-300">{c.purpose}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        <a class="text-krab-400 hover:text-krab-300" href={`${repoUrl}/index.yaml`}>index.yaml</a>
+        is the authoritative list. A component repository joins the index as soon as it holds a
+        <code class="font-mono text-krab-300">charts/</code> directory, so the table above can lag the
+        index by a release.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Install a chart</h2>
+
+      <div class="not-prose bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Install the operator:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={install}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>{install}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Verify a chart</h2>
+      <p>
+        The charts carry a Helm provenance file when the release job has the signing key. The public
+        half of that key lives in
+        <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,
+        under <code class="font-mono text-krab-300">charts/</code>. It is never stored on this site.
+      </p>
+
+      <div class="not-prose bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
+        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
+          <span>Verify before install:</span>
+          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={verify}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="text-krab-300 overflow-x-auto"><code>{verify}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">How the index is built</h2>
+      <ol class="list-decimal space-y-1.5 pl-5 text-gray-300">
+        <li>A scheduled job in this repository walks the krabka-io organisation.</li>
+        <li>It takes every repository that holds a <code class="font-mono text-krab-300">charts/</code> directory.</li>
+        <li>It packages each chart at the version in that repository's workspace <code class="font-mono text-krab-300">Cargo.toml</code>.</li>
+        <li>It writes one <code class="font-mono text-krab-300">index.yaml</code> over the whole set and commits it.</li>
+      </ol>
+      <p>
+        The index holds the current version of each chart. A renamed chart drops out under its old
+        name on the next run. A component repository can ask for an immediate rebuild by sending a
+        <code class="font-mono text-krab-300">charts-changed</code> repository dispatch to this
+        repository.
+      </p>
+    </div>
+  </div>
+</DocsLayout>

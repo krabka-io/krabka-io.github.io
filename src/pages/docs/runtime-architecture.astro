@@ -1,0 +1,154 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const brokerParts = [
+  { part: 'Kafka request dispatch', role: 'Decodes every Kafka API request, authorizes it, applies quotas, and routes it to the subsystem that answers it.' },
+  { part: 'Log segments', role: 'Kafka-compatible segment files, indexes and retention. Fetches are served zero-copy where the listener allows it.' },
+  { part: 'Group and transaction coordinators', role: 'Consumer groups, share groups and the transaction state machine, all on internal topics.' },
+  { part: 'KRaft metadata quorum', role: 'The native Raft quorum that owns cluster metadata. No ZooKeeper and no JVM.' },
+];
+
+const services = [
+  { service: 'krabka-operator', repo: 'krabka-operator', talks: 'Kubernetes API and the broker', role: 'Turns custom resources into StatefulSets, Services, ConfigMaps, Secrets, certificates, broker configuration, topic and user reconciliation, rolls and rebalances.' },
+  { service: 'krabka-schema-registry', repo: 'krabka-schema-registry', talks: 'Kafka wire protocol', role: 'A Confluent-API-compatible registry. It keeps every schema in the compacted _schemas topic, so the topic is the database.' },
+  { service: 'krabka-rebalancer', repo: 'krabka-rebalancer', talks: 'Kafka wire protocol', role: 'Answers a rebalance request with a partition assignment plan, the way Cruise Control does for Apache Kafka.' },
+  { service: 'krabka-connect', repo: 'krabka-connect', talks: 'Kafka wire protocol', role: 'The connector framework, the PostgreSQL CDC source, the worker runtime and the cluster replicator.' },
+  { service: 'krabka-client-rs', repo: 'krabka-client-rs', talks: 'Kafka wire protocol', role: 'The native Rust producer, consumer and admin client.' },
+];
+
+const crds = [
+  { crd: 'Kafka', declares: 'A broker cluster: version, cluster-wide configuration, and the owner of the Services, ConfigMap, Secrets and CA.' },
+  { crd: 'KafkaNodePool', declares: 'A StatefulSet of brokers: roles, replicas, storage and resources, bound to a cluster.' },
+  { crd: 'KafkaTopic', declares: 'A topic and its configuration.' },
+  { crd: 'KafkaUser', declares: 'SCRAM or mTLS credentials, ACLs and quotas for one principal.' },
+  { crd: 'KafkaRebalance', declares: 'A partition rebalance request.' },
+  { crd: 'SchemaRegistry', declares: 'A schema registry bound to a cluster.' },
+];
+---
+
+<DocsLayout
+  title="Runtime Architecture"
+  description="How a running Krabka cluster fits together: one broker core that speaks the Kafka wire protocol, and the operator, registry, rebalancer and clients that connect to it as ordinary cluster components."
+  currentSlug="/docs/runtime-architecture"
+>
+  <div class="space-y-6">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Runtime Architecture</h1>
+      <p class="text-gray-400 mt-2 text-base">
+        What runs where once the cluster is up.
+      </p>
+    </div>
+
+    <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+      <p>
+        Krabka is one broker core with a set of operational services around it. The broker speaks the
+        Kafka wire protocol, stores records in Kafka-compatible log segments, and keeps metadata in a
+        native KRaft quorum. Every other component connects to that core the way any Kafka client
+        does. None of them reaches into broker internals.
+      </p>
+      <p>
+        The <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/architecture')}>Ecosystem Architecture</a>
+        page covers the source layout, which repository holds what. This page covers the running
+        system.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Inside the broker</h2>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Subsystem</th>
+              <th class="py-3 px-4">What it owns</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {brokerParts.map((p) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-bold text-white text-xs whitespace-nowrap">{p.part}</td>
+                <td class="py-3 px-4 text-gray-300">{p.role}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Kafka clients and the JVM <code class="font-mono text-krab-300">kafka-*.sh</code> tools connect
+        to request dispatch. Dispatch reads and writes the log, drives the coordinators, and reads
+        cluster metadata from the quorum.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Services around the broker</h2>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Service</th>
+              <th class="py-3 px-4">Speaks</th>
+              <th class="py-3 px-4">What it does</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {services.map((s) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 whitespace-nowrap">
+                  <a class="font-mono font-bold text-krab-400 hover:text-krab-300 text-xs" href={`https://github.com/krabka-io/${s.repo}`}>
+                    {s.service}
+                  </a>
+                </td>
+                <td class="py-3 px-4 text-gray-400 whitespace-nowrap">{s.talks}</td>
+                <td class="py-3 px-4 text-gray-300">{s.role}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">The Kubernetes control plane</h2>
+      <p>
+        On Kubernetes the operator is the only component that talks to the Kubernetes API. It watches
+        the namespaces you grant it and reconciles every Krabka resource it finds. A
+        <code class="font-mono text-krab-300">Kafka</code> resource owns the cluster. One or more
+        <code class="font-mono text-krab-300">KafkaNodePool</code> resources supply the brokers, and
+        the broker count is the sum of the pool replica counts.
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Custom resource</th>
+              <th class="py-3 px-4">What it declares</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {crds.map((c) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-white text-xs whitespace-nowrap">{c.crd}</td>
+                <td class="py-3 px-4 text-gray-300">{c.declares}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        The <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/crds')}>CRD reference</a>
+        lists the fields of each resource. The
+        <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/operator')}>operator page</a>
+        covers the reconcile loop.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Where to go next</h2>
+      <ul class="list-disc space-y-1.5 pl-5 text-gray-300">
+        <li>Run a cluster locally: <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/quickstart')}>Quickstart</a>.</li>
+        <li>Run one on Kubernetes: <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/operator')}>Kubernetes Operator</a>.</li>
+        <li>Watch the quorum work: <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/playground')}>Consensus Playground</a>.</li>
+        <li>Pick a serde: <a class="text-krab-400 hover:text-krab-300" href={getPath('/docs/data-formats')}>Serdes and Data Formats</a>.</li>
+      </ul>
+    </div>
+  </div>
+</DocsLayout>

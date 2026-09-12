@@ -1,0 +1,295 @@
+/* Interactive KRaft consensus playground styles.
+ *
+ * Self-contained: every rule is scoped under #krabka-playground, so nothing
+ * bleeds into the rest of the site. The site renders dark only, so the palette
+ * below is the dark palette and it tracks the krab / ocean Tailwind colours in
+ * tailwind.config.mjs. */
+
+#krabka-playground {
+  --cp-accent: #ff4d2e;
+  --cp-accent-deep: #c82408;
+  --cp-bg: #0c1322;
+  --cp-panel: #0f172a;
+  --cp-border: rgba(255, 255, 255, 0.1);
+  --cp-text: #f3f4f6;
+  --cp-muted: #9ca3af;
+  --cp-leader: #f7b73a;
+  --cp-follower: #45c178;
+  --cp-candidate: #ff8466;
+  --cp-prospective: #d8b743;
+  --cp-observer: #5aa0e0;
+  --cp-idle: #6b7280;
+  --cp-msg: #94a3b8;
+
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--cp-border);
+  border-radius: 12px;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  font-size: 0.92rem;
+}
+
+
+#krabka-playground .cp-controls,
+#krabka-playground .cp-faults {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+
+#krabka-playground .cp-faults {
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--cp-border);
+}
+
+#krabka-playground .cp-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cp-muted);
+  font-weight: 700;
+  margin-right: 0.15rem;
+}
+
+#krabka-playground .cp-btn,
+#krabka-playground .cp-select {
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.34rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-panel);
+  color: var(--cp-text);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease,
+    transform 0.05s ease;
+}
+
+#krabka-playground .cp-btn:hover {
+  border-color: var(--cp-accent);
+  color: var(--cp-accent-deep);
+}
+
+#krabka-playground .cp-btn:active {
+  transform: translateY(1px);
+}
+
+#krabka-playground .cp-btn.cp-primary,
+#krabka-playground .cp-btn.cp-active {
+  background: var(--cp-accent);
+  border-color: var(--cp-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#krabka-playground .cp-btn.cp-primary:hover,
+#krabka-playground .cp-btn.cp-active:hover {
+  background: var(--cp-accent-deep);
+  border-color: var(--cp-accent-deep);
+  color: #fff;
+}
+
+/* Stage: diagram + timeline side by side. */
+#krabka-playground .cp-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: stretch;
+}
+
+@media (max-width: 720px) {
+  #krabka-playground .cp-stage {
+    grid-template-columns: 1fr;
+  }
+}
+
+#krabka-playground .cp-diagram-wrap,
+#krabka-playground .cp-timeline-wrap {
+  background: var(--cp-panel);
+  border: 1px solid var(--cp-border);
+  border-radius: 10px;
+  padding: 0.6rem;
+}
+
+#krabka-playground .cp-diagram {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Status line under the diagram. */
+#krabka-playground .cp-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin-top: 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--cp-border);
+  font-size: 0.82rem;
+  color: var(--cp-muted);
+}
+
+#krabka-playground .cp-status b {
+  color: var(--cp-text);
+  font-weight: 600;
+}
+
+/* Timeline log. */
+#krabka-playground .cp-timeline {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+
+#krabka-playground .cp-event {
+  display: grid;
+  grid-template-columns: 1.1rem 3.2rem 1fr;
+  gap: 0.3rem;
+  align-items: baseline;
+  padding: 0.18rem 0.1rem;
+  border-bottom: 1px solid var(--cp-border);
+}
+
+#krabka-playground .cp-event:last-child {
+  border-bottom: none;
+}
+
+#krabka-playground .cp-event-icon {
+  color: var(--cp-accent);
+  text-align: center;
+}
+
+#krabka-playground .cp-event-clock {
+  color: var(--cp-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.74rem;
+}
+
+/* Cluster nodes. */
+#krabka-playground .cp-node-bg {
+  fill: var(--cp-panel);
+  stroke: var(--cp-idle);
+  stroke-width: 2.5;
+  transition: stroke 0.15s ease, fill 0.15s ease;
+}
+
+#krabka-playground .cp-node-id {
+  font-size: 15px;
+  font-weight: 700;
+  fill: var(--cp-text);
+}
+
+#krabka-playground .cp-node-role {
+  font-size: 11px;
+  fill: var(--cp-muted);
+}
+
+#krabka-playground .cp-node-log {
+  font-size: 9.5px;
+  fill: var(--cp-muted);
+}
+
+#krabka-playground .cp-node-cut {
+  font-size: 16px;
+  fill: var(--cp-accent-deep);
+}
+
+#krabka-playground .cp-leader .cp-node-bg {
+  stroke: var(--cp-leader);
+  stroke-width: 4;
+}
+#krabka-playground .cp-follower .cp-node-bg {
+  stroke: var(--cp-follower);
+}
+#krabka-playground .cp-candidate .cp-node-bg {
+  stroke: var(--cp-candidate);
+  stroke-dasharray: 4 3;
+}
+#krabka-playground .cp-prospective .cp-node-bg {
+  stroke: var(--cp-prospective);
+  stroke-dasharray: 2 3;
+}
+#krabka-playground .cp-observer .cp-node-bg {
+  stroke: var(--cp-observer);
+}
+#krabka-playground .cp-partitioned {
+  opacity: 0.42;
+}
+#krabka-playground .cp-partitioned .cp-node-bg {
+  stroke-dasharray: 3 4;
+}
+
+/* In-flight messages. */
+#krabka-playground .cp-msg-path {
+  fill: none;
+  stroke: var(--cp-msg);
+  stroke-width: 1.8;
+  opacity: 0.85;
+}
+
+#krabka-playground .cp-arrow-tip {
+  fill: var(--cp-msg);
+}
+
+#krabka-playground .cp-msg-label {
+  font-size: 8.5px;
+  fill: var(--cp-text);
+  paint-order: stroke;
+  stroke: var(--cp-panel);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+}
+
+/* Legend. */
+#krabka-playground .cp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--cp-muted);
+}
+
+#krabka-playground .cp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+#krabka-playground .cp-legend-item .cp-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  display: inline-block;
+}
+
+#krabka-playground .cp-leader { color: var(--cp-leader); }
+#krabka-playground .cp-follower { color: var(--cp-follower); }
+#krabka-playground .cp-candidate { color: var(--cp-candidate); }
+#krabka-playground .cp-prospective { color: var(--cp-prospective); }
+#krabka-playground .cp-observer { color: var(--cp-observer); }
+#krabka-playground .cp-idle { color: var(--cp-idle); }
+
+#krabka-playground .cp-hint {
+  margin: 0.7rem 0 0;
+  font-size: 0.8rem;
+  color: var(--cp-muted);
+  line-height: 1.5;
+}
+
+#krabka-playground .cp-error {
+  color: var(--cp-accent-deep);
+  font-size: 0.88rem;
+}
+
+/* Before the script upgrades it, show nothing jarring. */
+#krabka-playground:not(.cp-ready) .cp-fallback {
+  color: var(--cp-muted);
+}
