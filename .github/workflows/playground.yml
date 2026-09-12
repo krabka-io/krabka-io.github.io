@@ -1,0 +1,54 @@
+name: Playground crate
+
+# The consensus playground is the only Rust in this repository. The deploy
+# workflow compiles it to WASM, which proves it builds but not that it behaves.
+# This workflow runs its tests and clippy, and only when the crate changes.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'playground/**'
+      - '.github/workflows/playground.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'playground/**'
+      - '.github/workflows/playground.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playground-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust with clippy and the wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache the playground build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: playground
+
+      - name: Test the shim on the host target
+        run: cargo test --manifest-path playground/Cargo.toml --locked
+
+      - name: Lint the wasm target
+        run: |
+          cargo clippy \
+            --manifest-path playground/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --locked \
+            -- -D warnings
