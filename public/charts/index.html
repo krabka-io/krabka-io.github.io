@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8">
+<title>Krabka Helm charts</title>
+<h1>Krabka Helm chart repository</h1>
+<pre>helm repo add krabka https://krabka-io.github.io/charts
+helm repo update</pre>
+<p>Repository index: <a href="index.yaml">index.yaml</a></p>
+<p>Documentation: <a href="/docs/helm-charts">Helm chart repository</a></p>
+<h2>Charts</h2><ul>
+<li><a href="krabka-operator-0.4.0.tgz">krabka-operator 0.4.0</a>
+ &mdash; <a href="https://github.com/krabka-io/krabka-operator">krabka-io/krabka-operator</a></li>
+<li><a href="crabka-rebalancer-0.4.0.tgz">crabka-rebalancer 0.4.0</a>
+ &mdash; <a href="https://github.com/krabka-io/krabka-rebalancer">krabka-io/krabka-rebalancer</a></li>
+</ul>
+<h2>Verify a chart</h2>
+<p>The chart signing public key lives in
+<a href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,
+under <code>charts/</code>.</p>
+<pre>gpg --dearmor &lt; krabka-charts.pub.asc &gt; krabka-keyring.gpg
+helm install my-op krabka/krabka-operator --verify --keyring ./krabka-keyring.gpg</pre>

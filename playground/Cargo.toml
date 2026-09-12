@@ -1,0 +1,56 @@
+[package]
+name = "krabka-playground"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+authors = ["The Krabka Authors"]
+publish = false
+description = "WebAssembly bindings driving Krabka's deterministic KRaft consensus simulator in the browser"
+repository = "https://github.com/krabka-io/krabka-io.github.io"
+homepage = "https://krabka-io.github.io"
+readme = "README.md"
+keywords = ["kafka", "kraft", "raft", "consensus", "wasm"]
+categories = ["wasm", "simulation"]
+
+[workspace]
+# This crate is the only Rust code in the website repository, so it carries its
+# own workspace root. Nothing here is published to crates.io.
+
+[lints.rust]
+# NOTE: the krabka workspaces forbid `unsafe_code`. `#[wasm_bindgen]` expands to
+# the `unsafe extern "C"` import/export shims every wasm-bindgen crate needs, so
+# the forbid would make this crate uncompilable. The Rust written here is safe;
+# only the generated glue is unsafe.
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+krabka-kraft-core = { git = "https://github.com/krabka-io/krabka-broker", tag = "v0.5.4", features = ["sim"] }
+wasm-bindgen = "0.2"
+serde_json = "1"
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+assert2 = "0.4"
+
+# `krabka-kraft-core` pulls `uuid` (with `v4`), which pulls `getrandom`. On
+# `wasm32-unknown-unknown` getrandom needs the JS-backed source selected
+# explicitly, or it refuses to compile. The simulator never draws randomness (it
+# uses `Uuid::nil()`), but the symbol must still link, so wire up the browser
+# backend for the wasm target only.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+uuid = { version = "1", features = ["js"] }
+
+# `krabka-voters` and `krabka-units` are not published to crates.io. The broker
+# workspace resolves them the same way: a git pin on the krabka-protocol
+# repository. Keep this revision in step with the broker pin.
+[patch.crates-io]
+krabka-ids = { git = "https://github.com/krabka-io/krabka-protocol", rev = "b79bf4965075a96ab88f2612f0b7cb9c86d2097b" }
+krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "b79bf4965075a96ab88f2612f0b7cb9c86d2097b" }
+krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "b79bf4965075a96ab88f2612f0b7cb9c86d2097b" }

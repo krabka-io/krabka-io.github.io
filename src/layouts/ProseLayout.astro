@@ -1,0 +1,44 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+// A long-form document page. Markdown pages set `layout` to this file and pass
+// `title`, `description` and an optional `lead` in their frontmatter. The page
+// renders inside the same frosted card the documentation uses, with the
+// Tailwind typography plugin styling the markdown body.
+interface Props {
+  frontmatter?: { title: string; description: string; lead?: string };
+  title?: string;
+  description?: string;
+  lead?: string;
+}
+
+const { frontmatter } = Astro.props;
+const title = frontmatter?.title ?? Astro.props.title ?? '';
+const description = frontmatter?.description ?? Astro.props.description ?? '';
+const lead = frontmatter?.lead ?? Astro.props.lead;
+---
+
+<BaseLayout title={`${title} | Krabka`} description={description} type="article">
+  <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-10">
+    <article class="frosted-card rounded-2xl p-8 lg:p-10 border border-white/10 space-y-6">
+      <header class="border-b border-white/10 pb-4">
+        <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
+        {lead && <p class="text-gray-400 mt-2 text-base">{lead}</p>}
+      </header>
+
+      <div
+        class="prose prose-invert prose-sm max-w-none
+               prose-headings:text-white prose-headings:font-bold
+               prose-a:text-krab-400 hover:prose-a:text-krab-300 prose-a:no-underline
+               prose-strong:text-white
+               prose-code:text-krab-300 prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+               prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-xl
+               prose-table:text-xs prose-th:text-gray-400 prose-th:uppercase prose-th:tracking-wider
+               prose-td:align-top prose-hr:border-white/10
+               prose-blockquote:border-krab-500/40 prose-blockquote:text-gray-400"
+      >
+        <slot />
+      </div>
+    </article>
+  </div>
+</BaseLayout>

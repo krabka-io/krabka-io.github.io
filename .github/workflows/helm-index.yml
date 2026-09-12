@@ -1,0 +1,81 @@
+name: Rebuild Helm chart index
+
+# The aggregated Helm chart repository is served from this site at
+# https://krabka-io.github.io/charts. Charts live in the component
+# repositories. This job discovers them, packages them, and commits the
+# repacked charts and the index to main. The push then triggers the Pages
+# deploy.
+#
+# A component repository can request a rebuild right after it releases a chart:
+#
+#   gh api repos/krabka-io/krabka-io.github.io/dispatches \
+#     -f event_type=charts-changed
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [charts-changed]
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/build-helm-index.sh'
+      - '.github/workflows/helm-index.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: helm-index
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Rebuild the aggregated chart index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional Helm-native PGP provenance. The public half of this key
+          # lives in krabka-io/tooling, under charts/. When the secret is
+          # absent the job packages the charts without a .prov file.
+          HELM_GPG_KEY: ${{ secrets.HELM_GPG_KEY }}
+          HELM_GPG_KEY_ID: ${{ secrets.HELM_GPG_KEY_ID }}
+          HELM_GPG_PASSPHRASE: ${{ secrets.HELM_GPG_PASSPHRASE }}
+        run: bash scripts/build-helm-index.sh
+
+      - name: Commit the index when it changed
+        run: |
+          set -euo pipefail
+          # `generated` and `created` carry a fresh timestamp on every run, so
+          # compare the chart digests instead. An unchanged set of digests means
+          # no chart moved and the commit is noise.
+          if git diff --quiet -- public/charts; then
+            echo "No chart changes."
+            exit 0
+          fi
+          digests_changed=$(
+            git diff -U0 -- public/charts/index.yaml |
+              grep -cE '^[-+][[:space:]]*(digest|name|version|urls):' || true
+          )
+          if [[ "${digests_changed}" -eq 0 ]] && git diff --quiet -- public/charts/*.tgz; then
+            echo "Only timestamps changed. Nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/charts
+          git commit -m "chore: rebuild the aggregated Helm chart index
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Xj9Yz7B2gp85n9KvAJ5npu"
+          git push

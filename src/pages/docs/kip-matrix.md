@@ -1,0 +1,306 @@
+---
+layout: ../../layouts/ProseLayout.astro
+title: Kafka KIP Matrix
+description: Krabka's implementation status against every Apache Kafka Improvement Proposal that defines the compatibility surface - the wire protocol, storage, replication, KRaft, security, quotas, admin APIs and share groups.
+lead: Krabka against the Apache Kafka Improvement Proposals that define the compatibility contract.
+---
+
+This document tracks Krabka's implementation status against the Apache Kafka
+Improvement Proposals (KIPs) that define Kafka's compatibility surface: the wire
+protocol, message format, storage, replication, KRaft metadata quorum, security,
+authorization, quotas, admin APIs, queues (share groups), and the streams
+rebalance protocol.
+
+It complements the wire-compatibility targets on the
+[versions page](/versions). Where the two disagree, the differential test
+results behind the versions page win, and this matrix is corrected to match.
+
+**Target surface.** Apache Kafka 4.x message schemas. The wire codec is
+generated from, and validated against, the Kafka schema corpus
+(the codec generator in
+[krabka-protocol](https://github.com/krabka-io/krabka-protocol) validates the
+4.2 corpus, 197 schema files, and the 4.3.0 schemas are the target). Encode/decode is checked byte-for-byte
+against `kafka-clients`, and a JVM acceptance suite drives the official
+`cp-kafka` / `apache/kafka` admin tools against a live Krabka broker.
+
+**Legend:** ✅ fully implemented · ⚠️ partial (gap noted) · ❌ in scope but not
+yet implemented · ⛔ out of scope by design.
+
+**Scope honesty.** Kafka has ~1300 KIP *numbers*, but a large fraction are
+unassigned, withdrawn/discarded, folded into another KIP, or purely
+JVM-client-library / Kafka Connect / Kafka Streams-library internal with no
+broker or wire surface. This matrix is exhaustive over the KIPs that define
+Krabka's actual compatibility contract; the rest are handled categorically in
+[§4](#4-deliberately-out-of-scope-) and [§7](#7-the-long-tail). Numbers are not
+invented to pad a one-row-per-integer table.
+
+---
+
+## 1. Fully implemented (✅)
+
+### Wire protocol & message format
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-31 | Relative offsets in compressed message sets | `records-legacy`, `log` |
+| KIP-32 | Add timestamps to messages | README |
+| KIP-74 | Fetch response size limit (`max_bytes` / `partition_max_bytes`) | fetch handler honors limits |
+| KIP-82 | Add record headers | README |
+| KIP-110 | Zstandard compression codec (message format v2 only) | `compression` |
+| KIP-219 | Improve quota communication (throttle-then-respond) | dispatch loop patches leading `ThrottleTimeMs` |
+| KIP-227 | Incremental fetch sessions | fetch-session cache + forget/merge model |
+| KIP-394 | Require `member.id` for initial JoinGroup | README |
+| KIP-464 | `CreateTopics` with broker-default partitions / replication factor | schema `CreateTopicsRequest` v4 |
+| KIP-467 | Augmented `ProduceResponse` per-record errors | schema `ProduceResponse` `RecordErrors` |
+| KIP-482 | Optional tagged fields (flexible versions) | README |
+| KIP-511 | Collect & expose client software name / version | README |
+| KIP-559 | Protocol-type / name on coordination responses (L7-proxy friendly) | README |
+| KIP-734 | `ListOffsets` `MAX_TIMESTAMP` (`-3`) | list_offsets handler |
+| KIP-903 | Fence stale-broker-epoch replicas from the ISR | README, kip903 spec |
+| KIP-951 | Leader-discovery hint (current leader in Produce/Fetch) | produce handler |
+
+### Producer — idempotence, transactions & EOS
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-98 | Exactly-once delivery & transactional messaging | txn coordinator |
+| KIP-360 | Reliable idempotent / transactional producer (safe epoch bump) | README |
+| KIP-447 | Producer scalability for EOS | kip447 spec |
+| KIP-480 | Sticky partitioner (client) | README |
+| KIP-679 | Idempotence on by default (client) | README |
+| KIP-794 | Strictly-uniform sticky partitioner (client) | README |
+| KIP-890 | Transactions server-side defense (`transaction.version=2`) | feature-pins note (byte-verified) |
+| KIP-915 | Txn/group coordinator record flexible-version downgrade foundation | txn log v1, feature-pins note |
+| KIP-939 | Two-phase-commit participation (`prepareTransaction`, recovery completion, and Admin force termination) | broker 2PC model + native producer/Admin APIs + `transactions_2pc_client` live recovery test |
+| KIP-1228 | Transaction version on `WriteTxnMarkers` | README |
+
+### Consumer groups & queues
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-62 | Background-thread heartbeat (session vs poll timeout) | README |
+| KIP-345 | Static membership | static-membership stateright model |
+| KIP-429 | Cooperative incremental rebalance protocol | README |
+| KIP-496 | `OffsetDelete` admin API | README |
+| KIP-518 | List groups by state (`StatesFilter` / `GroupState`) | schema `ListGroupsRequest` v4 |
+| KIP-699 | Batched `FindCoordinator` | schema `FindCoordinator` v4 |
+| KIP-800 | `Reason` field on Join/Leave group | schema Join/LeaveGroup |
+| KIP-848 | Next-generation consumer rebalance protocol (+ live classic↔next-gen migration) | specs 64a–64e |
+| KIP-1043 | Admin of all group types (`GROUP_ID_NOT_FOUND`) | schema `DescribeGroups` v6 |
+| KIP-1082 | Client-generated member ID (`ConsumerGroupHeartbeat`) | schema; KIP-848 path |
+| KIP-1099 | `MemberType` in `ConsumerGroupDescribe` | schema |
+| KIP-932 | Queues for Kafka / share groups | share-group specs + model |
+| KIP-1206 / KIP-1222 | ShareFetch `ShareAcquireMode` / `Renew` acknowledgement | schema `ShareFetch` v2; share-group slice F |
+| KIP-1226 | Share-group lag | share-group slice F |
+| KIP-1319 | Member-epoch fencing (next-gen / txn coordinator) | txn coordinator |
+
+### Storage & log
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-63 | Streams record cache / changelog dedup | streams state-store spec |
+| KIP-112 | Handle disk failure for JBOD | kip-112 spec |
+| KIP-113 | Replica movement between log dirs (`AlterReplicaLogDirs`) | README |
+| KIP-204 | `DeleteRecords` via the Admin client | README |
+| KIP-405 | Tiered storage (topic-backed RLMM default; copy/read/retention; RLMM snapshots; metadata, segment layout, and producer snapshots validated against Kafka 4.0 JVM) | specs 48a–48r + `jvm_tiered_storage` |
+| KIP-534 | Log retention with delete-horizon (tombstone retention) | kip534 spec |
+| KIP-1005 | `ListOffsets` last-tiered offset | v9 handler semantics + remote-storage tests |
+| KIP-1023 | `ListOffsets` earliest-pending-upload offset | v11 handler semantics + upload-pending tests |
+| KIP-1075 | Async remote `ListOffsets` | v10 delayed remote lookup, timeout/parallelism config, and handler tests |
+
+### Replication & availability
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-36 | Rack-aware replica assignment | rebalancer specs |
+| KIP-73 | Replication quotas (throttled replication) | token-bucket stateright model |
+| KIP-101 | Leader-epoch-based truncation | README |
+| KIP-207 | Monotonic `ListOffsets` across leader change | data-path model |
+| KIP-279 | Fix leader/follower log divergence | README |
+| KIP-320 | Detect & handle log truncation (leader epoch in Fetch) | kip-320 spec |
+| KIP-392 | Fetch from closest replica (rack-aware) | kip-392 spec |
+| KIP-455 | `AlterPartitionReassignments` / `ListPartitionReassignments` | README |
+| KIP-460 | Admin `ElectLeaders` (PREFERRED + UNCLEAN) | README |
+| KIP-497 | Inter-broker `AlterPartition` (AlterIsr) | ISR state model |
+| KIP-704 | Leader-recovery-state hint in `AlterPartition` | unclean-recovery path |
+| KIP-841 | Fence stale-epoch replicas / unclean-recovery toggle | README |
+| KIP-858 | JBOD in KRaft (`PartitionRecord.Directories`) | partition record v1 |
+| KIP-966 | Eligible leader replicas / offset-aware unclean recovery; `DescribeTopicPartitions` | kip966 spec |
+| KIP-996 | Pre-vote | kip-996 spec |
+| KIP-1102 | Native-client re-bootstrap on stale metadata | core, producer, and Admin recovery tests (timeout, error 129, all-known-node exhaustion, and retired seed) |
+
+### KRaft metadata quorum
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-500 | Replace ZooKeeper with a self-managed metadata quorum | README |
+| KIP-584 | Feature versioning (`metadata` / `group` / `transaction.version`) | feature-versioning framework |
+| KIP-595 | Raft protocol for the metadata quorum (wire) | kip595-* specs |
+| KIP-630 | Kafka Raft snapshot + `FetchSnapshot` | kip630 spec |
+| KIP-631 | Quorum-based controller (metadata records, RPCs) | kip631 spec |
+| KIP-836 | `DescribeQuorum` voter-lag timestamps | schema v1 |
+| KIP-853 | Dynamic KRaft voters (Add/Remove/UpdateRaftVoter) | deterministic Raft model + snapshot recovery + operator lifecycle tests; Kafka 4.3.1 `kafka-features` and `kafka-metadata-quorum` oracle |
+| KIP-919 | AdminClient ↔ controller routing (`bootstrap.controllers`; controller Admin RPCs; endpoint-type validation; controller registration; `UnregisterBroker`) | controller-bootstrap integration tests (supported routing + client-side error 115 preflight) + controller handler registry + schema `DescribeCluster` v1 |
+| KIP-1022 | Formatting & updating features (`krabka format --feature`) | JVM `kafka-features` validated |
+| KIP-1073 | `IncludeFencedBrokers` / `IsFenced` in `DescribeCluster` | schema v2 |
+
+### Admin, configs & topics
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-4 | Admin protocol foundation | README |
+| KIP-133 | Describe & Alter Configs | README |
+| KIP-195 | `CreatePartitions` | README |
+| KIP-226 | Dynamic broker configuration | README |
+| KIP-339 | `IncrementalAlterConfigs` | README |
+| KIP-430 | Authorized operations in describe responses | README |
+| KIP-516 | Topic identifiers | kip-516 spec |
+| KIP-525 | Return configs in `CreateTopics` response | README |
+| KIP-664 | `DescribeProducers` / `ListTransactions` / `DescribeTransactions` | README |
+| KIP-700 | `DescribeCluster` API | README |
+| KIP-827 | `DescribeLogDirs` total / usable bytes (v4) | describe_log_dirs handler |
+| KIP-919 | `UnregisterBroker` admin API (api_key 64) | dispatch + handler *(repo previously mislabeled this KIP-185; see [§6](#6-attribution-caveat))* |
+| KIP-994 | `ListTransactions` v1 minor additions | schema |
+| KIP-1142 | `ListConfigResources` admin API | list_config_resources handler |
+| KIP-1152 | `ListTransactions` `TransactionalIdPattern` | schema v2 |
+
+### Security & authentication
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-11 | Authorization interface | README |
+| KIP-12 | SSL & SASL/Kerberos | README |
+| KIP-43 | SASL mechanism negotiation | README |
+| KIP-48 / KIP-373 | Delegation tokens (+ for other users) | specs 51 / 51b |
+| KIP-84 | SASL/SCRAM | README |
+| KIP-140 | ACL admin APIs (Create / Delete / Describe) | README |
+| KIP-152 | SASL authentication-failure diagnostics | README |
+| KIP-255 | SASL/OAUTHBEARER, including inter-broker/controller outbound | README + `client-core/sasl` + `broker/raft_handshake` |
+| KIP-290 | Prefixed ACLs | README |
+| KIP-368 | Periodic SASL re-authentication | spec 49e |
+| KIP-504 | New Java authorizer API (semantics) | README |
+| KIP-554 | Broker-side SCRAM config API | slices 12 / 17a |
+| KIP-768 | OAUTHBEARER OIDC (JWKS / signed-JWT / introspection) | `security/oauthbearer`, operator-e2e interop |
+| KIP-801 | KRaft-native `StandardAuthorizer` | `authz` |
+
+### Quotas & throttling
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-13 | Quota design (byte-rate) | quota precedence model |
+| KIP-124 | Request-rate quotas | README |
+| KIP-257 | Configurable quota management | quota module |
+| KIP-546 | Client-quota admin APIs | README |
+| KIP-599 | Controller mutation quotas | slice 16c |
+| KIP-612 | IP / connection-creation-rate quotas | slice 16b |
+
+### Operator and Schema Registry compatibility
+
+| Area | Implemented surface | Grounding |
+|------|---------------------|-----------|
+| External listeners | Internal, NodePort, LoadBalancer, Ingress, and OpenShift Route listener reconciliation | operator listener reconciliation tests |
+| Secured external Schema Registry bootstrap | External broker bootstrap with the configured TLS and SASL security material | Schema Registry CRD/controller tests |
+
+### Observability & streams DSL/runtime (in the Rust Streams client)
+
+> The streams sub-KIPs below are implemented in `krabka-client-streams`, which
+> is itself ⚠️ partial versus the JVM Kafka Streams library (see
+> [§2](#2-partially-implemented--what-is-left)). They are listed here because the
+> individual DSL/runtime features exist and are golden-tested against JVM
+> capture.
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-714 | Client metrics & observability push | kip-714 spec |
+| KIP-1000 | List client-metrics configuration resources | kip-714 spec |
+| KIP-129 | Streams exactly-once semantics | streams EOS |
+| KIP-150 / KIP-213 | Cogroup / KTable foreign-key join | streams DSL |
+| KIP-328 / KIP-825 | Suppress / emit-final (`EmitStrategy`) | streams DSL |
+| KIP-401 / KIP-444 | Streams `stores()` auto-connect / metrics | streams specs |
+| KIP-450 | Sliding-window aggregations | streams DSL |
+| KIP-617 / KIP-796 / KIP-960 / KIP-968 | IQv2 (range / versioned / multi-versioned key queries) | streams IQv2 |
+| KIP-633 | Drop 24h grace default; stream-time-driven left/outer join emission | streams stream-join |
+| KIP-820 | `processValues` fixed-key Processor API | streams |
+| KIP-889 / KIP-914 / KIP-962 | Versioned state stores / DSL semantics / relax non-null key | streams |
+| KIP-923 | Grace period on stream-table join | streams |
+| KIP-1024 | `statestore.cache.max.bytes` | streams record-caching spec |
+
+---
+
+## 2. Partially implemented (⚠️) — what is left
+
+| KIP / area | Done | What's left for full parity |
+|------------|------|-----------------------------|
+| **KIP-778 / proposed KIP-1155** — KRaft upgrades and metadata-version downgrades | `metadata.version` level model (7–25), runtime enforcement, bootstrap/format, operator ordered roll + MV bump; Krabka-native safe/unsafe record-loss projection; all-node downgrade-capability and target-range checks; mandatory lower-version snapshot reload + log-prefix prune on every quorum node, with fail-closed retry and restart rediscovery; pre-KIP-1155 Kafka 4.0 nodes are rejected without changing cluster state | Successful mixed-JVM rolling software downgrade awaits an upstream Kafka release that assigns and advertises KIP-1155's promised capability metadata version. Kafka 4.0 correctly cannot be treated as downgrade-capable. Operator Admin RPCs over secured internal listeners still need TLS/SASL credential loading. |
+| **KIP-1071** — streams rebalance protocol | **Broker side fully done**: `StreamsGroupHeartbeat` / `StreamsGroupDescribe`, topology ingestion, internal repartition/changelog topic creation, active/standby/warmup assignment with changelog catch-up, `__consumer_offsets` persistence, `streams.version` gate. Rust client DSL/runtime/state-stores/joins/windows/suppress/IQv2/EOS are broad. Kafka supports only offline classic→streams migration. | Future accepted protocol revisions are tracked as bounded items; replacing the full JVM Kafka Streams library is outside this matrix's compatibility contract. |
+| **Geo-replication** | The native replicator runs selective topic flows, loop prevention, residency routing, offset-sync/checkpoint/heartbeat records, transactional output plus checkpoint recovery, and restart-safe supervision. | Schema-aware transforms/routing, secured standalone clients, an operator CRD, and the explicitly deferred audit/erasure/key-residency surfaces remain future slices. |
+
+---
+
+## 3. In scope but not yet implemented (❌)
+
+No finite repository-local KIP outcome is currently classified here. New work
+belongs in this section only when it has a bounded behavior and acceptance gate.
+
+### Tracked horizons (not ❌ implementation commitments)
+
+- `krabka-client-streams` is a Kafka Streams-inspired Rust API. Full drop-in JVM
+  Kafka Streams library parity has no bounded feature list or acceptance gate;
+  only separately scoped client features are implementation commitments.
+- [KIP-1150](https://cwiki.apache.org/confluence/display/KAFKA/KIP-1150%3A%2BDiskless%2BTopics)
+  is an accepted umbrella proposal that deliberately defines no code, public
+  interface, documentation, or test changes. Its concrete follow-up KIPs are
+  evaluated separately rather than treating KIP-1150 itself as unfinished code.
+
+---
+
+## 4. Deliberately out of scope (⛔)
+
+| KIP(s) / area | Reason |
+|---------------|--------|
+| KIP-866 + all ZooKeeper-mode / ZK→KRaft migration KIPs (incl. KIP-590 controller forwarding) | **Krabka is KRaft-only.** An explicit non-goal. Greenfield, no production users, no migration burden. |
+| Kafka **Connect** framework + connectors + EOS source + REST/offsets APIs (KIP-26, 145, 158, 208, 215, 238, 298, 305, 558, 610, 611, 618, 745, 875, 980, …) | Krabka provides its own Rust connector SPI, a managed Postgres CDC worker with durable Kafka-backed offsets, and a `KafkaConnector` operator CRD. JVM plugin loading, the distributed Connect worker protocol, the Connect REST API, multi-task execution, initial snapshots, and exactly-once source delivery remain out of scope for this first managed vertical slice. |
+| **Kafka Bridge** (HTTP) | Superseded in Krabka by the native gRPC / Connect-RPC + HTTP gateway; `KafkaBridge` CRD ❌. |
+| JVM-**client-library-internal** KIPs (e.g. KIP-235/302 DNS bootstrap, KIP-266 consumer block fix, KIP-289 default `group.id`, KIP-421 dynamic client config, KIP-580 client exponential backoff, KIP-91 producer `delivery.timeout.ms`) | Not applicable to a broker. Where relevant, equivalent behavior lives in Krabka's native Rust clients rather than as a tracked broker KIP. |
+
+---
+
+## 5. Wire-level note
+
+Several KIPs in §1 include **byte-exact codec support** generated from
+the Apache Kafka message schemas in
+[krabka-protocol](https://github.com/krabka-io/krabka-protocol). Schema
+presence alone is not treated as full
+feature parity: entries that require broker behavior are listed as complete
+only when their handler semantics and behavioral tests are present as well.
+
+---
+
+## 6. Attribution caveat
+
+The repo historically labeled the **`UnregisterBroker`** admin API (api_key 64)
+as "KIP-185". Canonical **KIP-185** is *"Make exactly-once in-order delivery per
+partition the default producer setting"* — unrelated. The `UnregisterBroker`
+*feature itself* is implemented and JVM-validated; only the cited KIP number was
+wrong.
+
+This has been corrected throughout the source and README to **KIP-919**
+(*"Allow AdminClient to Talk Directly with the KRaft Controller Quorum and add
+Controller Registration"*), which is the KIP that adds `unregisterBroker` support
+to the AdminClient (Apache JIRA KAFKA-17039). The underlying RPC originates with
+the KRaft controller surface (KIP-631). Release-managed `CHANGELOG.md` files were
+left untouched as historical record.
+
+---
+
+## 7. The long tail
+
+Kafka has ~1300 KIP *numbers*. This matrix does **not** invent a row per integer,
+because a large share are unassigned/never-used, discarded/withdrawn/rejected,
+folded into another KIP, or JVM-client / Connect / Streams-library-internal with
+no broker or wire surface. Those are covered categorically in §3 (tracked
+Streams-library boundary) and §4 (out-of-scope ecosystems and client-library
+internals). Every
+KIP that defines Krabka's actual compatibility contract — protocol, storage,
+replication, KRaft, security, authorization, quotas, queues, and the streams
+*protocol* — is enumerated in §1–§3 and grounded in the repo.

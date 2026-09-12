@@ -32,6 +32,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The consensus playground on /docs/playground is a Rust crate compiled to
+      # WebAssembly. `npm run build` runs playground/build.sh, which needs cargo
+      # and the wasm32 target. The script downloads the matching wasm-bindgen
+      # CLI itself.
+      - name: Setup Rust with the wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache the playground build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: playground
+
       - name: Build static website
         run: npm run build
         env:
