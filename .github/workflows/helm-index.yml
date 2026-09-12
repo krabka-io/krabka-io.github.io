@@ -1,10 +1,10 @@
 name: Rebuild Helm chart index
 
 # The aggregated Helm chart repository is served from this site at
-# https://krabka-io.github.io/charts. Charts live in the component
-# repositories. This job discovers them, packages them, and commits the
-# repacked charts and the index to main. The push then triggers the Pages
-# deploy.
+# https://krabka.io/charts. Charts live in the component repositories. This job
+# discovers them, packages and signs them, and commits the repacked charts and
+# the index to main. It then starts the Pages deploy itself, because a push made
+# with GITHUB_TOKEN does not trigger other workflows.
 #
 # A component repository can request a rebuild right after it releases a chart:
 #
@@ -25,6 +25,8 @@ on:
 
 permissions:
   contents: write
+  # To start deploy.yml after the index commit. See the last step.
+  actions: write
 
 concurrency:
   group: helm-index
@@ -54,6 +56,8 @@ jobs:
         run: bash scripts/build-helm-index.sh
 
       - name: Commit the index when it changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # `generated` and `created` carry a fresh timestamp on every run, so
@@ -83,3 +87,10 @@ jobs:
           Claude-Session: https://claude.ai/code/session_01Xj9Yz7B2gp85n9KvAJ5npu
           MSG
           git push
+
+          # GitHub does not start a workflow from a push made with GITHUB_TOKEN,
+          # so deploy.yml does not see this commit. It would publish the charts
+          # only at its next scheduled run, up to a day later. A
+          # workflow_dispatch event is exempt from that rule, so start the
+          # deploy directly.
+          gh workflow run deploy.yml --ref main
