@@ -12,9 +12,13 @@ const install = `helm install krabka-operator krabka/krabka-operator \\
 
 const keyUid = 'Krabka Charts <charts@krabka.dev>';
 const keyFingerprint = '74A6 7D5C F9AE 199A 45D2  2E42 594B D543 4544 D339';
+const keyUrl = 'https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc';
 
-const verify = `# Import the chart signing public key, then check the fingerprint
-# against the one published on this page before you trust it.
+const verify = `# Fetch the chart signing public key from krabka-io/tooling.
+curl -fsSLO ${keyUrl}
+
+# Import it, then check the fingerprint against the one published on this
+# page before you trust it.
 gpg --import krabka-charts.pub.asc
 gpg --fingerprint charts@krabka.dev
 
@@ -113,7 +117,8 @@ const charts = [
         The charts carry a Helm provenance file when the release job has the signing key. The public
         half of that key lives in
         <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,
-        under <code class="font-mono text-krab-300">charts/</code>. It is never stored on this site.
+        at <a class="text-krab-400 hover:text-krab-300" href={keyUrl}><code class="font-mono text-krab-300">charts/krabka-charts.pub.asc</code></a>.
+        It is never stored on this site.
       </p>
 
       <div class="frosted-card rounded-xl border border-white/10 p-4 not-prose space-y-1.5">
