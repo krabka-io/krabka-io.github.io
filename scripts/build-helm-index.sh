@@ -164,7 +164,12 @@ helm repo index "${out}" --url "${repo_url}/"
   echo '<p>The chart signing public key lives in'
   echo '<a href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,'
   echo 'under <code>charts/</code>.</p>'
-  echo '<pre>gpg --dearmor &lt; krabka-charts.pub.asc &gt; krabka-keyring.gpg'
+  echo '<p>Key: <code>Krabka Charts &lt;charts@krabka.dev&gt;</code><br>'
+  echo 'Fingerprint: <code>74A6 7D5C F9AE 199A 45D2&nbsp; 2E42 594B D543 4544 D339</code><br>'
+  echo 'Check the fingerprint before you trust the key. Any earlier key is revoked.</p>'
+  echo '<pre>gpg --import krabka-charts.pub.asc'
+  echo 'gpg --fingerprint charts@krabka.dev'
+  echo 'gpg --export charts@krabka.dev &gt; krabka-keyring.gpg'
   echo 'helm install my-op krabka/krabka-operator --verify --keyring ./krabka-keyring.gpg</pre>'
 } > "${out}/index.html"
 

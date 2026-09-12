@@ -74,8 +74,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/charts
-          git commit -m "chore: rebuild the aggregated Helm chart index
+          # The blank line and the trailers stay inside the YAML block, so they
+          # keep the block's indentation. YAML strips it back off again.
+          git commit -F - <<'MSG'
+          chore: rebuild the aggregated Helm chart index
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Xj9Yz7B2gp85n9KvAJ5npu"
+          Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01Xj9Yz7B2gp85n9KvAJ5npu
+          MSG
           git push

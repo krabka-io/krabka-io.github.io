@@ -8,12 +8,17 @@ helm repo update</pre>
 <h2>Charts</h2><ul>
 <li><a href="krabka-operator-0.4.0.tgz">krabka-operator 0.4.0</a>
  &mdash; <a href="https://github.com/krabka-io/krabka-operator">krabka-io/krabka-operator</a></li>
-<li><a href="crabka-rebalancer-0.4.0.tgz">crabka-rebalancer 0.4.0</a>
+<li><a href="krabka-rebalancer-0.4.0.tgz">krabka-rebalancer 0.4.0</a>
  &mdash; <a href="https://github.com/krabka-io/krabka-rebalancer">krabka-io/krabka-rebalancer</a></li>
 </ul>
 <h2>Verify a chart</h2>
 <p>The chart signing public key lives in
 <a href="https://github.com/krabka-io/tooling">krabka-io/tooling</a>,
 under <code>charts/</code>.</p>
-<pre>gpg --dearmor &lt; krabka-charts.pub.asc &gt; krabka-keyring.gpg
+<p>Key: <code>Krabka Charts &lt;charts@krabka.dev&gt;</code><br>
+Fingerprint: <code>74A6 7D5C F9AE 199A 45D2&nbsp; 2E42 594B D543 4544 D339</code><br>
+Check the fingerprint before you trust the key. Any earlier key is revoked.</p>
+<pre>gpg --import krabka-charts.pub.asc
+gpg --fingerprint charts@krabka.dev
+gpg --export charts@krabka.dev &gt; krabka-keyring.gpg
 helm install my-op krabka/krabka-operator --verify --keyring ./krabka-keyring.gpg</pre>
