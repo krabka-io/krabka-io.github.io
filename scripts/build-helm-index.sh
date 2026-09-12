@@ -51,6 +51,10 @@ done
 # is ever stored in this repository.
 sign_args=()
 if [[ -n "${HELM_GPG_KEY:-}" ]]; then
+  if [[ -z "${HELM_GPG_KEY_ID:-}" ]]; then
+    echo "==> HELM_GPG_KEY is set but HELM_GPG_KEY_ID is not. Helm cannot pick a signing key." >&2
+    exit 1
+  fi
   keydir="$(mktemp -d)"
   chmod 700 "${keydir}"
   export GNUPGHOME="${keydir}"
@@ -59,10 +63,15 @@ if [[ -n "${HELM_GPG_KEY:-}" ]]; then
   # through gpg-agent, which has no TTY in CI and exports nothing for a
   # passphrase-protected key.
   echo "${HELM_GPG_KEY}" | base64 -d | gpg --dearmor > "${keydir}/secring.gpg"
-  printf '%s' "${HELM_GPG_PASSPHRASE:-}" > "${keydir}/passphrase"
   sign_args=(--sign --key "${HELM_GPG_KEY_ID}"
-    --keyring "${keydir}/secring.gpg"
-    --passphrase-file "${keydir}/passphrase")
+    --keyring "${keydir}/secring.gpg")
+  # Helm reads the passphrase file and fails with `Error: EOF` when the file is
+  # empty. An unprotected key needs no passphrase, so pass the file only when
+  # there is a passphrase.
+  if [[ -n "${HELM_GPG_PASSPHRASE:-}" ]]; then
+    printf '%s' "${HELM_GPG_PASSPHRASE}" > "${keydir}/passphrase"
+    sign_args+=(--passphrase-file "${keydir}/passphrase")
+  fi
   echo "==> Helm PGP provenance signing is on"
 else
   echo "==> HELM_GPG_KEY is not set. The script skips .prov signing."
