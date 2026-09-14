@@ -1553,7 +1553,7 @@ spec:
                 type: array
               endpoint:
                 description: |-
-                  Connect-RPC base URL of the `crabka-rebalancer` service, for
+                  Connect-RPC base URL of the `krabka-rebalancer` service, for
                   example `http://my-cluster-rebalancer.kafka.svc:9300`. When this
                   field is absent, the operator derives
                   `http://<cluster>-rebalancer.<namespace>.svc.cluster.local:9300`
@@ -4034,6 +4034,27 @@ spec:
                     nullable: true
                     type: integer
                   readinessPeriodSeconds:
+                    format: int32
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  startupFailureThreshold:
+                    description: |-
+                      Failed startup probes before the kubelet restarts the container.
+                      Default 60.
+
+                      Set it so that `startupPeriodSeconds` times this value covers the
+                      longest replay of the schemas topic. The defaults allow 5 minutes.
+                    format: int32
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  startupPeriodSeconds:
+                    description: |-
+                      Seconds between two startup probes. Default 5.
+
+                      The registry binds its REST port only after it replays the schemas
+                      topic. The startup probe holds the liveness probe back until then.
                     format: int32
                     minimum: 1.0
                     nullable: true
