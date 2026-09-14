@@ -5,7 +5,7 @@
 # chart. This script discovers them, packages each one, and writes a single
 # `index.yaml`. Users then add one Helm repository URL:
 #
-#   helm repo add krabka https://krabka-io.github.io/charts
+#   helm repo add krabka https://krabka.io/charts
 #
 # Discovery, not a hard-coded list: the script walks every repository in the
 # krabka-io organisation and takes the ones that hold a `charts/` directory. A
@@ -29,10 +29,8 @@
 set -euo pipefail
 
 org="krabka-io"
-# krabka-io/gres is a snapshot of the pre-split monorepo. Its `charts/` holds
-# the retired crabka-named charts, so the index must not take them.
-skip_repos="gres"
-repo_url="https://krabka-io.github.io/charts"
+skip_repos=""
+repo_url="https://krabka.io/charts"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${root}/public/charts"
 work="$(mktemp -d)"

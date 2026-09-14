@@ -1,7 +1,7 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
 
-const composeCode = `curl -fsSL https://krabka-io.github.io/quickstart/docker-compose.yml -o docker-compose.yml
+const composeCode = `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 
 KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
@@ -14,8 +14,8 @@ docker run --rm --network host "$KAFKA_TOOLS" /opt/kafka/bin/kafka-console-consu
 
 docker compose down --volumes`;
 
-const helmCode = `kubectl apply -f https://krabka-io.github.io/quickstart/crds.yaml
-helm repo add krabka https://krabka-io.github.io/charts
+const helmCode = `kubectl apply -f https://krabka.io/quickstart/crds.yaml
+helm repo add krabka https://krabka.io/charts
 helm repo update
 helm install krabka-operator krabka/krabka-operator --version 0.4.0 \\
   --namespace krabka-system --create-namespace \\
@@ -23,7 +23,7 @@ helm install krabka-operator krabka/krabka-operator --version 0.4.0 \\
   --set-string image.digest=sha256:861796f11b63798f07cd8cfbcb0fa41376259cb6fce07b1e80e15e93de3a377b
 kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
 
-kubectl apply -f https://krabka-io.github.io/quickstart/krabka-cluster.yaml
+kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
 kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
 kubectl wait --for=condition=Ready kafkatopic/quickstart --timeout=5m
 
@@ -42,7 +42,7 @@ kubectl delete kafka/m20-quickstart
 kubectl delete kafkanodepool/brokers --ignore-not-found
 helm uninstall krabka-rebalancer
 helm uninstall krabka-operator -n krabka-system
-kubectl delete -f https://krabka-io.github.io/quickstart/crds.yaml`;
+kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
 ---
 
 <DocsLayout
