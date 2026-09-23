@@ -27,7 +27,7 @@ tombstones_on_delete = true`;
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
       <a href={getPath('/features')} class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
-        &larr; Back to Features Overview
+        Back to Features Overview
       </a>
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
         Krabka Connect & Postgres CDC
@@ -72,6 +72,22 @@ tombstones_on_delete = true`;
           <li><strong>Transaction Boundary Preservation:</strong> Propagates transaction commit timestamps, commit LSNs, and transaction IDs in Kafka record headers.</li>
           <li><strong>Automatic Schema Evolution:</strong> Maps PostgreSQL table DDL changes directly to Confluent Schema Registry schemas.</li>
         </ul>
+
+        <div class="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans">
+          <div>
+            <strong class="text-white">Looking for the Postgres compute substrate architecture?</strong>
+            <p class="text-gray-400 mt-0.5">Read our engineering whitepaper on how Krabka Gres scales Postgres-compatible writes across tenants and ranges.</p>
+          </div>
+          <a
+            href={getPath('/whitepapers/gres-scaling')}
+            class="shrink-0 inline-flex items-center gap-1 font-semibold text-krab-400 hover:text-krab-300 transition-colors"
+          >
+            <span>Read Whitepaper</span>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </a>
+        </div>
       </div>
 
       <!-- Section C: Configuration -->
@@ -90,15 +106,15 @@ tombstones_on_delete = true`;
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Active-Active Replicator (<code class="text-krab-400 font-mono text-xl">krabka-replicator</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          A native, high-throughput replication service wire-compatible with MirrorMaker 2. It synchronizes topic partitions across distinct geographic clusters, handles consumer offset translation, and prevents circular record replication for seamless multi-region disaster recovery.
+          A native, high-throughput replication service wire-compatible with MirrorMaker 2. It synchronizes topic partitions across distinct geographic clusters, handles consumer offset translation, and prevents circular record replication for active-passive or active-active multi-region failover.
         </p>
       </div>
 
     </div>
 
     <div class="mt-12 pt-8 border-t border-white/10 flex justify-between items-center font-sans text-sm">
-      <a href={getPath('/features/tiered-storage')} class="text-gray-400 hover:text-white">&larr; Tiered Storage</a>
-      <a href={getPath('/features/streams')} class="text-krab-400 hover:text-krab-300 font-semibold">Polyglot Streams &rarr;</a>
+      <a href={getPath('/features/tiered-storage')} class="text-gray-400 hover:text-white">Tiered Storage</a>
+      <a href={getPath('/features/streams')} class="text-krab-400 hover:text-krab-300 font-semibold">Polyglot Streams</a>
     </div>
   </div>
 </BaseLayout>
