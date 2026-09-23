@@ -1,8 +1,8 @@
 ---
-layout: ../../layouts/ProseLayout.astro
+layout: ../../layouts/DocsLayout.astro
 title: "Scaling Postgres on a Kafka Substrate"
-description: How Krabka Gres scales Postgres-compatible writes across tenants, across ranges and within a single table, with no per-tenant consensus and no synchronized clocks.
-lead: A Krabka whitepaper on the Gres architecture - ranges, rowid sharding, a logical timestamp oracle, and checkpoint-fork elasticity.
+description: "How Krabka Gres scales Postgres-compatible writes across tenants, ranges, and single tables with no per-tenant consensus."
+currentSlug: /whitepapers/gres-scaling
 ---
 
 ## Abstract
@@ -149,10 +149,16 @@ Every ceiling the architecture still has is named, measured in CI gates, and own
 
 The design documents behind this paper, for readers who want the decision-by-decision rationale and the alternatives considered:
 
-- [Chapter design: a pure-Rust Postgres compute engine on the Krabka substrate](superpowers/specs/2026-07-09-krabka-gres-chapter-design.md) — scaling model and ceilings, architecture overview.
-- [Substrate WAL design](superpowers/specs/2026-07-09-krabka-gres-g2-substrate-wal-design.md) — the committer seam, group commit, fencing.
-- [Checkpoints design](superpowers/specs/2026-07-09-krabka-gres-g3-checkpoints-design.md) — manifest-last snapshots, truncation, the recovery model.
-- [Multi-range tenants design](superpowers/specs/2026-07-09-krabka-gres-g7-multirange-design.md) — ranges, routing, the log-derived barrier.
-- [Sharded tables design](superpowers/specs/2026-07-09-krabka-gres-g8-sharded-tables-design.md) — rowid-interval sharding, scatter-gather, checkpoint-fork splits.
-- [Distributed maturity design](superpowers/specs/2026-07-09-krabka-gres-g9-distributed-maturity-design.md) — timestamp transactions, pushdown, hash sharding, indexes, the balancer, auto-sharding.
-- [Early TSO activation design](superpowers/specs/2026-07-15-gres-early-tso-activation-design.md) — grant availability during host startup and failover.
+- **Chapter design: a pure-Rust Postgres compute engine on the Krabka substrate** (`2026-07-09-krabka-gres-chapter-design.md`) — scaling model and ceilings, architecture overview.
+- **Substrate WAL design** (`2026-07-09-krabka-gres-g2-substrate-wal-design.md`) — the committer seam, group commit, fencing.
+- **Checkpoints design** (`2026-07-09-krabka-gres-g3-checkpoints-design.md`) — manifest-last snapshots, truncation, the recovery model.
+- **Multi-range tenants design** (`2026-07-09-krabka-gres-g7-multirange-design.md`) — ranges, routing, the log-derived barrier.
+- **Sharded tables design** (`2026-07-09-krabka-gres-g8-sharded-tables-design.md`) — rowid-interval sharding, scatter-gather, checkpoint-fork splits.
+- **Distributed maturity design** (`2026-07-09-krabka-gres-g9-distributed-maturity-design.md`) — timestamp transactions, pushdown, hash sharding, indexes, the balancer, auto-sharding.
+- **Early TSO activation design** (`2026-07-15-gres-early-tso-activation-design.md`) — grant availability during host startup and failover.
+
+## Related Documentation
+
+- [Ecosystem Architecture](/docs/architecture) — High-level dependency hierarchy and architectural tiers across Krabka.
+- [PostgreSQL CDC Source Connector](/docs/connect-postgres) — Streaming Postgres WAL changes into Kafka via logical decoding.
+- [Runtime Architecture](/docs/runtime-architecture) — Broker subsystems, operational services, and Kubernetes control plane.

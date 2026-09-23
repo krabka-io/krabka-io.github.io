@@ -1,55 +1,85 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
 
 const repoHierarchy = [
-  { repo: 'krabka-protocol', role: 'Wire codecs, KRaft metadata records, SASL/TLS, compression (snappy/lz4/zstd)' },
-  { repo: 'krabka-client-rs', role: 'Tokio async Kafka client (Producer, Consumer, Admin)' },
-  { repo: 'krabka-broker', role: 'Broker engine, KRaft consensus (krabka-raft), on-disk log (krabka-log), tiered storage' },
-  { repo: 'krabka-streams-rs', role: 'Rust stream runtime with schema registry serdes' },
-  { repo: 'krabka-streams-go', role: 'Go stream processing with Apache Arrow batch memory & barrier cuts' },
-  { repo: 'krabka-streams-java', role: 'Java stream processing with Kafka Streams 4.x and columnar operators' },
-  { repo: 'krabka-operator', role: 'Kubernetes operator reconciling krabka.io/v1alpha1 custom resources' },
-  { repo: 'krabka-connect', role: 'Connector framework, PostgreSQL CDC over pgoutput, worker runtime & replicator' },
-  { repo: 'krabka-o11y', role: 'OpenTelemetry, PromQL metrics, pprof continuous profiling, OCSF audit logs' },
-  { repo: 'krabka-cli', role: 'Admin and cluster formatting CLI tool' },
+  { repo: 'krabka-protocol', role: 'Wire codecs, KRaft metadata records, SASL/TLS, compression (snappy/lz4/zstd)', tier: 'Tier 0: Core Wire Layer', link: '/docs/architecture' },
+  { repo: 'krabka-client-rs', role: 'Tokio async Kafka client (Producer, Consumer, Admin)', tier: 'Tier 1: Foundation Clients & Broker', link: '/docs/streams-rs' },
+  { repo: 'krabka-broker', role: 'Broker engine, KRaft consensus (krabka-raft), on-disk log (krabka-log), tiered storage', tier: 'Tier 1: Foundation Clients & Broker', link: '/docs/broker' },
+  { repo: 'krabka-schema-registry', role: 'Confluent-compatible schema registry backed by the compacted _schemas topic', tier: 'Tier 1: Foundation Clients & Broker', link: '/docs/runtime-architecture' },
+  { repo: 'krabka-streams-rs', role: 'Rust stream runtime with schema registry serdes and RocksDB state stores', tier: 'Tier 2: Stream Processing Engines', link: '/docs/streams-rs' },
+  { repo: 'krabka-streams-go', role: 'Go stream processing with Apache Arrow batch memory & barrier cuts', tier: 'Tier 2: Stream Processing Engines', link: '/docs/streams-go' },
+  { repo: 'krabka-streams-java', role: 'Java stream processing with Kafka Streams 4.x and columnar operators', tier: 'Tier 2: Stream Processing Engines', link: '/docs/streams-java' },
+  { repo: 'krabka-connect', role: 'Connector framework, PostgreSQL CDC over pgoutput, worker runtime & replicator', tier: 'Tier 3: Data Integration & Control Plane', link: '/docs/connect-postgres' },
+  { repo: 'krabka-operator', role: 'Kubernetes operator reconciling krabka.io/v1alpha1 custom resources', tier: 'Tier 3: Data Integration & Control Plane', link: '/docs/operator' },
+  { repo: 'krabka-rebalancer', role: 'Cruise-Control-style partition assignment and cluster balancing daemon', tier: 'Tier 3: Data Integration & Control Plane', link: '/docs/runtime-architecture' },
+  { repo: 'krabka-o11y', role: 'OpenTelemetry, PromQL metrics, pprof continuous profiling, OCSF audit logs', tier: 'Tier 4: Observability & Tooling', link: '/docs/observability' },
+  { repo: 'krabka-cli', role: 'Admin and cluster log directory formatting CLI tool', tier: 'Tier 4: Observability & Tooling', link: '/docs/cli' },
 ];
 ---
 
 <DocsLayout
-  title="Ecosystem Architecture"
-  description="Architecture and dependency hierarchy of the eleven modular repositories across the krabka-io organization."
+  title="Ecosystem Architecture & Dependency Layering"
+  description="Architectural layering and dependency hierarchy across the eleven modular repositories in the krabka-io organization."
   currentSlug="/docs/architecture"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Ecosystem Architecture</h1>
-      <p class="text-gray-400 mt-2 text-base">
-        Modular dependency layers across the <code class="font-mono text-krab-300">krabka-io</code> ecosystem.
+      <div class="text-xs text-gray-400 mb-1">
+        System Design · Architectural Model
+      </div>
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Ecosystem Architecture & Layering</h1>
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        Decoupled repository boundaries, strict downward layering, and zero cyclic dependencies across the <code class="font-mono text-krab-300">krabka-io</code> organization.
       </p>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        Krabka is architected as 11 decoupled repositories with strict dependency layering. The broker sits on top of <code class="font-mono text-krab-300">krabka-protocol</code> and <code class="font-mono text-krab-300">krabka-client-rs</code> without cyclic dependencies.
+        Krabka is architected across decoupled repositories with strict one-way dependency layering. Unlike monolithic distributed streaming systems, components interact exclusively through defined public APIs and the standard Kafka wire protocol. In particular, clients, operators, and connectors never reach into broker internals.
       </p>
 
-      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+      <h2 class="text-xl font-bold text-white pt-2">Layering Principles</h2>
+      <ul class="space-y-2 text-sm text-gray-300 list-disc pl-5 leading-relaxed">
+        <li><strong class="text-white">Strict Downward Layering:</strong> Repositories only depend on lower tiers. High-level orchestrators (like <code class="text-krab-300 font-mono">krabka-operator</code>) depend on client and protocol crates, never vice versa.</li>
+        <li><strong class="text-white">Independent Wire Layer:</strong> <code class="text-krab-300 font-mono">krabka-protocol</code> defines exact byte-level request/response codecs generated from upstream JSON specifications with zero broker or client dependencies.</li>
+        <li><strong class="text-white">Decoupled Subcommands:</strong> CLI tooling (<code class="text-krab-300 font-mono">krabka-cli</code>) delegates specialized subcommands to standalone executables found on <code class="font-mono text-xs">PATH</code>, preventing domain-specific dependencies (such as the 21k-line Gres storage engine) from bloating the core binary.</li>
+      </ul>
+
+      <h2 class="text-xl font-bold text-white pt-2">Repository Hierarchy & Subsystems</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
         <table class="w-full text-left text-xs">
           <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
             <tr>
               <th class="py-3 px-4">Repository</th>
+              <th class="py-3 px-4">Architectural Tier</th>
               <th class="py-3 px-4">Subsystems & Purpose</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-white/5 font-sans">
             {repoHierarchy.map((r) => (
               <tr class="hover:bg-white/5 transition-colors">
-                <td class="py-3 px-4 font-mono font-bold text-white text-xs">{r.repo}</td>
+                <td class="py-3 px-4 font-mono font-bold text-krab-300 whitespace-nowrap">
+                  <a href={getPath(r.link)} class="hover:underline">{r.repo}</a>
+                </td>
+                <td class="py-3 px-4 text-gray-400 whitespace-nowrap">{r.tier}</td>
                 <td class="py-3 px-4 text-gray-300">{r.role}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Explore Architectural Deep Dives</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/docs/runtime-architecture')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Runtime Architecture →</div>
+          <p class="text-xs text-gray-400 mt-1">Operational topology, internal broker components, and control plane reconcile loops.</p>
+        </a>
+        <a href={getPath('/whitepapers/gres-scaling')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Scaling Postgres on Kafka →</div>
+          <p class="text-xs text-gray-400 mt-1">Technical whitepaper on multi-tenant relational compute over an event log substrate.</p>
+        </a>
       </div>
     </div>
   </div>
