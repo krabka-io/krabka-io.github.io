@@ -71,19 +71,32 @@ npm run preview
 - **Methodology Guide (`/docs/benchmarks`):** In-depth technical documentation covering test topology, memory working set (RSS), and reproducible benchmark runbooks.
 
 ### 5. Aggregated Helm Chart Repository
+
 Users add one repository URL:
 
 ```bash
-helm repo add krabka https://krabka-io.github.io/charts
+helm repo add krabka https://krabka.io/charts
 helm repo update
 ```
 
-`scripts/build-helm-index.sh` walks the organisation, packages each chart, and generates `public/charts/index.yaml`. The `helm-index.yml` workflow runs daily and commits the updated index.
+`scripts/build-helm-index.sh` walks the `krabka-io` organisation, takes every repository that holds a `charts/` directory, packages each chart, and writes one `index.yaml` over the whole set in `public/charts/`. The `helm-index.yml` workflow runs daily and commits the result.
 
-### 6. Release Verification & Track Resolution (`/versions`)
+A component repository can trigger an immediate index rebuild via repository dispatch:
+
+```bash
+gh api repos/krabka-io/krabka-io.github.io/dispatches -f event_type=charts-changed
+```
+
+The chart signing public key lives in [krabka-io/tooling](https://github.com/krabka-io/tooling), under `charts/`. No key material is stored here.
+
+### 6. Brand Assets & Chart Icons
+
+`/brand` lists every mark with the URL it is served from. Published Helm charts point their `Chart.yaml` icon at `/logo.png`. Treat a rename under `public/brand` or `public/logo.png` as a breaking change for published charts.
+
+### 7. Release Verification & Track Resolution (`/versions`)
 - Release tracking across stable, pre-release, and development channels with SLSA Level 3 provenance verification steps and Sigstore signatures.
 
-### 7. Automated Verification Suites
+### 8. Automated Verification Suites
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
 - **Code Stub Verifier (`scripts/verify-code-stubs.mjs`):** Parses and validates all code snippets across ingested markdown guides and Astro documentation pages.
