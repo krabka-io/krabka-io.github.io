@@ -1,12 +1,15 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import versionsData from '../../data/versions.json';
+
+const activeRelease = versionsData['streams-go']?.activeRelease || 'v0.1.0-dev';
 
 const goInstallCode = `go get github.com/krabka-io/krabka-streams-go`;
 
 const goCode = `package main
 
 import (
-	"context"
 	"github.com/krabka-io/krabka-streams-go/columnar"
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -37,84 +40,143 @@ func main() {
   description="Go client library for stream processing with Krabka: Apache Arrow batch processing, schema registry, and barrier cuts."
   currentSlug="/docs/streams-go"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
+    <!-- Header -->
     <div class="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
+        <div class="text-xs text-gray-400 mb-1">
+          Go 1.26+ · Track {activeRelease}
+        </div>
         <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Go Streams & Arrow</h1>
-        <p class="text-gray-400 mt-2 text-base">
-          Stream processing in Go featuring Apache Arrow batch acceleration and barrier cuts via <code class="text-krab-300 font-mono text-xs">krabka-streams-go</code>.
+        <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+          Stream processing in Go featuring Apache Arrow batch acceleration, barrier cuts, and schema decoding via <code>krabka-streams-go</code>.
         </p>
       </div>
 
       <a
-        href="https://krabka-io.github.io/krabka-streams-go/"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="inline-flex items-center gap-2 rounded-xl bg-krab-500/20 border border-krab-500/40 px-4 py-2 text-xs font-bold text-krab-300 hover:bg-krab-500/30 hover:text-white transition-all shrink-0 font-sans"
+        href={getPath('/api/streams-go/latest/')}
+        class="inline-flex items-center rounded-lg bg-krab-500/20 hover:bg-krab-500/30 border border-krab-500/40 px-4 py-2 text-xs font-semibold text-krab-300 hover:text-white transition-colors shrink-0"
       >
-        <span>Full Go API Reference</span>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-        </svg>
+        Browse Godoc Reference
       </a>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
-      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
-        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
-          <span>Installation (Go 1.26+):</span>
-          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={goInstallCode}>
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>Copy</span>
-          </button>
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
+      <p>
+        <code>krabka-streams-go</code> provides native Go stream processing primitives optimized for zero-copy column batching. Instead of per-record serialization overhead, streams operate on Apache Arrow record batches to maximize CPU cache locality.
+      </p>
+
+      <!-- Architecture & Engineering Guides -->
+      <div class="space-y-3 pt-2">
+        <div>
+          <h2 class="text-xl font-bold text-white">Architecture & Engineering Guides</h2>
+          <p class="text-sm text-gray-300 mt-1">
+            In-depth technical guides maintained alongside the Go codebase:
+          </p>
         </div>
-        <pre class="text-krab-300 overflow-x-auto"><code>$ {goInstallCode}</code></pre>
+        <ul class="space-y-2 text-sm text-gray-300 list-disc pl-5 marker:text-krab-400">
+          <li>
+            <a href={getPath('/docs/streams-go/getting-started')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Getting Started:</a> Installation, topology builder walkthrough, and consumer group setup.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/columnar')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Columnar Processing:</a> Arrow batch filters, memory allocators, and record projection.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/serdes')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Serdes:</a> Avro, Protobuf, and JSON schema caching and binary decoding.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/schema-registry')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Schema Registry:</a> Confluent Schema Registry client integration, schema evolution, and wire protocol.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/barriers')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Barrier Cuts:</a> Snapshot alignment, state checkpoints, and non-blocking barriers.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/coordination')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Coordination Primitives:</a> Work assignment, leader elections, and cooperative rebalance.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/testing')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Testing:</a> In-memory pipeline testing and deterministic record assertions.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-go/architecture')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Architecture:</a> Topology construction, channel-based execution graph, and memory safety.
+          </li>
+        </ul>
       </div>
 
+      <!-- Installation -->
+      <h2 class="text-xl font-bold text-white pt-2">Installation</h2>
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Go Module Command</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={goInstallCode}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>$ {goInstallCode}</code></pre>
+      </div>
+
+      <!-- Packages Table -->
       <h2 class="text-xl font-bold text-white pt-2">Packages</h2>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
             <tr>
               <th class="py-3 px-4">Package</th>
               <th class="py-3 px-4">Purpose</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-white/5 font-sans">
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">schema</td><td class="py-2.5 px-4">Registry client, cache, and Avro/Protobuf/JSON Schema serdes</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">columnar</td><td class="py-2.5 px-4">Apache Arrow batch processing, topologies, and barrier cuts</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">columnarschema</td><td class="py-2.5 px-4">Avro and Protobuf Arrow memory bridges</td></tr>
+          <tbody class="divide-y divide-white/5">
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">columnar</td><td class="py-2.5 px-4 text-gray-400">Apache Arrow batch processing, topologies, and barrier cuts</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">schema</td><td class="py-2.5 px-4 text-gray-400">Registry client, cache, and Avro/Protobuf/JSON Schema serdes</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">columnarschema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges</td></tr>
           </tbody>
         </table>
       </div>
 
+      <!-- Code Example -->
       <h2 class="text-xl font-bold text-white pt-2">Columnar Processing Example</h2>
-      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
-        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
-          <span>Topology Definition:</span>
-          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={goCode}>
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>Copy</span>
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Topology Definition</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={goCode}>
+            Copy
           </button>
         </div>
-        <pre class="text-krab-300 overflow-x-auto"><code>{goCode}</code></pre>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{goCode}</code></pre>
       </div>
 
-      <h2 class="text-xl font-bold text-white pt-2">Automatic GoDoc & API Reference</h2>
-      <p>
-        The complete interactive API reference for Go is generated with Bazel and published automatically to GitHub Pages:
-      </p>
-      <div class="pt-2">
-        <a
-          href="https://krabka-io.github.io/krabka-streams-go/"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-2 text-xs font-semibold text-white transition-all"
-        >
-          <span>Open krabka-streams-go API Reference</span>
-          <svg class="h-3.5 w-3.5 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-        </a>
+      <!-- Version & Compatibility Reference -->
+      <h2 class="text-xl font-bold text-white pt-2">Version & Compatibility</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
+            <tr>
+              <th class="py-2.5 px-4">Component</th>
+              <th class="py-2.5 px-4">Supported Version</th>
+              <th class="py-2.5 px-4">Notes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-gray-300">
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Go Runtime</td>
+              <td class="py-2 px-4">Go 1.26+</td>
+              <td class="py-2 px-4 text-gray-400">Targeting Go 1.26 toolchain</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Apache Arrow Go</td>
+              <td class="py-2 px-4">v17.0.0</td>
+              <td class="py-2 px-4 text-gray-400">Native Go allocator and Record batches</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Krabka Broker</td>
+              <td class="py-2 px-4">0.5.4 or Apache Kafka 4.3.1</td>
+              <td class="py-2 px-4 text-gray-400">Wire-protocol compatibility</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+      <p class="text-sm text-gray-300">
+        Full version matrices and SLSA Level 3 build provenance records are tracked on the <a href={getPath('/versions')} class="text-krab-400 hover:underline">Versions page</a>.
+      </p>
     </div>
   </div>
 </DocsLayout>

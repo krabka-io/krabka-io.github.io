@@ -1,24 +1,131 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const configSnippet = `[connector]
+name = "postgres-inventory-cdc"
+connector_class = "crabka_connect_postgres::PostgresWalSource"
+tasks_max = 1
+
+[connector.config]
+database_url = "postgres://cdc_user:\${env:POSTGRES_CDC_PASSWORD}@db.internal:5432/inventory"
+schema_registry_url = "http://schema-registry:8081"
+slot_name = "crabka_inventory_slot"
+publication_name = "inventory_publication"
+schema = "public"
+tables = ["orders", "line_items", "customers"]
+max_messages_per_poll = 1000`;
+
+const acceptanceTestSnippet = `# The Postgres CDC acceptance suite boots Postgres and Schema Registry containers,
+# runs a connector, restarts it, and verifies checkpoint resumption.
+cargo test -p crabka-connect-worker --test postgres_cdc -- --ignored`;
 ---
 
 <DocsLayout
-  title="PostgreSQL CDC Source"
-  description="PostgreSQL change data capture (CDC) source connector over logical decoding (pgoutput) in krabka-connect."
+  title="PostgreSQL CDC Source Connector (pgoutput)"
+  description="PostgreSQL change data capture (CDC) source connector over logical decoding (pgoutput) with checkpoint resumption in krabka-connect."
   currentSlug="/docs/connect-postgres"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">PostgreSQL CDC Source</h1>
-      <p class="text-gray-400 mt-2 text-base">
-        Stream database change logs over logical decoding directly into Kafka topics via <code class="text-krab-300 font-mono text-xs">krabka-connect-postgres</code>.
+      <div class="text-xs text-gray-400 mb-1">
+        Data Integration · Developer Preview
+      </div>
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">PostgreSQL CDC Source Connector</h1>
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        Stream database change logs over logical decoding (<code class="text-krab-300 font-mono text-xs">pgoutput</code>) directly into Kafka topics via <code class="text-krab-300 font-mono text-xs">krabka-connect-postgres</code>.
       </p>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
+      <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
+        <strong class="font-semibold text-amber-200">Developer Preview Notice:</strong>
+        The <code class="font-mono text-amber-200">krabka-connect</code> framework and its PostgreSQL CDC connector are currently in active development. Core WAL decoding and checkpoint resumption are verified in integration suites, while production cluster runtimes are being finalized.
+      </div>
+
       <p>
-        <code class="font-mono text-krab-300">krabka-connect-postgres</code> reads WAL records via PostgreSQL's <code class="font-mono text-xs text-gray-200">pgoutput</code> plugin, providing lock-free table snapshotting and exact transaction boundary propagation.
+        <code class="font-mono text-krab-300">krabka-connect-postgres</code> captures row-level inserts, updates, and deletes directly from PostgreSQL write-ahead logs using the native <code class="font-mono text-xs text-gray-200">pgoutput</code> logical replication stream. It provides lock-free table snapshotting, exact transaction boundary propagation, and automatic schema registration without external JVM sidecars.
       </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Connector Architecture</h2>
+      <p>
+        The connector framework is split across five modular crates in the <a href="https://github.com/krabka-io/krabka-connect" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline"><code>krabka-connect</code> repository</a>:
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Crate</th>
+              <th class="py-3 px-4">Role & Responsibility</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect</td>
+              <td class="py-3 px-4 text-gray-300">The connector SPI: <code class="font-mono text-xs">Source</code>, <code class="font-mono text-xs">Sink</code>, and <code class="font-mono text-xs">Converter</code> traits with checkpoint contracts.</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-derive</td>
+              <td class="py-3 px-4 text-gray-300">Derive macros for declarative connector configuration schemas (<code class="font-mono text-xs">#[derive(ConnectorConfig)]</code>).</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-postgres</td>
+              <td class="py-3 px-4 text-gray-300">PostgreSQL CDC source connector (<code class="font-mono text-xs">PostgresWalSource</code>) over <code class="font-mono text-xs">pgoutput</code> replication slots.</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-worker</td>
+              <td class="py-3 px-4 text-gray-300">Connector worker runtime: polls sources, batches into Kafka producers, and checkpoints offsets.</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-replicator</td>
+              <td class="py-3 px-4 text-gray-300">Cluster-to-cluster replication engine wire-compatible with Kafka MirrorMaker 2.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Sample Connector Configuration</h2>
+      <p>
+        A typical CDC worker task configuration declaring the target publication, replication slot, and schema registry integration (typed via <code class="font-mono text-xs text-gray-200">PostgresSourceConfig</code>):
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Worker Task TOML Configuration:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={configSnippet}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{configSnippet}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Checkpoint Resumption & Guarantees</h2>
+      <p>
+        The worker runtime tracks committed Log Sequence Numbers (LSNs) in internal compacted offset topics. When a worker restarts or recovers from network disruption, it resumes streaming from the exact checkpointed LSN, ensuring records are neither skipped nor replayed out of sequence.
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Running the Docker Acceptance Suite:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={acceptanceTestSnippet}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{acceptanceTestSnippet}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/features/connect')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Connect Feature Overview →</div>
+          <p class="text-xs text-gray-400 mt-1">High-level feature summary of Kafka Connect compatibility and MirrorMaker replication.</p>
+        </a>
+        <a href={getPath('/whitepapers/gres-scaling')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Postgres Scaling Whitepaper →</div>
+          <p class="text-xs text-gray-400 mt-1">Deep dive into Krabka Gres: scaling Postgres-compatible relational writes across a Kafka substrate.</p>
+        </a>
+      </div>
     </div>
   </div>
 </DocsLayout>

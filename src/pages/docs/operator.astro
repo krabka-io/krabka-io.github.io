@@ -1,24 +1,151 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const sampleClusterYaml = `apiVersion: krabka.io/v1alpha1
+kind: Kafka
+metadata:
+  name: demo
+  namespace: default
+spec:
+  kafkaVersion: "0.5.4"
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+  interBrokerListenerName: plain
+  authorization:
+    type: simple
+    superUsers: ["ANONYMOUS"]
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: default
+  labels:
+    krabka.io/cluster: demo
+spec:
+  roles: [Controller, Broker]
+  replicas: 3
+  nodeIdStart: 0
+  storage:
+    type: PersistentClaim
+    size: 50Gi
+    deleteClaim: true`;
+
+const installOperatorYaml = `# Add Helm chart repository and install the operator
+helm repo add krabka https://krabka.io/charts
+helm repo update
+helm install krabka-operator krabka/krabka-operator \\
+  --namespace krabka-system --create-namespace`;
 ---
 
 <DocsLayout
-  title="Kubernetes Operator"
-  description="Manage Krabka clusters natively on Kubernetes with custom resource definitions."
+  title="Kubernetes Operator (krabka-operator)"
+  description="Kubernetes operator reconciling Kafka clusters, node pools, topics, users, and rebalances via krabka.io/v1alpha1 CRDs."
   currentSlug="/docs/operator"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
+      <div class="text-xs text-gray-400 mb-1">
+        Kubernetes · Developer Preview
+      </div>
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Kubernetes Operator</h1>
-      <p class="text-gray-400 mt-2 text-base">
-        Declarative cluster reconciliation, rolling upgrades, and automated partition rebalancing via <code class="text-krab-300 font-mono text-xs">krabka-operator</code>.
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        Declarative cluster reconciliation, node pool orchestration, rolling upgrades, and automated partition rebalancing via <code class="text-krab-300 font-mono text-xs">krabka-operator</code>.
       </p>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
+      <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
+        <strong class="font-semibold text-amber-200">Developer Preview Notice:</strong>
+        <code class="font-mono text-amber-200">krabka-operator</code> is under active development. Core Kafka cluster reconciliation, custom resource definitions, and Helm deployment charts are published, while extended storage controllers are being integrated.
+      </div>
+
       <p>
-        The operator reconciles resources in group <code class="font-mono text-krab-300 text-xs">krabka.io/v1alpha1</code> to manage cluster lifecycles, node pools, listener configurations, TLS certificates, and topic states.
+        The Krabka Operator reconciles standard Kubernetes Custom Resource Definitions (CRDs) into running StatefulSets, headless Services, ConfigMaps, TLS Secrets, and broker configurations. Cluster topology is decoupled across <code class="font-mono text-xs text-krab-300">Kafka</code> (cluster-wide version, listeners, CA) and <code class="font-mono text-xs text-krab-300">KafkaNodePool</code> (roles, replicas, storage claims).
       </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Sample Kafka & NodePool Manifest</h2>
+      <p>
+        A minimal <code class="font-mono text-xs text-gray-200">krabka.io/v1alpha1</code> configuration declaring a three-broker combined Controller/Broker quorum with persistent volume storage:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Kafka & KafkaNodePool CRDs:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={sampleClusterYaml}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{sampleClusterYaml}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Custom Resource Definitions (CRDs)</h2>
+      <p>
+        All custom resource definitions managed by the operator in API group <code class="text-krab-300 font-mono">krabka.io/v1alpha1</code>:
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold font-sans">
+            <tr>
+              <th class="py-3 px-4">Kind</th>
+              <th class="py-3 px-4">Declared Responsibility</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">Kafka</td><td class="py-2.5 px-4 text-gray-400">A cluster: version, inter-broker listeners, cluster CA, authorization</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaNodePool</td><td class="py-2.5 px-4 text-gray-400">A pool of nodes with its own roles (Controller, Broker), replicas, and storage</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaTopic</td><td class="py-2.5 px-4 text-gray-400">A topic, partition count, replica assignment, and configuration</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaUser</td><td class="py-2.5 px-4 text-gray-400">A principal, its ACL permissions, and SCRAM/mTLS credentials</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaListener</td><td class="py-2.5 px-4 text-gray-400">An advertised listener, ports, and TLS configuration</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaConnector</td><td class="py-2.5 px-4 text-gray-400">A Connect source or sink connector instance</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaRebalance</td><td class="py-2.5 px-4 text-gray-400">A partition reassignment plan and automated cluster rebalancing</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaSchemaRegistry</td><td class="py-2.5 px-4 text-gray-400">A schema registry deployment and ingress</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaGrpcGateway</td><td class="py-2.5 px-4 text-gray-400">A gRPC gateway deployment</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">KafkaClusterCa</td><td class="py-2.5 px-4 text-gray-400">The cluster CA and automated certificate renewal policy</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Scope & Architectural Boundaries</h2>
+      <p>
+        <code class="font-mono text-krab-300">krabka-operator</code> is scoped strictly to Kafka broker and cluster components. The Postgres-compatible compute substrate (<code class="font-mono text-xs text-gray-200">gres</code>) is managed separately and will integrate with the operator once its storage controllers land in the organization.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Installing via Helm</h2>
+      <p>
+        Deploy the operator and its CRDs using the official Helm chart:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Helm Installation:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={installOperatorYaml}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{installOperatorYaml}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/docs/helm-charts')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Helm Chart Repository →</div>
+          <p class="text-xs text-gray-400 mt-1">GPG signing key, chart index, and verification instructions for Krabka charts.</p>
+        </a>
+        <a href={getPath('/features/operator')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Operator Feature Tour →</div>
+          <p class="text-xs text-gray-400 mt-1">Overview of rolling upgrades, CRD reconciliation, and automated partition rebalancing.</p>
+        </a>
+      </div>
     </div>
   </div>
 </DocsLayout>
