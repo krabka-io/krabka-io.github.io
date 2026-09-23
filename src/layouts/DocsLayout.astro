@@ -6,15 +6,19 @@ interface Props {
   title?: string;
   description?: string;
   currentSlug?: string;
+  headings?: { depth: number; slug: string; text: string }[];
   // A markdown page under src/pages sets `layout` to this file and passes the
   // three props in its frontmatter instead.
   frontmatter?: { title: string; description: string; currentSlug: string };
 }
 
-const { frontmatter } = Astro.props;
+const { frontmatter, headings = [] } = Astro.props;
 const title = frontmatter?.title ?? Astro.props.title ?? '';
 const description = frontmatter?.description ?? Astro.props.description ?? '';
 const currentSlug = frontmatter?.currentSlug ?? Astro.props.currentSlug ?? '';
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const hasToc = toc.length > 0;
+
 // An .astro page styles its own body. A markdown page has no classes of its
 // own, so the typography plugin styles it here.
 const proseClass = frontmatter
@@ -34,72 +38,100 @@ const docSections = [
     items: [
       { label: 'Introduction', slug: '/docs' },
       { label: 'Quickstart Guide', slug: '/docs/quickstart' },
-      { label: 'Milestone 20 Qualification', slug: '/docs/qualification' },
-      { label: 'Ecosystem Architecture', slug: '/docs/architecture' },
-      { label: 'Runtime Architecture', slug: '/docs/runtime-architecture' },
       { label: 'Consensus Playground', slug: '/docs/playground' },
-    ],
-  },
-  {
-    category: 'Core Broker',
-    items: [
-      { label: 'Broker Engine', slug: '/docs/broker' },
-      { label: 'KRaft Consensus', slug: '/docs/kraft' },
-      { label: 'Tiered Storage', slug: '/docs/tiered-storage' },
-      { label: 'Storage Formatting', slug: '/docs/formatting' },
-    ],
-  },
-  {
-    category: 'Polyglot Streams',
-    items: [
-      { label: 'Go Streams & Arrow', slug: '/docs/streams-go' },
-      { label: 'Java Streams & Arrow', slug: '/docs/streams-java' },
-      { label: 'Rust Streams & Client', slug: '/docs/streams-rs' },
-      { label: 'Barrier Cuts & Epochs', slug: '/docs/barriers' },
-      { label: 'Schema Registry & Serdes', slug: '/docs/schema-registry' },
-      { label: 'Serdes & Data Formats', slug: '/docs/data-formats' },
-    ],
-  },
-  {
-    category: 'Connect & CDC',
-    items: [
-      { label: 'PostgreSQL CDC Source', slug: '/docs/connect-postgres' },
-      { label: 'Cluster Replicator', slug: '/docs/replicator' },
-    ],
-  },
-  {
-    category: 'Operations & K8s',
-    items: [
-      { label: 'Kubernetes Operator', slug: '/docs/operator' },
-      { label: 'Operator CRD Reference', slug: '/docs/crds' },
-      { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
-      { label: 'Helm Chart Repository', slug: '/docs/helm-charts' },
-    ],
-  },
-  {
-    category: 'Performance & Benchmarks',
-    items: [
       { label: 'Benchmark Methodology', slug: '/docs/benchmarks' },
     ],
   },
   {
-    category: 'Compatibility',
+    category: 'Architecture & Whitepapers',
     items: [
-      { label: 'Kafka KIP Matrix', slug: '/docs/kip-matrix' },
+      { label: 'Ecosystem Architecture', slug: '/docs/architecture' },
+      { label: 'Runtime Architecture', slug: '/docs/runtime-architecture' },
+      { label: 'Postgres Scaling Whitepaper', slug: '/whitepapers/gres-scaling' },
+      { label: 'Milestone 20 Qualification', slug: '/docs/qualification' },
     ],
   },
   {
-    category: 'Observability',
+    category: 'Core Broker (krabka-broker)',
     items: [
-      { label: 'OpenTelemetry & PromQL', slug: '/docs/observability' },
+      { label: 'Overview & Quickstart', slug: '/docs/broker' },
+      { label: 'Broker Configuration Reference', slug: '/docs/broker/config-reference' },
+      { label: 'Verification', slug: '/docs/broker/verification' },
+      { label: 'Kafka KIP Compatibility Matrix', slug: '/docs/broker/kip_matrix' },
+      { label: 'Docgen Contract', slug: '/docs/broker/docgen-contract' },
+      { label: 'Release Process', slug: '/docs/broker/releasing' },
+    ],
+  },
+  {
+    category: 'Java Streams (krabka-streams-java)',
+    items: [
+      { label: 'Overview & Quickstart', slug: '/docs/streams-java' },
+      { label: 'Getting Started', slug: '/docs/streams-java/getting-started' },
+      { label: 'Columnar Processing', slug: '/docs/streams-java/columnar' },
+      { label: 'Columnar Operators', slug: '/docs/streams-java/columnar-operators' },
+      { label: 'Serdes', slug: '/docs/streams-java/serdes' },
+      { label: 'Schema Registry', slug: '/docs/streams-java/schema-registry' },
+      { label: 'Barrier Alignment', slug: '/docs/streams-java/barriers' },
+      { label: 'Coordination', slug: '/docs/streams-java/coordination' },
+      { label: 'Testing', slug: '/docs/streams-java/testing' },
+      { label: 'Troubleshooting', slug: '/docs/streams-java/troubleshooting' },
+      { label: 'Build and Release', slug: '/docs/streams-java/build-and-release' },
+    ],
+  },
+  {
+    category: 'Go Streams (krabka-streams-go)',
+    items: [
+      { label: 'Overview & Quickstart', slug: '/docs/streams-go' },
+      { label: 'Getting Started', slug: '/docs/streams-go/getting-started' },
+      { label: 'Columnar Processing', slug: '/docs/streams-go/columnar' },
+      { label: 'Serdes', slug: '/docs/streams-go/serdes' },
+      { label: 'Schema Registry', slug: '/docs/streams-go/schema-registry' },
+      { label: 'Barrier Cuts', slug: '/docs/streams-go/barriers' },
+      { label: 'Coordination Primitives', slug: '/docs/streams-go/coordination' },
+      { label: 'Testing', slug: '/docs/streams-go/testing' },
+      { label: 'Architecture', slug: '/docs/streams-go/architecture' },
+    ],
+  },
+  {
+    category: 'Operations & Deployment',
+    items: [
+      { label: 'Kubernetes Operator', slug: '/docs/operator' },
+      { label: 'Helm Chart Repository', slug: '/docs/helm-charts' },
+      { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
+      { label: 'Telemetry & O11y (krabka-o11y)', slug: '/docs/observability' },
+    ],
+  },
+  {
+    category: 'Ecosystem & Connect',
+    items: [
+      { label: 'Rust Client & Streams', slug: '/docs/streams-rs' },
+      { label: 'Serdes & Data Formats', slug: '/docs/data-formats' },
+      { label: 'PostgreSQL CDC Source', slug: '/docs/connect-postgres' },
     ],
   },
 ];
 
-// Find active category
-const activeCategory = docSections.find((sec) =>
-  sec.items.some((item) => item.slug === currentSlug || (item.slug === '/docs' && currentSlug === '/docs/'))
-)?.category || 'Docs';
+const normalize = (p: string) => p.replace(/\/$/, '') || '/';
+const currentNorm = normalize(currentSlug || Astro.url.pathname);
+
+const isItemActive = (slug: string) => {
+  const normSlug = normalize(slug);
+  const fullSlug = normalize(getPath(slug));
+  return currentNorm === normSlug || currentNorm === fullSlug;
+};
+
+const isCategoryActive = (sec: typeof docSections[0]) => {
+  return sec.items.some((item) => {
+    if (isItemActive(item.slug)) return true;
+    const itemNorm = normalize(item.slug);
+    if (item.slug !== '/docs' && currentNorm.startsWith(itemNorm + '/')) return true;
+    const fullNorm = normalize(getPath(item.slug));
+    if (item.slug !== '/docs' && currentNorm.startsWith(fullNorm + '/')) return true;
+    return false;
+  });
+};
+
+const activeCategory = docSections.find((sec) => isCategoryActive(sec))?.category || 'Docs';
 
 const breadcrumbData = {
   "@context": "https://schema.org",
@@ -140,72 +172,149 @@ const breadcrumbData = {
 >
   <script type="application/ld+json" set:html={JSON.stringify(breadcrumbData)} slot="head" />
 
-  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+  <div class="mx-auto max-w-[90rem] px-4 sm:px-6 lg:px-8 py-10 font-sans">
     <div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
       
       <!-- Sticky Left Sidebar -->
       <aside class="lg:col-span-3">
-        <div class="sticky top-24 space-y-6 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3">
-          <div class="pb-2 border-b border-white/10">
-            <span class="text-xs font-bold uppercase tracking-wider text-krab-400 font-sans">
-              Documentation Hub
+        <div class="sticky top-24 space-y-4 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3">
+          <div class="pb-2 border-b border-white/10 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">
+              Documentation
             </span>
           </div>
 
-          <nav class="space-y-6 text-sm font-sans" aria-label="Docs navigation">
-            {docSections.map((sec) => (
-              <div>
-                <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">
-                  {sec.category}
-                </h4>
-                <ul class="space-y-1">
-                  {sec.items.map((item) => {
-                    const itemUrl = getPath(item.slug);
-                    const isActive = Astro.url.pathname === itemUrl || (item.slug === '/docs' && Astro.url.pathname === getPath('/docs'));
-                    return (
-                      <li>
-                        <a
-                          href={itemUrl}
-                          class={`block px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                            isActive
-                              ? 'bg-krab-500/15 text-krab-400 font-bold border border-krab-500/30'
-                              : 'text-gray-300 hover:text-white hover:bg-white/5'
-                          }`}
-                        >
-                          {item.label}
-                        </a>
-                      </li>
-                    );
-                  })}
-                </ul>
+          <!-- Standalone API Reference Directory Nav Component -->
+          <div class="pt-0.5">
+            <a
+              href={getPath('/api')}
+              class="flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-gray-200 hover:text-white hover:bg-white/5 border border-white/10 bg-white/[0.02] transition-colors group"
+            >
+              <div class="flex items-center gap-2">
+                <svg class="h-3.5 w-3.5 text-krab-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                </svg>
+                <span>API Reference Directory</span>
               </div>
-            ))}
+              <span class="text-[10px] text-gray-400 font-mono">/api</span>
+            </a>
+          </div>
+
+          <nav class="space-y-2 text-sm" aria-label="Documentation navigation">
+            {docSections.map((sec) => {
+              const active = isCategoryActive(sec);
+              const isOpen = active || sec.category === 'Start Here';
+
+              return (
+                <details class="group rounded-lg border border-white/5 bg-white/[0.02] overflow-hidden" open={isOpen}>
+                  <summary class="flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300 hover:text-white cursor-pointer select-none list-none transition-colors">
+                    <span class={active ? 'text-krab-400 font-bold' : ''}>{sec.category}</span>
+                    <svg class="h-3 w-3 text-gray-500 transition-transform duration-200 group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </summary>
+                  <ul class="px-2 pb-2 pt-1 space-y-0.5">
+                    {sec.items.map((item) => {
+                      const itemUrl = getPath(item.slug);
+                      const activeItem = isItemActive(item.slug);
+                      return (
+                        <li>
+                          <a
+                            href={itemUrl}
+                            class={`block px-2.5 py-1 rounded-md text-xs transition-colors ${
+                              activeItem
+                                ? 'bg-krab-500/15 text-krab-400 font-semibold'
+                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {item.label}
+                          </a>
+
+                          {activeItem && hasToc && (
+                            <div class="my-2 ml-2 pl-2.5 border-l border-krab-500/30 space-y-1">
+                              <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block pt-0.5 pb-1">
+                                On This Page
+                              </span>
+                              <ul class="space-y-1">
+                                {toc.map((heading) => (
+                                  <li class={heading.depth === 3 ? 'pl-2' : ''}>
+                                    <a
+                                      href={`#${heading.slug}`}
+                                      class="block py-0.5 text-[11px] text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                                    >
+                                      {heading.text}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </details>
+              );
+            })}
           </nav>
+
+          <!-- Fallback: When page has TOC but its slug is not a direct item in the navigation tree -->
+          {!docSections.some((sec) => sec.items.some((item) => isItemActive(item.slug))) && hasToc && (
+            <div class="pt-3 border-t border-white/10">
+              <span class="text-xs font-semibold uppercase tracking-wider text-gray-400 block pb-2">
+                On This Page
+              </span>
+              <ul class="space-y-1 border-l border-krab-500/30 pl-2.5 ml-1">
+                {toc.map((heading) => (
+                  <li class={heading.depth === 3 ? 'pl-2' : ''}>
+                    <a
+                      href={`#${heading.slug}`}
+                      class="block py-0.5 text-xs text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                    >
+                      {heading.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </aside>
 
-      <!-- Main Docs Content -->
+      <!-- Main Docs Content (Takes full remaining 9 columns) -->
       <main class="lg:col-span-9 space-y-4">
         <!-- Breadcrumbs UI -->
-        <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs font-sans text-gray-400 pb-2">
+        <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-gray-400 pb-2">
           <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
           <span>/</span>
           <a href={getPath('/docs')} class="hover:text-white transition-colors">Docs</a>
           <span>/</span>
           <span class="text-gray-400">{activeCategory}</span>
           <span>/</span>
-          <span class="text-krab-400 font-semibold">{title}</span>
+          <span class="text-gray-200 font-medium">{title}</span>
         </nav>
 
         <div class="frosted-card rounded-2xl p-8 lg:p-10 border border-white/10 space-y-6">
-          {frontmatter && (
-            <div class="border-b border-white/10 pb-4">
-              <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
+          <!-- Active Development Notice -->
+          <div class="rounded-lg border border-krab-500/20 bg-krab-500/5 px-4 py-3 text-xs text-gray-400 flex items-start gap-3">
+            <svg class="h-4 w-4 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div class="leading-relaxed">
+              <span class="font-medium text-gray-200">Active Development:</span> Krabka is greenfield software under active development. Wire protocol features, configuration properties, and APIs may change prior to stable general availability. If you find a documentation error, please <a href="https://github.com/krabka-io" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">open an issue on GitHub</a>.
             </div>
-          )}
-          <div class={proseClass}>
-            <slot />
           </div>
+
+          {frontmatter ? (
+            <div class={proseClass}>
+              <div class="border-b border-white/10 pb-4 mb-6">
+                <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
+              </div>
+              <slot />
+            </div>
+          ) : (
+            <slot />
+          )}
         </div>
       </main>
 
