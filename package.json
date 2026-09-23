@@ -4,11 +4,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "astro dev",
+    "dev": "node scripts/sync-docs.mjs && astro dev",
     "start": "astro dev",
-    "build": "npm run build:playground && astro build",
+    "sync-docs": "node scripts/sync-docs.mjs",
     "build:playground": "bash playground/build.sh",
     "build:site": "astro build",
+    "build": "npm run build:playground && node scripts/sync-docs.mjs && astro build",
+    "check-links": "node scripts/check-links.mjs",
+    "check-seo": "node scripts/check-seo.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
