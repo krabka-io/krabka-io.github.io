@@ -1,55 +1,201 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import versionsData from '../../data/versions.json';
+
+const activeRelease = versionsData.broker?.activeRelease || 'v0.5.3';
+
+const runCommand = `# 1. Initialize KRaft metadata on a fresh storage volume
+docker run --rm \\
+  -v krabka-data:/var/lib/krabka \\
+  ghcr.io/krabka-io/krabka-broker:latest \\
+  /usr/bin/krabka-format \\
+  --log-dir=/var/lib/krabka \\
+  --standalone \\
+  --node-id=1 \\
+  --controller-listener=localhost:9093
+
+# 2. Run the broker daemon
+docker run -d \\
+  --name krabka \\
+  -p 9092:9092 \\
+  -v krabka-data:/var/lib/krabka \\
+  ghcr.io/krabka-io/krabka-broker:latest \\
+  --listen-addr=0.0.0.0:9092 \\
+  --advertised-listener=localhost:9092 \\
+  --log-dir=/var/lib/krabka \\
+  --process-roles=controller,broker`;
 
 const brokerCrates = [
   { name: 'krabka-broker', desc: 'Request handlers, coordinators, partition replication, quotas, server binary' },
   { name: 'krabka-raft', desc: 'KRaft consensus engine implementing KIP-595 wire RPC protocol' },
   { name: 'krabka-kraft-core', desc: 'Shared KRaft record types and quorum state machine' },
   { name: 'krabka-log', desc: 'On-disk write-ahead log: segments, index files, compaction, retention' },
+  { name: 'krabka-logfmt', desc: 'High-performance binary log record formatter and framing' },
   { name: 'krabka-remote-storage', desc: 'Tiered-storage reader and cloud object storage offloader' },
   { name: 'krabka-remote-storage-topic', desc: 'The __remote_log_metadata topic-backed RLMM' },
+  { name: 'krabka-object-store', desc: 'Unified asynchronous cloud object store driver (S3, GCS, MinIO, Azure Blob)' },
+  { name: 'krabka-verified', desc: 'Formally verified core arithmetic, compaction, and recovery algorithms with Creusot proofs' },
+  { name: 'krabka-throttle', desc: 'Token-bucket rate limiters and KIP-scoped client quota enforcement' },
   { name: 'krabka-authz', desc: 'Authorizer traits, ACL evaluations, and OPA client' },
   { name: 'krabka-audit', desc: 'Security audit events, OCSF serialization, and verify CLI' },
   { name: 'krabka-format', desc: 'Formats fresh log directory: meta.properties.json and VotersRecord' },
+  { name: 'krabka-restore', desc: 'Snapshot compaction and disaster recovery utilities' },
+  { name: 'krabka-records-legacy', desc: 'V0 and V1 legacy message format codecs and downconversion' },
   { name: 'krabka-telemetry', desc: 'OTLP pipeline, Prometheus metrics, and pprof debug endpoints' },
+  { name: 'krabka-barrier', desc: 'Distributed barrier alignment CLI utility' },
+  { name: 'krabka-guard', desc: 'Mutants and invariant verification test harness CLI' },
+  { name: 'krabka-parse-benches', desc: 'Microbenchmarking parse harnesses and latency profiles' },
 ];
 ---
 
 <DocsLayout
-  title="Broker Engine"
-  description="Deep dive into the Krabka broker subsystems, request handling pipeline, and log engine."
+  title="Broker Engine Overview (krabka-broker)"
+  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the Krabka broker."
   currentSlug="/docs/broker"
 >
-  <div class="space-y-6">
-    <div class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Broker Engine</h1>
-      <p class="text-gray-400 mt-2 text-base">
-        The core streaming broker: request pipelines, write-ahead logs, coordinators, and consensus via <code class="text-krab-300 font-mono text-xs">krabka-broker</code> and <code class="text-krab-300 font-mono text-xs">krabka-log</code>.
-      </p>
+  <div class="space-y-6 font-sans">
+    <!-- Header -->
+    <div class="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div>
+        <div class="text-xs text-gray-400 mb-1">
+          Rust Edition 2024 · Release {activeRelease}
+        </div>
+        <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Broker Engine Overview</h1>
+        <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+          The core streaming broker: request pipelines, write-ahead logs, coordinators, and KRaft consensus via <code>krabka-broker</code>.
+        </p>
+      </div>
+
+      <a
+        href={getPath('/api/broker/latest/')}
+        class="inline-flex items-center rounded-lg bg-krab-500/20 hover:bg-krab-500/30 border border-krab-500/40 px-4 py-2 text-xs font-semibold text-krab-300 hover:text-white transition-colors shrink-0"
+      >
+        Browse Rustdoc Reference
+      </a>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        The <code class="font-mono text-krab-300">krabka-broker</code> repository contains the primary broker binary and supporting crate subsystems:
+        <code>krabka-broker</code> is a native Rust, byte-exact drop-in replacement for Apache Kafka. It runs without the JVM, using asynchronous I/O and direct kernel memory management for zero-copy record batching.
       </p>
 
+      <!-- Architecture & Engineering Guides -->
+      <div class="space-y-3 pt-2">
+        <div>
+          <h2 class="text-xl font-bold text-white">Architecture & Engineering Guides</h2>
+          <p class="text-sm text-gray-300 mt-1">
+            In-depth technical guides maintained alongside the broker codebase:
+          </p>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-300 list-disc pl-5 marker:text-krab-400">
+          <li>
+            <a href={getPath('/docs/broker/config-reference')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Broker Configuration Reference:</a> Comprehensive server properties, listener parameters, and storage thresholds.
+          </li>
+          <li>
+            <a href={getPath('/docs/broker/verification')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Verification & Invariants:</a> Formal mathematical proofs with Creusot and model checking with Stateright.
+          </li>
+          <li>
+            <a href={getPath('/docs/broker/kip_matrix')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Kafka KIP Compatibility Matrix:</a> Kafka Improvement Proposals implementation status and behavioral conformance.
+          </li>
+          <li>
+            <a href={getPath('/docs/broker/docgen-contract')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Docgen Contract:</a> Compiler-enforced doc generation contracts and JSON schema synchronizers.
+          </li>
+          <li>
+            <a href={getPath('/docs/broker/releasing')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Release Process:</a> Build verification steps, SLSA Level 3 provenance attestations, and release signing.
+          </li>
+        </ul>
+      </div>
+
+      <!-- Quickstart Running Broker -->
+      <h2 class="text-xl font-bold text-white pt-2">Running a Broker</h2>
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Docker Run (Single-Node KRaft)</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={runCommand}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{runCommand}</code></pre>
+      </div>
+
+      <!-- Published Crates Table -->
+      <h2 class="text-xl font-bold text-white pt-2">Broker Crates & Subsystems</h2>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
             <tr>
               <th class="py-3 px-4">Crate</th>
               <th class="py-3 px-4">Purpose & Subsystem</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-white/5 font-sans">
-            {brokerCrates.map((c) => (
-              <tr class="hover:bg-white/5 transition-colors">
-                <td class="py-3 px-4 font-mono font-bold text-krab-300">{c.name}</td>
-                <td class="py-3 px-4 text-gray-300">{c.desc}</td>
-              </tr>
-            ))}
+            {brokerCrates.map((c) => {
+              const crateFolder = c.name.replace(/^krabka-/, '');
+              const githubUrl = `https://github.com/krabka-io/krabka-broker/tree/main/crates/${crateFolder}#readme`;
+              return (
+                <tr class="hover:bg-white/5 transition-colors">
+                  <td class="py-3 px-4 font-medium">
+                    <a
+                      href={githubUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-krab-400 hover:text-krab-300 hover:underline transition-colors"
+                    >
+                      {c.name}
+                    </a>
+                  </td>
+                  <td class="py-3 px-4 text-gray-400">{c.desc}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+      </div>
+
+      <!-- Version & Compatibility Reference -->
+      <h2 class="text-xl font-bold text-white pt-2">Version & Compatibility</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
+            <tr>
+              <th class="py-2.5 px-4">Component</th>
+              <th class="py-2.5 px-4">Supported Version</th>
+              <th class="py-2.5 px-4">Notes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-gray-300">
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Rust Toolchain</td>
+              <td class="py-2 px-4">Rust 1.97.1+ (Edition 2024)</td>
+              <td class="py-2 px-4 text-gray-400">Nightly required for formal verification passes</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Kafka Wire Protocol</td>
+              <td class="py-2 px-4">Kafka 4.3.1 (KIP-595 KRaft)</td>
+              <td class="py-2 px-4 text-gray-400">Byte-exact request/response schema serialization</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">OS Architecture</td>
+              <td class="py-2 px-4">Linux x86_64, aarch64</td>
+              <td class="py-2 px-4 text-gray-400">glibc 2.35+ or musl</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-sm text-gray-300">
+        Full version matrices and SLSA Level 3 build provenance records are tracked on the <a href={getPath('/versions')} class="text-krab-400 hover:underline">Versions page</a>.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/docs/benchmarks')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Benchmark Methodology →</div>
+          <p class="text-xs text-gray-400 mt-1">Direct I/O NVMe throughput, memory RSS, and latency profiles vs Strimzi Kafka.</p>
+        </a>
+        <a href={getPath('/docs/runtime-architecture')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Runtime Architecture →</div>
+          <p class="text-xs text-gray-400 mt-1">Operational topology, internal broker components, and control plane reconcile loops.</p>
+        </a>
       </div>
     </div>
   </div>

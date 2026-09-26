@@ -1,22 +1,27 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import versionsData from '../../data/versions.json';
 
-const javaMaven = `<!-- Maven Central Coordinate -->
+const activeRelease = versionsData['streams-java']?.activeRelease || 'v1.1.0';
+const releaseNumber = activeRelease.replace(/^v/, '');
+
+const javaMaven = `<!-- Maven Central -->
 <dependency>
     <groupId>io.krabka</groupId>
     <artifactId>krabka-streams</artifactId>
-    <version>1.3.0</version>
+    <version>${releaseNumber}</version>
 </dependency>
 <dependency>
     <groupId>io.krabka</groupId>
     <artifactId>krabka-streams-columnar</artifactId>
-    <version>1.3.0</version>
+    <version>${releaseNumber}</version>
 </dependency>`;
 
 const javaGradle = `// Gradle Kotlin DSL
-implementation("io.krabka:krabka-streams:1.3.0")
-implementation("io.krabka:krabka-streams-columnar:1.3.0")
-implementation("io.krabka:krabka-streams-schema-serde:1.3.0")`;
+implementation("io.krabka:krabka-streams:${releaseNumber}")
+implementation("io.krabka:krabka-streams-columnar:${releaseNumber}")
+implementation("io.krabka:krabka-streams-schema-serde:${releaseNumber}")`;
 
 const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
 ---
@@ -26,92 +31,157 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
   description="Java client library for stream processing with Krabka: Apache Kafka Streams API, Confluent Schema Registry serdes, and Apache Arrow columnar batch processing."
   currentSlug="/docs/streams-java"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
+    <!-- Header -->
     <div class="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
+        <div class="text-xs text-gray-400 mb-1">
+          Java 17+ · Release {activeRelease}
+        </div>
         <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Java Streams & Arrow</h1>
-        <p class="text-gray-400 mt-2 text-base">
-          Kafka Streams 4.x compatible engine with columnar Arrow operators and schema serdes via <code class="text-krab-300 font-mono text-xs">krabka-streams-java</code>.
+        <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+          Kafka Streams 4.x compatible engine with columnar Apache Arrow operators and schema serdes via <code>krabka-streams-java</code>.
         </p>
       </div>
 
       <a
-        href="https://krabka-io.github.io/krabka-streams-java/"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="inline-flex items-center gap-2 rounded-xl bg-krab-500/20 border border-krab-500/40 px-4 py-2 text-xs font-bold text-krab-300 hover:bg-krab-500/30 hover:text-white transition-all shrink-0 font-sans"
+        href={getPath('/api/streams-java/latest/')}
+        class="inline-flex items-center rounded-lg bg-krab-500/20 hover:bg-krab-500/30 border border-krab-500/40 px-4 py-2 text-xs font-semibold text-krab-300 hover:text-white transition-colors shrink-0"
       >
-        <span>Full Javadoc API Reference</span>
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-        </svg>
+        Browse Javadoc Reference
       </a>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <code class="font-mono text-krab-300">krabka-streams-java</code> is the Java client library for stream processing with Krabka. It exports the Kafka Streams API and adds native support for Confluent Schema Registry and Apache Arrow direct-memory processing. Minimum Java version is <strong>JDK 17</strong>.
+        <code>krabka-streams-java</code> is the Java client library for stream processing with Krabka. It exports the standard Kafka Streams API and adds native support for Confluent Schema Registry and Apache Arrow direct-memory processing. The library targets Java 17 bytecode and is tested on JDK 17 and JDK 21.
       </p>
 
-      <h2 class="text-xl font-bold text-white pt-2">Dependency Coordinates</h2>
-      <div class="frosted-card rounded-2xl p-6 border border-white/10 space-y-4">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold uppercase tracking-wider text-gray-400 font-sans">Gradle / Maven</span>
-          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans text-xs" data-copy={javaGradle}>
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>Copy Gradle</span>
-          </button>
+      <!-- Architecture & Engineering Guides -->
+      <div class="space-y-3 pt-2">
+        <div>
+          <h2 class="text-xl font-bold text-white">Architecture & Engineering Guides</h2>
+          <p class="text-sm text-gray-300 mt-1">
+            In-depth technical guides maintained alongside the Java codebase:
+          </p>
         </div>
-        <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{javaGradle}</code></pre>
+        <ul class="space-y-2 text-sm text-gray-300 list-disc pl-5 marker:text-krab-400">
+          <li>
+            <a href={getPath('/docs/streams-java/getting-started')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Getting Started:</a> Prerequisites, dependency coordinates, and your first streaming pipeline.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/columnar')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Columnar Processing:</a> VectorSchemaRoot batch execution, codecs, and topology lifecycle.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/columnar-operators')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Columnar Operators:</a> Direct off-heap buffer allocation, try-with-resources, and zero-copy filters.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/serdes')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Serdes:</a> Avro, Protobuf, and JSON Schema serdes with non-blocking schema caching.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/schema-registry')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Schema Registry:</a> Confluent Schema Registry client integration, schema evolution, and wire protocol.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/barriers')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Barrier Alignment:</a> Synchronous checkpoint cuts across multi-partition consumer topologies.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/coordination')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Coordination:</a> Distributed leader election, fencing tokens, and lease succession semantics.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/testing')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Testing:</a> Mock topologies in-memory with ColumnarTestDriver and SchemaRegistryStub.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/troubleshooting')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Troubleshooting:</a> Common JVM flags, buffer allocator diagnostics, and error resolutions.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/build-and-release')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Build and Release:</a> Hermetic Bazel build targets, Maven Central publishing, and Javadoc generation.
+          </li>
+        </ul>
       </div>
 
+      <!-- Dependency Coordinates -->
+      <h2 class="text-xl font-bold text-white pt-2">Dependency Coordinates</h2>
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Gradle Kotlin DSL</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={javaGradle}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{javaGradle}</code></pre>
+      </div>
+
+      <!-- Published Modules -->
       <h2 class="text-xl font-bold text-white pt-2">Published Modules</h2>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
             <tr>
               <th class="py-3 px-4">Artifact</th>
               <th class="py-3 px-4">Purpose</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-white/5 font-sans">
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams</td><td class="py-2.5 px-4">Apache Kafka Streams API and Krabka defaults</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams-schema-serde</td><td class="py-2.5 px-4">Avro, Protobuf, and JSON Schema serdes with non-blocking cache</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams-columnar</td><td class="py-2.5 px-4">Apache Arrow direct memory batch processing & operators</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4">Avro and Protobuf Arrow memory bridges</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams-test-utils</td><td class="py-2.5 px-4">ColumnarTestDriver and SchemaRegistryStub helpers</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono text-krab-300 font-semibold">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4">Bill of Materials dependency constraints</td></tr>
+          <tbody class="divide-y divide-white/5">
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams</td><td class="py-2.5 px-4 text-gray-400">Kafka Streams 4.x API compatibility</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-schema-serde</td><td class="py-2.5 px-4 text-gray-400">Avro, Protobuf, and JSON Schema serdes</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar</td><td class="py-2.5 px-4 text-gray-400">Apache Arrow batch processing and zero-copy operators</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-test-utils</td><td class="py-2.5 px-4 text-gray-400">ColumnarTestDriver and SchemaRegistryStub helpers</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4 text-gray-400">Bill of Materials dependency constraints</td></tr>
           </tbody>
         </table>
       </div>
 
+      <!-- JVM Requirements -->
       <h2 class="text-xl font-bold text-white pt-2">Direct Buffer JVM Requirement</h2>
-      <p>
-        Apache Arrow 19 requires this JVM option when accessing direct off-heap buffers:
+      <p class="text-sm text-gray-300">
+        When accessing off-heap Apache Arrow buffers on JDK 17+, supply this JVM flag:
       </p>
-      <div class="bg-black/50 p-4 rounded-xl border border-white/5 font-mono text-xs text-krab-300 flex items-center justify-between">
+      <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between">
         <span>{jvmFlag}</span>
-        <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={jvmFlag}>
-          <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-          <span>Copy Flag</span>
+        <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors" data-copy={jvmFlag}>
+          Copy Flag
         </button>
       </div>
 
-      <h2 class="text-xl font-bold text-white pt-2">Automatic Javadoc & Maven CI Publishing</h2>
-      <p>
-        The complete interactive Javadoc reference is built with Bazel/Gradle and published automatically on every release to GitHub Pages:
-      </p>
-      <div class="pt-2">
-        <a
-          href="https://krabka-io.github.io/krabka-streams-java/"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-2 text-xs font-semibold text-white transition-all"
-        >
-          <span>Open krabka-streams-java Javadoc Site</span>
-          <svg class="h-3.5 w-3.5 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-        </a>
+      <!-- Version & Compatibility Reference -->
+      <h2 class="text-xl font-bold text-white pt-2">Version & Compatibility</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
+            <tr>
+              <th class="py-2.5 px-4">Component</th>
+              <th class="py-2.5 px-4">Supported Version</th>
+              <th class="py-2.5 px-4">Notes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-gray-300">
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Java Bytecode</td>
+              <td class="py-2 px-4">JDK 17, JDK 21, JDK 25</td>
+              <td class="py-2 px-4 text-gray-400">Compiled with JDK 17 source/target compatibility</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Kafka Wire Protocol</td>
+              <td class="py-2 px-4">Kafka 4.3.1</td>
+              <td class="py-2 px-4 text-gray-400">Transitive api dependency</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Apache Arrow</td>
+              <td class="py-2 px-4">19.0.0</td>
+              <td class="py-2 px-4 text-gray-400">Direct off-heap memory allocators</td>
+            </tr>
+            <tr>
+              <td class="py-2 px-4 font-medium text-white">Krabka Broker</td>
+              <td class="py-2 px-4">0.5.4 or Apache Kafka 4.3.1</td>
+              <td class="py-2 px-4 text-gray-400">Requires streams.version=1 finalized</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+      <p class="text-sm text-gray-300">
+        Full version matrices and SLSA Level 3 build provenance records are tracked on the <a href={getPath('/versions')} class="text-krab-400 hover:underline">Versions page</a>.
+      </p>
     </div>
   </div>
 </DocsLayout>

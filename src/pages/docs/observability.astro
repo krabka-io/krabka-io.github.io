@@ -1,39 +1,131 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
 
-const o11yDemo = `git clone https://github.com/krabka-io/krabka-o11y-demo
-cd krabka-o11y-demo
-docker compose up -d`;
+const o11yDemo = `# Clone and start the full-signal observability stack
+git clone https://github.com/krabka-io/krabka-o11y-demo
+cd krabka-o11y-demo/demo/observability
+docker compose up -d
+
+# Grafana is served at http://localhost:3000 (anonymous admin access)
+# Inspect the orders stream with psql:
+PGPASSWORD=demo psql 'host=localhost port=5433 user=demo dbname=demo' \\
+  -c 'SELECT count(*) FROM demo_orders'`;
+
+const promqlQueries = `# Total broker message ingress throughput (msg/sec)
+sum(rate(crabka_broker_messages_in_total[5m]))
+
+# Topic byte ingress bandwidth (bytes/sec)
+sum(rate(crabka_broker_topic_bytes_in_total[5m]))
+
+# KRaft controller leader changes (cluster stability)
+sum(crabka_broker_controller_leader_changes_total)
+
+# In-sync replica (ISR) shrink frequency
+sum(rate(crabka_broker_isr_shrinks_total[5m]))`;
 ---
 
 <DocsLayout
-  title="OpenTelemetry & PromQL"
-  description="Metrics, distributed traces, continuous profiling, and Grafana dashboards for Krabka clusters."
+  title="Observability: Prometheus, PromQL & OpenTelemetry"
+  description="Full-signal observability stack for Krabka: PromQL metrics, OTLP traces, LogQL logs, and pprof continuous profiling."
   currentSlug="/docs/observability"
 >
-  <div class="space-y-6">
+  <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
+      <div class="text-xs text-gray-400 mb-1">
+        Telemetry & Operations · Developer Preview
+      </div>
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Observability & Telemetry</h1>
-      <p class="text-gray-400 mt-2 text-base">
-        Full-signal telemetry without third-party agent sidecars via <code class="text-krab-300 font-mono text-xs">krabka-telemetry</code> and <code class="text-krab-300 font-mono text-xs">krabka-o11y</code>.
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        Unified four-signal observability for streaming clusters: PromQL metrics, OTLP distributed traces, LogQL logs, and continuous profiling via <code class="text-krab-300 font-mono text-xs">krabka-o11y</code>.
       </p>
     </div>
 
-    <div class="space-y-6 text-sm text-gray-300">
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
+      <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
+        <strong class="font-semibold text-amber-200">Developer Preview Notice:</strong>
+        <code class="font-mono text-amber-200">krabka-o11y</code> is under active development. The PromQL, TraceQL, and LogQL query engines are tested against differential suites with upstream Prometheus and Grafana containers.
+      </div>
+
       <p>
-        The observability engine natively outputs Prometheus metrics on <code class="font-mono text-krab-300 text-xs">/metrics</code>, exports spans via OpenTelemetry gRPC/HTTP OTLP pipelines, and provides pprof runtime profiling endpoints.
+        Rather than running four separate storage daemons (Prometheus, Jaeger/Tempo, Loki, and Pyroscope), <code class="font-mono text-krab-300 text-xs">krabka-o11y</code> unifies metrics, traces, logs, and continuous profiles over a single columnar block store (<code class="font-mono text-xs text-gray-200">crabka-blockstore</code>) backed by cloud object storage. Each signal exposes the query language its ecosystem already speaks.
       </p>
 
-      <h2 class="text-xl font-bold text-white pt-2">Runnable Demo Stack</h2>
-      <div class="bg-black/50 p-4 rounded-xl border border-white/5 relative font-mono text-xs">
-        <div class="flex justify-between items-center text-gray-400 mb-2 font-sans">
-          <span>Run Demo Stack:</span>
-          <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={o11yDemo}>
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>Copy</span>
+      <h2 class="text-xl font-bold text-white pt-2">Crate Hierarchy & Query Backends</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Telemetry Signal</th>
+              <th class="py-3 px-4">Query Interface</th>
+              <th class="py-3 px-4">Subsystem Crate</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-bold text-white">Metrics</td>
+              <td class="py-3 px-4 text-krab-300 font-mono">PromQL</td>
+              <td class="py-3 px-4 text-gray-300"><code class="text-xs font-mono">crabka-promql</code>, <code class="text-xs font-mono">crabka-metrics-service</code></td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-bold text-white">Distributed Traces</td>
+              <td class="py-3 px-4 text-krab-300 font-mono">TraceQL / OTLP</td>
+              <td class="py-3 px-4 text-gray-300"><code class="text-xs font-mono">crabka-traceql</code>, <code class="text-xs font-mono">crabka-traces</code></td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-bold text-white">Logs & Audit</td>
+              <td class="py-3 px-4 text-krab-300 font-mono">LogQL</td>
+              <td class="py-3 px-4 text-gray-300"><code class="text-xs font-mono">crabka-logql</code>, <code class="text-xs font-mono">crabka-observability</code></td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-bold text-white">Continuous Profiling</td>
+              <td class="py-3 px-4 text-krab-300 font-mono">pprof</td>
+              <td class="py-3 px-4 text-gray-300"><code class="text-xs font-mono">crabka-pprof</code>, <code class="text-xs font-mono">crabka-profiles</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Key Broker Metrics & PromQL</h2>
+      <p>
+        The broker natively exposes Prometheus metrics on <code class="font-mono text-krab-300 text-xs">/metrics</code>. Common PromQL expressions used in the pre-provisioned Grafana dashboards:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>PromQL Metric Queries:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={promqlQueries}>
+            Copy
           </button>
         </div>
-        <pre class="text-krab-300 overflow-x-auto"><code>{o11yDemo}</code></pre>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{promqlQueries}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Runnable Demo Stack</h2>
+      <p>
+        The <a href="https://github.com/krabka-io/krabka-o11y-demo" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline"><code>krabka-o11y-demo</code> repository</a> provides a runnable full-signal environment featuring an instrumented orders pipeline with W3C trace context propagated across record headers into Grafana:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Run Local Grafana Stack:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={o11yDemo}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{o11yDemo}</code></pre>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/features/observability')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Observability Feature Overview →</div>
+          <p class="text-xs text-gray-400 mt-1">Architecture of native telemetry, zero-agent sidecars, and Grafana integration.</p>
+        </a>
+        <a href={getPath('/docs/benchmarks')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Benchmark Methodology →</div>
+          <p class="text-xs text-gray-400 mt-1">Comparative memory working set RSS and p99 latency evaluation.</p>
+        </a>
       </div>
     </div>
   </div>
