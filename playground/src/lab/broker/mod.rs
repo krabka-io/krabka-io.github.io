@@ -51,7 +51,7 @@
 //! | `default_replication_factor` | `i16` | `-1` | `default.replication.factor` | `-1` means every unfenced broker |
 //! | `min_insync_replicas` | `i32` | `1` | `min.insync.replicas` | the broker default |
 //! | `log_retention_ms` | `i64` | `604800000` (7 days) | `log.retention.ms` | the broker default of `retention.ms`; `-1` keeps everything |
-//! | `replica_lag_time_max_ms` | `u64` | `10000` | `replica.lag.time.max.ms` | how long a follower may lag before it leaves the ISR |
+//! | `replica_lag_time_max_ms` | `u64` | `30000` | `replica.lag.time.max.ms` | how long a follower may lag before it leaves the ISR |
 //! | `request_timeout_ms` | `u64` | `30000` | `request.timeout.ms` | the longest a held request waits (a `Produce` waits its own `timeout_ms` when shorter, a `Fetch` its `max_wait_ms`), and how long a follower waits for its leader's answer |
 //! | `broker_heartbeat_interval_ms` | `u64` | `2000` | `broker.heartbeat.interval.ms` | the pause between two heartbeats |
 //! | `broker_session_timeout_ms` | `u64` | `9000` | `broker.session.timeout.ms` | how long the controller waits for a heartbeat before it fences the broker |
@@ -353,7 +353,7 @@ impl BrokerConfig {
             default_replication_factor: config_field_or(spec, "default_replication_factor", -1)?,
             min_insync_replicas: config_field_or(spec, "min_insync_replicas", 1)?,
             log_retention_ms: config_field_or(spec, "log_retention_ms", DEFAULT_RETENTION_MS)?,
-            replica_lag_time_max_ms: config_field_or(spec, "replica_lag_time_max_ms", 10_000)?,
+            replica_lag_time_max_ms: config_field_or(spec, "replica_lag_time_max_ms", 30_000)?,
             request_timeout_ms: config_field_or(spec, "request_timeout_ms", 30_000)?,
             broker_heartbeat_interval_ms: config_field_or(
                 spec,
@@ -1542,7 +1542,7 @@ mod tests {
             default_replication_factor: -1,
             min_insync_replicas: 1,
             log_retention_ms: DEFAULT_RETENTION_MS,
-            replica_lag_time_max_ms: 10_000,
+            replica_lag_time_max_ms: 30_000,
             request_timeout_ms: 30_000,
             broker_heartbeat_interval_ms: 2_000,
             broker_session_timeout_ms: 9_000,
