@@ -568,6 +568,14 @@ function buildShell() {
   root.appendChild(layout);
 }
 
+// Selecting a session pushes `#session=<id>`, so Back and Forward move through
+// the hashes; a URL without one, the state the page opened in, means the
+// default session again.
+function followHash() {
+  const id = idFromHash() || (visibleSessions()[0] || {}).id;
+  if (id && id !== selectedId) select(id, false);
+}
+
 function main() {
   root = document.getElementById(ROOT_ID);
   if (!root) return;
@@ -589,14 +597,8 @@ function main() {
       const first = visibleSessions()[0];
       if (first) select(first.id, false);
     }
-    window.addEventListener("hashchange", () => {
-      const id = idFromHash();
-      if (id && id !== selectedId) select(id, false);
-    });
-    window.addEventListener("popstate", () => {
-      const id = idFromHash();
-      if (id && id !== selectedId) select(id, false);
-    });
+    window.addEventListener("hashchange", followHash);
+    window.addEventListener("popstate", followHash);
     probeBundle();
   } catch (err) {
     const p = el("p", "px-error", `The proof explorer could not start: ${err && err.message ? err.message : err}`);
@@ -915,8 +917,8 @@ function getAltErgoPool() {
 
 // ---- replay ---------------------------------------------------------------------
 
-function setLeaf(key, state, text) {
-  const entry = leafCells.get(key);
+function setLeafIn(cells, key, state, text) {
+  const entry = cells.get(key);
   if (!entry) return;
   entry.cell.className = `px-live px-live-${state}`;
   entry.cell.textContent = text;
@@ -924,6 +926,11 @@ function setLeaf(key, state, text) {
 
 async function recheckSession(session, ui) {
   const started = performance.now();
+  // The tree keys are positions, so they collide across sessions. Results go
+  // to the cells rendered for this session, even after the reader selects
+  // another one while the run continues.
+  const cells = leafCells;
+  const setLeaf = (key, state, text) => setLeafIn(cells, key, state, text);
   const totals = { attempted: 0, proved: 0, unproved: 0, timeout: 0, error: 0, skipped: 0, diverged: 0, missing: 0 };
 
   ui.status("Starting Why3...");
@@ -942,7 +949,7 @@ async function recheckSession(session, ui) {
   ui.log(`Loaded ${plural(loadedGoals.size, "goal", "goals")} from ${session.id}.coma`);
 
   // Reset the status cells.
-  for (const key of leafCells.keys()) setLeaf(key, "running", "queued");
+  for (const key of cells.keys()) setLeaf(key, "running", "queued");
 
   const proofs = [];
   let leafNo = 0;

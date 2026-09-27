@@ -171,8 +171,13 @@ function kindOf(name, kernelNames) {
 
 const checkout = brokerCheckout();
 if (!checkout) {
-  console.warn('  ⚠️ No proof sessions available; the proof explorer will say so.');
-  process.exit(0);
+  // The proof explorer page imports the sessions file, so a build without it
+  // fails later with a less helpful message, and a reused workspace would
+  // otherwise publish whatever the previous sync wrote.
+  fs.rmSync(COMA_OUT, { recursive: true, force: true });
+  fs.rmSync(DATA_OUT, { force: true });
+  console.error(`  ✗ No proof sessions: ${REPO} is not checked out beside this repository and could not be cloned. The proof explorer cannot be built without them.`);
+  process.exit(1);
 }
 
 const verifDir = path.join(checkout, VERIF_SUBDIR);
