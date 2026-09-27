@@ -46,7 +46,7 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
 
 <DocsLayout
   title="Proof Explorer"
-  description="Explore the Why3 proof sessions of Krabka's Creusot-verified kernels: which tactic split each verification condition, which prover discharged each leaf and how long it took, and re-check a session in the browser with Alt-Ergo compiled to JavaScript."
+  description="Browse the Why3 proof sessions of Krabka's Creusot-verified kernels, tactic by tactic and prover by prover, and re-check one in the browser with Alt-Ergo compiled to JavaScript."
   currentSlug="/docs/proof-explorer"
 >
   <div class="space-y-6 font-sans min-w-0">
@@ -113,11 +113,11 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
       <p>
         <span class="font-semibold text-gray-200">What this page can and cannot do.</span> The sessions are the
         repository's recorded proofs, shown as why3find stored them; nothing here re-derives them. The browser
-        re-check, when the build includes it, runs Alt-Ergo compiled to JavaScript on the same verification
-        conditions, printed through Why3's native-syntax Alt-Ergo driver, whereas CI proved them through
-        Alt-Ergo's SMT-LIB input: the same prover on the same condition through a different printer, so a leaf
-        that times out in the browser says nothing against the recorded proof. Goals recorded with Z3, CVC4 or
-        CVC5 are shown as recorded and are not re-run.
+        re-check, when the build includes it, runs the same Alt-Ergo release on the same verification
+        conditions through Why3's SMT-LIB driver, the same input language CI uses, compiled to JavaScript. A
+        leaf that times out in the browser says nothing against the recorded proof: the JavaScript build is
+        slower than the native one and the step budget is the page's, not CI's. Goals recorded with Z3, CVC4
+        or CVC5 are shown as recorded and are not re-run.
       </p>
     </div>
 

@@ -42,6 +42,12 @@ npm run check-links
 # Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
 npm run check-seo
 
+# Sync the broker's proof sessions and Coma files for the proof explorer
+npm run sync-proofs
+
+# Build Why3 and Alt-Ergo to JavaScript with Bazel (needs Docker) for the browser re-check
+npm run build:why3-web
+
 # Check that the synced broker verification catalog still parses into the ledger rows
 npm run check-catalog
 
@@ -73,6 +79,10 @@ npm run preview
 - The same `playground/` crate also binds `krabka-verified`, the broker's Creusot-proved decision kernels, through one `run_kernel(name, json)` dispatcher. The page evaluates a curated set of kernels in the browser with each function's `requires` and `ensures` contract beside the result; inputs outside a precondition are reported, not evaluated.
 - Each kernel's panel carries a "Proof ledger" drilldown quoting the broker's catalog: what the catalog says the kernel proves, which production code calls it, its Why3 proof sessions, and what the caller must establish.
 - Below the explorer, an expandable Stateright model ledger built from `src/data/stateright-models.json` and the catalog lists every model entry point with what it drives, its bounds, its properties, its pinned unique-state counts, and the catalog's own description. The models themselves cannot run in a browser (they are test modules of I/O-bearing crates), so the ledger is an inventory, not a checker.
+
+### 4b. Proof Explorer (`/docs/proof-explorer`)
+- `scripts/sync-proofs.mjs` copies the broker's Why3find proof sessions (`verif/**/proof.json`) and the Coma files Creusot generated into `src/data/proof-sessions.json` and `public/proofs/coma/`. The page lists every session by module, shows its proof tree (tactics, provers, times), the `[@expl]` obligations parsed from the Coma with their source spans, and the generated Coma itself.
+- With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo compiled to JavaScript discharges each leaf through Why3's SMT-LIB driver.
 
 ### 5. Correctness & Verification (`/verification`)
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
