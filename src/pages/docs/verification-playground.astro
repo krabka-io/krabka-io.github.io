@@ -1,53 +1,75 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
+import EvidenceLedger from '../../components/EvidenceLedger.astro';
 import { getPath } from '../../utils/paths';
-import kernels from '../../data/verified-kernels.json';
-import models from '../../data/stateright-models.json';
+import { loadVerificationData } from '../../utils/verification-loader';
 import '../../styles/kernels.css';
 
-type Kernel = (typeof kernels)[number];
-type Model = (typeof models)[number] & {
-  kafka?: string;
-  outside?: string;
-  pinned_states?: { config: string; count: number }[];
-};
-
-const kernelAreas = [...new Set(kernels.map((k: Kernel) => k.area))];
-const modelAreas = [...new Set(models.map((m: Model) => m.area))];
-const modelsByArea = (area: string) => (models as Model[]).filter((m) => m.area === area);
-const pinnedTotal = (models as Model[]).reduce(
-  (sum, m) => sum + (m.pinned_states ?? []).reduce((s, p) => s + p.count, 0),
-  0,
-);
+const data = loadVerificationData();
+const { stats } = data;
 const formatCount = (n: number) => n.toLocaleString('en-US');
+
+// The explorer reads these specs from the page. A ledger's `page_url` is
+// site-relative in the data, and the deployed site may sit under a base path,
+// so it is resolved here, once, before it is embedded.
+const specs = data.explorerSpecs.map((spec) =>
+  spec.ledger ? { ...spec, ledger: { ...spec.ledger, page_url: getPath(spec.ledger.page_url) } } : spec,
+);
+const kernelAreas = [...new Set(specs.map((s) => s.area))];
+const staterightNotes = data.catalog.sections.find((s) => s.slug === 'stateright-model-check-tier')?.html ?? [];
+
+// The catalog renderer escapes everything it does not emit itself, so the
+// embedded HTML cannot hold a closing script tag; `<` is escaped anyway so no
+// future field can end the JSON block early.
+const specsJson = JSON.stringify(specs).replace(/</g, '\\u003c');
+
+const facts: { value: string; label: string }[] = [
+  stats.catalogAvailable
+    ? { value: `${formatCount(stats.explorerKernels)} of ${formatCount(stats.functions)}`, label: 'proved kernel functions run here' }
+    : { value: formatCount(stats.explorerKernels), label: 'proved kernel functions run here' },
+  { value: formatCount(stats.models), label: 'Stateright models' },
+  { value: formatCount(stats.pinnedTotal), label: 'pinned unique states' },
+];
+if (stats.catalogAvailable) {
+  facts.push({ value: formatCount(stats.proofSessions), label: 'proof sessions in the ledger' });
+}
 ---
 
 <DocsLayout
   title="Verification Playground"
-  description="Evaluate Krabka's Creusot-verified decision kernels in WebAssembly and browse every Stateright model with its bounds, properties, and pinned state counts."
+  description="Evaluate Krabka's Creusot-verified decision kernels in WebAssembly, read each kernel's proof ledger row, and browse every Stateright model with its bounds, properties, and pinned state counts."
   currentSlug="/docs/verification-playground"
 >
   <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Verification Playground</h1>
+      <p class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400" aria-label="Verification figures">
+        {facts.map((fact, i) => (
+          <>
+            {i > 0 && <span class="text-gray-600 select-none" aria-hidden="true">·</span>}
+            <span><span class="font-semibold text-white tabular-nums">{fact.value}</span> {fact.label}</span>
+          </>
+        ))}
+      </p>
       <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
         Run the proved kernels in your browser, and read what each Stateright model checks.
       </p>
     </div>
 
-    <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+    <div class="space-y-3 text-sm text-gray-300 leading-relaxed">
       <p>
         Krabka keeps its safety-critical decisions in <code class="font-mono text-krab-300">krabka-verified</code>,
-        a crate of small pure functions whose contracts Creusot proves. Because those kernels do no I/O, the
-        crate compiles to WebAssembly unchanged. The explorer below calls the same compiled bodies that the
-        broker calls, so the answer you see is the answer the broker would give. Beside each result is the
-        function's <code class="font-mono text-krab-300">requires</code> and
-        <code class="font-mono text-krab-300">ensures</code> contract, quoted from the source.
+        a crate of small pure functions whose contracts Creusot proves. The kernels do no I/O, so the crate
+        compiles to WebAssembly unchanged, and the explorer below calls the same compiled bodies the broker
+        calls: the answer on screen is the broker's answer, shown beside the
+        <code class="font-mono text-krab-300">requires</code> and
+        <code class="font-mono text-krab-300">ensures</code> contract quoted from the source.
       </p>
       <p>
-        The kernels here are {kernels.length} of the crate's decision functions, chosen because their inputs fit
-        a form. The <a href={getPath('/docs/broker/verification')} class="text-krab-400 hover:text-krab-300 font-semibold">verification catalog</a>
-        lists every proved kernel and every model.
+        The kernels here are {formatCount(stats.explorerKernels)} of the crate's decision functions, chosen
+        because their inputs fit a form. The
+        <a href={getPath('/docs/broker/verification')} class="text-krab-400 hover:text-krab-300 font-semibold">verification catalog</a>
+        lists every proved kernel and every model, and each kernel's panel below quotes the catalog's row for it.
       </p>
     </div>
 
@@ -57,9 +79,12 @@ const formatCount = (n: number) => n.toLocaleString('en-US');
       Areas: {kernelAreas.join(', ')}. Pick a kernel, edit its inputs, and the result updates as you type. An
       input that breaks a precondition is reported rather than evaluated, because the proof says nothing about
       inputs outside the contract.
+      {stats.catalogAvailable
+        ? 'Each kernel’s panel has a “Proof ledger” drilldown quoting the catalog: what the kernel proves, who calls it in production, which proof sessions cover it, and what the caller must establish.'
+        : 'The catalog rows are missing from this build, so the “Proof ledger” drilldown under each kernel is absent; run the docs sync to restore them.'}
     </p>
 
-    <script type="application/json" id="krabka-kernel-specs" is:inline set:html={JSON.stringify(kernels)}></script>
+    <script type="application/json" id="krabka-kernel-specs" is:inline set:html={specsJson}></script>
     <div id="krabka-kernels" class="not-prose">
       <p class="kx-fallback">
         Loading the verified kernel explorer. This panel needs JavaScript and WebAssembly. If it does not
@@ -67,120 +92,58 @@ const formatCount = (n: number) => n.toLocaleString('en-US');
       </p>
     </div>
 
-    <!-- Stateright gallery -->
-    <h2 id="models" class="text-xl font-bold text-white pt-4">Stateright model gallery</h2>
-    <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+    <!-- Stateright models -->
+    <h2 id="models" class="text-xl font-bold text-white pt-4">Stateright models</h2>
+    <div class="space-y-3 text-sm text-gray-300 leading-relaxed">
       <p>
-        Where correctness depends on a sequence of crashes, retries, and interleavings rather than on one
+        Where correctness depends on a sequence of crashes, retries and interleavings rather than on one
         decision, Krabka writes a Stateright model. The checker enumerates every reachable state within the
-        model's bounds and prints a counterexample trace if a property fails. Each model's runner asserts its
+        model's bounds and prints a counterexample trace if a property fails, and each runner asserts its
         unique-state count against a pinned constant, so a search that silently shrinks fails the build.
       </p>
       <p>
-        The models cannot run in this page. They live as test modules inside the broker and client crates,
-        which depend on networking and file I/O that WebAssembly does not provide, and the checker itself
-        uses threads. What this gallery gives you instead is the inventory: {models.length} model entry
-        points, what production code each one drives, its bounds, its properties, and the
-        {formatCount(pinnedTotal)} pinned unique states they cover between them. Every figure comes from
-        the verification catalog, which pull request CI keeps in step with the models.
+        The models cannot run in this page: they live as test modules inside broker and client crates that
+        depend on networking and file I/O, and the checker itself uses threads. The list below gives the
+        inventory instead. Its {formatCount(stats.models)} entry points are grouped by area, and each opens to
+        the production code it drives, its bounds, its properties, its pinned unique states
+        ({formatCount(stats.pinnedTotal)} between them), what stays outside the model, and one level further
+        down the catalog's own paragraphs about it. Every figure comes from the verification catalog, which
+        pull request CI keeps in step with the models.
       </p>
     </div>
 
-    <div class="space-y-8 not-prose">
-      {modelAreas.map((area) => (
-        <section>
-          <h3 class="text-base font-bold text-white mb-3">{area}</h3>
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {modelsByArea(area).map((m) => (
-              <article id={`model-${m.id}`} class="frosted-card rounded-2xl p-5 border border-white/10 flex flex-col gap-3">
-                <div>
-                  <div class="flex items-start justify-between gap-3">
-                    <h4 class="text-sm font-bold text-white">{m.name}</h4>
-                    <span class="rounded bg-white/5 border border-white/10 px-2 py-0.5 text-[10px] font-medium text-gray-400 whitespace-nowrap">{m.repo}</span>
-                  </div>
-                  <a
-                    href={m.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="mt-1 inline-block font-mono text-[11px] text-krab-300 hover:text-krab-200 break-all"
-                  >
-                    {m.path}
-                  </a>
-                </div>
+    <EvidenceLedger
+      models={data.models}
+      modelNotes={staterightNotes}
+      initialTab="models"
+      id="model-ledger"
+      catalogPath={getPath('/docs/broker/verification')}
+    />
 
-                <p class="text-xs text-gray-300 leading-relaxed">{m.summary}</p>
-
-                {m.drives && m.drives.length > 0 && (
-                  <div>
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Drives</div>
-                    <div class="flex flex-wrap gap-1.5">
-                      {m.drives.map((d) => (
-                        <code class="rounded bg-black/40 border border-white/5 px-1.5 py-0.5 font-mono text-[11px] text-gray-200">{d}</code>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {m.bounds && (
-                  <div>
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Bounds</div>
-                    <p class="text-xs text-gray-300 leading-relaxed">{m.bounds}</p>
-                  </div>
-                )}
-
-                {m.properties && m.properties.length > 0 && (
-                  <div>
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Properties</div>
-                    <div class="flex flex-wrap gap-1.5">
-                      {m.properties.map((p) => (
-                        <code class="rounded bg-krab-500/10 border border-krab-500/30 px-1.5 py-0.5 font-mono text-[11px] text-krab-300">{p}</code>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {m.pinned_states && m.pinned_states.length > 0 && (
-                  <div>
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Pinned unique states</div>
-                    <table class="w-full text-left text-[11px]">
-                      <tbody class="divide-y divide-white/5">
-                        {m.pinned_states.map((p) => (
-                          <tr>
-                            <td class="py-1 pr-3 font-mono text-gray-300">{p.config}</td>
-                            <td class="py-1 font-mono text-white text-right">{formatCount(p.count)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {m.outside && (
-                  <p class="text-[11px] text-gray-500 leading-relaxed border-t border-white/5 pt-2">
-                    <span class="font-semibold text-gray-400">Outside the model:</span> {m.outside}
-                  </p>
-                )}
-              </article>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
+    <details class="group rounded-xl border border-white/10 bg-white/[0.02] not-prose">
+      <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3">
+        <h2 id="how-it-works" class="text-base font-bold text-white">How the explorer works</h2>
+        <svg class="h-3.5 w-3.5 shrink-0 text-gray-500 transition-transform duration-200 group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </summary>
+      <div class="space-y-3 border-t border-white/10 px-4 py-3 text-sm leading-relaxed text-gray-300">
+        <ol class="list-decimal space-y-1.5 pl-5">
+          <li>The site build compiles <code class="font-mono text-krab-300">krabka-verified</code> at the pinned broker release into the same WebAssembly module as the consensus playground.</li>
+          <li>The page serialises your inputs to JSON and hands them to one dispatcher function in the module.</li>
+          <li>The dispatcher checks the kernel's <code class="font-mono text-krab-300">requires</code> clauses first. Inputs outside the contract come back as a precondition report and never reach the kernel.</li>
+          <li>Inputs inside the contract run the proved body, and the result comes back as JSON for the page to render.</li>
+        </ol>
+        <p>
+          The bindings live in <code class="font-mono text-krab-300">playground/src/kernels.rs</code> in this
+          repository. They add no logic of their own: each arm parses a request, checks the preconditions the
+          catalog lists for the caller, and calls the kernel. The proof ledger text under each kernel is read
+          from the catalog at build time, so the page and the catalog cannot disagree.
+        </p>
+      </div>
+    </details>
 
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
-      <h2 class="text-xl font-bold text-white pt-2">How the explorer works</h2>
-      <ol class="list-decimal space-y-1.5 pl-5 text-gray-300">
-        <li>The site build compiles <code class="font-mono text-krab-300">krabka-verified</code> at the pinned broker release into the same WebAssembly module as the consensus playground.</li>
-        <li>The page serialises your inputs to JSON and hands them to one dispatcher function in the module.</li>
-        <li>The dispatcher checks the kernel's <code class="font-mono text-krab-300">requires</code> clauses first. Inputs outside the contract come back as a precondition report and never reach the kernel.</li>
-        <li>Inputs inside the contract run the proved body, and the result comes back as JSON for the page to render.</li>
-      </ol>
-      <p>
-        The bindings live in <code class="font-mono text-krab-300">playground/src/kernels.rs</code> in this
-        repository. They add no logic of their own: each arm parses a request, checks the preconditions the
-        catalog lists for the caller, and calls the kernel.
-      </p>
-
       <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
         <a href={getPath('/docs/playground')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
