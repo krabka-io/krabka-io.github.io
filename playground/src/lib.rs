@@ -18,6 +18,9 @@
 use krabka_kraft_core::{sim::Sim, types::NodeId};
 use wasm_bindgen::prelude::*;
 
+mod kernels;
+pub use kernels::{kernel_names, run_kernel};
+
 /// An interactive, in-browser `KRaft` consensus simulation.
 ///
 /// Construct one with a voter count, then drive it from JavaScript. Inject
@@ -232,7 +235,7 @@ mod tests {
         pg.settle();
         let old = leaders(&pg)[0];
 
-        pg.partition(old as u32);
+        pg.partition(u32::try_from(old).unwrap());
         // The partitioned leader shows as isolated.
         let node = state(&pg)["nodes"]
             .as_array()
@@ -245,7 +248,7 @@ mod tests {
 
         step_until(&mut pg, |p| leaders(p).iter().any(|&l| l != old));
         pg.settle();
-        pg.heal(old as u32);
+        pg.heal(u32::try_from(old).unwrap());
         pg.settle();
         assert2::assert!(leaders(&pg).len() == 1);
     }
@@ -259,7 +262,7 @@ mod tests {
         assert2::assert!(pg.drop_next());
         assert2::assert!(in_flight_len(&pg) == before - 1);
         // timeline_since exposes the recorded Drop step as JSON.
-        let count = state(&pg)["step_count"].as_u64().unwrap() as usize;
+        let count = usize::try_from(state(&pg)["step_count"].as_u64().unwrap()).unwrap();
         let tl: Value = serde_json::from_str(&pg.timeline_since(count - 1)).unwrap();
         assert2::assert!(tl.as_array().unwrap().last().unwrap()["action"]["kind"] == "Drop");
     }
