@@ -1,89 +1,136 @@
 ---
 import { getPath } from '../utils/paths';
+import { loadVerificationData } from '../utils/verification-loader';
+
+// Counts come from the broker's verification catalog at build time; see
+// src/utils/verification-loader.ts. Without a synced catalog the cards keep
+// their qualitative copy and drop the count lines.
+const { stats } = loadVerificationData();
+const n = (value: number) => value.toLocaleString('en-US');
+
+const creusotPoints = [
+  {
+    text: 'Small, total, allocation-light kernels in the ',
+    code: 'krabka-verified',
+    tail: ' crate. Creusot proves each one’s pre- and postconditions with automated provers.',
+  },
+  {
+    text: 'KRaft vote admission and quorum size, ISR and leader failover, KIP-534 compaction retention, ACL precedence, quota token buckets, and idempotent-producer sequencing are proved kernels.',
+  },
+  {
+    text: 'Host crates call the kernel. There is no second copy of any decision, so the proved body is the one that runs.',
+  },
+];
+
+const staterightPoints = [
+  { text: 'Models enumerate crashes, retries, failover, replay, and concurrent operations that example-based tests cannot cover.' },
+  { text: 'KRaft consensus, the quorum WAL, leader failover, transactions and exactly-once, group coordination, log compaction, and client failover each have a checked model.' },
+  { text: 'Each runner pins its unique-state count. A search that shrinks without an explained model change fails the build.' },
+];
 ---
 
-<section class="py-16 bg-ocean-950/40 border-y border-white/5">
+<section class="py-14 bg-ocean-950/40 border-y border-white/5">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-    <div class="max-w-3xl mx-auto text-center mb-12">
+    <div class="max-w-3xl mx-auto text-center mb-10">
       <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
         Engineered for Correctness
       </h2>
-      <p class="mt-3 text-lg text-gray-400">
+      <p class="mt-3 text-base text-gray-400">
         Safe Rust rules out memory corruption. Two formal tiers then check the decisions that a broker gets wrong most expensively, and pull request CI reruns every proof and every model.
       </p>
     </div>
 
-    <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <!-- Creusot -->
-      <div class="frosted-card rounded-2xl p-6 sm:p-8">
-        <div class="flex items-center justify-between">
+      <div class="frosted-card rounded-2xl p-6 min-w-0 flex flex-col">
+        <div class="flex items-center justify-between gap-3">
           <h3 class="text-lg font-bold text-white">Creusot Proof Kernels</h3>
-          <span class="rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">Deductive proofs</span>
+          <span class="shrink-0 rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">Deductive proofs</span>
         </div>
         <p class="text-xs text-gray-400 mt-1">Contracts proved on the exact executable bodies the broker calls</p>
+        {stats.catalogAvailable && (
+          <dl class="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">Kernels</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight">{n(stats.functions)}</dd>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">Modules</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight">{n(stats.modules)}</dd>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">Proof sessions</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight">{n(stats.proofSessions)}</dd>
+            </div>
+          </dl>
+        )}
 
-        <ul class="mt-6 space-y-3 text-sm text-gray-300">
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>The <code class="font-mono text-xs text-krab-300">krabka-verified</code> crate holds small, total, allocation-light kernels. Creusot proves each one's pre- and postconditions with automated provers.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>KRaft vote admission and quorum size, ISR and leader failover, KIP-534 compaction retention, ACL precedence, quota token buckets, and idempotent-producer sequencing are proved kernels.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Host crates call the kernel. There is no second copy of any decision, so the proved body is the one that runs.</span>
-          </li>
+        <ul class="mt-4 space-y-2 text-sm text-gray-300">
+          {creusotPoints.map((point) => (
+            <li class="flex items-start gap-2.5 min-w-0">
+              <svg class="h-4 w-4 mt-0.5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <span class="[overflow-wrap:anywhere]">
+                {point.text}{point.code && <code class="font-mono text-xs text-krab-300">{point.code}</code>}{point.tail}
+              </span>
+            </li>
+          ))}
         </ul>
 
-        <p class="mt-4 text-xs text-gray-400 border-t border-white/5 pt-3">
-          Proof sessions are committed beside the code, and a pinned Creusot image redischarges every one on each pull request.
-        </p>
+        <div class="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
+          <span>Proof sessions are committed beside the code and redischarged by a pinned Creusot image on each pull request.</span>
+          <a href={getPath('/verification#creusot')} class="font-semibold text-krab-400 hover:text-krab-300 whitespace-nowrap">
+            {stats.catalogAvailable ? `Browse all ${n(stats.rows)} ledger rows →` : 'Browse the proof ledger →'}
+          </a>
+        </div>
       </div>
 
       <!-- Stateright -->
-      <div class="frosted-card rounded-2xl p-6 sm:p-8">
-        <div class="flex items-center justify-between">
+      <div class="frosted-card rounded-2xl p-6 min-w-0 flex flex-col">
+        <div class="flex items-center justify-between gap-3">
           <h3 class="text-lg font-bold text-white">Stateright Model Checking</h3>
-          <span class="rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">Exhaustive search</span>
+          <span class="shrink-0 rounded bg-krab-500/10 border border-krab-500/30 px-2 py-0.5 text-xs font-semibold text-krab-400">Exhaustive search</span>
         </div>
-        <p class="text-xs text-gray-400 mt-1">Every reachable state within each model's stated bounds</p>
+        <p class="text-xs text-gray-400 mt-1">Every reachable state within each model’s stated bounds</p>
+        {stats.catalogAvailable && (
+          <dl class="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">Models</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight">{n(stats.models)}</dd>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">Pinned states</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight [overflow-wrap:anywhere]">{n(stats.pinnedTotal)}</dd>
+            </div>
+            <div class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 min-w-0">
+              <dt class="text-[10px] uppercase tracking-wider text-gray-500">With catalog notes</dt>
+              <dd class="text-lg font-extrabold text-white leading-tight">{n(stats.modelsWithNotes)}</dd>
+            </div>
+          </dl>
+        )}
 
-        <ul class="mt-6 space-y-3 text-sm text-gray-300">
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Models enumerate crashes, retries, failover, replay, and concurrent operations that example-based tests cannot cover.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>KRaft consensus, the quorum WAL, leader failover, transactions and exactly-once, group coordination, log compaction, and client failover each have a checked model.</span>
-          </li>
-          <li class="flex items-start gap-3">
-            <svg class="h-5 w-5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Each runner pins its unique-state count. A search that shrinks without an explained model change fails the build.</span>
-          </li>
+        <ul class="mt-4 space-y-2 text-sm text-gray-300">
+          {staterightPoints.map((point) => (
+            <li class="flex items-start gap-2.5 min-w-0">
+              <svg class="h-4 w-4 mt-0.5 text-krab-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <span class="[overflow-wrap:anywhere]">{point.text}</span>
+            </li>
+          ))}
         </ul>
 
-        <p class="mt-4 text-xs text-gray-400 border-t border-white/5 pt-3">
-          Many models drive production decision functions directly, so the property checked is the property shipped.
-        </p>
+        <div class="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
+          <span>Many models drive production decision functions directly, so the property checked is the property shipped.</span>
+          <a href={getPath('/verification#stateright')} class="font-semibold text-krab-400 hover:text-krab-300 whitespace-nowrap">
+            {stats.catalogAvailable ? `Browse all ${n(stats.models)} models →` : 'Browse the model inventory →'}
+          </a>
+        </div>
       </div>
     </div>
 
-    <div class="mt-10 text-center">
+    <div class="mt-8 text-center">
       <a
         href={getPath('/verification')}
         class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors"

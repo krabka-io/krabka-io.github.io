@@ -42,6 +42,9 @@ npm run check-links
 # Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
 npm run check-seo
 
+# Check that the synced broker verification catalog still parses into the ledger rows
+npm run check-catalog
+
 # Preview production build locally
 npm run preview
 ```
@@ -68,11 +71,12 @@ npm run preview
 
 ### 4. Verification Playground (`/docs/verification-playground`)
 - The same `playground/` crate also binds `krabka-verified`, the broker's Creusot-proved decision kernels, through one `run_kernel(name, json)` dispatcher. The page evaluates a curated set of kernels in the browser with each function's `requires` and `ensures` contract beside the result; inputs outside a precondition are reported, not evaluated.
-- A static Stateright model gallery, generated from `src/data/stateright-models.json`, lists every model entry point with what it drives, its bounds, its properties, and its pinned unique-state counts. The models themselves cannot run in a browser (they are test modules of I/O-bearing crates), so the gallery is an inventory, not a checker.
+- Each kernel's panel carries a "Proof ledger" drilldown quoting the broker's catalog: what the catalog says the kernel proves, which production code calls it, its Why3 proof sessions, and what the caller must establish.
+- Below the explorer, an expandable Stateright model ledger built from `src/data/stateright-models.json` and the catalog lists every model entry point with what it drives, its bounds, its properties, its pinned unique-state counts, and the catalog's own description. The models themselves cannot run in a browser (they are test modules of I/O-bearing crates), so the ledger is an inventory, not a checker.
 
 ### 5. Correctness & Verification (`/verification`)
-- **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka.
-- **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`.
+- **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
+- **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`. `src/utils/verification-catalog.ts` parses that file at build time and `src/utils/verification-data.ts` joins it with the site's data files; the counts on the homepage and the verification page come from that parse, so they follow the broker's catalog rather than hand-maintained copy.
 - The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
 
 ### 6. Aggregated Helm Chart Repository
@@ -105,6 +109,7 @@ The chart signing public key lives in [krabka-io/tooling](https://github.com/kra
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
 - **Code Stub Verifier (`scripts/verify-code-stubs.mjs`):** Parses and validates all code snippets across ingested markdown guides and Astro documentation pages.
+- **Catalog Parse Check (`scripts/check-catalog.mjs`):** Runs the verification-catalog parser against the synced `docs/verification.md` and fails when the ledger table or the model paragraphs no longer parse, so a layout change in the broker's catalog cannot silently empty the site's ledger. The deploy workflow runs it after every build.
 
 ---
 
@@ -131,6 +136,7 @@ krabka-website/
 │   ├── sync-docs.mjs         # Multi-repo documentation & release asset sync engine
 │   ├── check-links.mjs       # Internal link crawl and resolution validator
 │   ├── check-seo.mjs         # Production technical SEO audit suite
+│   ├── check-catalog.mjs     # Verification catalog parse check (ledger rows and model notes)
 │   ├── verify-code-stubs.mjs # Markdown and Astro code snippet syntax checker
 │   └── build-helm-index.sh   # Rebuilds public/charts from component repositories
 ├── src/
@@ -152,13 +158,18 @@ krabka-website/
 │   │   ├── brand.astro       # Brand guidelines and vector assets
 │   │   ├── get-started.astro # Interactive quickstart with Docker Compose and Helm
 │   │   ├── index.astro       # Primary ecosystem homepage
-│   │   ├── verification.astro # Correctness, Creusot, and Stateright overview
+│   │   ├── verification.astro # Correctness overview and the expandable evidence ledger
 │   │   └── versions.astro    # Release tracks and SLSA artifact provenance
 │   ├── styles/
 │   │   ├── custom.css        # Ocean dark theme, custom scrollbars, markdown typography
+│   │   ├── evidence.css      # Expandable evidence ledger (verification page and playground)
+│   │   ├── kernels.css       # Verified kernel explorer styling
 │   │   └── playground.css    # Interactive consensus simulator styling
 │   └── utils/
 │       ├── paths.ts          # Base URL path resolution helper
+│       ├── verification-catalog.ts # Parser for the synced broker verification catalog
+│       ├── verification-data.ts    # Joins the catalog with src/data for the verification pages
+│       ├── verification-loader.ts  # Reads the synced catalog and data files at build time
 │       └── versions.ts       # GitHub GraphQL live release resolution
 ├── astro.config.mjs          # Astro static site configuration
 ├── tailwind.config.mjs       # Tailwind configuration with @tailwindcss/typography

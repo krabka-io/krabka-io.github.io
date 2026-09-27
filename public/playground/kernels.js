@@ -353,9 +353,18 @@ class KernelExplorer {
       const link = el("a", "kx-source");
       link.href = spec.source_url;
       link.target = "_blank";
-      link.rel = "noopener";
+      link.rel = "noopener noreferrer";
       link.textContent = "Source ↗";
       path.appendChild(link);
+    }
+    if (spec.ledger) {
+      // Jumps to the "Proof ledger" drilldown in the contract panel.
+      const pill = el("button", "kx-ledger-pill");
+      pill.type = "button";
+      pill.textContent = "In the proof ledger";
+      pill.title = "Open the catalog's proof ledger row for this kernel";
+      pill.addEventListener("click", () => this.openProof());
+      path.appendChild(pill);
     }
 
     this.head.append(title, path);
@@ -626,11 +635,131 @@ class KernelExplorer {
     this.requires = clauseList("Requires", spec.requires, "kx-requires");
     this.ensures = clauseList("Ensures", spec.ensures, "kx-ensures");
     this.contract.append(this.requires, this.ensures);
+
+    // The catalog's row for the kernel, when the build had the catalog.
+    this.proof = spec.ledger ? proofLedger(spec.ledger) : null;
+    if (this.proof) this.contract.appendChild(this.proof);
   }
 
   markRequires(violated) {
     if (this.requires) this.requires.classList.toggle("kx-violated", violated);
   }
+
+  // Open the "Proof ledger" drilldown and bring it into view; the head pill
+  // calls this.
+  openProof() {
+    const box = this.proof;
+    if (!box) return;
+    box.open = true;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const summary = box.querySelector("summary");
+    if (summary) summary.focus({ preventScroll: true });
+  }
+}
+
+// ---- proof ledger drilldown ---------------------------------------------------
+//
+// `ledger` is the kernel's row of the broker's Creusot proof ledger, joined in
+// at build time: `contract_html` (what the row says the kernel proves),
+// `host_html` (the production caller), `proofs` (proof session links),
+// `preconditions_html` (what the caller must establish; empty when the
+// contract accepts every value of the Rust input types) and `page_url` (the
+// row's anchor on the verification page).
+
+const PROOF_HINT =
+  "what the catalog says this kernel proves, who calls it, and what the " +
+  "caller must establish";
+const NO_PRECONDITIONS = "Accepts every value of the Rust input types.";
+
+function proofLedger(ledger) {
+  const box = el("details", "kx-proof");
+
+  const summary = el("summary", "kx-proof-summary");
+  const title = el("span", "kx-proof-title");
+  title.textContent = "Proof ledger";
+  const hint = el("span", "kx-proof-hint");
+  hint.textContent = PROOF_HINT;
+  summary.append(title, hint);
+
+  const body = el("div", "kx-proof-body");
+  const list = el("dl", "kx-proof-list");
+  list.append(
+    proofEntry("Proves", richText(ledger.contract_html)),
+    proofEntry("Host caller", richText(ledger.host_html)),
+    proofEntry("Proof sessions", proofLinks(ledger.proofs)),
+    proofEntry(
+      "Caller preconditions",
+      ledger.preconditions_html
+        ? richText(ledger.preconditions_html)
+        : mutedNote(NO_PRECONDITIONS),
+    ),
+  );
+  body.appendChild(list);
+
+  if (ledger.page_url) {
+    const foot = el("p", "kx-proof-foot");
+    const page = el("a", "kx-proof-page");
+    page.href = ledger.page_url;
+    page.textContent = "Open this row on the verification page →";
+    foot.appendChild(page);
+    body.appendChild(foot);
+  }
+
+  box.append(summary, body);
+  return box;
+}
+
+function proofEntry(term, value) {
+  const entry = el("div", "kx-proof-entry");
+  const dt = el("dt", "kx-label");
+  dt.textContent = term;
+  const dd = el("dd", "kx-proof-value");
+  dd.appendChild(value);
+  entry.append(dt, dd);
+  return entry;
+}
+
+// The `*_html` ledger fields are the build-time output of the site's own
+// catalog renderer (src/utils/verification-catalog.ts), which escapes every
+// character it does not emit itself and only emits code spans, links and
+// bold, so assigning them to innerHTML is safe here. Links in the catalog
+// point at GitHub or the catalog page; any that arrived without the external
+// link attributes get them so nothing navigates the explorer away.
+function richText(html) {
+  const holder = el("div", "kx-proof-html");
+  holder.innerHTML = html || "";
+  for (const link of holder.querySelectorAll("a")) {
+    if (!link.getAttribute("target")) link.target = "_blank";
+    const rel = new Set((link.getAttribute("rel") || "").split(/\s+/).filter(Boolean));
+    rel.add("noopener");
+    rel.add("noreferrer");
+    link.rel = [...rel].join(" ");
+  }
+  return holder;
+}
+
+// One small external link per proof session, labelled as the catalog labels
+// it; the full URL is the tooltip.
+function proofLinks(proofs) {
+  const items = Array.isArray(proofs) ? proofs : [];
+  if (items.length === 0) return mutedNote("No proof session is linked.");
+  const holder = el("div", "kx-proof-links");
+  for (const proof of items) {
+    const link = el("a", "kx-proof-link");
+    link.href = proof.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.title = proof.url;
+    link.textContent = `${proof.label || "proof"} ↗`;
+    holder.appendChild(link);
+  }
+  return holder;
+}
+
+function mutedNote(text) {
+  const note = el("p", "kx-proof-none");
+  note.textContent = text;
+  return note;
 }
 
 function clauseList(title, clauses, cls) {

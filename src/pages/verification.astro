@@ -1,93 +1,157 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import EvidenceLedger from '../components/EvidenceLedger.astro';
+import type { EvidenceItem } from '../components/EvidenceLedger.astro';
 import { getPath } from '../utils/paths';
+import { loadVerificationData } from '../utils/verification-loader';
+
+// Every count and every ledger row below comes from the broker's verification
+// catalog, which `scripts/sync-docs.mjs` copies in before a build, joined with
+// the site's own data files. A checkout that never synced still builds, and the
+// copy says which counts are missing.
+const { stats, catalog, kernels, models } = loadVerificationData();
+const hasCatalog = stats.catalogAvailable;
+const n = (value: number) => value.toLocaleString('en-US');
+const section = (slug: string) => catalog.sections.find((s) => s.slug === slug);
 
 const brokerRepo = 'https://github.com/krabka-io/krabka-broker';
-const clientRepo = 'https://github.com/krabka-io/krabka-client-rs';
+const verifiedCrateUrl = `${brokerRepo}/tree/main/crates/verified`;
+const protocolRepo = 'https://github.com/krabka-io/krabka-protocol';
+const creusotUrl = 'https://github.com/creusot-rs/creusot';
+const staterightUrl = 'https://github.com/stateright/stateright';
+const catalogPath = getPath('/docs/broker/verification');
+const playgroundPath = getPath('/docs/verification-playground');
+const modelGalleryPath = getPath('/docs/verification-playground#models');
+const consensusPlaygroundPath = getPath('/docs/playground');
+const mutantsBaselinePath = getPath('/docs/broker/mutants-baseline');
 
-const proofKernels = [
+interface Tile {
+  value: string;
+  label: string;
+  sub: string;
+  href: string;
+}
+
+const tiles: Tile[] = [
+  { value: '0', label: 'lines of unsafe Rust', sub: 'forbid-level lint under Cargo and Bazel', href: '#memory-safety' },
+  hasCatalog
+    ? { value: n(stats.functions), label: 'proved kernel functions', sub: `${n(stats.rows)} ledger rows across ${n(stats.modules)} modules`, href: '#creusot' }
+    : { value: 'Proved', label: 'kernel functions', sub: 'ledger counts unavailable in this build', href: '#creusot' },
+  hasCatalog
+    ? { value: n(stats.proofSessions), label: 'Why3 proof sessions', sub: 're-discharged on every pull request', href: '#creusot' }
+    : { value: 'Why3', label: 'proof sessions', sub: 're-discharged on every pull request', href: '#creusot' },
+  { value: n(stats.models), label: 'Stateright models', sub: `${n(stats.pinnedTotal)} pinned unique states`, href: '#stateright' },
+  { value: n(stats.explorerKernels), label: 'kernels runnable in your browser', sub: 'compiled to WebAssembly, contract beside the result', href: playgroundPath },
+  { value: 'Every PR', label: 'proofs, models and compatibility gates', sub: 'mutation sweeps run weekly per crate', href: '#evidence' },
+];
+
+const stripCaption = hasCatalog
+  ? "Counts are derived from the broker's verification catalog at build time. One ledger row can hold several related kernels, so rows and functions differ."
+  : "The verification catalog was not synced into this build, so the ledger rows and the counts derived from them are unavailable here. Model, state and playground counts come from the site's own data files.";
+
+// Rows for the "other evidence" tab. The first three are the independent
+// failure signals; the rest carry the catalog's own sections verbatim.
+const localEvidence: EvidenceItem[] = [
   {
-    area: 'KRaft consensus',
-    kernels: 'Majority size, election quorum, log up-to-date checks, high-watermark recomputation, Vote wire admission, voter-set admission, and KIP-853 one-change-at-a-time reconfiguration.',
-    module: 'consensus, vote, voter_set, reconfiguration, quorum_state',
+    id: 'mutation-testing',
+    title: 'Mutation testing with cargo-mutants',
+    kind: 'Mutation testing',
+    area: 'Independent failure signals',
+    claim: 'cargo-mutants inserts faults into production code and the suite must detect each one; sweeps run weekly per crate.',
+    body_html: [
+      `<p><code>cargo-mutants</code> inserts faults into production code and the suite must detect each one. Sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.</p>`,
+      `<p>A proof can have a bad adapter and a test can repeat the implementation's mistake, so Krabka layers checks whose failure modes are independent of each other. A surviving mutant is a fault the test suite did not detect, whatever the proofs and the models say about the same code.</p>`,
+      `<p>Mutation testing stands in for authorship only while it is actually running. The <a href="${mutantsBaselinePath}">mutation sweep baseline</a> records the last run in which each swept crate came back with no survivor.</p>`,
+    ].join(''),
+    links: [
+      { label: 'Mutation sweep baseline', url: mutantsBaselinePath },
+      { label: 'README: mutation testing', url: `${brokerRepo}/blob/main/README.md#mutation-testing` },
+      { label: 'README: skipping a mutant', url: `${brokerRepo}/blob/main/README.md#skipping-a-mutant` },
+    ],
   },
   {
-    area: 'Replication and failover',
-    kernels: 'AlterPartition validation on the controller, ISR maintenance and follower catch-up on the leader, leader-epoch divergence lookup, and partition-reassignment transitions.',
-    module: 'isr, leader_epoch, reassignment, stretch',
+    id: 'differential-suites',
+    title: 'Differential and JVM acceptance suites',
+    kind: 'Differential testing',
+    area: 'Independent failure signals',
+    claim: 'Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka, real kafka-clients drive both, and responses are compared byte for byte.',
+    body_html: [
+      `<p>Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka. Real <code>kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.</p>`,
+      `<p>The wire layer in <a href="${protocolRepo}" target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Protocol encoding and decoding sit largely outside both formal tiers, so these suites are the evidence that the generated codecs are byte exact against a live Kafka.</p>`,
+    ].join(''),
+    links: [
+      { label: 'README: container suites', url: `${brokerRepo}/blob/main/README.md#container-suites` },
+      { label: 'krabka-protocol', url: protocolRepo },
+    ],
   },
   {
-    area: 'Storage',
-    kernels: 'KIP-534 compaction retention, local and remote retention prefixes, sparse offset and time index lookup, torn-tail recovery, producer-snapshot selection, and checkpoint retention.',
-    module: 'compaction, retention, log_index, local_recovery, producer_snapshot, checkpoint',
-  },
-  {
-    area: 'Producers and transactions',
-    kernels: 'Idempotent-producer sequence arithmetic and deduplication, producer-ID block fencing, produce batch-header admission, and EndTxn completion fencing.',
-    module: 'producer, producer_id, produce, transaction',
-  },
-  {
-    area: 'Security',
-    kernels: "Kafka ACL precedence in AclAuthorizer order (super-user bypass, deny wins, default deny), quota-entity precedence, token-bucket refill, SCRAM alteration planning, delegation-token deadlines, and OAuth reauthentication.",
-    module: 'authz, quota, throttle, scram, delegation_token, oauth',
-  },
-  {
-    area: 'Integrity and operations',
-    kernels: 'Audit spool admission and chain steps, signed WORM manifests, break-glass admission and consumption, feature finalization, and group migration plans.',
-    module: 'audit, chain, worm, break_glass, features, group_migration',
+    id: 'crash-recovery-tests',
+    title: 'Crash-recovery and property tests',
+    kind: 'Property and crash testing',
+    area: 'Independent failure signals',
+    claim: 'Unit, property-based, integration and crash-recovery tests cover the boundaries that neither formal tier reaches.',
+    body_html: [
+      `<p>Unit, property-based, integration, and crash-recovery tests cover the boundaries that neither formal tier reaches, including protocol codecs, I/O, and async orchestration.</p>`,
+      `<p>Those tests are evidence, but they are not a Creusot proof or a Stateright model check. The catalog's <a href="${catalogPath}#outside-both-tiers">Outside both tiers</a> section names what they cover on their own.</p>`,
+    ].join(''),
+    links: [{ label: 'Outside both tiers, in the catalog', url: `${catalogPath}#outside-both-tiers` }],
   },
 ];
 
-const models = [
+interface CatalogEvidenceSpec {
+  slug: string;
+  title: string;
+  kind: string;
+  claim: string;
+  links?: { label: string; url: string }[];
+}
+
+const catalogEvidenceSpecs: CatalogEvidenceSpec[] = [
   {
-    area: 'KRaft consensus',
-    what: 'Leader election, log replication, and commit safety under crashes and message loss, with a commit-index model checked against the KIP-595 specification.',
-    where: 'crates/raft/tests/kraft_model.rs',
-    repo: brokerRepo,
+    slug: 'development-evidence',
+    title: 'Development evidence',
+    kind: 'Process',
+    claim: 'Human and AI changes pass the same build, test, proof, model-check and compatibility gates, and the checks have independent failure signals.',
+    links: [{ label: 'Mutation sweep baseline', url: mutantsBaselinePath }],
   },
   {
-    area: 'Quorum write-ahead log',
-    what: 'The replicated WAL engine that a produce durably lands in, including truncation and recovery orderings.',
-    where: 'crates/broker/src/wal/quorum/engine/model.rs',
-    repo: brokerRepo,
+    slug: 'catalog-boundary',
+    title: 'Catalog boundary',
+    kind: 'Scope',
+    claim: 'What belongs in the Creusot ledger, what belongs in the Stateright inventory, and what the closure audit found.',
   },
   {
-    area: 'Broker data path and Fetch',
-    what: 'Produce and Fetch interleavings, producer state, replica state, fetch sessions, and fetch visibility at the high watermark.',
-    where: 'crates/broker/src/data_path_model.rs',
-    repo: brokerRepo,
+    slug: 'run-the-creusot-proofs',
+    title: 'Run the proofs yourself',
+    kind: 'Reproduce',
+    claim: 'A pinned Creusot release, the commands that re-run every proof, and an unproved goal that fails CI.',
+    links: [{ label: 'krabka-verified on GitHub', url: verifiedCrateUrl }],
   },
   {
-    area: 'Failover and placement',
-    what: 'Leader failover and recovery, partition reassignment, stretch-cluster durability, diskless crash recovery, and client-visible failover behavior.',
-    where: 'crates/broker/src/leader_failover_model.rs',
-    repo: brokerRepo,
-  },
-  {
-    area: 'Groups and transactions',
-    what: 'Classic and consumer-group state machines, coordinator replay, streams-group reconciliation, transaction decisions, exactly-once composition, and two-phase commit.',
-    where: 'crates/broker/src/txn/two_pc_model.rs',
-    repo: brokerRepo,
-  },
-  {
-    area: 'Share groups and break-glass',
-    what: 'Share-group membership and share-partition state, and break-glass proposal state with cross-spend safety.',
-    where: 'crates/broker/src/share_partition/state_model.rs',
-    repo: brokerRepo,
-  },
-  {
-    area: 'Log, throttle, and audit',
-    what: 'Compaction driving the proved retention kernel, leader-epoch checkpoint lookup, token-bucket behavior over time, and the audit spool.',
-    where: 'crates/log/src/compact_model.rs',
-    repo: brokerRepo,
-  },
-  {
-    area: 'Rust client',
-    what: 'Role succession under coordinator and broker fencing, deadlock freedom of the consumer lock protocol, and producer failover routing with bounded retries.',
-    where: 'crates/client-producer/src/client_failover_model.rs',
-    repo: clientRepo,
+    slug: 'outside-both-tiers',
+    title: 'Outside both tiers',
+    kind: 'Boundary',
+    claim: 'Protocol codecs, network and async orchestration, I/O and operational configuration are covered by tests, not by proofs or models.',
   },
 ];
+
+const catalogEvidence: EvidenceItem[] = catalogEvidenceSpecs.flatMap((spec) => {
+  const found = section(spec.slug);
+  if (!found) return [];
+  return [
+    {
+      id: spec.slug,
+      title: spec.title,
+      kind: spec.kind,
+      area: 'From the catalog',
+      claim: spec.claim,
+      body_html: found.html.join(''),
+      links: [{ label: 'Read in the catalog', url: `${catalogPath}#${spec.slug}` }, ...(spec.links ?? [])],
+    },
+  ];
+});
+
+const evidence: EvidenceItem[] = [...localEvidence, ...catalogEvidence];
 
 const articleSchema = {
   '@context': 'https://schema.org',
@@ -111,224 +175,178 @@ const articleSchema = {
 >
   <script type="application/ld+json" set:html={JSON.stringify(articleSchema)} slot="head" />
 
-  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 font-sans">
-    <header class="text-left border-b border-white/10 pb-8 mb-12 max-w-4xl">
-      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+  <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 font-sans">
+    <header class="mb-8 border-b border-white/10 pb-6">
+      <h1 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
         Correctness &amp; Verification
       </h1>
-      <p class="mt-4 text-lg text-gray-300 leading-relaxed">
-        A Kafka broker is trusted with other people's data. Krabka treats that trust as an engineering requirement with evidence behind it: the language rules out memory corruption, Creusot proves the decisions that admit, fence, retain, and elect, Stateright enumerates the event orderings around them, and every pull request reruns all of it.
+      <p class="mt-3 max-w-[60ch] text-sm leading-relaxed text-gray-300 sm:text-base">
+        A Kafka broker is trusted with other people's data, so Krabka treats correctness as an engineering requirement with evidence behind it. Safe Rust rules out memory corruption, Creusot proves the decisions that admit, fence, retain and elect, Stateright enumerates the event orderings around them, and every pull request reruns all of it.
       </p>
     </header>
 
-    <!-- Pillars -->
-    <section class="grid grid-cols-1 gap-6 md:grid-cols-3 mb-20">
-      <div class="frosted-card rounded-2xl p-7">
-        <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Memory safety</div>
-        <h2 class="mt-2 text-xl font-bold text-white">Zero <code class="font-mono text-lg">unsafe</code></h2>
-        <p class="mt-3 text-sm text-gray-400 leading-relaxed">
-          Every Krabka workspace forbids <code class="font-mono text-xs text-krab-300">unsafe_code</code> as a compiler-enforced lint, under Cargo and under Bazel alike. Buffer overruns, use-after-free, and data races are excluded by the type system, not by review.
-        </p>
-      </div>
-      <div class="frosted-card rounded-2xl p-7">
-        <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Formal verification</div>
-        <h2 class="mt-2 text-xl font-bold text-white">Creusot proof kernels</h2>
-        <p class="mt-3 text-sm text-gray-400 leading-relaxed">
-          Safety-critical decisions live in <code class="font-mono text-xs text-krab-300">krabka-verified</code> as pure kernels with pre- and postconditions. Creusot translates them to Why3 and automated provers discharge the contracts.
-        </p>
-      </div>
-      <div class="frosted-card rounded-2xl p-7">
-        <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Model checking</div>
-        <h2 class="mt-2 text-xl font-bold text-white">Stateright models</h2>
-        <p class="mt-3 text-sm text-gray-400 leading-relaxed">
-          Where correctness depends on a sequence of crashes, retries, and interleavings, a Stateright model explores every reachable state within stated bounds and reports a counterexample trace if a property fails.
-        </p>
-      </div>
-    </section>
-
-    <!-- Memory safety -->
-    <section class="mb-20 max-w-4xl">
-      <h2 id="memory-safety" class="text-2xl font-bold text-white">Memory safety by construction</h2>
-      <div class="mt-4 space-y-4 text-gray-300 leading-relaxed">
-        <p>
-          Krabka is written in safe Rust. The workspace lint <code class="font-mono text-sm text-krab-300">unsafe_code = "forbid"</code> cannot be overridden by an inner attribute, and the Bazel build passes the same <code class="font-mono text-sm text-krab-300">-Funsafe_code</code> flag so the guarantee does not lapse under a second build system. Clippy runs at the <code class="font-mono text-sm text-krab-300">pedantic</code> level with warnings promoted to errors, and no suppression attributes are accepted.
-        </p>
-        <p>
-          The wire layer in <a href="https://github.com/krabka-io/krabka-protocol" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Byte exactness against Kafka is checked by differential suites that run digest-pinned Apache Kafka and Confluent Platform brokers beside Krabka and compare live responses.
-        </p>
-      </div>
-    </section>
-
-    <!-- Creusot -->
-    <section class="mb-20">
-      <div class="max-w-4xl">
-        <h2 id="creusot" class="text-2xl font-bold text-white">Creusot: proved decision kernels</h2>
-        <div class="mt-4 space-y-4 text-gray-300 leading-relaxed">
-          <p>
-            <a href="https://github.com/creusot-rs/creusot" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold">Creusot</a> is a deductive verifier for Rust. A function carries <code class="font-mono text-sm text-krab-300">#[requires]</code> and <code class="font-mono text-sm text-krab-300">#[ensures]</code> contracts beside its body, and the proof obligations go to SMT solvers through Why3. When a proof session is green, the contract holds for every input the Rust types admit, not only for the inputs a test happened to pick.
-          </p>
-          <p>
-            Krabka extracts each safety-critical decision into a small, total, synchronous kernel in the <code class="font-mono text-sm text-krab-300">krabka-verified</code> crate. A host crate maps its state into the kernel's inputs, calls it, and applies the result. There is no second copy of any decision, so the proved body is the body that runs in production.
-          </p>
-          <p>
-            The kernels do no I/O, so they also compile to WebAssembly. The <a href={getPath('/docs/verification-playground')} class="text-krab-400 hover:text-krab-300 font-semibold">verification playground</a> lets you evaluate a selection of them in your browser, with each function's contract beside the result.
-          </p>
-        </div>
-      </div>
-
-      <div class="mt-8 frosted-card rounded-2xl overflow-hidden border border-white/10">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm">
-            <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
-              <tr>
-                <th scope="col" class="py-4 px-6">Area</th>
-                <th scope="col" class="py-4 px-6">Proved kernels</th>
-                <th scope="col" class="py-4 px-6">Modules</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5">
-              {proofKernels.map((row) => (
-                <tr class="hover:bg-white/5 transition-colors align-top">
-                  <td class="py-3.5 px-6 font-semibold text-white whitespace-nowrap">{row.area}</td>
-                  <td class="py-3.5 px-6 text-gray-300">{row.kernels}</td>
-                  <td class="py-3.5 px-6 font-mono text-xs text-krab-300">{row.module}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3 text-sm">
-        <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
-          <div class="font-semibold text-white">Proof sessions are source</div>
-          <p class="mt-2 text-gray-400 leading-relaxed">Why3 sessions live under <code class="font-mono text-xs text-krab-300">verif/</code> in the repository. A contract change without a matching proof update fails the build.</p>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
-          <div class="font-semibold text-white">Redischarged on every pull request</div>
-          <p class="mt-2 text-gray-400 leading-relaxed">CI runs a pinned Creusot image against every package in Creusot's scope. A package-discovery check fails if a crate that writes contracts is missing from the proof run.</p>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
-          <div class="font-semibold text-white">Preconditions are the caller's job</div>
-          <p class="mt-2 text-gray-400 leading-relaxed">The verification catalog lists what each host must establish before a proof applies. A proved kernel does not prove its caller, and the catalog says so.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Stateright -->
-    <section class="mb-20">
-      <div class="max-w-4xl">
-        <h2 id="stateright" class="text-2xl font-bold text-white">Stateright: exhaustive model checking</h2>
-        <div class="mt-4 space-y-4 text-gray-300 leading-relaxed">
-          <p>
-            <a href="https://github.com/stateright/stateright" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold">Stateright</a> is a model checker for Rust. A model declares its actors, the actions each may take, and the properties that must hold. The checker performs a breadth-first search over every reachable state within the model's bounds, and when a property fails it prints the exact sequence of actions that broke it.
-          </p>
-          <p>
-            Some Krabka models drive a production decision function directly. Others compose real decision functions with a small environment of crashes, retries, and message reordering. Each model's module comment states its bounds, its properties, and its <code class="font-mono text-sm text-krab-300">DRIVEN</code> and <code class="font-mono text-sm text-krab-300">MODELED</code> notes, so a reader can tell what the property says about production before relying on it.
-          </p>
-        </div>
-      </div>
-
-      <div class="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {models.map((m) => (
-          <div class="frosted-card rounded-2xl p-6">
-            <div class="flex items-start justify-between gap-4">
-              <h3 class="text-base font-bold text-white">{m.area}</h3>
-            </div>
-            <p class="mt-2 text-sm text-gray-400 leading-relaxed">{m.what}</p>
-            <a
-              href={`${m.repo}/blob/main/${m.where}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="mt-3 inline-block font-mono text-xs text-krab-300 hover:text-krab-200 break-all"
-            >
-              {m.where}
-            </a>
-          </div>
+    <!-- Stat strip -->
+    <section class="mb-10" aria-label="Verification at a glance">
+      <div class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {tiles.map((tile) => (
+          <a href={tile.href} class="frosted-card block min-w-0 rounded-xl p-3 transition-colors hover:border-krab-500/40 sm:p-4">
+            <div class="text-xl font-extrabold tracking-tight text-white [overflow-wrap:anywhere] sm:text-2xl">{tile.value}</div>
+            <div class="mt-1 text-xs font-semibold leading-snug text-gray-200 [overflow-wrap:anywhere]">{tile.label}</div>
+            <div class="mt-0.5 text-xs leading-snug text-gray-400 [overflow-wrap:anywhere]">{tile.sub}</div>
+          </a>
         ))}
       </div>
+      <p class="mt-2 text-xs leading-snug text-gray-400">{stripCaption}</p>
+    </section>
 
-      <p class="mt-6 text-sm text-gray-400 max-w-4xl">
-        The <a href={getPath('/docs/verification-playground#models')} class="text-krab-400 hover:text-krab-300 font-semibold">model gallery</a> lists every entry point with what it drives, its bounds, its properties, and its pinned state counts.
-      </p>
+    <!-- Pillars -->
+    <section class="mb-10" aria-label="The three tiers">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <article id="memory-safety" data-pillar class="frosted-card min-w-0 scroll-mt-24 rounded-2xl p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Memory safety</div>
+          <h2 class="mt-1 text-base font-bold text-white">Zero <code class="font-mono">unsafe</code></h2>
+          <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
+            Every Krabka workspace forbids <code class="pill-code">unsafe_code</code> as a compiler-enforced lint, under Cargo and under Bazel alike, so buffer overruns, use-after-free and data races are excluded by the type system, not by review.
+          </p>
+          <details class="drill mt-3">
+            <summary>
+              <svg aria-hidden="true" class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              How it works
+            </summary>
+            <div class="drill-body">
+              <p>
+                Krabka is written in safe Rust. The workspace lint <code>unsafe_code = "forbid"</code> cannot be overridden by an inner attribute, and the Bazel build passes the same <code>-Funsafe_code</code> flag so the guarantee does not lapse under a second build system. Clippy runs at the <code>pedantic</code> level with warnings promoted to errors, and no suppression attributes are accepted.
+              </p>
+              <p>
+                The wire layer in <a href={protocolRepo} target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Byte exactness against Kafka is checked by differential suites that run digest-pinned Apache Kafka and Confluent Platform brokers beside Krabka and compare live responses.
+              </p>
+            </div>
+          </details>
+        </article>
 
-      <div class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 text-sm">
-        <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
-          <div class="font-semibold text-white">Pinned state counts</div>
-          <p class="mt-2 text-gray-400 leading-relaxed">An exhaustive search over a fixed model visits a deterministic set of states. Each runner asserts its unique-state count against a pinned constant, so an action generator that silently drops a branch fails the build instead of passing a smaller search.</p>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
-          <div class="font-semibold text-white">Never skipped by impact analysis</div>
-          <p class="mt-2 text-gray-400 leading-relaxed">Pull request CI explicitly runs every Bazel target that contains a model entry point, separately from change-based test selection, so an unrelated edit cannot skip a model check.</p>
-        </div>
+        <article data-pillar class="frosted-card min-w-0 rounded-2xl p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Formal verification</div>
+          <h2 class="mt-1 text-base font-bold text-white">Creusot proof kernels</h2>
+          <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
+            Safety-critical decisions live in <code class="pill-code">krabka-verified</code> as pure kernels with pre- and postconditions; <a href={creusotUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 hover:text-krab-300">Creusot</a>, a deductive verifier for Rust, translates them to Why3 and automated provers discharge the contracts.
+          </p>
+          <details class="drill mt-3">
+            <summary>
+              <svg aria-hidden="true" class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              How it works
+            </summary>
+            <div class="drill-body">
+              <p>
+                A function carries <code>#[requires]</code> and <code>#[ensures]</code> contracts beside its body, and the proof obligations go to SMT solvers through Why3. When a proof session is green, the contract holds for every input the Rust types admit, not only for the inputs a test happened to pick.
+              </p>
+              <p>
+                Krabka extracts each safety-critical decision into a small, total, synchronous kernel in the <code>krabka-verified</code> crate. A host crate maps its state into the kernel's inputs, calls it, and applies the result. There is no second copy of any decision, so the proved body is the body that runs in production.
+              </p>
+              <ul>
+                <li><strong>Proof sessions are source.</strong> Why3 sessions live under <code>verif/</code> in the repository. A contract change without a matching proof update fails the build.</li>
+                <li><strong>Re-discharged on every pull request.</strong> CI runs a pinned Creusot image against every package in Creusot's scope. A package-discovery check fails if a crate that writes contracts is missing from the proof run.</li>
+                <li><strong>Preconditions are the caller's job.</strong> The verification catalog lists what each host must establish before a proof applies. A proved kernel does not prove its caller, and the catalog says so.</li>
+              </ul>
+              <p>
+                The kernels do no I/O, so they also compile to WebAssembly. The <a href={playgroundPath}>verification playground</a> evaluates {n(stats.explorerKernels)} of them in your browser, with each function's contract beside the result.
+              </p>
+            </div>
+          </details>
+        </article>
+
+        <article data-pillar class="frosted-card min-w-0 rounded-2xl p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Model checking</div>
+          <h2 class="mt-1 text-base font-bold text-white">Stateright models</h2>
+          <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
+            Where correctness depends on a sequence of crashes, retries and interleavings, a <a href={staterightUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 hover:text-krab-300">Stateright</a> model explores every reachable state within stated bounds and reports a counterexample trace if a property fails.
+          </p>
+          <details class="drill mt-3">
+            <summary>
+              <svg aria-hidden="true" class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              How it works
+            </summary>
+            <div class="drill-body">
+              <p>
+                Stateright is a model checker for Rust. A model declares its actors, the actions each may take, and the properties that must hold. The checker performs a breadth-first search over every reachable state within the model's bounds, and when a property fails it prints the exact sequence of actions that broke it.
+              </p>
+              <p>
+                Some Krabka models drive a production decision function directly. Others compose real decision functions with a small environment of crashes, retries, and message reordering. Each model's module comment states its bounds, its properties, and its <code>DRIVEN</code> and <code>MODELED</code> notes, so a reader can tell what the property says about production before relying on it.
+              </p>
+              <ul>
+                <li><strong>Pinned state counts.</strong> An exhaustive search over a fixed model visits a deterministic set of states. Each runner asserts its unique-state count against a pinned constant, so an action generator that silently drops a branch fails the build instead of passing a smaller search.</li>
+                <li><strong>Never skipped by impact analysis.</strong> Pull request CI explicitly runs every Bazel target that contains a model entry point, separately from change-based test selection, so an unrelated edit cannot skip a model check.</li>
+              </ul>
+              <p>
+                The <a href={modelGalleryPath}>model gallery</a> lists every entry point with what it drives, its bounds, its properties, and its pinned state counts. The model rows below carry the same facts, with the catalog's own paragraphs where it has them.
+              </p>
+            </div>
+          </details>
+        </article>
       </div>
     </section>
 
-    <!-- Supporting evidence -->
-    <section class="mb-20 max-w-4xl">
-      <h2 id="independent-signals" class="text-2xl font-bold text-white">Independent failure signals</h2>
-      <p class="mt-4 text-gray-300 leading-relaxed">
-        A proof can have a bad adapter and a test can repeat the implementation's mistake. Krabka therefore layers checks whose failure modes are independent of each other.
+    <!-- Ledger -->
+    <section class="mb-10" aria-labelledby="ledger-heading">
+      <h2 id="ledger-heading" class="text-xl font-bold text-white">The evidence, row by row</h2>
+      <p class="mt-1 max-w-[70ch] text-sm leading-relaxed text-gray-400">
+        Every row expands to what is proved or checked, who calls it, and what it assumes.
       </p>
-      <ul class="mt-6 space-y-4">
-        <li class="flex items-start gap-3">
-          <svg class="h-5 w-5 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <div class="text-sm text-gray-300 leading-relaxed">
-            <strong class="text-white">Mutation testing.</strong> <code class="font-mono text-xs text-krab-300">cargo-mutants</code> inserts faults into production code and the suite must detect each one. Sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.
-          </div>
-        </li>
-        <li class="flex items-start gap-3">
-          <svg class="h-5 w-5 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <div class="text-sm text-gray-300 leading-relaxed">
-            <strong class="text-white">Differential and JVM acceptance suites.</strong> Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka. Real <code class="font-mono text-xs text-krab-300">kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.
-          </div>
-        </li>
-        <li class="flex items-start gap-3">
-          <svg class="h-5 w-5 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <div class="text-sm text-gray-300 leading-relaxed">
-            <strong class="text-white">Crash-recovery and property tests.</strong> Unit, property-based, integration, and crash-recovery tests cover the boundaries that neither formal tier reaches, including protocol codecs, I/O, and async orchestration.
-          </div>
-        </li>
-      </ul>
+      {!hasCatalog && (
+        <p class="mt-3 max-w-[70ch] rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs leading-snug text-amber-200/90">
+          Catalog rows are unavailable in this build: the synced verification catalog is missing, so the kernel tab and the catalog-backed evidence rows are empty. The published site includes them.
+        </p>
+      )}
+      <div class="mt-4 min-w-0">
+        <EvidenceLedger
+          kernels={kernels}
+          models={models}
+          evidence={evidence}
+          kernelNotes={catalog.ledgerNotes}
+          modelNotes={catalog.modelNotes}
+          initialTab="kernels"
+          playgroundPath={playgroundPath}
+          catalogPath={catalogPath}
+        />
+      </div>
     </section>
 
     <!-- Boundary -->
-    <section class="mb-16 max-w-4xl">
-      <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 sm:p-8">
-        <h2 id="boundary" class="text-xl font-bold text-white">Where the formal boundary ends</h2>
-        <p class="mt-3 text-sm text-gray-300 leading-relaxed">
-          This is not a whole-system formal proof. Creusot proves kernels, and a proof applies only when the caller establishes the listed preconditions. Stateright checks a model within its bounds and says nothing beyond them. Protocol encoding and decoding, network and async orchestration, file and object-store I/O, and operational configuration are covered by tests, not by proofs. The verification catalog in the broker repository states the boundary in detail and lists every proof and every model.
+    <section class="mb-6">
+      <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 sm:p-6">
+        <h2 id="boundary" class="scroll-mt-24 text-base font-bold text-white">Where the formal boundary ends</h2>
+        <p class="mt-2 max-w-[80ch] text-sm leading-relaxed text-gray-300">
+          This is not a whole-system formal proof: Creusot proves kernels, and a proof applies only when the caller establishes the listed preconditions, while Stateright checks a model within its bounds and says nothing beyond them. Protocol encoding and decoding, network and async orchestration, file and object-store I/O, and operational configuration are covered by tests, not by proofs. The verification catalog in the broker repository states the boundary in detail and lists every proof and every model.
         </p>
-        <div class="mt-5 flex flex-wrap gap-3">
+        <div class="mt-4 flex flex-wrap gap-2">
           <a
-            href={getPath('/docs/broker/verification')}
-            class="inline-flex items-center rounded-lg bg-krab-500 px-4 py-2 text-sm font-semibold text-white hover:bg-krab-600 transition-colors"
+            href={catalogPath}
+            class="inline-flex max-w-full items-center rounded-lg bg-krab-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-krab-600"
           >
             Read the verification catalog
           </a>
           <a
-            href={`${brokerRepo}/tree/main/crates/verified`}
+            href={verifiedCrateUrl}
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex items-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+            class="inline-flex max-w-full items-center rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/10"
           >
             Browse krabka-verified on GitHub
           </a>
           <a
-            href={getPath('/docs/verification-playground')}
-            class="inline-flex items-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+            href={playgroundPath}
+            class="inline-flex max-w-full items-center rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/10"
           >
             Evaluate the verified kernels in your browser
           </a>
           <a
-            href={getPath('/docs/playground')}
-            class="inline-flex items-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+            href={consensusPlaygroundPath}
+            class="inline-flex max-w-full items-center rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/10"
           >
             Try the KRaft consensus playground
           </a>
@@ -337,3 +355,89 @@ const articleSchema = {
     </section>
   </div>
 </BaseLayout>
+
+<style>
+  .pill-code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.85em;
+    color: #ffb39e;
+    overflow-wrap: anywhere;
+  }
+
+  .drill summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #ff8466;
+    user-select: none;
+  }
+
+  .drill summary:hover {
+    color: #ffb39e;
+  }
+
+  .drill summary svg {
+    transition: transform 0.15s ease;
+  }
+
+  .drill[open] summary svg {
+    transform: rotate(90deg);
+  }
+
+  .drill-body {
+    display: grid;
+    gap: 0.625rem;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: #9ca3af;
+    overflow-wrap: anywhere;
+  }
+
+  .drill-body strong {
+    font-weight: 600;
+    color: #f3f4f6;
+  }
+
+  .drill-body code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.85em;
+    color: #ffb39e;
+    overflow-wrap: anywhere;
+  }
+
+  .drill-body a {
+    font-weight: 600;
+    color: #ff8466;
+    overflow-wrap: anywhere;
+  }
+
+  .drill-body a:hover {
+    color: #ffb39e;
+  }
+
+  .drill-body ul {
+    display: grid;
+    gap: 0.5rem;
+    padding-left: 1rem;
+    list-style: disc;
+  }
+</style>
+
+<script>
+  // A link that targets a pillar card also opens its drilldown, so the text the
+  // link points at is visible on arrival rather than folded away.
+  const openTargetedPillar = () => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id === '') return;
+    const pillar = document.getElementById(id);
+    if (!pillar || !pillar.hasAttribute('data-pillar')) return;
+    const details = pillar.querySelector('details');
+    if (details) details.open = true;
+  };
+  openTargetedPillar();
+  window.addEventListener('hashchange', openTargetedPillar);
+</script>
