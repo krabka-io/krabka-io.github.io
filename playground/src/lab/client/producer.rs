@@ -18,6 +18,15 @@
 //! `bumpIdempotentProducerEpoch` do; the batches of the old epoch still in
 //! flight return first, and the partition then starts again at sequence 0.
 //! A routing error adopts the leader its answer names (KIP-951).
+//!
+//! A record for a topic the metadata does not know yet, or for a partition
+//! beyond the topic's partition count, waits for the metadata as Kafka's
+//! `KafkaProducer.waitOnMetadata` blocks `send`: the producer asks for the
+//! topic again after every answer, at the client's metadata backoff of
+//! `retry.backoff.ms` doubling up to `retry.backoff.max.ms`, and fails the
+//! record with Kafka's `TimeoutException` text once `max.block.ms` passed.
+//! A record that waited takes its timestamp and joins a batch when the
+//! metadata arrives, as `send` does after the wait.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -168,6 +177,9 @@ pub struct ProducerConfig {
     /// How many keyless records go to a sticky partition before the
     /// partitioner moves on. Default: 32.
     pub sticky_batch_records: u32,
+    /// `max.block.ms`: how long a record waits for the metadata of its
+    /// topic before it fails. Default: 60 000.
+    pub max_block_ms: Millis,
 }
 
 impl ProducerConfig {
@@ -198,6 +210,7 @@ impl Default for ProducerConfig {
             request_timeout_ms: 30_000,
             compression: Compression::None,
             sticky_batch_records: 32,
+            max_block_ms: 60_000,
         }
     }
 }
@@ -254,6 +267,11 @@ pub enum ProducerEvent {
         topic: String,
         partition: i32,
         code: i16,
+        /// The text of the exception Kafka's producer fails the record with
+        /// when the producer itself decided the failure: the metadata wait
+        /// that ran past `max.block.ms`, or a batch that expired before it
+        /// was sent. `None` for an error the broker answered.
+        message: Option<String>,
     },
 }
 
@@ -337,7 +355,8 @@ pub struct ProducerMetrics {
 struct PendingRecord {
     seq: SeqNo,
     record: BatchRecord,
-    created_at: Millis,
+    /// When `send` took the record: its latency counts from here.
+    sent_at: Millis,
     size: usize,
 }
 
@@ -436,10 +455,17 @@ struct InFlightProduce {
     batches: Vec<(String, i32, ProducerBatch)>,
 }
 
-/// A record whose topic the metadata does not know yet.
+/// A record that waits for the metadata of its topic, as Kafka's `send`
+/// blocks in `waitOnMetadata`.
 struct DeferredRecord {
-    pending: PendingRecord,
+    seq: SeqNo,
+    partition: Option<i32>,
     key: Option<Bytes>,
+    value: Option<Bytes>,
+    headers: Vec<RecordHeader>,
+    timestamp: Option<i64>,
+    /// When `send` took the record; it fails `max.block.ms` later.
+    sent_at: Millis,
 }
 
 /// The producer. See the module documentation.
@@ -544,6 +570,12 @@ impl Producer {
     /// Accept a record. It goes out at the next tick that finds its batch
     /// ready; the outcome arrives as a [`ProducerEvent`] with the returned
     /// sequence number.
+    ///
+    /// A record the metadata cannot place yet, because its topic or its
+    /// partition is unknown, waits for the metadata behind the records of
+    /// its topic that already wait (see the module documentation). A
+    /// negative partition fails at once with Kafka's
+    /// `IllegalArgumentException` text.
     pub fn send(&mut self, now: Millis, record: ProducerRecord) -> SeqNo {
         self.next_seq += 1;
         let seq = SeqNo(self.next_seq);
@@ -556,30 +588,81 @@ impl Producer {
             headers,
             timestamp,
         } = record;
-        let batch_record = BatchRecord {
-            timestamp: timestamp.unwrap_or_else(|| i64::try_from(now).unwrap_or(i64::MAX)),
-            key: key.clone(),
+        if let Some(invalid) = partition.filter(|p| *p < 0) {
+            self.metrics.failed += 1;
+            self.stashed.push(ProducerEvent::Failed {
+                seq,
+                topic,
+                partition: invalid,
+                code: codes::UNKNOWN_SERVER_ERROR,
+                message: Some(format!(
+                    "Invalid partition: {invalid}. Partition number should always be non-negative or null."
+                )),
+            });
+            return seq;
+        }
+        self.client.add_topics([topic.as_str()]);
+        let record = DeferredRecord {
+            seq,
+            partition,
+            key,
             value,
             headers,
+            timestamp,
+            sent_at: now,
+        };
+        let waiting = if self.deferred.contains_key(&topic) {
+            Some(record)
+        } else {
+            self.place(&topic, record, now)
+        };
+        if let Some(record) = waiting {
+            // The first `requestUpdateForTopic` of Kafka's `waitOnMetadata`.
+            self.client.request_metadata_refresh();
+            self.deferred.entry(topic).or_default().push(record);
+        }
+        seq
+    }
+
+    /// Put a record in the batch of its partition when the metadata knows
+    /// the partition, and give it back when it must wait. It takes its
+    /// timestamp now, as Kafka's `send` does once `waitOnMetadata` returns.
+    fn place(
+        &mut self,
+        topic: &str,
+        record: DeferredRecord,
+        now: Millis,
+    ) -> Option<DeferredRecord> {
+        let count = self
+            .client
+            .metadata()
+            .partition_count(topic)
+            .filter(|count| *count > 0);
+        let partition = match (record.partition, count) {
+            (Some(partition), Some(count)) => (partition < count).then_some(partition),
+            (None, Some(_)) => self.choose_partition(topic, record.key.as_deref()),
+            (_, None) => None,
+        };
+        let Some(partition) = partition else {
+            return Some(record);
+        };
+        let batch_record = BatchRecord {
+            timestamp: record
+                .timestamp
+                .unwrap_or_else(|| i64::try_from(now).unwrap_or(i64::MAX)),
+            key: record.key,
+            value: record.value,
+            headers: record.headers,
         };
         let size = record_size(&batch_record);
         let pending = PendingRecord {
-            seq,
+            seq: record.seq,
             record: batch_record,
-            created_at: now,
+            sent_at: record.sent_at,
             size,
         };
-        self.client.add_topics([topic.as_str()]);
-        let chosen = partition.or_else(|| self.choose_partition(&topic, key.as_deref()));
-        match chosen {
-            Some(partition) => self.append(&topic, partition, pending, now),
-            None => self
-                .deferred
-                .entry(topic)
-                .or_default()
-                .push(DeferredRecord { pending, key }),
-        }
-        seq
+        self.append(topic, partition, pending, now);
+        None
     }
 
     fn choose_partition(&mut self, topic: &str, key: Option<&[u8]>) -> Option<i32> {
@@ -627,27 +710,33 @@ impl Producer {
         queue.batches.push_back(ProducerBatch::new(id, record, now));
     }
 
-    /// Give the deferred records of the topics the metadata now knows their
+    /// The metadata changed: place the waiting records it can place, in
+    /// order per topic, and ask for the metadata again while any still
+    /// waits, as the loop of Kafka's `waitOnMetadata` calls
+    /// `requestUpdateForTopic` after each update that did not bring the
     /// partition.
     fn assign_deferred(&mut self, now: Millis) {
         let topics: Vec<String> = self.deferred.keys().cloned().collect();
         for topic in topics {
-            if self.client.metadata().partition_count(&topic).is_none() {
-                continue;
-            }
             let Some(records) = self.deferred.remove(&topic) else {
                 continue;
             };
-            for deferred in records {
-                match self.choose_partition(&topic, deferred.key.as_deref()) {
-                    Some(partition) => self.append(&topic, partition, deferred.pending, now),
-                    None => self
-                        .deferred
-                        .entry(topic.clone())
-                        .or_default()
-                        .push(deferred),
-                }
+            let mut waiting = Vec::new();
+            for record in records {
+                // A record waits behind an earlier one of its topic that waits.
+                let left = if waiting.is_empty() {
+                    self.place(&topic, record, now)
+                } else {
+                    Some(record)
+                };
+                waiting.extend(left);
             }
+            if !waiting.is_empty() {
+                self.deferred.insert(topic, waiting);
+            }
+        }
+        if !self.deferred.is_empty() {
+            self.client.request_metadata_refresh();
         }
     }
 
@@ -686,10 +775,11 @@ impl Producer {
         for (topic, records) in std::mem::take(&mut self.deferred) {
             for deferred in records {
                 events.push(ProducerEvent::Failed {
-                    seq: deferred.pending.seq,
+                    seq: deferred.seq,
                     topic: topic.clone(),
-                    partition: -1,
+                    partition: deferred.partition.unwrap_or(-1),
                     code: codes::UNKNOWN_SERVER_ERROR,
+                    message: None,
                 });
             }
         }
@@ -711,7 +801,7 @@ impl Producer {
                 &topic,
                 partition,
                 batch,
-                codes::UNKNOWN_SERVER_ERROR,
+                (codes::UNKNOWN_SERVER_ERROR, None),
                 &mut events,
             );
         }
@@ -760,7 +850,7 @@ impl Producer {
                 self.deferred
                     .values()
                     .flatten()
-                    .map(|d| d.pending.created_at + self.config.delivery_timeout_ms),
+                    .map(|d| d.sent_at + self.config.max_block_ms),
             );
         let producer_id = match self.identity {
             ProducerId::Absent if self.config.idempotent() => Some(self.identity_retry_at),
@@ -870,7 +960,13 @@ impl Producer {
                     })
                     .collect();
                 for (topic, partition, batch) in queued {
-                    self.fail_batch(&topic, partition, batch, response.error_code, events);
+                    self.fail_batch(
+                        &topic,
+                        partition,
+                        batch,
+                        (response.error_code, None),
+                        events,
+                    );
                 }
             }
             _ => {
@@ -893,8 +989,11 @@ impl Producer {
 
     // ---- draining ---------------------------------------------------------------
 
-    /// Fail queued records past `delivery_timeout_ms`, and deferred records
-    /// whose topic never appeared.
+    /// Fail queued records past `delivery_timeout_ms` with the text of
+    /// Kafka's `Sender.failExpiredBatches`, and records that waited
+    /// `max_block_ms` for their metadata with the text of Kafka's
+    /// `waitOnMetadata`; both are Kafka's `TimeoutException`,
+    /// `REQUEST_TIMED_OUT`.
     fn expire(&mut self, now: Millis, events: &mut Vec<ProducerEvent>) {
         let timeout = self.config.delivery_timeout_ms;
         let mut expired = Vec::new();
@@ -910,20 +1009,44 @@ impl Producer {
             }
         }
         for (topic, partition, batch) in expired {
-            self.fail_batch(&topic, partition, batch, codes::REQUEST_TIMED_OUT, events);
+            let message = format!(
+                "Expiring {} record(s) for {topic}-{partition}:{} ms has passed since batch creation. The request has not been sent, or no server response has been received yet.",
+                batch.records.len(),
+                now - batch.created_at,
+            );
+            self.fail_batch(
+                &topic,
+                partition,
+                batch,
+                (codes::REQUEST_TIMED_OUT, Some(&message)),
+                events,
+            );
         }
+        let max_block = self.config.max_block_ms;
         for (topic, records) in &mut self.deferred {
             let (late, kept): (Vec<DeferredRecord>, Vec<DeferredRecord>) = std::mem::take(records)
                 .into_iter()
-                .partition(|d| now >= d.pending.created_at + timeout);
+                .partition(|d| now >= d.sent_at + max_block);
             *records = kept;
+            let count = self
+                .client
+                .metadata()
+                .partition_count(topic)
+                .filter(|count| *count > 0);
             for deferred in late {
                 self.metrics.failed += 1;
+                let message = match (count, deferred.partition) {
+                    (Some(count), Some(partition)) => format!(
+                        "Partition {partition} of topic {topic} with partition count {count} is not present in metadata after {max_block} ms."
+                    ),
+                    _ => format!("Topic {topic} not present in metadata after {max_block} ms."),
+                };
                 events.push(ProducerEvent::Failed {
-                    seq: deferred.pending.seq,
+                    seq: deferred.seq,
                     topic: topic.clone(),
-                    partition: -1,
-                    code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    partition: deferred.partition.unwrap_or(-1),
+                    code: codes::REQUEST_TIMED_OUT,
+                    message: Some(message),
                 });
             }
         }
@@ -1165,7 +1288,7 @@ impl Producer {
             codes::INVALID_PRODUCER_EPOCH
             | codes::PRODUCER_FENCED
             | codes::INVALID_PRODUCER_ID_MAPPING => {
-                self.fail_batch(topic, partition, batch, code, events);
+                self.fail_batch(topic, partition, batch, (code, None), events);
                 self.identity = ProducerId::Absent;
                 self.identity_retry_at = now + self.config.retry_backoff_ms;
                 self.reset_sequences();
@@ -1186,7 +1309,7 @@ impl Producer {
                 }
                 ErrorClass::Retriable => self.retry_or_fail(ctx, key, batch, code, events),
                 ErrorClass::None | ErrorClass::NotRetriable => {
-                    self.fail_batch(topic, partition, batch, code, events);
+                    self.fail_batch(topic, partition, batch, (code, None), events);
                     // Kafka's `handleFailedBatch` bumps the epoch of an
                     // idempotent producer, so the sequences after the failed
                     // batch stay valid.
@@ -1209,7 +1332,7 @@ impl Producer {
         let now = ctx.now();
         let expired = now >= batch.created_at + self.config.delivery_timeout_ms;
         if batch.attempts >= self.config.retries || expired {
-            self.fail_batch(&key.0, key.1, batch, code, events);
+            self.fail_batch(&key.0, key.1, batch, (code, None), events);
             return;
         }
         batch.retry_at = now
@@ -1253,7 +1376,7 @@ impl Producer {
             } else {
                 -1
             };
-            let latency_ms = now.saturating_sub(record.created_at);
+            let latency_ms = now.saturating_sub(record.sent_at);
             self.metrics.rtt.record(latency_ms);
             events.push(ProducerEvent::Acked {
                 seq: record.seq,
@@ -1272,14 +1395,17 @@ impl Producer {
         }
     }
 
+    /// Fail every record of `batch` with `failure`: the error code and, for
+    /// a failure the producer decided itself, Kafka's exception text.
     fn fail_batch(
         &mut self,
         topic: &str,
         partition: i32,
         batch: ProducerBatch,
-        code: i16,
+        failure: (i16, Option<&str>),
         events: &mut Vec<ProducerEvent>,
     ) {
+        let (code, message) = failure;
         self.metrics.failed += u64::try_from(batch.records.len()).unwrap_or(u64::MAX);
         for record in batch.records {
             events.push(ProducerEvent::Failed {
@@ -1287,6 +1413,7 @@ impl Producer {
                 topic: topic.to_string(),
                 partition,
                 code,
+                message: message.map(str::to_string),
             });
         }
     }

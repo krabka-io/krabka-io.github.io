@@ -591,34 +591,6 @@ fn a_resend_after_a_lost_answer_is_deduplicated_by_its_sequence() {
 }
 
 #[test]
-fn a_record_for_a_topic_that_never_appears_fails_at_the_delivery_timeout() {
-    let config = ProducerConfig {
-        delivery_timeout_ms: 2_000,
-        ..Default::default()
-    };
-    let mut h = Harness::new(producer(config), cluster(&[]));
-    ready(&mut h);
-    let t0 = h.now();
-    send(&mut h, record("missing", Some("k"), "v"));
-    h.run_for(1_900);
-    assert!(h.events.is_empty());
-    assert!(h.client.pending_records() == 1);
-    assert!(h.run_until(|h| !h.events.is_empty(), 1_000));
-    assert!(h.now() == t0 + 2_000);
-    assert!(failed(&h.take_events()) == vec![(SeqNo(1), -1, codes::UNKNOWN_TOPIC_OR_PARTITION)]);
-    assert!(h.client.pending_records() == 0);
-    // While the record waited, the producer asked for the topic by name.
-    let asked: MetadataRequest = h.seen(MetadataRequest::API_KEY).last().unwrap().decode();
-    assert!(
-        asked.topics
-            == Some(vec![MetadataRequestTopic {
-                name: Some("missing".to_string()),
-                ..Default::default()
-            }])
-    );
-}
-
-#[test]
 fn compressed_batches_reach_the_log_readable() {
     for compression in [Compression::None, Compression::Gzip, Compression::Snappy] {
         let config = ProducerConfig {
@@ -643,4 +615,228 @@ fn compressed_batches_reach_the_log_readable() {
             "{compression:?}"
         );
     }
+}
+
+/// A `Metadata` request for `topics` by name.
+fn named(topics: &[&str]) -> MetadataRequest {
+    MetadataRequest {
+        topics: Some(
+            topics
+                .iter()
+                .map(|name| MetadataRequestTopic {
+                    name: Some((*name).to_string()),
+                    ..Default::default()
+                })
+                .collect(),
+        ),
+        allow_auto_topic_creation: false,
+        ..Default::default()
+    }
+}
+
+/// The `Metadata` requests the brokers saw from `from` on, with when each
+/// arrived.
+fn metadata_since(h: &Harness<Producer>, from: Millis) -> Vec<(Millis, MetadataRequest)> {
+    h.seen(MetadataRequest::API_KEY)
+        .iter()
+        .filter(|s| s.at >= from)
+        .map(|s| (s.at, s.decode()))
+        .collect()
+}
+
+#[test]
+fn a_topic_created_after_the_first_lookup_is_found() {
+    // The first lookup answers UNKNOWN_TOPIC_OR_PARTITION. As Kafka's
+    // `waitOnMetadata`, the producer asks for the topic again at the
+    // metadata backoff (100 ms, then 200 ms, doubling, with jitter), and the
+    // record goes out once the topic appears. It takes its timestamp then,
+    // as `send` does after the wait.
+    let state = cluster(&[]);
+    let mut h = Harness::new(producer(ProducerConfig::default()), Rc::clone(&state));
+    ready(&mut h);
+    let t0 = h.now();
+    send(&mut h, record("orders", Some("k"), "v"));
+    h.run_for(500);
+    let lookups = metadata_since(&h, t0);
+    let requests: Vec<MetadataRequest> = lookups.iter().map(|(_, r)| r.clone()).collect();
+    assert!(requests == vec![named(&["orders"]); 3]);
+    assert!(lookups[0].0 == t0 + 5);
+    state.borrow_mut().add_topic("orders", 1, 3);
+    assert!(h.run_until(|h| !h.events.is_empty(), 2_000));
+    let latency_ms = h.now() - t0;
+    assert!(
+        h.take_events()
+            == vec![ProducerEvent::Acked {
+                seq: SeqNo(1),
+                topic: "orders".to_string(),
+                partition: 0,
+                offset: 0,
+                latency_ms,
+            }]
+    );
+    // The lookup that found the topic was the last; its answer placed the
+    // record.
+    let placed_at = metadata_since(&h, t0).last().unwrap().0 + h.latency;
+    let mut expected = build_batch(
+        &[BatchRecord {
+            timestamp: i64::try_from(placed_at).unwrap(),
+            key: Some(Bytes::from_static(b"k")),
+            value: Some(Bytes::from_static(b"v")),
+            headers: Vec::new(),
+        }],
+        Some(ProducerStamp {
+            producer_id: 1_000,
+            producer_epoch: 0,
+            base_sequence: 0,
+        }),
+        0,
+    );
+    expected.partition_leader_epoch = 0;
+    assert!(state.borrow().batches("orders", 0) == vec![expected]);
+}
+
+#[test]
+fn a_topic_asked_for_while_a_refresh_is_out_is_looked_up() {
+    let state = cluster(&[("a", 1), ("b", 1)]);
+    let mut c = client(&[1]);
+    c.add_topics(["a"]);
+    let mut h = Harness::new(
+        Producer::new(c, ProducerConfig::default(), 7),
+        Rc::clone(&state),
+    );
+    // `Metadata` for `a` leaves at 10 ms and is answered at 20 ms.
+    h.run_for(12);
+    let t0 = h.now();
+    send(&mut h, record("b", Some("k"), "v"));
+    assert!(h.run_until(|h| !h.events.is_empty(), 1_000));
+    let latency_ms = h.now() - t0;
+    assert!(
+        h.take_events()
+            == vec![ProducerEvent::Acked {
+                seq: SeqNo(1),
+                topic: "b".to_string(),
+                partition: 0,
+                offset: 0,
+                latency_ms,
+            }]
+    );
+    let requests: Vec<MetadataRequest> =
+        metadata_since(&h, 0).into_iter().map(|(_, r)| r).collect();
+    assert!(requests == vec![named(&["a"]), named(&["a", "b"])]);
+}
+
+#[test]
+fn a_record_that_cannot_be_placed_waits_up_to_max_block_ms() {
+    // Rows: the topics of the cluster, the partition of the record, whether
+    // the producer looks the topic up while the record waits, and the
+    // failure Kafka's `send` ends with and when: `waitOnMetadata`'s
+    // `TimeoutException` once `max.block.ms` passed, or at once the
+    // `IllegalArgumentException` of a negative partition.
+    let rows = [
+        (
+            "a topic that never appears",
+            vec![],
+            None,
+            true,
+            (
+                -1,
+                codes::REQUEST_TIMED_OUT,
+                "Topic orders not present in metadata after 2000 ms.",
+            ),
+            2_000,
+        ),
+        (
+            "a partition beyond the partition count",
+            vec![("orders", 1)],
+            Some(3),
+            true,
+            (
+                3,
+                codes::REQUEST_TIMED_OUT,
+                "Partition 3 of topic orders with partition count 1 is not present in metadata after 2000 ms.",
+            ),
+            2_000,
+        ),
+        (
+            "a negative partition",
+            vec![("orders", 1)],
+            Some(-1),
+            false,
+            (
+                -1,
+                codes::UNKNOWN_SERVER_ERROR,
+                "Invalid partition: -1. Partition number should always be non-negative or null.",
+            ),
+            0,
+        ),
+    ];
+    for (name, topics, partition, looks_up, (failed_partition, code, message), after) in rows {
+        let config = ProducerConfig {
+            max_block_ms: 2_000,
+            ..Default::default()
+        };
+        let mut h = Harness::new(producer(config), cluster(&topics));
+        ready(&mut h);
+        let t0 = h.now();
+        send(
+            &mut h,
+            ProducerRecord {
+                partition,
+                ..record("orders", Some("k"), "v")
+            },
+        );
+        assert!(h.run_until(|h| !h.events.is_empty(), 3_000), "{name}");
+        assert!(h.now() == t0 + after, "{name}");
+        assert!(
+            h.take_events()
+                == vec![ProducerEvent::Failed {
+                    seq: SeqNo(1),
+                    topic: "orders".to_string(),
+                    partition: failed_partition,
+                    code,
+                    message: Some(message.to_string()),
+                }],
+            "{name}"
+        );
+        assert!(h.client.pending_records() == 0, "{name}");
+        assert!(h.client.metrics().failed == 1, "{name}");
+        let lookups = metadata_since(&h, t0);
+        assert!(!lookups.is_empty() == looks_up, "{name}");
+        assert!(
+            lookups.iter().all(|(_, r)| *r == named(&["orders"])),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_batch_without_a_leader_expires_with_kafkas_message() {
+    let state = cluster(&[("orders", 1)]);
+    state.borrow_mut().set_leader("orders", 0, -1);
+    let config = ProducerConfig {
+        delivery_timeout_ms: 2_000,
+        linger_ms: 0,
+        ..Default::default()
+    };
+    let mut h = Harness::new(producer(config), Rc::clone(&state));
+    ready(&mut h);
+    let t0 = h.now();
+    send(&mut h, record("orders", Some("k"), "v"));
+    assert!(h.run_until(|h| !h.events.is_empty(), 3_000));
+    assert!(h.now() == t0 + 2_000);
+    assert!(
+        h.take_events()
+            == vec![ProducerEvent::Failed {
+                seq: SeqNo(1),
+                topic: "orders".to_string(),
+                partition: 0,
+                code: codes::REQUEST_TIMED_OUT,
+                message: Some(
+                    "Expiring 1 record(s) for orders-0:2000 ms has passed since batch creation. \
+                     The request has not been sent, or no server response has been received yet."
+                        .to_string()
+                ),
+            }]
+    );
+    assert!(produces(&h).is_empty());
 }
