@@ -330,14 +330,24 @@ impl Lab {
     }
 }
 
-fn brokers() -> Vec<Value> {
+/// Three brokers, each with `extra` config.
+fn brokers(extra: &Value) -> Vec<Value> {
     (1..=3)
-        .map(|id| json!({ "id": id, "kind": "broker", "config": { "broker_id": id } }))
+        .map(|id| {
+            let mut config = json!({ "broker_id": id });
+            merge(&mut config, extra);
+            json!({ "id": id, "kind": "broker", "config": config })
+        })
         .collect()
 }
 
-fn scenario(mut nodes: Vec<Value>, topics: &Value) -> Value {
-    let mut all = brokers();
+fn scenario(nodes: Vec<Value>, topics: &Value) -> Value {
+    scenario_with(&json!({}), nodes, topics)
+}
+
+/// A scenario of three brokers with `broker` config, `nodes` and `topics`.
+fn scenario_with(broker: &Value, mut nodes: Vec<Value>, topics: &Value) -> Value {
+    let mut all = brokers(broker);
     all.append(&mut nodes);
     json!({
         "version": 1,
@@ -822,12 +832,17 @@ fn counts_by_key(records: &[Stored], changelog: bool) -> BTreeMap<String, Vec<i6
 /// One run of counts from 1 per customer, as long as the customer's orders
 /// over 250.
 fn expected_runs(orders: &[Stored]) -> BTreeMap<String, Vec<i64>> {
-    let mut totals: BTreeMap<String, i64> = BTreeMap::new();
-    for r in orders {
+    runs(orders.iter().filter_map(|r| {
         let value: Value = serde_json::from_slice(&r.value).unwrap();
-        if value["total"].as_i64().unwrap() > 250 {
-            *totals.entry(r.key.clone().unwrap()).or_default() += 1;
-        }
+        (value["total"].as_i64().unwrap() > 250).then(|| r.key.clone().unwrap())
+    }))
+}
+
+/// One run of counts from 1 per key, as long as the key's occurrences.
+fn runs(keys: impl IntoIterator<Item = String>) -> BTreeMap<String, Vec<i64>> {
+    let mut totals: BTreeMap<String, i64> = BTreeMap::new();
+    for key in keys {
+        *totals.entry(key).or_default() += 1;
     }
     totals
         .into_iter()
@@ -1019,4 +1034,128 @@ fn window_count_emits_a_count_per_key_and_window() {
             json!({ "cmd": "query", "store": "per-second", "key": "user-0" })
         ) == json!({ "store": "per-second", "key": "user-0", "task": "0_0", "value": user_0 })
     );
+}
+
+#[test]
+fn a_rekeyed_count_goes_through_the_repartition_topic() {
+    let producer = json!({ "id": 10, "kind": "producer", "config": {
+        "bootstrap": [1, 2, 3],
+        "topic": "orders",
+        "rate_per_sec": 0,
+        "key": { "pattern": "order-{seq}" },
+        "value": { "format": "json", "template": {
+            "customer": "{pick alice|bob|carol|dave}", "total": "{rand 1 500}",
+        } },
+    } });
+    let app = json!({ "id": 20, "kind": "streams", "config": {
+        "bootstrap": [1, 2, 3],
+        "application_id": "order-stats",
+        "topology": {
+            "source": "orders",
+            "ops": [
+                { "op": "select_key", "field": "customer" },
+                { "op": "count_by_key", "store": "per-customer" },
+            ],
+            "sink": "customer-counts",
+        },
+    } });
+    let mut lab = Lab::new(&scenario(
+        vec![producer, app],
+        &json!([
+            { "name": "orders", "partitions": 3 },
+            { "name": "customer-counts", "partitions": 3 },
+        ]),
+    ));
+    lab.wait_for_topics();
+    send_orders(&mut lab, 3_000);
+    let repartition = "order-stats-per-customer-repartition";
+    assert!(lab.wait_committed("order-stats", "orders", 30_000));
+    assert!(lab.wait_committed("order-stats", repartition, 30_000));
+
+    // Every order went through the repartition topic the broker created,
+    // keyed by its customer, on the partition the default partitioner picks.
+    let orders = lab.read_topic(NodeId(1), "orders");
+    let customer = |r: &Stored| -> String {
+        let value: Value = serde_json::from_slice(&r.value).unwrap();
+        value["customer"].as_str().unwrap().to_string()
+    };
+    let mut expected: Vec<(String, i32)> = orders
+        .iter()
+        .map(|r| {
+            let c = customer(r);
+            let partition = partition_for_key(c.as_bytes(), 3).unwrap();
+            (c, partition)
+        })
+        .collect();
+    expected.sort();
+    let mut rekeyed: Vec<(String, i32)> = lab
+        .read_topic(NodeId(1), repartition)
+        .iter()
+        .map(|r| (r.key.clone().unwrap(), r.partition))
+        .collect();
+    rekeyed.sort();
+    assert!(rekeyed == expected);
+    // The second subtopology counted every customer's orders.
+    let counted = counts_by_key(&lab.read_topic(NodeId(1), "customer-counts"), false);
+    assert!(counted == runs(orders.iter().map(customer)));
+}
+
+#[test]
+fn two_instances_share_the_tasks_and_one_takes_over_when_the_other_dies() {
+    // The broker's `group.streams.num.standby.replicas`.
+    for standbys in [0, 1] {
+        let mut second = counting_app(21);
+        second["id"] = json!(21);
+        let mut lab = Lab::new(&scenario_with(
+            &json!({ "group_streams_num_standby_replicas": standbys }),
+            vec![orders_producer(10, &json!({})), counting_app(20), second],
+            &json!([
+                { "name": "orders", "partitions": 3 },
+                { "name": "order-counts", "partitions": 3 },
+            ]),
+        ));
+        lab.wait_for_topics();
+        send_orders(&mut lab, 3_000);
+        assert!(lab.wait_committed("order-stats", "orders", 30_000));
+        // The two processes split the three tasks; with a standby replica,
+        // each keeps a standby of the other's tasks.
+        let owned = |lab: &Lab, node: u32, role: &str| -> BTreeSet<String> {
+            lab.snapshot(node)["membership"][role]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t.as_str().unwrap().to_string())
+                .collect()
+        };
+        let (first, other) = (
+            owned(&lab, 20, "owned_active"),
+            owned(&lab, 21, "owned_active"),
+        );
+        let all: BTreeSet<String> = ["0_0", "0_1", "0_2"].map(String::from).into();
+        assert!(!first.is_empty() && !other.is_empty(), "{standbys}");
+        assert!(first.union(&other).cloned().collect::<BTreeSet<_>>() == all);
+        assert!(first.is_disjoint(&other));
+        let standby_of = |active: &BTreeSet<String>| {
+            if standbys == 0 {
+                BTreeSet::new()
+            } else {
+                active.clone()
+            }
+        };
+        assert!(owned(&lab, 20, "owned_standby") == standby_of(&other));
+        assert!(owned(&lab, 21, "owned_standby") == standby_of(&first));
+
+        // One process dies; once its session expired the other runs every
+        // task and counts on from the changelogs.
+        lab.world.fault(Fault::Kill { node: NodeId(21) });
+        send_orders(&mut lab, 3_000);
+        assert!(
+            lab.wait_committed("order-stats", "orders", 90_000),
+            "{standbys}"
+        );
+        assert!(owned(&lab, 20, "owned_active") == all);
+        let orders = lab.read_topic(NodeId(1), "orders");
+        let counted = counts_by_key(&lab.read_topic(NodeId(1), "order-counts"), false);
+        assert!(counted == expected_runs(&orders), "{standbys}");
+    }
 }
