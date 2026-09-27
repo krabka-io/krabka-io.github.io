@@ -14,10 +14,13 @@
 //
 // Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--headed]
 // Needs `playwright` or `playwright-core`, project-local or global (found
-// through `npm root -g`), and a Chromium that Playwright finds by itself: its
-// own download (`npx playwright install chromium`) or the directory named by
-// PLAYWRIGHT_BROWSERS_PATH. Exits 2 when either is missing, 1 when a check
-// fails.
+// through `npm root -g`), and a Chromium: the one that Playwright finds by
+// itself (its own download, `npx playwright install chromium`, or the build
+// it expects under PLAYWRIGHT_BROWSERS_PATH), or else the newest `chromium-N`
+// under PLAYWRIGHT_BROWSERS_PATH. The fallback covers a project-local
+// `playwright-core` newer than the installed browsers, which is what
+// `npm run check-wasi` leaves behind. Exits 2 when either is missing, 1 when
+// a check fails.
 
 import fs from 'fs';
 import http from 'http';
@@ -55,6 +58,46 @@ async function loadPlaywright() {
     }
   }
   return null;
+}
+
+// The newest Chromium under PLAYWRIGHT_BROWSERS_PATH, for a Playwright whose
+// own browser build is not installed there; undefined when there is none. A
+// headless run prefers the headless shell, as Playwright itself does.
+function installedChromium() {
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!base || !fs.existsSync(base)) return undefined;
+  const builds = [
+    ['chromium', ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-win/chrome.exe']],
+  ];
+  if (HEADLESS) {
+    builds.unshift(['chromium_headless_shell', ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell']]);
+  }
+  const entries = fs.readdirSync(base);
+  for (const [name, executables] of builds) {
+    const pattern = new RegExp(`^${name}-(\\d+)$`);
+    const dirs = entries
+      .filter((d) => pattern.test(d))
+      .sort((a, b) => Number(b.match(pattern)[1]) - Number(a.match(pattern)[1]));
+    for (const dir of dirs) {
+      for (const executable of executables) {
+        const candidate = path.join(base, dir, executable);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+// Launch Chromium, falling back to `installedChromium()` when Playwright's own
+// build is missing.
+async function launchChromium(pw) {
+  try {
+    return await pw.chromium.launch({ headless: HEADLESS });
+  } catch (err) {
+    const executablePath = installedChromium();
+    if (!executablePath) throw err;
+    return pw.chromium.launch({ headless: HEADLESS, executablePath });
+  }
 }
 
 // ---- a static server over dist/ -----------------------------------------------------------
@@ -249,7 +292,7 @@ async function main() {
   }
   let browser;
   try {
-    browser = await pw.chromium.launch({ headless: HEADLESS });
+    browser = await launchChromium(pw);
   } catch (err) {
     console.error(`Playwright could not launch Chromium: ${err.message.split('\n')[0]}`);
     console.error('Install it with `npx playwright install chromium`, or point PLAYWRIGHT_BROWSERS_PATH at an installed one.');
