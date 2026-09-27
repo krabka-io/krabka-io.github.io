@@ -11,6 +11,10 @@ use super::{
     scenario::NodeSpec,
 };
 
+mod admin;
+
+pub use self::admin::AdminNode;
+
 macro_rules! stub_node {
     ($name:ident, $kind:literal) => {
         #[doc = concat!("A `", $kind, "` node.")]
@@ -47,4 +51,3 @@ macro_rules! stub_node {
 stub_node!(ProducerNode, "producer");
 stub_node!(ConsumerNode, "consumer");
 stub_node!(StreamsNode, "streams");
-stub_node!(AdminNode, "admin");
