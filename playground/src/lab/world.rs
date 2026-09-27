@@ -632,19 +632,17 @@ impl World {
             return;
         }
         let key = frame.conn_key();
-        match frame.payload {
-            Payload::Open => {
-                self.conns.insert(key, frame.dst);
-            }
-            Payload::Close => {
-                self.forget_conn(key);
-            }
-            Payload::Data(_) => {}
+        if frame.payload == Payload::Open {
+            self.conns.insert(key, frame.dst);
         }
+        let closing = frame.payload == Payload::Close;
         let (a, b) = (frame.src.node, frame.dst.node);
         let link = self.link(a, b);
         let isolated = |w: &Self, n: NodeId| w.nodes.get(&n).is_some_and(|s| s.isolated);
         if a != b && (link.cut || isolated(self, a) || isolated(self, b)) {
+            if closing {
+                self.forget_conn(key);
+            }
             return;
         }
         if matches!(frame.payload, Payload::Data(_))
@@ -678,6 +676,11 @@ impl World {
                 deliver_at: at,
                 frame,
             });
+        }
+        // The close took its place behind the connection's earlier frames;
+        // only now can the floors go.
+        if closing {
+            self.forget_conn(key);
         }
     }
 
@@ -1234,6 +1237,38 @@ mod tests {
         });
         w.run_for(200); // the pinger reopens and its echoes flow again
         assert!(w.world().delivery_floors() == 2);
+    }
+
+    #[test]
+    fn a_close_never_overtakes_the_connections_earlier_frames() {
+        // A node that closes right after sending data, on a link that just got
+        // faster, must still deliver the data first.
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1, "links": { "default_latency_ms": 100 },
+            "nodes": [
+                { "id": 1, "kind": "echo" },
+                { "id": 3, "kind": "pinger", "config": { "target": 1, "period_ms": 1000 } }
+            ]
+        }))
+        .unwrap();
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.step_until(50); // the open is on the wire until 100
+        world.fault(Fault::Latency {
+            a: NodeId(1),
+            b: NodeId(3),
+            ms: 1,
+        });
+        world.push_ingress(vec![Frame::close(
+            Endpoint::client(NodeId(3)),
+            Endpoint::kafka(NodeId(1)),
+            ConnId(1),
+        )]);
+        // Ingress frames deliver at once: this one is a peer's close arriving
+        // on the wire, so it must still queue behind the open.
+        world.step_until(200);
+        let snap = world.node_snapshot(NodeId(1)).unwrap();
+        assert!(snap["frames"] == 2);
+        assert!(snap["closes"] == 1);
     }
 
     #[test]
