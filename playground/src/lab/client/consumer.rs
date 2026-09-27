@@ -18,8 +18,52 @@
 //! Positions come from `OffsetFetch` at assignment, or from `ListOffsets`
 //! with the reset policy when the group committed none. One `Fetch` per
 //! leader carries every assigned partition the leader owns; the buffered
-//! records leave through [`Consumer::poll`], which advances the positions
-//! the auto-commit timer commits.
+//! records leave through [`Consumer::poll`] and [`Consumer::poll_at`], which
+//! advance the positions a commit sends.
+//!
+//! # Manual assignment and seeking
+//!
+//! [`Consumer::assign`] takes partitions without a group, as Kafka's
+//! `KafkaConsumer.assign`: no membership, positions from the group's
+//! committed offsets when the consumer has a `group.id`, else from the reset
+//! policy, and commits with generation `-1` and no member id. It refuses a
+//! consumer that subscribed, as Kafka's `SubscriptionState` does.
+//! [`Consumer::seek`] sets a partition's position at once;
+//! [`Consumer::seek_to_beginning`] and [`Consumer::seek_to_end`] ask for an
+//! offset reset that the next `ListOffsets` resolves. Both drop the records
+//! fetched for the old position, and a fetch answer for it is discarded,
+//! as Kafka's `FetchCollector` discards a stale fetch. A seek on a partition
+//! the consumer does not hold is refused with Kafka's `IllegalStateException`
+//! text.
+//!
+//! # Static membership (KIP-345)
+//!
+//! With `group_instance_id` set, `JoinGroup`, `SyncGroup`, `Heartbeat`,
+//! `OffsetCommit` and every KIP-848 heartbeat carry the instance id. A
+//! restarted member joins with the same instance id and an empty member id,
+//! and the coordinator gives it the place, and the assignment, of the member
+//! it replaces; a returning leader that the coordinator tells to skip the
+//! assignment (KIP-814) syncs with none. On close a classic static member
+//! sends no `LeaveGroup`, as Kafka's `AbstractCoordinator.maybeLeaveGroup`
+//! does, so the group keeps it until its session times out; a KIP-848
+//! static member leaves with epoch `-2`, as `ConsumerMembershipManager`'s
+//! `leaveGroupEpoch` does, and the coordinator keeps its assignment.
+//!
+//! # Auto-commit
+//!
+//! Kafka 4.3 commits the consumed positions on the interval only inside
+//! `poll`, with either protocol: the classic consumer from
+//! `ConsumerCoordinator.poll` (`maybeAutoCommitOffsetsAsync`), the KIP-848
+//! consumer from the `AsyncPollEvent` of `poll`
+//! (`CommitRequestManager.updateTimerAndMaybeCommit`). [`Consumer::poll_at`]
+//! is that `poll`: it commits when `auto.commit.interval.ms` passed since the
+//! last auto-commit, and then takes the records; [`Consumer::next_auto_commit`]
+//! tells a node when a poll would commit. The interval starts over when an
+//! assignment is installed, and a commit that fails with a retriable error
+//! brings the next one forward to `retry.backoff.ms`. The consumer also
+//! commits before it rejoins a classic group, before it reconciles a KIP-848
+//! assignment, and when it closes. Ticks and frames never commit on the
+//! interval.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -57,6 +101,7 @@ use krabka_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use thiserror::Error;
 
 use super::{
     ClientError, ClientEvent, CoordinatorType, KafkaClient, RequestId, Target,
@@ -76,6 +121,12 @@ use crate::lab::{
 const JOIN_GROUP_MEMBER_EPOCH: i32 = 0;
 /// Kafka's `ConsumerGroupHeartbeatRequest.LEAVE_GROUP_MEMBER_EPOCH`.
 const LEAVE_GROUP_MEMBER_EPOCH: i32 = -1;
+/// Kafka's `ConsumerGroupHeartbeatRequest.LEAVE_GROUP_STATIC_MEMBER_EPOCH`:
+/// a static member leaves for a while and keeps its assignment.
+const LEAVE_GROUP_STATIC_MEMBER_EPOCH: i32 = -2;
+/// The generation of an offset commit outside a group's generations:
+/// Kafka's `OffsetCommitRequest.DEFAULT_GENERATION_ID`.
+const NO_GENERATION: i32 = -1;
 /// `ListOffsets` timestamp of the earliest offset.
 const EARLIEST_TIMESTAMP: i64 = -2;
 /// `ListOffsets` timestamp of the latest offset.
@@ -94,6 +145,19 @@ type Partitions = Vec<(String, i32)>;
 
 /// The `(topic, partition, offset)` rows of one commit.
 type Offsets = Vec<(String, i32, i64)>;
+
+/// The partitions of one `ListOffsets`, each with the reset it resolves.
+type Resets = Vec<((String, i32), AutoOffsetReset)>;
+
+/// An `OffsetCommit` in flight.
+struct PendingCommit {
+    id: RequestId,
+    offsets: Offsets,
+    /// An auto-commit: one that fails with a retriable error brings the
+    /// next auto-commit forward to `retry.backoff.ms`, as the callback of
+    /// Kafka's `autoCommitOffsetsAsync` does.
+    auto: bool,
+}
 
 /// The group protocol of a consumer: Kafka's `group.protocol`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -147,8 +211,11 @@ impl IsolationLevel {
 /// The settings of a consumer, with Kafka's defaults.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ConsumerConfig {
-    /// `group.id`.
+    /// `group.id`. Empty means no group, Kafka's unset `group.id`: the
+    /// consumer can only [`Consumer::assign`], and commits nothing.
     pub group_id: String,
+    /// `group.instance.id`: the member is static (KIP-345). Default: none.
+    pub group_instance_id: Option<String>,
     /// `group.protocol`. Default: classic.
     pub group_protocol: GroupProtocol,
     /// `auto.offset.reset`. Default: latest.
@@ -185,6 +252,7 @@ impl Default for ConsumerConfig {
     fn default() -> Self {
         Self {
             group_id: String::new(),
+            group_instance_id: None,
             group_protocol: GroupProtocol::Classic,
             auto_offset_reset: AutoOffsetReset::Latest,
             session_timeout_ms: 45_000,
@@ -267,6 +335,30 @@ pub struct ConsumerMetrics {
     pub rebalances: u64,
 }
 
+/// Why the consumer refused a call, with the text of the exception Kafka's
+/// `KafkaConsumer` throws for it.
+#[derive(Clone, PartialEq, Eq, Debug, Error)]
+#[non_exhaustive]
+pub enum ConsumerError {
+    /// The partition is not assigned to the consumer: Kafka's
+    /// `SubscriptionState.assignedState`.
+    #[error("No current assignment for partition {topic}-{partition}")]
+    NotAssigned { topic: String, partition: i32 },
+    /// A seek to a negative offset.
+    #[error("seek offset must not be a negative number")]
+    NegativeOffset,
+    /// `assign` on a consumer that subscribed: Kafka's
+    /// `SUBSCRIPTION_EXCEPTION_MESSAGE`.
+    #[error("Subscription to topics, partitions and pattern are mutually exclusive")]
+    Subscribed,
+    /// `assign` with a partition of an empty or blank topic name.
+    #[error("Topic partitions to assign to cannot have null or empty topic")]
+    EmptyTopic,
+    /// The consumer was closed.
+    #[error("This consumer has already been closed.")]
+    Closed,
+}
+
 /// How far a partition is in getting a position.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PositionState {
@@ -274,11 +366,11 @@ enum PositionState {
     Init,
     /// `OffsetFetch` is in flight.
     FetchingCommitted,
-    /// The group committed nothing, or the position was out of range: the
-    /// reset policy decides.
-    NeedReset,
-    /// `ListOffsets` is in flight.
-    Resetting,
+    /// The group committed nothing, the position was out of range, or a
+    /// seek asked for the beginning or the end: the strategy decides.
+    NeedReset(AutoOffsetReset),
+    /// `ListOffsets` for the strategy is in flight.
+    Resetting(AutoOffsetReset),
     /// The position is known.
     Ready,
 }
@@ -298,6 +390,9 @@ struct PartitionState {
     /// one `ListOffsets` or `OffsetFetch` returned. It goes into the commit.
     leader_epoch: i32,
     fetch_in_flight: bool,
+    /// The offset the fetch in flight asked for. Its answer counts only
+    /// while the partition still fetches from there.
+    fetch_offset: Option<i64>,
     /// KIP-848: the partition leaves with the reconciliation under way, so it
     /// neither fetches nor hands out records, as Kafka's
     /// `markPendingRevocationToPauseFetching` does.
@@ -317,6 +412,7 @@ impl PartitionState {
             pending_revocation: false,
             leader_epoch: -1,
             fetch_in_flight: false,
+            fetch_offset: None,
             retry_at: 0,
         }
     }
@@ -324,6 +420,25 @@ impl PartitionState {
     fn lag(&self) -> Option<i64> {
         (self.high_watermark >= 0 && self.state == PositionState::Ready)
             .then(|| (self.high_watermark - self.position).max(0))
+    }
+
+    /// Kafka's `seekUnvalidated` with no leader epoch: the position is
+    /// `offset` at once, and what was fetched for the old one is dropped.
+    fn seek(&mut self, offset: i64) {
+        self.state = PositionState::Ready;
+        self.position = offset;
+        self.next_fetch = offset;
+        self.leader_epoch = -1;
+        self.buffered.clear();
+        self.retry_at = 0;
+    }
+
+    /// Kafka's `requestOffsetReset`: the position is gone until a
+    /// `ListOffsets` for `strategy` answers.
+    fn reset(&mut self, strategy: AutoOffsetReset) {
+        self.state = PositionState::NeedReset(strategy);
+        self.buffered.clear();
+        self.retry_at = 0;
     }
 }
 
@@ -411,15 +526,20 @@ pub struct Consumer {
     sync: Option<RequestId>,
     heartbeat: Option<RequestId>,
     leave: Option<RequestId>,
-    commit: Option<(RequestId, Offsets)>,
+    commit: Option<PendingCommit>,
     offset_fetch: Option<(RequestId, Partitions)>,
-    list_offsets: BTreeMap<RequestId, Partitions>,
+    list_offsets: BTreeMap<RequestId, Resets>,
     fetches: BTreeMap<RequestId, (i32, Partitions)>,
     fetch_brokers: BTreeSet<i32>,
     next_heartbeat_at: Millis,
     heartbeat_interval_ms: Millis,
-    next_commit_at: Millis,
+    /// When a poll commits next: Kafka's auto-commit timer, which starts
+    /// when the consumer first sees the clock.
+    next_commit_at: Option<Millis>,
     pending_leader: Option<PendingLeader>,
+    /// The partitions came from [`Consumer::assign`], outside any group:
+    /// Kafka's `USER_ASSIGNED` subscription.
+    manual: bool,
     assigned: BTreeMap<(String, i32), PartitionState>,
     sent_fields: SentFields,
     /// KIP-848: the last assignment the coordinator sent, reconciled again
@@ -457,8 +577,9 @@ impl Consumer {
             fetches: BTreeMap::new(),
             fetch_brokers: BTreeSet::new(),
             next_heartbeat_at: 0,
-            next_commit_at: 0,
+            next_commit_at: None,
             pending_leader: None,
+            manual: false,
             assigned: BTreeMap::new(),
             sent_fields: SentFields::default(),
             target: None,
@@ -548,14 +669,36 @@ impl Consumer {
         self.assigned.values().map(|p| p.buffered.len()).sum()
     }
 
+    /// The high watermark the last fetch of an assigned partition reported:
+    /// the end of the partition as the consumer sees it.
+    #[must_use]
+    pub fn high_watermark(&self, topic: &str, partition: i32) -> Option<i64> {
+        self.assigned
+            .get(&(topic.to_string(), partition))
+            .map(|p| p.high_watermark)
+            .filter(|hwm| *hwm >= 0)
+    }
+
+    /// Whether the partitions came from [`Consumer::assign`] rather than
+    /// from a group.
+    #[must_use]
+    pub fn is_manually_assigned(&self) -> bool {
+        self.manual
+    }
+
     /// Subscribe to `topics` and join the group at the next tick. A change
     /// of subscription joins again.
+    ///
+    /// Kafka refuses `subscribe` on a consumer with a manual assignment
+    /// until it unsubscribes; this `subscribe` has no error to give, so it
+    /// drops the manual assignment and subscribes.
     pub fn subscribe(&mut self, topics: &[&str]) {
         let mut topics: Vec<String> = topics.iter().map(|t| (*t).to_string()).collect();
         topics.sort();
         topics.dedup();
         self.client.add_topics(topics.iter().map(String::as_str));
         self.subscription = topics;
+        self.manual = false;
         self.assigned.clear();
         self.sent_fields = SentFields::default();
         self.state = MemberState::Joining;
@@ -566,10 +709,145 @@ impl Consumer {
         self.rejoin_at = 0;
     }
 
+    /// Take `partitions` by hand, outside any group: Kafka's
+    /// `KafkaConsumer.assign`. A partition that stays keeps its position;
+    /// the others lose what was fetched for them. An empty list gives up
+    /// every partition, as Kafka's `assign` of an empty list unsubscribes.
+    /// With auto-commit on, a commit due by the interval goes out first, as
+    /// Kafka commits before the assignment changes.
+    ///
+    /// # Errors
+    /// The checks run in Kafka's order: [`ConsumerError::Closed`] after
+    /// [`Consumer::close`], [`ConsumerError::EmptyTopic`] for a topic name
+    /// that Java's `trim` leaves empty, and [`ConsumerError::Subscribed`]
+    /// when the consumer subscribed, after the auto-commit that is due. The
+    /// assignment stays as it was. An empty list on a subscribed consumer is
+    /// refused as well: Kafka's `unsubscribe` would take the member out of
+    /// its group, and this consumer leaves a group only when it closes.
+    pub fn assign(
+        &mut self,
+        ctx: &mut Ctx<'_>,
+        partitions: &[(&str, i32)],
+    ) -> Result<(), ConsumerError> {
+        if self.closed {
+            return Err(ConsumerError::Closed);
+        }
+        let subscribed = !self.manual && self.state != MemberState::Unsubscribed;
+        if partitions.is_empty() {
+            if subscribed {
+                return Err(ConsumerError::Subscribed);
+            }
+            self.manual = false;
+            self.assigned.clear();
+            return Ok(());
+        }
+        // Kafka's `Utils.isBlank`: Java's `trim` drops every character up to
+        // U+0020.
+        if partitions
+            .iter()
+            .any(|(topic, _)| topic.chars().all(|c| c <= ' '))
+        {
+            return Err(ConsumerError::EmptyTopic);
+        }
+        self.maybe_auto_commit(ctx);
+        if subscribed {
+            return Err(ConsumerError::Subscribed);
+        }
+        let target: BTreeSet<(String, i32)> = partitions
+            .iter()
+            .map(|(topic, partition)| ((*topic).to_string(), *partition))
+            .collect();
+        self.assigned.retain(|key, _| target.contains(key));
+        for key in target {
+            self.assigned.entry(key).or_insert_with(PartitionState::new);
+        }
+        self.manual = true;
+        let topics: BTreeSet<&str> = partitions.iter().map(|(topic, _)| *topic).collect();
+        self.client.add_topics(topics);
+        Ok(())
+    }
+
+    /// Fetch `partition` of `topic` from `offset` on: Kafka's
+    /// `KafkaConsumer.seek`. The records fetched for the old position are
+    /// dropped. Nothing is sent: the next fetch asks for `offset`.
+    ///
+    /// # Errors
+    /// [`ConsumerError::NegativeOffset`] for an offset below 0,
+    /// [`ConsumerError::Closed`] after [`Consumer::close`], and
+    /// [`ConsumerError::NotAssigned`] for a partition the consumer does not
+    /// hold.
+    pub fn seek(&mut self, topic: &str, partition: i32, offset: i64) -> Result<(), ConsumerError> {
+        if offset < 0 {
+            return Err(ConsumerError::NegativeOffset);
+        }
+        if self.closed {
+            return Err(ConsumerError::Closed);
+        }
+        self.assigned
+            .get_mut(&(topic.to_string(), partition))
+            .ok_or_else(|| ConsumerError::NotAssigned {
+                topic: topic.to_string(),
+                partition,
+            })?
+            .seek(offset);
+        Ok(())
+    }
+
+    /// Move `partitions`, or every assigned partition when the list is
+    /// empty, to their first offset: Kafka's `seekToBeginning`. The offset
+    /// is looked up with `ListOffsets` at the next tick, lazily, as in
+    /// Kafka.
+    ///
+    /// # Errors
+    /// [`ConsumerError::Closed`] after [`Consumer::close`], and
+    /// [`ConsumerError::NotAssigned`] at the first partition the consumer
+    /// does not hold; as in Kafka, the partitions before it are moved.
+    pub fn seek_to_beginning(&mut self, partitions: &[(&str, i32)]) -> Result<(), ConsumerError> {
+        self.seek_to(partitions, AutoOffsetReset::Earliest)
+    }
+
+    /// Move `partitions`, or every assigned partition when the list is
+    /// empty, to the end of their log: Kafka's `seekToEnd`. The offset is
+    /// looked up with `ListOffsets` at the next tick.
+    ///
+    /// # Errors
+    /// As [`Consumer::seek_to_beginning`].
+    pub fn seek_to_end(&mut self, partitions: &[(&str, i32)]) -> Result<(), ConsumerError> {
+        self.seek_to(partitions, AutoOffsetReset::Latest)
+    }
+
+    fn seek_to(
+        &mut self,
+        partitions: &[(&str, i32)],
+        strategy: AutoOffsetReset,
+    ) -> Result<(), ConsumerError> {
+        if self.closed {
+            return Err(ConsumerError::Closed);
+        }
+        let keys: Vec<(String, i32)> = if partitions.is_empty() {
+            self.assignment()
+        } else {
+            partitions
+                .iter()
+                .map(|(topic, partition)| ((*topic).to_string(), *partition))
+                .collect()
+        };
+        for (topic, partition) in keys {
+            let key = (topic, partition);
+            let Some(state) = self.assigned.get_mut(&key) else {
+                let (topic, partition) = key;
+                return Err(ConsumerError::NotAssigned { topic, partition });
+            };
+            state.reset(strategy);
+        }
+        Ok(())
+    }
+
     /// Take up to `max` buffered records, and never more than
     /// `max_poll_records`, advancing the positions the next commit sends.
     /// The partitions take turns, and a partition the member is giving up
-    /// hands out none.
+    /// hands out none. It never commits; [`Consumer::poll_at`] is Kafka's
+    /// `poll`, with its auto-commit.
     pub fn poll(&mut self, max: usize) -> Vec<ConsumedRecord> {
         let max = max.min(self.config.max_poll_records);
         let keys: Vec<(String, i32)> = self
@@ -605,6 +883,36 @@ impl Consumer {
         out
     }
 
+    /// Kafka's `KafkaConsumer.poll`: commit the consumed positions when
+    /// `auto.commit.interval.ms` passed since the last auto-commit, take up
+    /// to `max` records as [`Consumer::poll`] does, and send the fetches of
+    /// the partitions whose records ran out, as Kafka sends the next fetches
+    /// before `poll` returns. Kafka 4.3 auto-commits on the interval only
+    /// here, with either group protocol.
+    pub fn poll_at(&mut self, ctx: &mut Ctx<'_>, max: usize) -> Vec<ConsumedRecord> {
+        self.maybe_auto_commit(ctx);
+        let records = self.poll(max);
+        if self.fetching() {
+            self.maybe_fetch(ctx);
+        }
+        records
+    }
+
+    /// When a [`Consumer::poll_at`] would next commit on the interval:
+    /// Kafka's `ConsumerCoordinator.timeToNextPoll`, which bounds how long a
+    /// poll loop may wait. `None` while auto-commit is off, the consumer has
+    /// no group, a commit is in flight (the next is due once it answers), or
+    /// the consumer is closed. A tick does not commit, so a node that wants
+    /// the commit polls at this time.
+    #[must_use]
+    pub fn next_auto_commit(&self) -> Option<Millis> {
+        let possible = self.config.enable_auto_commit
+            && self.has_group()
+            && self.commit.is_none()
+            && !self.closed;
+        if possible { self.next_commit_at } else { None }
+    }
+
     /// A frame arrived for this consumer's client.
     pub fn on_frame(
         &mut self,
@@ -628,13 +936,17 @@ impl Consumer {
     }
 
     /// Commit the current positions now, whatever `enable.auto.commit` says.
+    /// A consumer without a group commits nothing.
     pub fn commit(&mut self, ctx: &mut Ctx<'_>) {
         if self.commit.is_none() {
-            self.commit_positions(ctx);
+            self.commit_positions(ctx, false);
         }
     }
 
-    /// Commit, leave the group, and close the client.
+    /// Commit, leave the group, and close the client. A classic static
+    /// member sends no `LeaveGroup`, and a KIP-848 static member leaves with
+    /// epoch `-2`, so the group keeps its assignment for the member that
+    /// comes back with its instance id.
     pub fn close(&mut self, ctx: &mut Ctx<'_>) -> Vec<ConsumerEvent> {
         let mut events = Vec::new();
         if self.closed {
@@ -642,15 +954,21 @@ impl Consumer {
         }
         self.closed = true;
         if self.config.enable_auto_commit && self.commit.is_none() {
-            self.commit_positions(ctx);
+            self.commit_positions(ctx, false);
         }
-        if !self.member_id.is_empty()
+        let dynamic = self.config.group_instance_id.is_none();
+        let leaves = match self.config.group_protocol {
+            GroupProtocol::Classic => dynamic,
+            GroupProtocol::Consumer => true,
+        };
+        if leaves
+            && !self.member_id.is_empty()
             && matches!(self.state, MemberState::Stable | MemberState::Syncing)
         {
             self.send_leave(ctx);
         }
         let partitions = self.assignment();
-        if !partitions.is_empty() {
+        if !self.manual && !partitions.is_empty() {
             events.push(ConsumerEvent::Revoked { partitions });
         }
         self.assigned.clear();
@@ -675,24 +993,77 @@ impl Consumer {
                 self.leave = Some(self.client.send(ctx, self.coordinator(), request));
             }
             GroupProtocol::Consumer => {
-                // Kafka's `transitionToSendingLeaveGroup` gives the assignment
-                // up first, so a member that reported partitions reports none.
+                // Kafka's `leaveGroup` unsubscribes and gives the assignment
+                // up before the heartbeat is built, so the heartbeat reports
+                // an empty subscription, and no partitions when it reported
+                // some.
                 let owned_reported = self
                     .sent_fields
                     .topic_partitions
                     .as_ref()
                     .is_some_and(|owned| !owned.is_empty());
+                let subscribed_reported = self
+                    .sent_fields
+                    .subscribed_topic_names
+                    .as_ref()
+                    .is_none_or(|names| !names.is_empty());
+                let member_epoch = if self.config.group_instance_id.is_some() {
+                    LEAVE_GROUP_STATIC_MEMBER_EPOCH
+                } else {
+                    LEAVE_GROUP_MEMBER_EPOCH
+                };
                 let request = ConsumerGroupHeartbeatRequest {
                     group_id: self.config.group_id.clone(),
                     member_id: self.member_id.clone(),
-                    member_epoch: LEAVE_GROUP_MEMBER_EPOCH,
+                    member_epoch,
+                    instance_id: self.config.group_instance_id.clone(),
                     rebalance_timeout_ms: -1,
+                    subscribed_topic_names: subscribed_reported.then(Vec::new),
                     topic_partitions: owned_reported.then(Vec::new),
                     ..Default::default()
                 };
                 self.leave = Some(self.client.send(ctx, self.coordinator(), request));
             }
         }
+    }
+
+    /// Whether the consumer belongs to a group: Kafka's `group.id` is set.
+    fn has_group(&self) -> bool {
+        !self.config.group_id.is_empty()
+    }
+
+    /// Whether the consumer holds partitions it fetches: a member of its
+    /// group, or a consumer with a manual assignment.
+    fn fetching(&self) -> bool {
+        !self.closed
+            && (self.manual
+                || matches!(
+                    self.state,
+                    MemberState::Joining | MemberState::Syncing | MemberState::Stable
+                ))
+    }
+
+    /// Start the auto-commit timer the first time the consumer sees the
+    /// clock, as Kafka starts it when the consumer is built.
+    fn start_commit_timer(&mut self, now: Millis) {
+        if self.next_commit_at.is_none() {
+            self.next_commit_at = Some(now + self.config.auto_commit_interval_ms);
+        }
+    }
+
+    /// Commit the consumed positions when the auto-commit interval passed:
+    /// Kafka's `maybeAutoCommitOffsetsAsync`. The timer starts over whether
+    /// or not there was something to commit, and a commit in flight holds
+    /// the next one back until it answers.
+    fn maybe_auto_commit(&mut self, ctx: &mut Ctx<'_>) {
+        let now = ctx.now();
+        self.start_commit_timer(now);
+        let due = self.next_auto_commit().is_some_and(|at| now >= at);
+        if !due {
+            return;
+        }
+        self.next_commit_at = Some(now + self.config.auto_commit_interval_ms);
+        self.commit_positions(ctx, true);
     }
 
     fn coordinator(&self) -> Target {
@@ -703,22 +1074,20 @@ impl Consumer {
     }
 
     /// The next time the consumer needs a tick: `None` when only an answer
-    /// or new metadata can move it on, which arrive as frames.
+    /// or new metadata can move it on, which arrive as frames. An
+    /// auto-commit is a poll's work, not a tick's; see
+    /// [`Consumer::next_auto_commit`].
     #[must_use]
     pub fn next_deadline(&self, now: Millis) -> Option<Millis> {
         let client = self.client.next_deadline(now);
-        let active = !self.closed
-            && matches!(
-                self.state,
-                MemberState::Joining | MemberState::Syncing | MemberState::Stable
-            );
-        if !active {
+        if !self.fetching() {
             return client.map(|at| at.max(now));
         }
         // Only what a tick can act on counts. A request in flight wakes the
         // member with its answer, and a partition without a leader waits for
         // the metadata the client refreshes.
         let membership = match (self.state, self.config.group_protocol) {
+            _ if self.manual => None,
             (MemberState::Joining, GroupProtocol::Classic)
                 if self.join.is_none() && self.sync.is_none() =>
             {
@@ -734,31 +1103,27 @@ impl Consumer {
             }),
             _ => None,
         };
-        let commit = (self.config.enable_auto_commit
-            && self.state == MemberState::Stable
-            && self.commit.is_none())
-        .then_some(self.next_commit_at);
         let partitions = self.assigned.iter().filter_map(|((topic, partition), p)| {
             let leader = self.client.metadata().leader(topic, *partition);
             let due = match p.state {
                 PositionState::Init => {
-                    self.offset_fetch.is_none() && self.state == MemberState::Stable
+                    self.offset_fetch.is_none()
+                        && (self.manual || self.state == MemberState::Stable)
                 }
-                PositionState::NeedReset => leader.is_some(),
+                PositionState::NeedReset(_) => leader.is_some(),
                 PositionState::Ready => {
                     !p.fetch_in_flight
                         && !p.pending_revocation
                         && p.buffered.is_empty()
                         && leader.is_some_and(|l| !self.fetch_brokers.contains(&l))
                 }
-                PositionState::FetchingCommitted | PositionState::Resetting => false,
+                PositionState::FetchingCommitted | PositionState::Resetting(_) => false,
             };
             due.then_some(p.retry_at)
         });
         client
             .into_iter()
             .chain(membership)
-            .chain(commit)
             .chain(partitions)
             .min()
             .map(|at| at.max(now))
@@ -767,22 +1132,19 @@ impl Consumer {
     // ---- driving ----------------------------------------------------------------
 
     fn step(&mut self, ctx: &mut Ctx<'_>, events: &mut Vec<ConsumerEvent>) {
-        if self.closed
-            || matches!(
-                self.state,
-                MemberState::Unsubscribed | MemberState::Failed(_) | MemberState::Left
-            )
-        {
+        self.start_commit_timer(ctx.now());
+        if !self.fetching() {
             return;
         }
-        match self.config.group_protocol {
-            GroupProtocol::Classic => {
-                self.maybe_join(ctx);
-                self.maybe_heartbeat(ctx);
+        if !self.manual {
+            match self.config.group_protocol {
+                GroupProtocol::Classic => {
+                    self.maybe_join(ctx);
+                    self.maybe_heartbeat(ctx);
+                }
+                GroupProtocol::Consumer => self.maybe_group_heartbeat(ctx),
             }
-            GroupProtocol::Consumer => self.maybe_group_heartbeat(ctx),
         }
-        self.maybe_commit(ctx);
         self.init_positions(ctx);
         self.maybe_fetch(ctx);
         let _ = events;
@@ -830,16 +1192,16 @@ impl Consumer {
             self.leave = None;
             // The member is gone whatever the answer says.
             drop(result);
-        } else if self.commit.as_ref().is_some_and(|(c, _)| *c == id) {
-            if let Some((_, offsets)) = self.commit.take() {
-                self.on_commit(ctx, &offsets, result, events);
+        } else if self.commit.as_ref().is_some_and(|c| c.id == id) {
+            if let Some(commit) = self.commit.take() {
+                self.on_commit(ctx, &commit, result, events);
             }
         } else if self.offset_fetch.as_ref().is_some_and(|(o, _)| *o == id) {
             if let Some((_, partitions)) = self.offset_fetch.take() {
                 self.on_offset_fetch(ctx, &partitions, result, events);
             }
-        } else if let Some(partitions) = self.list_offsets.remove(&id) {
-            self.on_list_offsets(ctx, &partitions, result, events);
+        } else if let Some(resets) = self.list_offsets.remove(&id) {
+            self.on_list_offsets(ctx, &resets, result, events);
         } else if let Some((broker, partitions)) = self.fetches.remove(&id) {
             self.fetch_brokers.remove(&broker);
             self.on_fetch(ctx, &partitions, result, events);
@@ -857,8 +1219,9 @@ impl Consumer {
         if !keep_member_id {
             self.member_id.clear();
         }
+        // Kafka's `onJoinPrepare` auto-commits before the member joins again.
         if self.config.enable_auto_commit && self.commit.is_none() {
-            self.commit_positions(ctx);
+            self.commit_positions(ctx, true);
         }
         let partitions = self.assignment();
         if !partitions.is_empty() {
@@ -898,7 +1261,7 @@ impl Consumer {
             session_timeout_ms: millis_i32(self.config.session_timeout_ms),
             rebalance_timeout_ms: millis_i32(self.config.rebalance_timeout_ms),
             member_id: self.member_id.clone(),
-            group_instance_id: None,
+            group_instance_id: self.config.group_instance_id.clone(),
             protocol_type: CONSUMER_PROTOCOL_TYPE.to_string(),
             protocols: vec![JoinGroupRequestProtocol {
                 name: RANGE_PROTOCOL.to_string(),
@@ -931,7 +1294,7 @@ impl Consumer {
                 });
                 self.state = MemberState::Syncing;
                 if response.leader == response.member_id {
-                    let members = response
+                    let members: Vec<(String, Vec<String>)> = response
                         .members
                         .iter()
                         .map(|m| {
@@ -943,6 +1306,19 @@ impl Consumer {
                             )
                         })
                         .collect();
+                    if response.skip_assignment {
+                        // KIP-814: a static leader that came back keeps the
+                        // assignment the group has; it follows the group's
+                        // topics and syncs with no assignment, as Kafka's
+                        // `onLeaderElected` does.
+                        self.client.add_topics(
+                            members
+                                .iter()
+                                .flat_map(|(_, topics)| topics.iter().map(String::as_str)),
+                        );
+                        self.send_sync(ctx, Vec::new());
+                        return;
+                    }
                     self.pending_leader = Some(PendingLeader {
                         generation: self.generation,
                         members,
@@ -1032,7 +1408,7 @@ impl Consumer {
             group_id: self.config.group_id.clone(),
             generation_id: self.generation,
             member_id: self.member_id.clone(),
-            group_instance_id: None,
+            group_instance_id: self.config.group_instance_id.clone(),
             protocol_type: Some(CONSUMER_PROTOCOL_TYPE.to_string()),
             protocol_name: Some(RANGE_PROTOCOL.to_string()),
             assignments,
@@ -1058,7 +1434,9 @@ impl Consumer {
                 self.state = MemberState::Stable;
                 let now = ctx.now();
                 self.next_heartbeat_at = now + self.config.heartbeat_interval_ms;
-                self.next_commit_at = now + self.config.auto_commit_interval_ms;
+                // Kafka's `onJoinComplete` starts the auto-commit interval
+                // over with the new assignment.
+                self.next_commit_at = Some(now + self.config.auto_commit_interval_ms);
             }
             codes::REBALANCE_IN_PROGRESS | codes::ILLEGAL_GENERATION => {
                 self.request_rejoin(ctx, events, true);
@@ -1128,7 +1506,7 @@ impl Consumer {
             group_id: self.config.group_id.clone(),
             generation_id: self.generation,
             member_id: self.member_id.clone(),
-            group_instance_id: None,
+            group_instance_id: self.config.group_instance_id.clone(),
             ..Default::default()
         };
         self.heartbeat = Some(self.client.send(ctx, self.coordinator(), request));
@@ -1152,6 +1530,12 @@ impl Consumer {
             }
             codes::UNKNOWN_MEMBER_ID => self.request_rejoin(ctx, events, false),
             codes::FENCED_INSTANCE_ID => {
+                // A new process joined with the instance id: Kafka's
+                // consumer fails with `FencedInstanceIdException`.
+                events.push(ConsumerEvent::Error {
+                    api: "Heartbeat",
+                    code: codes::FENCED_INSTANCE_ID,
+                });
                 self.state = MemberState::Failed(codes::FENCED_INSTANCE_ID);
             }
             code => {
@@ -1197,6 +1581,8 @@ impl Consumer {
             } else {
                 self.generation
             },
+            // Every heartbeat names a static member's instance.
+            instance_id: self.config.group_instance_id.clone(),
             rack_id: joining.then(|| self.config.rack_id.clone()).flatten(),
             rebalance_timeout_ms: -1,
             ..Default::default()
@@ -1309,7 +1695,6 @@ impl Consumer {
                 member_id: self.member_id.clone(),
                 generation: self.generation,
             });
-            self.next_commit_at = now + self.config.auto_commit_interval_ms;
         }
         if let Some(assignment) = response.assignment {
             self.reconcile(ctx, assignment.topic_partitions, events);
@@ -1370,7 +1755,7 @@ impl Consumer {
             }
             if !reconciling.commit_sent {
                 reconciling.commit_sent = true;
-                if self.commit_positions(ctx) {
+                if self.commit_positions(ctx, false) {
                     return;
                 }
             }
@@ -1405,28 +1790,22 @@ impl Consumer {
         }
         self.metrics.rebalances += 1;
         self.ack_pending = true;
+        // Kafka's `signalReconciliationCompleting` starts the auto-commit
+        // interval over with the new assignment.
+        self.next_commit_at = Some(ctx.now() + self.config.auto_commit_interval_ms);
     }
 
     // ---- commits ----------------------------------------------------------------
 
-    fn maybe_commit(&mut self, ctx: &mut Ctx<'_>) {
-        if !self.config.enable_auto_commit
-            || self.state != MemberState::Stable
-            || self.commit.is_some()
-            || ctx.now() < self.next_commit_at
-        {
-            return;
-        }
-        self.next_commit_at = ctx.now() + self.config.auto_commit_interval_ms;
-        self.commit_positions(ctx);
-    }
-
-    /// Commit every known position that changed since the last commit.
     /// Commit the position of every partition that has one, as Kafka's
-    /// consumers commit `SubscriptionState.allConsumed()`. Returns whether a
-    /// request went out.
-    fn commit_positions(&mut self, ctx: &mut Ctx<'_>) -> bool {
-        if self.member_id.is_empty() {
+    /// consumers commit `SubscriptionState.allConsumed()`. A member commits
+    /// with its generation or epoch; a consumer with a manual assignment
+    /// with generation `-1` and no member id, and a classic one without its
+    /// instance id, as Kafka's `sendOffsetCommitRequest` does. `auto` marks
+    /// an auto-commit. Returns whether a request went out: never without a
+    /// group, nor for a member without a member id.
+    fn commit_positions(&mut self, ctx: &mut Ctx<'_>, auto: bool) -> bool {
+        if !self.has_group() || (!self.manual && self.member_id.is_empty()) {
             return false;
         }
         let offsets: Vec<(String, i32, i64, i32)> = self
@@ -1451,11 +1830,24 @@ impl Consumer {
                     ..Default::default()
                 });
         }
+        let (generation, member_id, group_instance_id) = match self.config.group_protocol {
+            GroupProtocol::Classic if self.manual => (NO_GENERATION, String::new(), None),
+            GroupProtocol::Consumer if self.manual => (
+                NO_GENERATION,
+                String::new(),
+                self.config.group_instance_id.clone(),
+            ),
+            GroupProtocol::Classic | GroupProtocol::Consumer => (
+                self.generation,
+                self.member_id.clone(),
+                self.config.group_instance_id.clone(),
+            ),
+        };
         let request = OffsetCommitByName(OffsetCommitRequest {
             group_id: self.config.group_id.clone(),
-            generation_id_or_member_epoch: self.generation,
-            member_id: self.member_id.clone(),
-            group_instance_id: None,
+            generation_id_or_member_epoch: generation,
+            member_id,
+            group_instance_id,
             retention_time_ms: -1,
             topics: topics
                 .into_iter()
@@ -1468,31 +1860,43 @@ impl Consumer {
             ..Default::default()
         });
         let id = self.client.send(ctx, self.coordinator(), request);
-        self.commit = Some((
+        self.commit = Some(PendingCommit {
             id,
-            offsets
+            offsets: offsets
                 .into_iter()
                 .map(|(topic, partition, offset, _)| (topic, partition, offset))
                 .collect(),
-        ));
+            auto,
+        });
         self.metrics.commits += 1;
         true
+    }
+
+    /// A retriable failure of an auto-commit brings the next one forward to
+    /// `retry.backoff.ms`, as Kafka's auto-commit callback resets its timer.
+    fn back_off_auto_commit(&mut self, now: Millis, commit: &PendingCommit) {
+        if commit.auto {
+            self.next_commit_at = Some(now + self.config.retry_backoff_ms);
+        }
     }
 
     fn on_commit(
         &mut self,
         ctx: &mut Ctx<'_>,
-        offsets: &[(String, i32, i64)],
+        commit: &PendingCommit,
         result: Result<super::Response, ClientError>,
         events: &mut Vec<ConsumerEvent>,
     ) {
         let Some(response) =
             self.expect::<OffsetCommitResponse>(ctx, "OffsetCommit", result, events)
         else {
+            self.back_off_auto_commit(ctx.now(), commit);
             self.advance_reconciliation(ctx, events);
             return;
         };
+        let offsets = &commit.offsets;
         let mut committed = Vec::new();
+        let mut retriable = false;
         for topic in &response.topics {
             for partition in &topic.partitions {
                 let key = (topic.name.clone(), partition.partition_index);
@@ -1511,7 +1915,7 @@ impl Consumer {
                     codes::ILLEGAL_GENERATION
                     | codes::UNKNOWN_MEMBER_ID
                     | codes::REBALANCE_IN_PROGRESS
-                        if self.config.group_protocol == GroupProtocol::Classic =>
+                        if self.config.group_protocol == GroupProtocol::Classic && !self.manual =>
                     {
                         events.push(ConsumerEvent::Error {
                             api: "OffsetCommit",
@@ -1524,7 +1928,19 @@ impl Consumer {
                         );
                         return;
                     }
+                    codes::FENCED_INSTANCE_ID => {
+                        // Another instance took the member's place: Kafka's
+                        // consumer fails with `FencedInstanceIdException`.
+                        events.push(ConsumerEvent::Error {
+                            api: "OffsetCommit",
+                            code: codes::FENCED_INSTANCE_ID,
+                        });
+                        self.state = MemberState::Failed(codes::FENCED_INSTANCE_ID);
+                    }
                     code => {
+                        if retry::class(code).is_retriable() {
+                            retriable = true;
+                        }
                         self.client.note_error(code, &self.coordinator());
                         events.push(ConsumerEvent::Error {
                             api: "OffsetCommit",
@@ -1534,6 +1950,9 @@ impl Consumer {
                 }
             }
         }
+        if retriable {
+            self.back_off_auto_commit(ctx.now(), commit);
+        }
         if !committed.is_empty() {
             events.push(ConsumerEvent::Committed { offsets: committed });
         }
@@ -1542,9 +1961,21 @@ impl Consumer {
 
     // ---- positions --------------------------------------------------------------
 
+    /// Give the new partitions a position: the committed offset through
+    /// `OffsetFetch` when the consumer has a group, else the reset policy;
+    /// then a `ListOffsets` per leader for the partitions a reset waits on.
     fn init_positions(&mut self, ctx: &mut Ctx<'_>) {
         let now = ctx.now();
-        if self.offset_fetch.is_none() && self.state == MemberState::Stable {
+        if !self.has_group() {
+            // Nothing is committed without a group: the reset policy decides.
+            let reset = self.config.auto_offset_reset;
+            for p in self.assigned.values_mut() {
+                if p.state == PositionState::Init {
+                    p.state = PositionState::NeedReset(reset);
+                }
+            }
+        } else if self.offset_fetch.is_none() && (self.manual || self.state == MemberState::Stable)
+        {
             let need: Vec<(String, i32)> = self
                 .assigned
                 .iter()
@@ -1555,25 +1986,28 @@ impl Consumer {
                 self.send_offset_fetch(ctx, need);
             }
         }
-        let mut per_leader: BTreeMap<i32, Vec<(String, i32)>> = BTreeMap::new();
+        let mut per_leader: BTreeMap<i32, Resets> = BTreeMap::new();
         let mut needs_metadata = false;
         for ((topic, partition), p) in &self.assigned {
-            if p.state != PositionState::NeedReset || now < p.retry_at {
+            let PositionState::NeedReset(strategy) = p.state else {
+                continue;
+            };
+            if now < p.retry_at {
                 continue;
             }
             match self.client.metadata().leader(topic, *partition) {
                 Some(leader) => per_leader
                     .entry(leader)
                     .or_default()
-                    .push((topic.clone(), *partition)),
+                    .push(((topic.clone(), *partition), strategy)),
                 None => needs_metadata = true,
             }
         }
         if needs_metadata {
             self.client.request_metadata_refresh();
         }
-        for (leader, partitions) in per_leader {
-            self.send_list_offsets(ctx, leader, partitions);
+        for (leader, resets) in per_leader {
+            self.send_list_offsets(ctx, leader, resets);
         }
     }
 
@@ -1582,8 +2016,9 @@ impl Consumer {
         for (topic, partition) in &partitions {
             by_topic.entry(topic.clone()).or_default().push(*partition);
         }
-        let member_id =
-            (self.config.group_protocol == GroupProtocol::Consumer).then(|| self.member_id.clone());
+        // A KIP-848 member names itself; a manual assignment has no member.
+        let member_id = (self.config.group_protocol == GroupProtocol::Consumer && !self.manual)
+            .then(|| self.member_id.clone());
         let request = OffsetFetchByName(OffsetFetchRequest {
             group_id: self.config.group_id.clone(),
             topics: Some(
@@ -1692,7 +2127,7 @@ impl Consumer {
                     p.state = PositionState::Ready;
                 }
                 (None, Some((codes::NONE | codes::UNKNOWN_TOPIC_OR_PARTITION, _, _))) => {
-                    p.state = PositionState::NeedReset;
+                    p.state = PositionState::NeedReset(self.config.auto_offset_reset);
                 }
                 _ => {
                     p.state = PositionState::Init;
@@ -1702,15 +2137,11 @@ impl Consumer {
         }
     }
 
-    fn send_list_offsets(
-        &mut self,
-        ctx: &mut Ctx<'_>,
-        leader: i32,
-        partitions: Vec<(String, i32)>,
-    ) {
-        let timestamp = self.config.auto_offset_reset.timestamp();
+    /// Resolve the resets of `resets` with one `ListOffsets` to `leader`,
+    /// each partition at the timestamp of its own strategy.
+    fn send_list_offsets(&mut self, ctx: &mut Ctx<'_>, leader: i32, resets: Resets) {
         let mut by_topic: BTreeMap<String, Vec<ListOffsetsPartition>> = BTreeMap::new();
-        for (topic, partition) in &partitions {
+        for ((topic, partition), strategy) in &resets {
             let epoch = self
                 .client
                 .metadata()
@@ -1722,7 +2153,7 @@ impl Consumer {
                 .push(ListOffsetsPartition {
                     partition_index: *partition,
                     current_leader_epoch: epoch,
-                    timestamp,
+                    timestamp: strategy.timestamp(),
                     ..Default::default()
                 });
         }
@@ -1739,26 +2170,30 @@ impl Consumer {
                 .collect(),
             ..Default::default()
         };
-        for key in &partitions {
+        for (key, strategy) in &resets {
             if let Some(p) = self.assigned.get_mut(key) {
-                p.state = PositionState::Resetting;
+                p.state = PositionState::Resetting(*strategy);
             }
         }
         let id = self.client.send(ctx, Target::Broker(leader), request);
-        self.list_offsets.insert(id, partitions);
+        self.list_offsets.insert(id, resets);
     }
 
+    /// Apply the offsets a `ListOffsets` found, to the partitions that still
+    /// wait for that reset: a partition sought or reset otherwise since the
+    /// request left keeps its new state, as Kafka's `maybeSeekUnvalidated`
+    /// skips a reset that is no longer needed.
     fn on_list_offsets(
         &mut self,
         ctx: &mut Ctx<'_>,
-        partitions: &[(String, i32)],
+        resets: &[((String, i32), AutoOffsetReset)],
         result: Result<super::Response, ClientError>,
         events: &mut Vec<ConsumerEvent>,
     ) {
         let now = ctx.now();
         let backoff = self.config.retry_backoff_ms;
         let response = self.expect::<ListOffsetsResponse>(ctx, "ListOffsets", result, events);
-        for key in partitions {
+        for (key, strategy) in resets {
             let row = response.as_ref().and_then(|r| {
                 r.topics
                     .iter()
@@ -1766,7 +2201,11 @@ impl Consumer {
                     .and_then(|t| t.partitions.iter().find(|p| p.partition_index == key.1))
                     .map(|p| (p.error_code, p.offset, p.leader_epoch))
             });
-            let Some(p) = self.assigned.get_mut(key) else {
+            let Some(p) = self
+                .assigned
+                .get_mut(key)
+                .filter(|p| p.state == PositionState::Resetting(*strategy))
+            else {
                 continue;
             };
             match row {
@@ -1788,11 +2227,11 @@ impl Consumer {
                         api: "ListOffsets",
                         code,
                     });
-                    p.state = PositionState::NeedReset;
+                    p.state = PositionState::NeedReset(*strategy);
                     p.retry_at = now + backoff;
                 }
                 None => {
-                    p.state = PositionState::NeedReset;
+                    p.state = PositionState::NeedReset(*strategy);
                     p.retry_at = now + backoff;
                 }
             }
@@ -1838,6 +2277,7 @@ impl Consumer {
                 continue;
             };
             p.fetch_in_flight = true;
+            p.fetch_offset = Some(p.next_fetch);
             let epoch = self
                 .client
                 .metadata()
@@ -1911,6 +2351,12 @@ impl Consumer {
                 continue;
             };
             p.fetch_in_flight = false;
+            // Kafka's `FetchCollector` discards an answer for a position the
+            // partition no longer has: a seek or a reset moved it.
+            let sent_from = p.fetch_offset.take();
+            if p.state != PositionState::Ready || sent_from != Some(p.next_fetch) {
+                continue;
+            }
             let Some(row) = row else {
                 p.retry_at = now + backoff;
                 continue;
@@ -1938,7 +2384,7 @@ impl Consumer {
                         api: "Fetch",
                         code: codes::OFFSET_OUT_OF_RANGE,
                     });
-                    p.state = PositionState::NeedReset;
+                    p.state = PositionState::NeedReset(self.config.auto_offset_reset);
                     p.retry_at = now;
                 }
                 code => {
@@ -2028,9 +2474,11 @@ impl Consumer {
             },
             "state": self.state.name(),
             "member_id": self.member_id,
+            "group_instance_id": self.config.group_instance_id,
             "generation": self.generation,
             "coordinator": coordinator,
             "subscription": self.subscription,
+            "manual_assignment": self.manual,
             "assignment": assignment,
             "records": self.metrics.records,
             "bytes": self.metrics.bytes,

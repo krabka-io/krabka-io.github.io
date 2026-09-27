@@ -115,8 +115,8 @@ pub use self::{
     },
     batch::{BatchRecord, ConsumedRecord, ProducerStamp, build_batch, records_of},
     consumer::{
-        AutoOffsetReset, Consumer, ConsumerConfig, ConsumerEvent, ConsumerMetrics, GroupProtocol,
-        IsolationLevel, MemberState,
+        AutoOffsetReset, Consumer, ConsumerConfig, ConsumerError, ConsumerEvent, ConsumerMetrics,
+        GroupProtocol, IsolationLevel, MemberState,
     },
     metadata::{BrokerInfo, MetadataCache, PartitionInfo, TopicInfo, endpoint_for_host, uuid_hex},
     partitioner::{

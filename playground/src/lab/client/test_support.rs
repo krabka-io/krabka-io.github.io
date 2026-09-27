@@ -149,6 +149,14 @@ impl Members {
     pub fn crash(&mut self, i: usize) {
         self.members[i].alive = false;
     }
+
+    /// Member `i` starts again as `consumer`: a new process on the same
+    /// node, which knows nothing of the one before.
+    pub fn restart(&mut self, i: usize, consumer: Consumer) {
+        let member = &mut self.members[i];
+        member.consumer = consumer;
+        member.alive = true;
+    }
 }
 
 impl Driven for Members {

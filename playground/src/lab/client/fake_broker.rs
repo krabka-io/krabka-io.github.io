@@ -123,6 +123,8 @@ pub struct FakeMember {
     pub session_timeout_ms: Millis,
     /// When the member last joined, synced or heartbeat.
     pub last_seen: Millis,
+    /// The `group.instance.id` of a static member (KIP-345).
+    pub instance_id: Option<String>,
 }
 
 /// A `JoinGroup` or `SyncGroup` the coordinator holds until the rebalance
@@ -147,6 +149,8 @@ pub struct FakeGroup {
     pub assignments: BTreeMap<String, Bytes>,
     pub committed: BTreeMap<(String, i32), (i64, i32)>,
     pub next_member: u32,
+    /// The member id each static member's instance id holds.
+    pub static_members: BTreeMap<String, String>,
     joins: Vec<Held>,
     syncs: Vec<Held>,
     /// KIP-848: the epoch of each member.
@@ -660,6 +664,7 @@ impl FakeBroker {
             }
             for id in &expired {
                 group.members.remove(id);
+                group.static_members.retain(|_, member| member != id);
             }
             if group.members.is_empty() {
                 group.state = Some(GroupState::Empty);
@@ -1381,31 +1386,52 @@ impl FakeBroker {
             return Reply::Now(frame_response(11, version, correlation, &response));
         }
         let group = state.groups.entry(request.group_id.clone()).or_default();
-        if request.member_id.is_empty() {
-            group.next_member += 1;
-            let member_id = format!("{}-{:08x}", "member", group.next_member);
-            let response = JoinGroupResponse {
-                error_code: MEMBER_ID_REQUIRED,
-                generation_id: -1,
-                protocol_type: Some(request.protocol_type.clone()),
-                member_id,
-                ..Default::default()
-            };
-            return Reply::Now(frame_response(11, version, correlation, &response));
-        }
-        let protocols = request
+        let protocols: Vec<(String, Bytes)> = request
             .protocols
             .iter()
             .map(|p| (p.name.clone(), p.metadata.clone()))
             .collect();
+        let member_id = match (&request.group_instance_id, request.member_id.is_empty()) {
+            // KIP-345: a static member joins without the second round of
+            // KIP-394, under a new id made from its instance id.
+            (Some(instance), true) => {
+                group.next_member += 1;
+                let new_id = format!("{instance}-{:08x}", group.next_member);
+                if let Some(response) =
+                    Self::replace_static_member(group, instance, &new_id, &protocols, ctx.now())
+                {
+                    return Reply::Now(frame_response(11, version, correlation, &response));
+                }
+                new_id
+            }
+            (None, true) => {
+                group.next_member += 1;
+                let member_id = format!("{}-{:08x}", "member", group.next_member);
+                let response = JoinGroupResponse {
+                    error_code: MEMBER_ID_REQUIRED,
+                    generation_id: -1,
+                    protocol_type: Some(request.protocol_type.clone()),
+                    member_id,
+                    ..Default::default()
+                };
+                return Reply::Now(frame_response(11, version, correlation, &response));
+            }
+            (_, false) => request.member_id.clone(),
+        };
+        if let Some(instance) = &request.group_instance_id {
+            group
+                .static_members
+                .insert(instance.clone(), member_id.clone());
+        }
         let next_generation = group.generation + 1;
         group.members.insert(
-            request.member_id.clone(),
+            member_id.clone(),
             FakeMember {
                 protocols,
                 joined: next_generation,
                 session_timeout_ms: Millis::try_from(request.session_timeout_ms).unwrap_or(0),
                 last_seen: ctx.now(),
+                instance_id: request.group_instance_id.clone(),
             },
         );
         group.state = Some(GroupState::PreparingRebalance);
@@ -1430,13 +1456,84 @@ impl FakeBroker {
             conn,
             correlation,
             version,
-            member_id: request.member_id.clone(),
+            member_id,
         });
         let all_joined = group.members.values().all(|m| m.joined == next_generation);
         if all_joined {
             Self::complete_join(&mut state, &request.group_id, ctx, self.endpoint());
         }
         Reply::Hold
+    }
+
+    /// Kafka's `updateStaticMemberThenRebalanceOrCompleteJoin` for a static
+    /// member that comes back to a stable group: it takes `new_id` with its
+    /// assignment, and the generation stays. The answer comes at once; a
+    /// returning leader gets the members and must skip the assignment
+    /// (KIP-814). In any other state the old member goes, and the member
+    /// joins as a new one: `None`.
+    fn replace_static_member(
+        group: &mut FakeGroup,
+        instance: &str,
+        new_id: &str,
+        protocols: &[(String, Bytes)],
+        now: Millis,
+    ) -> Option<JoinGroupResponse> {
+        let old_id = group.static_members.get(instance)?.clone();
+        let Some(mut member) = group.members.remove(&old_id) else {
+            group.static_members.remove(instance);
+            return None;
+        };
+        if group.state != Some(GroupState::Stable) {
+            return None;
+        }
+        member.protocols = protocols.to_vec();
+        member.last_seen = now;
+        group.members.insert(new_id.to_string(), member);
+        if let Some(assignment) = group.assignments.remove(&old_id) {
+            group.assignments.insert(new_id.to_string(), assignment);
+        }
+        if group.leader.as_deref() == Some(old_id.as_str()) {
+            group.leader = Some(new_id.to_string());
+        }
+        group
+            .static_members
+            .insert(instance.to_string(), new_id.to_string());
+        let leader = group.leader.clone().unwrap_or_default();
+        let is_leader = leader == new_id;
+        Some(JoinGroupResponse {
+            error_code: codes::NONE,
+            generation_id: group.generation,
+            protocol_type: Some("consumer".to_string()),
+            protocol_name: Some("range".to_string()),
+            leader,
+            skip_assignment: is_leader,
+            member_id: new_id.to_string(),
+            members: if is_leader {
+                Self::member_list(group)
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        })
+    }
+
+    /// The members of a group as `JoinGroup` lists them for the leader.
+    fn member_list(group: &FakeGroup) -> Vec<JoinGroupResponseMember> {
+        group
+            .members
+            .iter()
+            .map(|(id, m)| JoinGroupResponseMember {
+                member_id: id.clone(),
+                group_instance_id: m.instance_id.clone(),
+                metadata: m
+                    .protocols
+                    .iter()
+                    .find(|(name, _)| name == "range")
+                    .map(|(_, bytes)| bytes.clone())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+            .collect()
     }
 
     /// Advance the generation and answer every held join: the leader gets the
@@ -1453,21 +1550,7 @@ impl FakeBroker {
         }
         let leader = group.members.keys().next().cloned().unwrap_or_default();
         group.leader = Some(leader.clone());
-        let members: Vec<JoinGroupResponseMember> = group
-            .members
-            .iter()
-            .map(|(id, m)| JoinGroupResponseMember {
-                member_id: id.clone(),
-                group_instance_id: None,
-                metadata: m
-                    .protocols
-                    .iter()
-                    .find(|(name, _)| name == "range")
-                    .map(|(_, bytes)| bytes.clone())
-                    .unwrap_or_default(),
-                ..Default::default()
-            })
-            .collect();
+        let members = Self::member_list(group);
         let generation = group.generation;
         for held in std::mem::take(&mut group.joins) {
             let response = JoinGroupResponse {
@@ -1528,7 +1611,12 @@ impl FakeBroker {
             };
             return Reply::Now(frame_response(14, version, correlation, &response));
         }
-        if group.leader.as_deref() == Some(request.member_id.as_str()) {
+        // The leader's assignment completes a rebalance. In a stable group a
+        // sync, a returning static member's among them, gets the assignment
+        // the group holds.
+        if group.state == Some(GroupState::CompletingRebalance)
+            && group.leader.as_deref() == Some(request.member_id.as_str())
+        {
             group.assignments = request
                 .assignments
                 .iter()
@@ -1579,6 +1667,26 @@ impl FakeBroker {
         }
         let code = match state.groups.get(&request.group_id) {
             None => codes::UNKNOWN_MEMBER_ID,
+            // Kafka's `validateMember`: another member holds the instance id.
+            // An instance id nobody holds is an unknown member.
+            Some(group)
+                if request.group_instance_id.as_ref().is_some_and(|instance| {
+                    group
+                        .static_members
+                        .get(instance)
+                        .is_some_and(|holder| *holder != request.member_id)
+                }) =>
+            {
+                codes::FENCED_INSTANCE_ID
+            }
+            Some(group)
+                if request
+                    .group_instance_id
+                    .as_ref()
+                    .is_some_and(|instance| !group.static_members.contains_key(instance)) =>
+            {
+                codes::UNKNOWN_MEMBER_ID
+            }
             Some(group) if !group.members.contains_key(&request.member_id) => {
                 codes::UNKNOWN_MEMBER_ID
             }

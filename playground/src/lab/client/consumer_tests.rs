@@ -1,6 +1,7 @@
 //! The consumer against the fake broker: the classic join, sync, positions,
 //! fetch and commit; the range split and the rebalances when members come
-//! and go; KIP-848 reconciliation; and a fetch that follows a new leader.
+//! and go; KIP-848 reconciliation; a fetch that follows a new leader; manual
+//! assignment and seeks; static membership; and when auto-commits go out.
 
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
@@ -11,6 +12,8 @@ use krabka_protocol::{
     owned::{
         consumer_group_heartbeat_request::{ConsumerGroupHeartbeatRequest, TopicPartitions},
         fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+        find_coordinator_request::FindCoordinatorRequest,
+        heartbeat_request::HeartbeatRequest,
         join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
         leave_group_request::{LeaveGroupRequest, MemberIdentity},
         list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
@@ -26,16 +29,18 @@ use krabka_protocol::{
 };
 
 use super::{
-    AutoOffsetReset, ConsumedRecord, Consumer, ConsumerConfig, ConsumerEvent, GroupProtocol,
-    MemberState,
+    AutoOffsetReset, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig, ConsumerError,
+    ConsumerEvent, GroupProtocol, KafkaClient, MemberState,
     assignor::{encode_assignment, encode_subscription},
     batch::BatchRecord,
+    conn_base,
     fake_broker::{CghAnswer, ClusterState, Seen},
-    test_support::{Harness, Members, client, cluster},
+    test_support::{CLIENT_NODE, Harness, Members, client, cluster},
 };
 use crate::lab::{
     codes,
-    net::{Millis, NodeId},
+    net::{Ctx, Endpoint, Millis, NodeId},
+    testing::CtxBuffers,
 };
 
 fn config(protocol: GroupProtocol, reset: AutoOffsetReset) -> ConsumerConfig {
@@ -284,9 +289,13 @@ fn a_classic_member_joins_syncs_fetches_and_commits() {
     );
     let positions: Vec<Option<i64>> = (0..3).map(|p| h.client.position("orders", p)).collect();
     assert!(positions == vec![Some(2), Some(1), Some(0)]);
-    // `auto.commit.interval.ms` later every position goes to the
+    // Kafka 4.3 auto-commits only in `poll`: no tick commits, and the first
+    // poll after `auto.commit.interval.ms` sends every position to the
     // coordinator, with the member's generation.
-    assert!(h.run_until(|h| !h.seen(OffsetCommitRequest::API_KEY).is_empty(), 6_000));
+    h.run_for(6_000);
+    assert!(h.seen(OffsetCommitRequest::API_KEY).is_empty());
+    assert!(h.with_client(|c, ctx| c.poll_at(ctx, 500)).is_empty());
+    assert!(h.run_until(|h| !h.seen(OffsetCommitRequest::API_KEY).is_empty(), 100));
     assert!(
         decoded::<OffsetCommitRequest>(&h)[0]
             == commit_request(1, member, &[(0, 2), (1, 1), (2, 0)])
@@ -739,6 +748,8 @@ fn a_kip848_member_joins_with_a_kafka_member_id_and_leaves_with_epoch_minus_one(
             }]
     );
     h.run_for(100);
+    // Kafka's `leaveGroup` unsubscribes before the heartbeat is built, so it
+    // reports an empty subscription as well as no partitions.
     let heartbeats: Vec<ConsumerGroupHeartbeatRequest> = decoded(&h);
     assert!(
         heartbeats.last()
@@ -747,6 +758,7 @@ fn a_kip848_member_joins_with_a_kafka_member_id_and_leaves_with_epoch_minus_one(
                 member_id,
                 member_epoch: -1,
                 rebalance_timeout_ms: -1,
+                subscribed_topic_names: Some(Vec::new()),
                 topic_partitions: Some(Vec::new()),
                 ..Default::default()
             })
@@ -796,4 +808,808 @@ fn a_fetch_that_meets_a_new_leader_follows_it() {
             .leader_epoch
             == 1
     );
+}
+
+/// A consumer of the fake cluster without a group, Kafka's unset
+/// `group.id`, with the reset policy `reset`.
+fn groupless(reset: AutoOffsetReset) -> Consumer {
+    consumer(ConsumerConfig {
+        group_id: String::new(),
+        auto_offset_reset: reset,
+        ..ConsumerConfig::default()
+    })
+}
+
+/// The offsets of `records`.
+fn offsets(records: &[ConsumedRecord]) -> Vec<i64> {
+    records.iter().map(|r| r.offset).collect()
+}
+
+/// The `ListOffsets` of partition 0 of `orders` at `timestamp`, leader
+/// epoch 0.
+fn list_offsets_at(timestamp: i64) -> ListOffsetsRequest {
+    let mut request = earliest(0);
+    request.topics[0].partitions[0].timestamp = timestamp;
+    request
+}
+
+#[test]
+fn a_consumer_without_a_group_reads_the_partitions_it_assigns_itself() {
+    let state = cluster(&[("orders", 2)]);
+    seed(&state, "orders", 0, &["a0", "a1"]);
+    seed(&state, "orders", 1, &["b0"]);
+    let mut h = Harness::new(groupless(AutoOffsetReset::Earliest), Rc::clone(&state));
+    assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0), ("orders", 1)])) == Ok(()));
+    assert!(h.client.is_manually_assigned());
+    assert!(h.run_until(|h| h.client.buffered() == 3, 2_000));
+    // Kafka's `assign` without a group: no coordinator, no membership and
+    // no committed offsets, so `earliest` asks each leader.
+    let group_apis = [
+        FindCoordinatorRequest::API_KEY,
+        JoinGroupRequest::API_KEY,
+        HeartbeatRequest::API_KEY,
+        ConsumerGroupHeartbeatRequest::API_KEY,
+        OffsetFetchRequest::API_KEY,
+    ];
+    for api in group_apis {
+        assert!(h.seen(api).is_empty(), "api {api}");
+    }
+    let listed: Vec<(NodeId, ListOffsetsRequest)> = h
+        .seen(ListOffsetsRequest::API_KEY)
+        .iter()
+        .map(|s| (s.broker, s.decode()))
+        .collect();
+    assert!(listed == vec![(NodeId(1), earliest(0)), (NodeId(2), earliest(1))]);
+    assert!(
+        h.with_client(|c, ctx| c.poll_at(ctx, 500))
+            == vec![
+                consumed(0, 0, 1_000, "a0"),
+                consumed(0, 1, 1_001, "a1"),
+                consumed(1, 0, 1_000, "b0"),
+            ]
+    );
+    // Without a group nothing is committed, and closing leaves no group
+    // and revokes nothing.
+    h.with_client(Consumer::commit);
+    assert!(h.with_client(Consumer::close).is_empty());
+    h.run_for(100);
+    assert!(h.seen(OffsetCommitRequest::API_KEY).is_empty());
+    assert!(h.seen(LeaveGroupRequest::API_KEY).is_empty());
+    assert!(h.take_events().is_empty());
+}
+
+#[test]
+fn a_manual_assignment_with_a_group_starts_from_the_commit_and_commits_outside_the_generations() {
+    // Rows: the group protocol and the instance id its commit carries. The
+    // classic consumer commits a manual assignment with Kafka's
+    // `NO_GENERATION` and no instance id (`sendOffsetCommitRequest`); the
+    // KIP-848 consumer names its configured instance
+    // (`CommitRequestManager`). Neither joins the group.
+    let rows = [
+        (GroupProtocol::Classic, None),
+        (GroupProtocol::Consumer, Some("i-1".to_string())),
+    ];
+    for (protocol, commit_instance) in rows {
+        let state = cluster(&[("orders", 1)]);
+        seed(&state, "orders", 0, &["r0", "r1", "r2"]);
+        state
+            .borrow_mut()
+            .groups
+            .entry("billing".to_string())
+            .or_default()
+            .committed
+            .insert(("orders".to_string(), 0), (1, 0));
+        let config = ConsumerConfig {
+            group_instance_id: Some("i-1".to_string()),
+            ..config(protocol, AutoOffsetReset::Earliest)
+        };
+        let mut h = Harness::new(consumer(config), Rc::clone(&state));
+        assert!(
+            h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()),
+            "{protocol:?}"
+        );
+        assert!(
+            h.run_until(|h| h.client.buffered() == 2, 2_000),
+            "{protocol:?}"
+        );
+        assert!(
+            decoded::<OffsetFetchRequest>(&h)
+                == vec![OffsetFetchRequest {
+                    groups: vec![OffsetFetchRequestGroup {
+                        group_id: "billing".to_string(),
+                        member_id: None,
+                        member_epoch: -1,
+                        topics: Some(vec![OffsetFetchRequestTopics {
+                            name: "orders".to_string(),
+                            partition_indexes: vec![0],
+                            ..Default::default()
+                        }]),
+                        ..Default::default()
+                    }],
+                    require_stable: true,
+                    ..Default::default()
+                }],
+            "{protocol:?}"
+        );
+        assert!(
+            offsets(&h.with_client(|c, _| c.poll(500))) == vec![1, 2],
+            "{protocol:?}"
+        );
+        h.with_client(Consumer::commit);
+        assert!(
+            h.run_until(|h| h.client.committed("orders", 0) == Some(3), 1_000),
+            "{protocol:?}"
+        );
+        assert!(
+            decoded::<OffsetCommitRequest>(&h)
+                == vec![OffsetCommitRequest {
+                    group_instance_id: commit_instance,
+                    ..commit_request(-1, "", &[(0, 3)])
+                }],
+            "{protocol:?}"
+        );
+        let membership_apis = [
+            JoinGroupRequest::API_KEY,
+            HeartbeatRequest::API_KEY,
+            ConsumerGroupHeartbeatRequest::API_KEY,
+        ];
+        for api in membership_apis {
+            assert!(h.seen(api).is_empty(), "{protocol:?}: api {api}");
+        }
+    }
+}
+
+/// How a test moves a partition's position.
+#[derive(Clone, Copy, Debug)]
+enum Move {
+    To(i64),
+    Beginning,
+    End,
+}
+
+#[test]
+fn seeks_move_the_position_and_drop_what_was_fetched_for_the_old_one() {
+    // The log holds r0 to r4 when the consumer fetches them all and hands
+    // out r0 and r1; r5 arrives before the move. Rows: the move, the
+    // offsets polled after it, and the `ListOffsets` it took: a seek needs
+    // none, Kafka's `seekToBeginning` and `seekToEnd` resolve lazily with
+    // one at -2 and at -1.
+    let rows = [
+        (Move::To(1), vec![1, 2, 3, 4, 5], vec![]),
+        (Move::To(4), vec![4, 5], vec![]),
+        (
+            Move::Beginning,
+            vec![0, 1, 2, 3, 4, 5],
+            vec![list_offsets_at(-2)],
+        ),
+        (Move::End, vec![], vec![list_offsets_at(-1)]),
+    ];
+    for (movement, polled, listed) in rows {
+        let state = cluster(&[("orders", 1)]);
+        seed(&state, "orders", 0, &["r0", "r1", "r2", "r3", "r4"]);
+        let mut h = Harness::new(groupless(AutoOffsetReset::Earliest), Rc::clone(&state));
+        assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+        assert!(
+            h.run_until(|h| h.client.buffered() == 5, 2_000),
+            "{movement:?}"
+        );
+        assert!(
+            offsets(&h.with_client(|c, _| c.poll(2))) == vec![0, 1],
+            "{movement:?}"
+        );
+        seed(&state, "orders", 0, &["r5"]);
+        let before = h.seen(ListOffsetsRequest::API_KEY).len();
+        let moved = h.with_client(|c, _| match movement {
+            Move::To(offset) => c.seek("orders", 0, offset),
+            Move::Beginning => c.seek_to_beginning(&[("orders", 0)]),
+            Move::End => c.seek_to_end(&[]),
+        });
+        assert!(moved == Ok(()), "{movement:?}");
+        h.run_for(1_000);
+        assert!(
+            offsets(&h.with_client(|c, _| c.poll(500))) == polled,
+            "{movement:?}"
+        );
+        let taken: Vec<ListOffsetsRequest> = decoded::<ListOffsetsRequest>(&h)[before..].to_vec();
+        assert!(taken == listed, "{movement:?}");
+    }
+}
+
+/// What a test does to a consumer before the call it checks.
+type Setup = fn(&mut Consumer, &mut Ctx<'_>);
+
+/// The call a test checks.
+type Call = fn(&mut Consumer, &mut Ctx<'_>) -> Result<(), ConsumerError>;
+
+/// A refused call: its name, the setup, the call, the error with its text,
+/// and the position of `orders-0` after the call.
+type Refusal = (
+    &'static str,
+    Setup,
+    Call,
+    ConsumerError,
+    &'static str,
+    Option<i64>,
+);
+
+#[test]
+fn a_call_kafka_refuses_is_refused_with_kafkas_text() {
+    fn assigned(c: &mut Consumer, ctx: &mut Ctx<'_>) {
+        assert!(c.assign(ctx, &[("orders", 0)]) == Ok(()));
+        assert!(c.seek("orders", 0, 5) == Ok(()));
+    }
+    let not_assigned = ConsumerError::NotAssigned {
+        topic: "orders".to_string(),
+        partition: 1,
+    };
+    // Rows: the setup, the call, the error with its text, and the position
+    // of `orders-0` after the call. As in Kafka, `seekToBeginning` moves the
+    // partitions before the first one the consumer does not hold, and
+    // `assign` checks the topic names before the subscription.
+    let rows: [Refusal; 8] = [
+        (
+            "a seek on a partition the consumer does not hold",
+            assigned,
+            |c, _| c.seek("orders", 1, 0),
+            not_assigned.clone(),
+            "No current assignment for partition orders-1",
+            Some(5),
+        ),
+        (
+            "a seek to a negative offset",
+            assigned,
+            |c, _| c.seek("orders", 0, -1),
+            ConsumerError::NegativeOffset,
+            "seek offset must not be a negative number",
+            Some(5),
+        ),
+        (
+            "a seek to the beginning of a partition the consumer does not hold",
+            assigned,
+            |c, _| c.seek_to_beginning(&[("orders", 0), ("orders", 1)]),
+            not_assigned,
+            "No current assignment for partition orders-1",
+            None,
+        ),
+        (
+            "an assignment after a subscription",
+            |c, _| c.subscribe(&["orders"]),
+            |c, ctx| c.assign(ctx, &[("orders", 0)]),
+            ConsumerError::Subscribed,
+            "Subscription to topics, partitions and pattern are mutually exclusive",
+            None,
+        ),
+        (
+            "an empty assignment after a subscription",
+            |c, _| c.subscribe(&["orders"]),
+            |c, ctx| c.assign(ctx, &[]),
+            ConsumerError::Subscribed,
+            "Subscription to topics, partitions and pattern are mutually exclusive",
+            None,
+        ),
+        (
+            "an assignment of a blank topic",
+            |_, _| {},
+            |c, ctx| c.assign(ctx, &[(" \t", 0)]),
+            ConsumerError::EmptyTopic,
+            "Topic partitions to assign to cannot have null or empty topic",
+            None,
+        ),
+        (
+            "an assignment of a blank topic after a subscription",
+            |c, _| c.subscribe(&["orders"]),
+            |c, ctx| c.assign(ctx, &[("orders", 0), ("", 1)]),
+            ConsumerError::EmptyTopic,
+            "Topic partitions to assign to cannot have null or empty topic",
+            None,
+        ),
+        (
+            "a seek after close",
+            |c, ctx| {
+                assert!(c.assign(ctx, &[("orders", 0)]) == Ok(()));
+                c.close(ctx);
+            },
+            |c, _| c.seek("orders", 0, 1),
+            ConsumerError::Closed,
+            "This consumer has already been closed.",
+            None,
+        ),
+    ];
+    for (name, setup, call, error, text, position) in rows {
+        let mut c = consumer(config(GroupProtocol::Classic, AutoOffsetReset::Earliest));
+        let mut bufs = CtxBuffers::new(CLIENT_NODE);
+        let result = bufs.with(0, |ctx| {
+            setup(&mut c, ctx);
+            call(&mut c, ctx)
+        });
+        assert!(result == Err(error), "{name}");
+        assert!(result.unwrap_err().to_string() == text, "{name}");
+        assert!(c.position("orders", 0) == position, "{name}");
+    }
+}
+
+#[test]
+fn a_fetch_answer_for_a_position_the_consumer_left_is_discarded() {
+    let state = cluster(&[("orders", 1)]);
+    let topic_id = state.borrow().topics["orders"].id;
+    seed(&state, "orders", 0, &["r0", "r1", "r2"]);
+    let mut h = Harness::new(groupless(AutoOffsetReset::Earliest), Rc::clone(&state));
+    assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+    assert!(h.run_until(|h| h.client.buffered() == 3, 2_000));
+    // The poll sends the next fetch, from offset 3, and the broker holds it
+    // for `fetch.max.wait.ms`; r3 arrives while it waits.
+    assert!(offsets(&h.with_client(|c, ctx| c.poll_at(ctx, 500))) == vec![0, 1, 2]);
+    h.run_for(10);
+    seed(&state, "orders", 0, &["r3"]);
+    assert!(h.with_client(|c, _| c.seek("orders", 0, 1)) == Ok(()));
+    // The held fetch answers with r3; the consumer, now at offset 1,
+    // discards it as Kafka's `FetchCollector` discards a stale fetch, and
+    // fetches from 1.
+    assert!(h.run_until(|h| h.client.buffered() == 3, 2_000));
+    assert!(offsets(&h.with_client(|c, _| c.poll(500))) == vec![1, 2, 3]);
+    assert!(
+        decoded::<FetchRequest>(&h)
+            == vec![
+                fetch_request(topic_id, 0, 0),
+                fetch_request(topic_id, 0, 3),
+                fetch_request(topic_id, 0, 1),
+            ]
+    );
+}
+
+#[test]
+fn an_answer_to_a_reset_that_a_later_seek_replaced_is_ignored() {
+    let state = cluster(&[("orders", 1)]);
+    seed(&state, "orders", 0, &["r0", "r1", "r2"]);
+    let mut h = Harness::new(groupless(AutoOffsetReset::Latest), Rc::clone(&state));
+    assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+    assert!(h.run_until(|h| h.client.position("orders", 0) == Some(3), 2_000));
+    let before = h.seen(ListOffsetsRequest::API_KEY).len();
+    // Both resets leave at once, the end first; the answers come back in
+    // that order. Kafka's `maybeSeekUnvalidated` skips the end's answer,
+    // because the partition waits for the beginning by then.
+    assert!(h.with_client(|c, _| c.seek_to_end(&[])) == Ok(()));
+    assert!(h.with_client(|c, _| c.seek_to_beginning(&[])) == Ok(()));
+    assert!(h.run_until(|h| h.client.position("orders", 0).is_some(), 1_000));
+    assert!(h.client.position("orders", 0) == Some(0));
+    assert!(
+        decoded::<ListOffsetsRequest>(&h)[before..] == [list_offsets_at(-1), list_offsets_at(-2)]
+    );
+    assert!(h.run_until(|h| h.client.buffered() == 3, 2_000));
+    assert!(offsets(&h.with_client(|c, _| c.poll(500))) == vec![0, 1, 2]);
+}
+
+/// A static member of `billing` with the instance id `instance` and a
+/// session of 10 s.
+fn static_member(protocol: GroupProtocol, instance: &str) -> ConsumerConfig {
+    ConsumerConfig {
+        group_instance_id: Some(instance.to_string()),
+        session_timeout_ms: 10_000,
+        ..config(protocol, AutoOffsetReset::Earliest)
+    }
+}
+
+/// A consumer of a process that started again on the node of an earlier
+/// one: its client draws connection ids from a lane of its own, so the
+/// answers to the earlier process's requests never reach it.
+fn restarted(config: ConsumerConfig) -> Consumer {
+    let client = KafkaClient::new(
+        vec![Endpoint::kafka(NodeId(1))],
+        "test",
+        ClientOptions {
+            conn_base: conn_base(1),
+            ..ClientOptions::default()
+        },
+    );
+    Consumer::new(client, config)
+}
+
+#[test]
+fn a_static_member_that_restarts_within_its_session_keeps_its_place() {
+    // Two classic static members hold `orders` by range: `i-a` leads with
+    // partitions 0 and 1, `i-b` holds 2. One closes, sending no
+    // `LeaveGroup` (Kafka's `maybeLeaveGroup` for a static member), and a
+    // new process with its instance id joins with no member id. The
+    // coordinator gives it a new member id with the old member's place:
+    // the generation stays, the other member sees no rebalance, and a
+    // returning leader skips the assignment (KIP-814). Rows: which member
+    // restarts, its instance id and its partitions.
+    let rows = [(1, "i-b", vec![2]), (0, "i-a", vec![0, 1])];
+    for (i, instance, held) in rows {
+        let state = cluster(&[("orders", 3)]);
+        let members = Members::new(vec![
+            (
+                NodeId(101),
+                consumer(static_member(GroupProtocol::Classic, "i-a")),
+            ),
+            (
+                NodeId(102),
+                consumer(static_member(GroupProtocol::Classic, "i-b")),
+            ),
+        ]);
+        let mut h = Harness::new(members, Rc::clone(&state));
+        with_member(&mut h, 0, |c, _| c.subscribe(&["orders"]));
+        assert!(h.run_until(|h| h.client.get(0).assignment().len() == 3, 2_000));
+        with_member(&mut h, 1, |c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(
+                |h| h.client.get(0).assignment() == partitions("orders", &[0, 1])
+                    && h.client.get(1).assignment() == partitions("orders", &[2])
+                    && h.client.get(0).state() == MemberState::Stable
+                    && h.client.get(1).state() == MemberState::Stable,
+                10_000
+            ),
+            "{instance}"
+        );
+        with_member(&mut h, i, Consumer::close);
+        h.run_for(100);
+        h.take_events();
+        let joins = h.seen(JoinGroupRequest::API_KEY).len();
+        let syncs = h.seen(SyncGroupRequest::API_KEY).len();
+        h.with_client(|members, _| {
+            members.restart(
+                i,
+                restarted(static_member(GroupProtocol::Classic, instance)),
+            );
+        });
+        with_member(&mut h, i, |c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(|h| h.client.get(i).state() == MemberState::Stable, 2_000),
+            "{instance}"
+        );
+        h.run_for(4_000);
+        let new_id = format!("{instance}-{:08x}", 3);
+        assert!(h.seen(LeaveGroupRequest::API_KEY).is_empty(), "{instance}");
+        assert!(
+            decoded::<JoinGroupRequest>(&h)[joins..]
+                == [JoinGroupRequest {
+                    session_timeout_ms: 10_000,
+                    group_instance_id: Some(instance.to_string()),
+                    ..join_request("")
+                }],
+            "{instance}"
+        );
+        assert!(
+            decoded::<SyncGroupRequest>(&h)[syncs..]
+                == [SyncGroupRequest {
+                    group_id: "billing".to_string(),
+                    generation_id: 2,
+                    member_id: new_id.clone(),
+                    group_instance_id: Some(instance.to_string()),
+                    protocol_type: Some("consumer".to_string()),
+                    protocol_name: Some("range".to_string()),
+                    assignments: Vec::new(),
+                    ..Default::default()
+                }],
+            "{instance}"
+        );
+        assert!(
+            h.take_events()
+                == vec![
+                    (
+                        i,
+                        ConsumerEvent::Joined {
+                            member_id: new_id,
+                            generation: 2,
+                        }
+                    ),
+                    (
+                        i,
+                        ConsumerEvent::Assigned {
+                            partitions: partitions("orders", &held),
+                        }
+                    ),
+                ],
+            "{instance}"
+        );
+        let generations = [h.client.get(0).generation(), h.client.get(1).generation()];
+        assert!(generations == [2, 2], "{instance}");
+        assert!(
+            state.borrow().groups["billing"].members.len() == 2,
+            "{instance}"
+        );
+    }
+}
+
+#[test]
+fn a_static_member_that_restarts_after_its_session_expired_joins_as_a_new_member() {
+    // `i-b` closes without a `LeaveGroup` and stays away past its 10 s
+    // session: the coordinator drops the member with its instance id and
+    // the group rebalances to `i-a` alone. The new process of `i-b` then
+    // joins as a new member, and the group rebalances again.
+    let state = cluster(&[("orders", 3)]);
+    let members = Members::new(vec![
+        (
+            NodeId(101),
+            consumer(static_member(GroupProtocol::Classic, "i-a")),
+        ),
+        (
+            NodeId(102),
+            consumer(static_member(GroupProtocol::Classic, "i-b")),
+        ),
+    ]);
+    let mut h = Harness::new(members, Rc::clone(&state));
+    with_member(&mut h, 0, |c, _| c.subscribe(&["orders"]));
+    assert!(h.run_until(|h| h.client.get(0).assignment().len() == 3, 2_000));
+    with_member(&mut h, 1, |c, _| c.subscribe(&["orders"]));
+    assert!(h.run_until(|h| h.client.get(1).state() == MemberState::Stable, 10_000));
+    with_member(&mut h, 1, Consumer::close);
+    assert!(h.run_until(
+        |h| h.client.get(0).generation() == 3 && h.client.get(0).assignment().len() == 3,
+        20_000
+    ));
+    assert!(state.borrow().groups["billing"].static_members.len() == 1);
+    h.with_client(|members, _| {
+        members.restart(1, restarted(static_member(GroupProtocol::Classic, "i-b")));
+    });
+    with_member(&mut h, 1, |c, _| c.subscribe(&["orders"]));
+    assert!(h.run_until(
+        |h| {
+            (0..2).all(|i| {
+                h.client.get(i).generation() == 4 && h.client.get(i).state() == MemberState::Stable
+            })
+        },
+        20_000
+    ));
+    let held: Vec<Vec<(String, i32)>> = (0..2).map(|i| h.client.get(i).assignment()).collect();
+    assert!(held == vec![partitions("orders", &[0, 1]), partitions("orders", &[2])]);
+    let new_id = h.client.get(1).member_id().to_string();
+    assert!(new_id == "i-b-00000003");
+    let group = &state.borrow().groups["billing"];
+    assert!(
+        group.static_members
+            == [
+                ("i-a".to_string(), "i-a-00000001".to_string()),
+                ("i-b".to_string(), new_id),
+            ]
+            .into()
+    );
+}
+
+#[test]
+fn a_static_member_whose_instance_id_a_new_process_took_is_fenced() {
+    // A second process joins with the instance id of a live member. The
+    // coordinator gives it the member's place and assignment, and the old
+    // member's next heartbeat answers FENCED_INSTANCE_ID (Kafka's
+    // `validateMember`), on which Kafka's consumer fails with
+    // `FencedInstanceIdException`.
+    let state = cluster(&[("orders", 3)]);
+    let members = Members::new(vec![
+        (
+            NodeId(101),
+            consumer(static_member(GroupProtocol::Classic, "i-a")),
+        ),
+        (
+            NodeId(102),
+            consumer(static_member(GroupProtocol::Classic, "i-a")),
+        ),
+    ]);
+    let mut h = Harness::new(members, Rc::clone(&state));
+    with_member(&mut h, 0, |c, _| c.subscribe(&["orders"]));
+    assert!(h.run_until(|h| h.client.get(0).assignment().len() == 3, 2_000));
+    h.take_events();
+    let heartbeats = h.seen(HeartbeatRequest::API_KEY).len();
+    with_member(&mut h, 1, |c, _| c.subscribe(&["orders"]));
+    let fenced = MemberState::Failed(codes::FENCED_INSTANCE_ID);
+    assert!(h.run_until(|h| h.client.get(0).state() == fenced, 5_000));
+    let (old_id, new_id) = ("i-a-00000001".to_string(), "i-a-00000002".to_string());
+    assert!(
+        h.take_events()
+            == vec![
+                (
+                    1,
+                    ConsumerEvent::Joined {
+                        member_id: new_id.clone(),
+                        generation: 1,
+                    }
+                ),
+                (
+                    1,
+                    ConsumerEvent::Assigned {
+                        partitions: partitions("orders", &[0, 1, 2]),
+                    }
+                ),
+                (
+                    0,
+                    ConsumerEvent::Error {
+                        api: "Heartbeat",
+                        code: codes::FENCED_INSTANCE_ID,
+                    }
+                ),
+            ]
+    );
+    assert!(
+        decoded::<HeartbeatRequest>(&h)[heartbeats..]
+            == [HeartbeatRequest {
+                group_id: "billing".to_string(),
+                generation_id: 1,
+                member_id: old_id,
+                group_instance_id: Some("i-a".to_string()),
+                ..Default::default()
+            }]
+    );
+    assert!(h.client.get(1).state() == MemberState::Stable);
+    let group = &state.borrow().groups["billing"];
+    assert!(group.members.keys().collect::<Vec<_>>() == [&new_id]);
+    assert!(group.static_members == [("i-a".to_string(), new_id.clone())].into());
+}
+
+#[test]
+fn a_classic_member_leaves_on_close_unless_it_is_static() {
+    // Rows: the instance id, and the `LeaveGroup` requests the coordinator
+    // sees: Kafka's `shouldSendLeaveGroupRequest` sends one for a dynamic
+    // member only.
+    let leave = |member_id: &str| LeaveGroupRequest {
+        group_id: "billing".to_string(),
+        members: vec![MemberIdentity {
+            member_id: member_id.to_string(),
+            group_instance_id: None,
+            reason: Some("the consumer is being closed".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = [
+        (None, vec![leave("member-00000001")]),
+        (Some("i-1"), vec![]),
+    ];
+    for (instance, leaves) in rows {
+        let config = ConsumerConfig {
+            group_instance_id: instance.map(str::to_string),
+            ..config(GroupProtocol::Classic, AutoOffsetReset::Earliest)
+        };
+        let mut h = Harness::new(consumer(config), cluster(&[("orders", 1)]));
+        h.with_client(|c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(|h| h.client.state() == MemberState::Stable, 2_000),
+            "{instance:?}"
+        );
+        h.with_client(Consumer::close);
+        h.run_for(100);
+        assert!(decoded::<LeaveGroupRequest>(&h) == leaves, "{instance:?}");
+    }
+}
+
+#[test]
+fn a_kip848_member_names_its_instance_in_every_heartbeat_and_a_static_one_leaves_with_epoch_minus_two()
+ {
+    // Rows: the instance id and the epoch of the leave heartbeat, Kafka's
+    // `ConsumerMembershipManager.leaveGroupEpoch`.
+    let rows = [(None, -1), (Some("i-1"), -2)];
+    for (instance, leave_epoch) in rows {
+        let instance_id = instance.map(str::to_string);
+        let config = ConsumerConfig {
+            group_instance_id: instance_id.clone(),
+            ..config(GroupProtocol::Consumer, AutoOffsetReset::Earliest)
+        };
+        let state = cluster(&[("orders", 1)]);
+        let topic_id = state.borrow().topics["orders"].id;
+        let mut h = Harness::new(consumer(config), Rc::clone(&state));
+        h.with_client(|c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(|h| h.client.assignment().len() == 1, 2_000),
+            "{instance:?}"
+        );
+        // Let the acknowledgement of the assignment go out.
+        h.run_for(100);
+        let member_id = h.client.member_id().to_string();
+        h.with_client(Consumer::close);
+        h.run_for(100);
+        let base = ConsumerGroupHeartbeatRequest {
+            group_id: "billing".to_string(),
+            member_id: member_id.clone(),
+            member_epoch: 1,
+            instance_id: instance_id.clone(),
+            rebalance_timeout_ms: -1,
+            ..Default::default()
+        };
+        assert!(
+            decoded::<ConsumerGroupHeartbeatRequest>(&h)
+                == vec![
+                    ConsumerGroupHeartbeatRequest {
+                        member_epoch: 0,
+                        rebalance_timeout_ms: 300_000,
+                        subscribed_topic_names: Some(vec!["orders".to_string()]),
+                        topic_partitions: Some(Vec::new()),
+                        ..base.clone()
+                    },
+                    ConsumerGroupHeartbeatRequest {
+                        topic_partitions: Some(vec![TopicPartitions {
+                            topic_id,
+                            partitions: vec![0],
+                            ..Default::default()
+                        }]),
+                        ..base.clone()
+                    },
+                    ConsumerGroupHeartbeatRequest {
+                        member_epoch: leave_epoch,
+                        subscribed_topic_names: Some(Vec::new()),
+                        topic_partitions: Some(Vec::new()),
+                        ..base
+                    },
+                ],
+            "{instance:?}"
+        );
+    }
+}
+
+/// When the next auto-commit is due, from when the poll that committed ran
+/// and when the commit was answered.
+type NextCommit = fn(Millis, Millis) -> Millis;
+
+#[test]
+fn auto_commits_go_out_in_poll_once_the_interval_passed() {
+    // Kafka 4.3 auto-commits only in `poll`, with either protocol:
+    // `ConsumerCoordinator.poll` and the KIP-848 consumer's `AsyncPollEvent`.
+    // A tick never commits; a poll before the interval takes records and
+    // commits nothing; the poll after it commits every position. The next
+    // auto-commit is due `auto.commit.interval.ms` after that poll, or
+    // `retry.backoff.ms` after a retriable failure. Rows: the protocol, the
+    // errors the coordinator answers commits with, and when the next
+    // auto-commit is due, from the time of the poll and of the answer.
+    let after_the_interval: NextCommit = |polled_at, _| polled_at + 5_000;
+    let after_the_backoff: NextCommit = |_, answered_at| answered_at + 100;
+    let rows: [(GroupProtocol, &[i16], NextCommit); 4] = [
+        (GroupProtocol::Classic, &[], after_the_interval),
+        (GroupProtocol::Consumer, &[], after_the_interval),
+        (
+            GroupProtocol::Classic,
+            &[codes::COORDINATOR_LOAD_IN_PROGRESS],
+            after_the_backoff,
+        ),
+        (
+            GroupProtocol::Consumer,
+            &[codes::COORDINATOR_LOAD_IN_PROGRESS],
+            after_the_backoff,
+        ),
+    ];
+    for (protocol, errors, next) in rows {
+        let state = cluster(&[("orders", 1)]);
+        seed(&state, "orders", 0, &["r0", "r1"]);
+        let mut h = Harness::new(
+            consumer(config(protocol, AutoOffsetReset::Earliest)),
+            Rc::clone(&state),
+        );
+        h.with_client(|c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(|h| h.client.buffered() == 2, 2_000),
+            "{protocol:?}"
+        );
+        let due = h.client.next_auto_commit().unwrap();
+        assert!(
+            offsets(&h.with_client(|c, ctx| c.poll_at(ctx, 500))) == vec![0, 1],
+            "{protocol:?}"
+        );
+        h.run_for(due + 1_000 - h.now());
+        assert!(
+            h.seen(OffsetCommitRequest::API_KEY).is_empty(),
+            "{protocol:?}"
+        );
+        state.borrow_mut().knobs.commit_errors = errors.iter().copied().collect();
+        let polled_at = h.now();
+        assert!(
+            h.with_client(|c, ctx| c.poll_at(ctx, 500)).is_empty(),
+            "{protocol:?}"
+        );
+        // The commit in flight holds the next one back until it answers.
+        assert!(h.client.next_auto_commit().is_none(), "{protocol:?}");
+        assert!(
+            h.run_until(|h| h.client.next_auto_commit().is_some(), 100),
+            "{protocol:?}"
+        );
+        let answered_at = h.now();
+        assert!(
+            decoded::<OffsetCommitRequest>(&h)
+                == vec![commit_request(
+                    h.client.generation(),
+                    h.client.member_id(),
+                    &[(0, 2)]
+                )],
+            "{protocol:?}"
+        );
+        assert!(
+            h.client.next_auto_commit() == Some(next(polled_at, answered_at)),
+            "{protocol:?}"
+        );
+    }
 }
