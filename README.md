@@ -84,12 +84,19 @@ npm run preview
 - `scripts/sync-proofs.mjs` copies the broker's Why3find proof sessions (`verif/**/proof.json`) and the Coma files Creusot generated into `src/data/proof-sessions.json` and `public/proofs/coma/`. The page lists every session by module, shows its proof tree (tactics, provers, times), the `[@expl]` obligations parsed from the Coma with their source spans, and the generated Coma itself.
 - With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo compiled to JavaScript discharges each leaf through Why3's SMT-LIB driver.
 
-### 5. Correctness & Verification (`/verification`)
+### 5. Cluster Lab (`/docs/lab`)
+- A distributed-systems playground: brokers, a schema registry, producers, consumers and `krabka-client-streams` apps placed on a canvas and run as one sans-IO simulation inside the same `playground/` crate (`playground/src/lab/`, contract in `playground/docs/lab-design.md`). The page owns the clock and the virtual network; faults (kill, restart, wipe, isolate, partition, latency, loss) are deliberate and replay under the seed.
+- The front-end is `public/playground/lab/` (hand-written ES modules, no bundler): `app.js` boots and wires the panels, `world.js` wraps the `Lab` wasm class and the animation-frame clock, `canvas.js` is the SVG canvas, `kinds.js` the node-kind catalogue (forms, derived edges, status lines) and `views.js` the kind-specific inspector views. Presets live in `presets.js`; a preset that needs a node kind the loaded module does not carry yet is badged *full build*, decided by probing the module at boot.
+- Durable node state (partition logs, the controller log, registry schemas, the echo node's counter) is drained from the module after every step and written to IndexedDB (`storage.js`: database `krabka-lab`, stores `logs`, `kv`, `scenarios`), keyed by the scenario's `id`; reopening a saved scenario folds it back into `loadScenarioWithState`. Scenarios also export/import as JSON and travel whole inside a share link (`#s=`).
+- Several tabs can host one cluster over WebRTC data channels (`session.js`): the hub makes a `?join=` invite link, the spoke shows an answer code to paste back, no signalling server. The hub assigns nodes to peers; frames for nodes hosted elsewhere leave through `drainEgress` and arrive through `pushIngress`.
+- `scripts/check-lab.mjs` (`npm run check-lab`, after `npm run build`) drives the built page in headless Chromium: the preset runs, faults take effect, the echo counter survives a reload and a reopen from the Saved list, a share link reproduces the scenario, and two pages host a cluster together over WebRTC (`--no-webrtc` skips that part). It needs `playwright` or `playwright-core` (project-local or global) and a Chromium Playwright can find (`npx playwright install chromium`, or `PLAYWRIGHT_BROWSERS_PATH`); it exits 2 when either is missing.
+
+### 6. Correctness & Verification (`/verification`)
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
 - **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`. `src/utils/verification-catalog.ts` parses that file at build time and `src/utils/verification-data.ts` joins it with the site's data files; the counts on the homepage and the verification page come from that parse, so they follow the broker's catalog rather than hand-maintained copy.
 - The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
 
-### 6. Aggregated Helm Chart Repository
+### 7. Aggregated Helm Chart Repository
 
 Users add one repository URL:
 
@@ -108,17 +115,18 @@ gh api repos/krabka-io/krabka-io.github.io/dispatches -f event_type=charts-chang
 
 The chart signing public key lives in [krabka-io/tooling](https://github.com/krabka-io/tooling), under `charts/`. No key material is stored here.
 
-### 6. Brand Assets & Chart Icons
+### 8. Brand Assets & Chart Icons
 
 `/brand` lists every mark with the URL it is served from. Published Helm charts point their `Chart.yaml` icon at `/logo.png`. Treat a rename under `public/brand` or `public/logo.png` as a breaking change for published charts.
 
-### 7. Release Verification & Track Resolution (`/versions`)
+### 9. Release Verification & Track Resolution (`/versions`)
 - Release tracking across stable, pre-release, and development channels with SLSA Level 3 provenance verification steps and Sigstore signatures.
 
-### 8. Automated Verification Suites
+### 10. Automated Verification Suites
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
 - **Code Stub Verifier (`scripts/verify-code-stubs.mjs`):** Parses and validates all code snippets across ingested markdown guides and Astro documentation pages.
+- **Cluster Lab End-to-End (`scripts/check-lab.mjs`):** Drives `/docs/lab` in headless Chromium, persistence and WebRTC hosting included.
 - **Catalog Parse Check (`scripts/check-catalog.mjs`):** Runs the verification-catalog parser against the synced `docs/verification.md` and fails when the ledger table or the model paragraphs no longer parse, so a layout change in the broker's catalog cannot silently empty the site's ledger. The deploy workflow runs it after every build.
 
 ---
