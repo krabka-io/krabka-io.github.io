@@ -40,7 +40,9 @@ pub struct RegisterRequest<'a> {
 /// so the response goes out at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written<T> {
+    /// What the mutation answers once its records are read back.
     pub value: T,
+    /// The records to write, in order.
     pub records: Vec<RawRecord>,
 }
 

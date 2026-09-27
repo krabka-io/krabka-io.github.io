@@ -82,7 +82,9 @@
 //! # Events
 //!
 //! `registry` for every write and every error answer; `kafkastore` for the
-//! store's startup, its warnings and its failure.
+//! store's startup, its warnings and its failure, and for the reason of a
+//! write the store failed (`{"step": "write_failed", "op", "path",
+//! "message"}`).
 //!
 //! # Durable state
 //!
@@ -341,6 +343,7 @@ impl RegistryNode {
                         return;
                     }
                     Some(Err(error)) => {
+                        Self::log_store_failure(ctx, &pending, &error);
                         let response = pending.op.failure(&error).to_response();
                         self.finish(ctx, &pending, &response);
                     }
@@ -365,12 +368,28 @@ impl RegistryNode {
                     }
                     Some(Ok(())) => self.finish(ctx, &pending, &response),
                     Some(Err(error)) => {
+                        Self::log_store_failure(ctx, &pending, &error);
                         let response = pending.op.failure(&error).to_response();
                         self.finish(ctx, &pending, &response);
                     }
                 },
             }
         }
+    }
+
+    /// The store's reason for a failed write, which the answer does not
+    /// carry: Confluent logs it.
+    fn log_store_failure(ctx: &mut Ctx<'_>, pending: &Pending, error: &kafkastore::StoreError) {
+        ctx.event(
+            "kafkastore",
+            json!({
+                "step": "write_failed",
+                "op": pending.op.name(),
+                "path": pending.request.path,
+                "message": error.to_string(),
+                "level": "warn",
+            }),
+        );
     }
 
     /// A write answered: send its response, and serve what its connection

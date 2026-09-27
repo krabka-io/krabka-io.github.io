@@ -29,7 +29,10 @@ pub enum WriteOp {
     /// `DELETE /subjects/{subject}/versions/{version}`.
     DeleteVersion,
     /// `DELETE /subjects/{subject}`.
-    DeleteSubject { subject: String },
+    DeleteSubject {
+        /// The subject, which a failure names.
+        subject: String,
+    },
     /// `PUT /config` and `PUT /config/{subject}`.
     UpdateConfig,
     /// `DELETE /config` and `DELETE /config/{subject}`.
@@ -120,7 +123,9 @@ pub fn write_op(req: &HttpRequest) -> Option<WriteOp> {
 /// The records a mutation writes, and its operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Write {
+    /// The operation, which names the error a failed write answers.
     pub op: WriteOp,
+    /// The records, in the order they are written.
     pub records: Vec<RawRecord>,
 }
 
@@ -128,7 +133,9 @@ pub struct Write {
 /// response of a write goes out only once the write succeeded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
+    /// The answer: at once without a write, else once the write succeeded.
     pub response: HttpResponse,
+    /// What the request writes, if anything.
     pub write: Option<Write>,
 }
 
