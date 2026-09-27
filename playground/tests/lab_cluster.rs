@@ -12,8 +12,8 @@ use bytes::Bytes;
 use krabka_playground::lab::{
     Endpoint, Fault, Millis, NodeId, World,
     broker::{
-        CONSUMER_OFFSETS_PARTITIONS, CONSUMER_OFFSETS_TOPIC, LAB_CLUSTER_ID, cluster_id_string,
-        group_partition,
+        CONSUMER_OFFSETS_PARTITIONS, CONSUMER_OFFSETS_TOPIC, LAB_CLUSTER_ID,
+        broker_api_versions_table, cluster_id_string, group_partition, supported_features,
         test_support::{TestClient, batch, decode_response, encode_batch},
     },
     codes,
@@ -25,6 +25,8 @@ use krabka_playground::lab::{
 use krabka_protocol::{
     ProtocolRequest,
     owned::{
+        api_versions_request::ApiVersionsRequest,
+        api_versions_response::ApiVersionsResponse,
         common::{
             consumer_group_heartbeat_response::topic_partitions::TopicPartitions,
             describe_quorum_response::replica_state::ReplicaState,
@@ -637,6 +639,43 @@ fn three_voters_elect_a_controller_and_every_broker_registers_unfenced() {
         };
         assert!(described == expected, "broker {broker}");
     }
+}
+
+#[test]
+fn a_client_that_connects_early_is_answered_once_its_broker_runs() {
+    let mut cluster = Cluster::new();
+    let mut conn = cluster.connect(NodeId(3));
+    let request = ApiVersionsRequest {
+        client_software_name: "krabka-test".into(),
+        client_software_version: "1.0".into(),
+        ..ApiVersionsRequest::default()
+    };
+    let correlation = cluster.send(&mut conn, 4, &request);
+    // The broker accepts the connection at once but answers nothing while
+    // it registers, catches up and waits to be unfenced, as Kafka binds its
+    // socket server before it enables request processing: the answer leaves
+    // in the step that makes the broker `RUNNING`.
+    let deadline = cluster.world.now() + 5_000;
+    let mut state_before = Value::Null;
+    while cluster.inbox.is_empty() {
+        state_before = cluster.snapshot(NodeId(3))["state"].clone();
+        assert!(
+            cluster.world.step_once(deadline),
+            "no answer by {deadline} ms"
+        );
+        cluster.collect();
+    }
+    let snapshot = cluster.snapshot(NodeId(3));
+    assert!(state_before == "RECOVERY" && snapshot["state"] == "RUNNING");
+    assert!(snapshot["connections"] == 1);
+    let answer = cluster.receive::<ApiVersionsRequest>(&conn, 4, correlation, 0);
+    let expected = ApiVersionsResponse {
+        api_keys: broker_api_versions_table(),
+        supported_features: supported_features(4),
+        finalized_features_epoch: -1,
+        ..ApiVersionsResponse::default()
+    };
+    assert!(answer == Some(expected));
 }
 
 #[test]

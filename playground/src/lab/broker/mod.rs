@@ -515,6 +515,10 @@ pub struct BrokerNode {
     next_tick: Millis,
     next_conn: u32,
     started: bool,
+    /// Whether the client listener serves requests: from the first time the
+    /// broker is `RUNNING` after a start, as Kafka's
+    /// `enableRequestProcessing` opens it once.
+    listener_open: bool,
     /// The time of the last call the world made, for the snapshot.
     now: Millis,
     /// Logs a reload restored, taken by the replicas the image opens.
@@ -556,6 +560,7 @@ impl BrokerNode {
             next_tick: 0,
             next_conn: 0,
             started: false,
+            listener_open: false,
             now: 0,
             restored_logs: BTreeMap::new(),
             checkpoints: BTreeMap::new(),
@@ -905,11 +910,10 @@ impl BrokerNode {
             self.poll_isr(ctx);
             let events = self.poll_channels(ctx);
             let progressed = self.retry_all_held(ctx);
-            if !serving && self.lifecycle.serving() {
-                self.pump_all(ctx);
-            }
+            let opened = self.open_client_listener(ctx);
             let settled = !events
                 && !progressed
+                && !opened
                 && applied == self.quorum.applied
                 && active == self.quorum.active.is_some()
                 && serving == self.lifecycle.serving();
@@ -1031,15 +1035,15 @@ impl BrokerNode {
     }
 
     /// Serve the queued requests of a connection in order until one is held
-    /// or the queue is empty. The client listener serves nothing until the
-    /// broker was unfenced.
+    /// or the queue is empty. The client listener serves nothing until it
+    /// opens.
     fn pump(&mut self, ctx: &mut Ctx<'_>, key: ConnKey) {
         loop {
-            let serving = self.lifecycle.serving();
+            let open = self.listener_open;
             let Some(conn) = self.conns.get_mut(&key) else {
                 return;
             };
-            if conn.is_blocked() || (conn.listener == Listener::Broker && !serving) {
+            if conn.is_blocked() || (conn.listener == Listener::Broker && !open) {
                 return;
             }
             let listener = conn.listener;
@@ -1067,8 +1071,21 @@ impl BrokerNode {
         }
     }
 
-    /// Serve every connection that has requests waiting and nothing held,
-    /// once the client listener opens.
+    /// Open the client listener once the broker is `RUNNING`, and serve what
+    /// its connections queued meanwhile: a client that connected early is
+    /// accepted but not answered until then, as Kafka binds its socket
+    /// server before it waits for the initial catch-up. Returns whether the
+    /// listener opened now.
+    fn open_client_listener(&mut self, ctx: &mut Ctx<'_>) -> bool {
+        if self.listener_open || !self.lifecycle.serving() {
+            return false;
+        }
+        self.listener_open = true;
+        self.pump_all(ctx);
+        true
+    }
+
+    /// Serve every connection that has requests waiting and nothing held.
     fn pump_all(&mut self, ctx: &mut Ctx<'_>) {
         let keys: Vec<ConnKey> = self
             .conns
@@ -1282,6 +1299,7 @@ impl Node for BrokerNode {
     fn start(&mut self, ctx: &mut Ctx<'_>) {
         let now = ctx.now();
         self.started = true;
+        self.listener_open = false;
         self.now = now;
         self.conns.clear();
         self.links.clear();
