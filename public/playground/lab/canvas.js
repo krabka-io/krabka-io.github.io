@@ -1,6 +1,8 @@
 // The SVG canvas: nodes as draggable cards, the edges the configs imply,
-// topics as pills between producers and consumers, frames in flight as dots
-// that slide along the wire, and the overlays of cut, slow and lossy links.
+// topics as pills between producers and consumers (a streams app's changelog
+// and repartition topics as dashed pills beside it), frames in flight as
+// dots that slide along the wire, and the overlays of cut, slow and lossy
+// links.
 //
 // Coordinates: every node has a scenario position `(x, y)` in canvas units;
 // the viewport transform (pan `x`, `y` and zoom `k`) maps them to pixels.
@@ -11,7 +13,7 @@
 // place, so the reader's focus and the hover state survive snapshots.
 
 import { svg, el, button, setAttrs, clamp } from "./dom.js";
-import { kindOf, derivedEdges, topicNames, statusLine } from "./kinds.js";
+import { kindOf, derivedEdges, topicNames, internalTopics, statusLine } from "./kinds.js";
 
 const CARD_W = 172;
 const CARD_H = 60;
@@ -25,6 +27,9 @@ const DRAG_THRESHOLD = 4;
 const LONG_PRESS_MS = 500;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
+// Edges drawn faint: connections and a streams app's internal topics, not
+// the data flow of the scenario's own topics.
+const FAINT_EDGES = new Set(["bootstrap", "ping", "registry", "changelog", "repartition"]);
 
 export class Canvas {
   // hooks: onSelect(id, { additive }), onDeselect(), onMove(id, x, y),
@@ -268,6 +273,7 @@ export class Canvas {
   syncTopics() {
     const names = this.scenario ? topicNames(this.scenario) : [];
     const specs = new Map((this.scenario?.topics || []).map((t) => [t.name, t]));
+    const internal = this.scenario ? internalTopics(this.scenario) : new Map();
     const seen = new Set();
     for (const name of names) {
       seen.add(name);
@@ -275,6 +281,7 @@ export class Canvas {
       if (!g) {
         g = svg("g", { class: "lab-topic" });
         g.dataset.topic = name;
+        g.appendChild(svg("title"));
         g.appendChild(svg("rect", { class: "lab-topic-bg", x: -TOPIC_W / 2, y: -TOPIC_H / 2, width: TOPIC_W, height: TOPIC_H, rx: TOPIC_H / 2 }));
         const t = svg("text", { class: "lab-topic-name", x: 0, y: -1, "text-anchor": "middle" });
         const sub = svg("text", { class: "lab-topic-sub", x: 0, y: 11, "text-anchor": "middle" });
@@ -283,8 +290,15 @@ export class Canvas {
         this.topicEls.set(name, g);
       }
       const spec = specs.get(name);
+      const role = internal.get(name);
+      g.classList.toggle("lab-topic-internal", Boolean(role) && !spec);
       g.querySelector(".lab-topic-name").textContent = truncate(name, 18);
-      g.querySelector(".lab-topic-sub").textContent = spec ? `${spec.partitions} partitions · rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}` : "topic";
+      g.querySelector(".lab-topic-sub").textContent = spec
+        ? `${spec.partitions} partitions · rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}`
+        : role
+          ? `${role} · made by the group`
+          : "topic";
+      g.querySelector("title").textContent = role && !spec ? `${name}: the streams app's ${role} topic, which the streams group creates` : name;
     }
     for (const [name, g] of this.topicEls) {
       if (!seen.has(name)) {
@@ -344,7 +358,7 @@ export class Canvas {
       let line = this.edgeEls.get(key);
       if (!line) {
         line = svg("line", { class: `lab-edge lab-edge-${e.type}` });
-        line.setAttribute("marker-end", e.type === "bootstrap" || e.type === "ping" || e.type === "registry" ? "url(#lab-arrow-faint)" : "url(#lab-arrow)");
+        line.setAttribute("marker-end", FAINT_EDGES.has(e.type) ? "url(#lab-arrow-faint)" : "url(#lab-arrow)");
         this.layerEdges.appendChild(line);
         this.edgeEls.set(key, line);
       }

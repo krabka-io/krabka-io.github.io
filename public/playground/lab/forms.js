@@ -3,8 +3,14 @@
 // `buildForm` turns the field specs of `kinds.js` into controls and reads a
 // `config` object back out of them, with validation: required fields,
 // numbers, JSON documents, node references picked from the existing nodes,
-// nested groups (optional groups fold to a checkbox), and the streams
-// topology ops editor. The same form adds a node and edits an existing one.
+// nested groups (optional groups fold to a checkbox), `advanced` disclosures
+// whose fields sit in the same config object as the rest, a record value
+// (format and template), and the streams topology ops editor. The same form
+// adds a node and edits an existing one.
+//
+// A field's `default` is what the node does when the key is missing. With
+// `emitDefault: false` a field that still holds its default is left out of
+// the config, so a spec carries only what differs from the node's defaults.
 //
 // `openDialog` shows a `<dialog>` with a title, a body and Apply/Cancel
 // buttons. The dialog traps focus and closes on Escape, so everything in it
@@ -12,9 +18,13 @@
 
 import { el, button, select, labelled } from "./dom.js";
 
-// The parameters of each streams topology op. `filter` stores its comparison
-// as `{ op: "filter", field, <cmp>: value }`, matching the design document's
-// `{ "op": "filter", "field": "total", "gt": 100 }`.
+// The placeholders a record template takes (`apps::templates`).
+export const TEMPLATE_HELP = "Placeholders: {seq}, {seq % n}, {now}, {rand a b}, {pick a|b|c}, {uuid}; {{ and }} are literal braces.";
+
+// The parameters of each streams topology op (`apps::topology`). `filter`
+// stores its comparison as `{ op: "filter", field, <cmp>: value }`, matching
+// the design document's `{ "op": "filter", "field": "total", "gt": 100 }`.
+const STORE_FIELD = { key: "store", label: "Store", type: "text", placeholder: "count-by-key-1", help: "The state store's name; its changelog is <application id>-<store>-changelog. Empty: <op>-<index>." };
 const OP_SPECS = {
   filter: {
     label: "filter — keep records whose field compares",
@@ -27,30 +37,52 @@ const OP_SPECS = {
   map: {
     label: "map — reshape the value",
     fields: [
-      { key: "params", label: "Parameters", type: "json", default: { select: ["id", "total"] }, help: 'Merged into the op: {"select": [...]}, {"rename": {"a": "b"}} or {"uppercase": [...]}.' },
+      { key: "select", label: "Select", type: "list", placeholder: "id, total", help: "Keep only these fields." },
+      { key: "rename", label: "Rename", type: "json", placeholder: '{"total": "amount"}', validate: stringMap, help: "Field → new name." },
+      { key: "set", label: "Set", type: "json", placeholder: '{"source": "lab-{seq}"}', validate: stringMap, help: `Field → template; {seq} is the source offset, {now} its timestamp. ${TEMPLATE_HELP}` },
+      { key: "upper", label: "Upper", type: "list", placeholder: "customer", help: "Upper-case these text fields. Applied in this order: select, rename, set, upper." },
     ],
   },
   select_key: {
     label: "select_key — re-key by a field",
-    fields: [{ key: "field", label: "Field", type: "text", required: true, placeholder: "customer" }],
+    fields: [{ key: "field", label: "Field", type: "text", required: true, placeholder: "customer", help: "An aggregation after it reads through a repartition topic." }],
   },
-  count_by_key: { label: "count_by_key — running count per key", fields: [] },
+  count_by_key: { label: "count_by_key — running count per key", fields: [STORE_FIELD] },
   sum_by_key: {
     label: "sum_by_key — running sum of a field per key",
-    fields: [{ key: "field", label: "Field", type: "text", required: true, placeholder: "total" }],
+    fields: [{ key: "field", label: "Field", type: "text", required: true, placeholder: "total" }, STORE_FIELD],
   },
   window_count: {
-    label: "window_count — count per key per tumbling window",
-    fields: [{ key: "size_ms", label: "Window size (ms)", type: "number", default: 1000, min: 1, step: 1 }],
+    label: "window_count — count per key per window",
+    fields: [
+      { key: "size_ms", label: "Window size (ms)", type: "number", required: true, default: 1000, min: 1, step: 1 },
+      { key: "advance_ms", label: "Advance (ms)", type: "number", min: 1, step: 1, help: "Hopping windows; empty is a tumbling window (advance = size)." },
+      { key: "grace_ms", label: "Grace (ms)", type: "number", min: 0, step: 1, help: "How late a record may be before its window closes; empty is 0." },
+      STORE_FIELD,
+    ],
   },
 };
 const CMP_KEYS = ["gt", "gte", "lt", "lte", "eq", "ne", "contains"];
+
+// A JSON object of strings, as `map` takes for `rename` and `set`.
+function stringMap(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "an object";
+  const bad = Object.entries(v).find(([, s]) => typeof s !== "string");
+  return bad ? `${bad[0]} is not a string` : null;
+}
+
+// Whether two JSON values are the same document.
+export function sameJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 // Build a form. `ctx.nodes` lists `{ id, kind, name }` for node pickers;
 // `ctx.self` is the id of the node being edited (excluded from pickers).
 export function buildForm(fields, values = {}, ctx = {}) {
   const root = el("div", "lab-form");
-  const controls = fields.map((spec) => makeControl(spec, values[spec.key], ctx));
+  const source = values && typeof values === "object" ? values : {};
+  // An `advanced` disclosure reads its fields from the same object.
+  const controls = fields.map((spec) => makeControl(spec, spec.type === "advanced" ? source : source[spec.key], ctx));
   for (const c of controls) root.appendChild(c.root);
   return {
     root,
@@ -61,7 +93,8 @@ export function buildForm(fields, values = {}, ctx = {}) {
       for (const c of controls) {
         const r = c.read();
         c.setError(r.error || "");
-        if (r.error) errors.push({ key: c.spec.key, message: r.error });
+        if (r.error) errors.push({ key: c.spec.key ?? c.spec.label, message: r.error });
+        else if (r.flat) Object.assign(value, r.flat);
         else if (r.value !== undefined) value[c.spec.key] = r.value;
       }
       return { value, errors };
@@ -97,6 +130,7 @@ function makeControl(spec, value, ctx) {
       read = () => {
         const v = input.value.trim();
         if (!v) return spec.required ? { error: "required" } : { value: undefined };
+        if (spec.emitDefault === false && v === spec.default) return { value: undefined };
         return { value: v };
       };
       break;
@@ -114,8 +148,11 @@ function makeControl(spec, value, ctx) {
         if (!raw) return spec.required ? { error: "required" } : { value: undefined };
         const n = Number(raw);
         if (!Number.isFinite(n)) return { error: "not a number" };
+        if (spec.step === 1 && !Number.isInteger(n)) return { error: "a whole number" };
         if (spec.min != null && n < spec.min) return { error: `at least ${spec.min}` };
         if (spec.max != null && n > spec.max) return { error: `at most ${spec.max}` };
+        const invalid = spec.validate ? spec.validate(n) : null;
+        if (invalid) return { error: invalid };
         if (spec.emitDefault === false && n === spec.default) return { value: undefined };
         return { value: n };
       };
@@ -224,6 +261,7 @@ function makeControl(spec, value, ctx) {
       const ta = el("textarea", "lab-textarea");
       ta.rows = 4;
       ta.spellcheck = false;
+      if (spec.placeholder) ta.placeholder = spec.placeholder;
       let text = "";
       if (typeof initial === "string") {
         try {
@@ -243,7 +281,63 @@ function makeControl(spec, value, ctx) {
         } catch (err) {
           return { error: `invalid JSON: ${err.message}` };
         }
+        const invalid = spec.validate ? spec.validate(parsed) : null;
+        if (invalid) return { error: invalid };
         return { value: spec.stringify ? JSON.stringify(parsed) : parsed };
+      };
+      break;
+    }
+    case "record-value": {
+      // A producer's `value`: `{ format: "json", template: <document> }` or
+      // `{ format: "text", template: <text> }`.
+      const start = initial && typeof initial === "object" ? initial : spec.default || { format: "json", template: {} };
+      const formats = spec.formats || ["json", "text"];
+      const fmt = select(formats, start.format || "json", null);
+      const ta = el("textarea", "lab-textarea");
+      ta.rows = 4;
+      ta.spellcheck = false;
+      ta.value = typeof start.template === "string" ? start.template : JSON.stringify(start.template ?? {}, null, 2);
+      const fieldset = el("fieldset", "lab-group");
+      fieldset.appendChild(el("legend", null, spec.label));
+      fieldset.append(labelled("Format", fmt, "json: a JSON document whose string values are templates; text: one text template."), labelled("Template", ta, help));
+      wrap.appendChild(fieldset);
+      read = () => {
+        const format = fmt.value;
+        const raw = ta.value.trim();
+        if (!raw) return { error: "the template is required" };
+        let template = raw;
+        if (format === "json") {
+          try {
+            template = JSON.parse(raw);
+          } catch (err) {
+            return { error: `invalid JSON: ${err.message}` };
+          }
+        }
+        const value = { format, template };
+        if (spec.emitDefault === false && sameJson(value, spec.default)) return { value: undefined };
+        return { value };
+      };
+      break;
+    }
+    case "advanced": {
+      // Fields a reader seldom touches, folded away; their keys sit in the
+      // same config object as the rest. Opens by itself when one of them
+      // holds something other than the node's default.
+      const details = el("details", "lab-advanced");
+      details.appendChild(el("summary", "lab-advanced-title", spec.label || "Advanced"));
+      const inner = buildForm(spec.fields, initial && typeof initial === "object" ? initial : {}, ctx);
+      inner.root.classList.add("lab-advanced-body");
+      details.appendChild(inner.root);
+      if (help) details.appendChild(el("small", "lab-field-help", help));
+      details.open = spec.fields.some((f) => initial && initial[f.key] !== undefined && !sameJson(initial[f.key], f.default));
+      wrap.appendChild(details);
+      read = () => {
+        const r = inner.read();
+        if (r.errors.length) {
+          details.open = true;
+          return { error: r.errors.map((e) => `${e.key}: ${e.message}`).join("; ") };
+        }
+        return { flat: r.value };
       };
       break;
     }
@@ -399,11 +493,8 @@ function makeOpRow(op, ctx, actions) {
       values.cmp = cmp;
       values.value = op[cmp];
     }
-  } else if (type === "map") {
-    const { op: _ignored, ...params } = op;
-    values.params = params;
   } else {
-    for (const f of spec.fields) if (f.key in op) values[f.key] = op[f.key];
+    for (const f of spec.fields) if (f.key in op) values[f.key] = typeof op[f.key] === "string" && f.type === "list" ? [op[f.key]] : op[f.key];
   }
   const form = buildForm(spec.fields, values, ctx);
   root.appendChild(form.root);
@@ -422,7 +513,9 @@ function makeOpRow(op, ctx, actions) {
         out[v.cmp || "gt"] = v.value !== undefined ? v.value : 0;
         return { value: out };
       }
-      if (type === "map") return { value: { op: "map", ...(v.params || {}) } };
+      if (type === "map" && !["select", "rename", "set", "upper"].some((k) => v[k] !== undefined)) {
+        return { error: "map: needs at least one of select, rename, set or upper" };
+      }
       return { value: { op: type, ...v } };
     },
   };

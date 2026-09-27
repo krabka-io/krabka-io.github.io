@@ -1,15 +1,17 @@
 // The inspector: the side panel for the selected node.
 //
-// Header (kind, id, name, alive, hosted by), fault buttons, then three tabs:
-// the kind-specific view of the snapshot's `state` (from `views.js`), the
-// config form (the same form the palette uses to add a node), and the raw
-// snapshot JSON. The state view re-renders at most four times a second and
-// only when the state changed; the JSON tree keeps the branches the reader
-// opened across renders.
+// Header (kind, id, name, alive, hosted by), fault buttons, the node's
+// control commands (send, rate, pause, query, ...; `commands` in `kinds.js`),
+// then three tabs: the kind-specific view of the snapshot's `state` (from
+// `views.js`), the config form (the same form the palette uses to add a
+// node), and the raw snapshot JSON. The state view re-renders at most four
+// times a second and only when the state changed; the JSON tree keeps the
+// branches the reader opened across renders. The command bar is built once
+// per node and only enabled or disabled after that, so what the reader types
+// in it survives the snapshots.
 
 import { el, button, select } from "./dom.js";
-import { kindOf, renderState } from "./kinds.js";
-import { jsonTree } from "./json-tree.js";
+import { kindOf, renderState, commandObject } from "./kinds.js";
 import { buildForm } from "./forms.js";
 import { FAULT } from "./faults.js";
 
@@ -17,9 +19,10 @@ const STATE_INTERVAL_MS = 250;
 const RAW_INTERVAL_MS = 500;
 
 export class Inspector {
-  // hooks: onFault(fault), onCommand(id, command), onHostChange(id, peerId),
-  // onTakeOver(id), onUpdateNode(id, spec) → boolean, formCtx() → { nodes },
-  // peerName(peerId), nodeName(id), nodeLabelForBroker(brokerId)
+  // hooks: onFault(fault), onCommand(id, command), onControl(id, command) →
+  // { ok, answer | error }, onHostChange(id, peerId), onTakeOver(id),
+  // onUpdateNode(id, spec) → boolean, formCtx() → { nodes }, peerName(peerId),
+  // nodeName(id), nodeLabelForBroker(brokerId)
   constructor(container, hooks) {
     this.hooks = hooks;
     this.selected = null;
@@ -57,6 +60,13 @@ export class Inspector {
 
     this.actions = el("div", "lab-insp-actions");
     this.body.appendChild(this.actions);
+
+    this.commands = el("div", "lab-insp-commands");
+    this.commands.setAttribute("aria-label", "Node commands");
+    this.commands.hidden = true;
+    this.body.appendChild(this.commands);
+    this.commandKey = "";
+    this.commandControls = [];
 
     this.tabs = el("div", "lab-tabs");
     this.tabs.setAttribute("role", "tablist");
@@ -140,6 +150,7 @@ export class Inspector {
     this.emptyMsg.hidden = has;
     if (!has) return;
     this.renderHeader(n);
+    this.renderCommands(n);
     if (this.tab === "state") this.renderState(n, force);
     else if (this.tab === "raw") this.renderRaw(n, force);
     else if (this.tab === "config" && this.formFor !== this.configKey(n)) this.renderConfig(true);
@@ -214,6 +225,80 @@ export class Inspector {
     }
   }
 
+  // The command bar: one row per command of the kind that is not marked
+  // `bar: false`. Built when the selection or its kind changes; after that
+  // each snapshot only enables and disables the buttons, and refreshes the
+  // inputs the reader has not touched.
+  renderCommands(n) {
+    const k = kindOf(n.kind);
+    const key = `${n.id}:${n.kind}`;
+    if (key !== this.commandKey) {
+      this.commandKey = key;
+      this.buildCommands(n, (k.commands || []).filter((c) => c.bar !== false));
+    }
+    if (!this.commandControls.length) return;
+    const state = n.state && typeof n.state === "object" ? n.state : {};
+    const blocked = !n.alive ? "the node is down" : !n.hosted ? "another tab runs this node" : "";
+    this.commandNote.textContent = blocked ? `Commands wait: ${blocked}.` : "";
+    this.commandNote.hidden = !blocked;
+    for (const c of this.commandControls) {
+      c.button.disabled = Boolean(blocked) || (c.spec.enabled ? !c.spec.enabled(state) : false);
+      for (const input of c.inputs) {
+        input.el.disabled = Boolean(blocked);
+        input.refresh(state);
+      }
+    }
+  }
+
+  buildCommands(n, specs) {
+    this.commands.innerHTML = "";
+    this.commandControls = [];
+    this.commands.hidden = specs.length === 0;
+    if (!specs.length) return;
+    const state = n.state && typeof n.state === "object" ? n.state : {};
+    const rows = el("div", "lab-cmd-rows");
+    for (const spec of specs) {
+      const row = el("div", "lab-cmd");
+      row.dataset.command = spec.cmd;
+      const inputs = (spec.params || []).map((p) => commandParam(p, state, spec));
+      for (const input of inputs) row.appendChild(input.wrap);
+      const b = button(spec.label, "lab-btn-sm", () => this.runCommand(n.id, spec, inputs), { title: spec.title, data: { command: spec.cmd } });
+      row.appendChild(b);
+      rows.appendChild(row);
+      this.commandControls.push({ spec, button: b, inputs });
+    }
+    this.commandNote = el("p", "lab-muted lab-small");
+    this.commandNote.hidden = true;
+    this.commandResult = el("p", "lab-cmd-result lab-small");
+    this.commandResult.dataset.field = "command-result";
+    this.commandResult.hidden = true;
+    this.commands.append(rows, this.commandNote, this.commandResult);
+  }
+
+  runCommand(id, spec, inputs) {
+    const values = {};
+    for (const input of inputs) {
+      const r = input.read();
+      if (r.error) {
+        this.showResult(spec, { ok: false, error: `${input.param.label}: ${r.error}` });
+        return;
+      }
+      if (r.value !== undefined) values[input.param.key] = r.value;
+    }
+    const result = this.hooks.onControl(id, commandObject(spec, values));
+    for (const input of inputs) input.touched = false;
+    this.showResult(spec, result);
+  }
+
+  showResult(spec, r) {
+    const el2 = this.commandResult;
+    el2.hidden = false;
+    el2.textContent = r.ok ? `${spec.label}: ${answerText(r.answer)}` : `${spec.label} failed: ${r.error}`;
+    el2.dataset.ok = String(Boolean(r.ok));
+    el2.dataset.command = spec.cmd;
+    el2.classList.toggle("lab-cmd-error", !r.ok);
+  }
+
   renderState(n, force) {
     const now = performance.now();
     const key = JSON.stringify(n.state);
@@ -231,6 +316,7 @@ export class Inspector {
       collapsed: ts.collapsed,
       nodeName: this.hooks.nodeName,
       nodeLabelForBroker: this.hooks.nodeLabelForBroker,
+      spec: this.data?.scenario?.nodes?.find((s) => s.id === n.id) || null,
     };
     const view = renderState(n, ctx);
     const panel = this.panels.state;
@@ -306,4 +392,77 @@ export class Inspector {
     row.append(apply, cancel);
     panel.append(note, row);
   }
+}
+
+// One input of a command: a number, a text or a select. `fromState` fills a
+// number from the node's state for as long as the reader has not typed in
+// it; a select whose `options` is a function of the state follows it.
+function commandParam(param, state, spec) {
+  const wrap = el("label", "lab-cmd-param");
+  const text = el("span", "lab-muted lab-small", param.label);
+  let input;
+  const out = { param, wrap, touched: false, el: null, read: null, refresh: () => {} };
+  if (param.type === "select") {
+    input = select([], null, null, "lab-input-sm");
+    let current = "";
+    out.refresh = (s) => {
+      const options = typeof param.options === "function" ? param.options(s) || [] : param.options || [];
+      const key = options.join("\u0000");
+      if (key === current) return;
+      current = key;
+      const chosen = input.value;
+      input.innerHTML = "";
+      for (const o of options) {
+        const opt = document.createElement("option");
+        opt.value = String(o);
+        opt.textContent = String(o);
+        input.appendChild(opt);
+      }
+      if (options.map(String).includes(chosen)) input.value = chosen;
+    };
+    out.refresh(state);
+    out.read = () => (input.value ? { value: input.value } : { error: "nothing to choose yet" });
+  } else {
+    input = el("input", "lab-input lab-input-sm");
+    input.type = param.type === "number" ? "number" : "text";
+    if (param.min != null) input.min = String(param.min);
+    if (param.step != null) input.step = String(param.step);
+    if (param.placeholder) input.placeholder = param.placeholder;
+    const fromState = (s) => {
+      const v = param.fromState ? param.fromState(s) : undefined;
+      return v == null ? (param.default ?? "") : v;
+    };
+    input.value = String(fromState(state));
+    input.addEventListener("input", () => {
+      out.touched = true;
+    });
+    if (param.fromState) {
+      out.refresh = (s) => {
+        if (!out.touched && document.activeElement !== input) input.value = String(fromState(s));
+      };
+    }
+    out.read = () => {
+      const raw = input.value.trim();
+      if (param.type !== "number") return raw ? { value: raw } : { error: "required" };
+      if (!raw) return { error: "required" };
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return { error: "not a number" };
+      if (param.step === 1 && !Number.isInteger(n)) return { error: "a whole number" };
+      if (param.min != null && n < param.min) return { error: `at least ${param.min}` };
+      return { value: n };
+    };
+  }
+  input.setAttribute("aria-label", `${spec.label}: ${param.label}`);
+  input.dataset.param = param.key;
+  out.el = input;
+  wrap.append(text, input);
+  return out;
+}
+
+// A command's answer as one line.
+function answerText(answer) {
+  if (answer == null) return "done";
+  if (typeof answer !== "object") return String(answer);
+  const text = JSON.stringify(answer);
+  return text.length > 160 ? `${text.slice(0, 159)}…` : text;
 }

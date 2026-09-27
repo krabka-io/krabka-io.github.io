@@ -21,7 +21,7 @@ import { Palette } from "./palette.js";
 import { StoragePanel } from "./storage-panel.js";
 import { LabStorage } from "./storage.js";
 import { Session, joinCodeFromUrl } from "./session.js";
-import { KINDS, kindOf, defaultName, probeAvailability } from "./kinds.js";
+import { KINDS, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
 import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
@@ -151,6 +151,7 @@ class LabApp {
     this.inspector = new Inspector(right, {
       onFault: (f) => this.fault(f),
       onCommand: (id, command) => this.command(id, command),
+      onControl: (id, command) => this.control(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
       onTakeOver: (id) => this.session.requestTakeover(id),
       onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
@@ -426,8 +427,10 @@ class LabApp {
     return this.world.scenario().nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name }));
   }
 
+  // A node's name: from the scenario, or for a node the world adds itself
+  // (the hidden admin), from the snapshot.
   nodeName(id) {
-    const n = this.world.scenario().nodes.find((s) => s.id === id);
+    const n = this.world.scenario().nodes.find((s) => s.id === id) || this.world.snapshot()?.nodes?.find((s) => s.id === id);
     return n ? n.name || `#${id}` : `#${id}`;
   }
 
@@ -476,6 +479,15 @@ class LabApp {
         break;
       default:
     }
+  }
+
+  // A control command for a node, from the inspector's command bar or the
+  // Send command dialog. The answer comes back at once; what the command
+  // changed shows in the next snapshot, taken right away.
+  control(id, command) {
+    const r = this.world.control(id, command);
+    this.world.flush(performance.now(), true);
+    return r;
   }
 
   // The inspector's Apply. Only the host edits the scenario: an edit in a
@@ -573,12 +585,31 @@ class LabApp {
     }
   }
 
+  // The command palette of a node: its kind's commands as templates, and a
+  // JSON box for anything else.
   async controlDialog(id) {
+    const k = kindOf(this.world.spec(id)?.kind);
+    const commands = k.commands || [];
     const ta = el("textarea", "lab-textarea lab-code");
     ta.rows = 4;
-    ta.value = JSON.stringify(kindOf(this.world.spec(id)?.kind).kind === "pinger" ? { cmd: "ping" } : { cmd: "" }, null, 2);
+    ta.value = JSON.stringify(commands.length ? commandExample(commands[0]) : { cmd: "" }, null, 2);
     const out = el("pre", "lab-raw");
+    out.dataset.field = "command-answer";
     const body = el("div");
+    if (commands.length) {
+      const list = el("div", "lab-cmd-palette");
+      list.appendChild(el("span", "lab-field-label", "Commands"));
+      const row = el("div", "lab-cmd-palette-row");
+      for (const c of commands) {
+        row.appendChild(button(c.label, "lab-btn-sm", () => (ta.value = JSON.stringify(commandExample(c), null, 2)), { title: c.title, data: { template: c.cmd } }));
+      }
+      list.appendChild(row);
+      body.appendChild(list);
+    } else {
+      const note = el("p", "lab-muted lab-small", k.noCommands || "This kind documents no control commands.");
+      note.dataset.field = "no-commands";
+      body.appendChild(note);
+    }
     body.append(labelled("Command JSON", ta, "Handed to the node's control handler; the answer appears below."), out);
     await openDialog(this.root, {
       title: `Command for ${this.nodeName(id)}`,
@@ -593,9 +624,8 @@ class LabApp {
           out.textContent = `invalid JSON: ${err.message}`;
           return false;
         }
-        const r = this.world.control(id, cmd);
+        const r = this.control(id, cmd);
         out.textContent = r.ok ? JSON.stringify(r.answer, null, 2) : `error: ${r.error}`;
-        this.world.flush(performance.now(), true);
         return false;
       },
     });
@@ -614,8 +644,7 @@ class LabApp {
     const nameInput = el("input", "lab-input");
     nameInput.type = "text";
     nameInput.value = defaultName(kind, nextId);
-    const defaults = {};
-    if (kind === "broker") defaults.broker_id = nextId;
+    const defaults = suggestedConfig(kind, { nextId, nodes: this.nodeList() });
     const form = buildForm(k.fields, defaults, { nodes: this.nodeList() });
     const body = el("div");
     body.append(labelled("Name", nameInput), form.root);
@@ -908,6 +937,14 @@ function sessionFlag(key, value) {
   } catch {
     return false;
   }
+}
+
+// A command of `kinds.js` as the JSON the Send command dialog starts from.
+function commandExample(spec) {
+  if (spec.example) return spec.example;
+  const values = {};
+  for (const p of spec.params || []) values[p.key] = p.default ?? (p.type === "number" ? 0 : "");
+  return commandObject(spec, values);
 }
 
 // A spot on the canvas that no card occupies: right of the rightmost card in
