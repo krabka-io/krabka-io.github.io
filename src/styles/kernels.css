@@ -386,6 +386,14 @@
 
 /* ---- detail pane: body ----------------------------------------------------- */
 
+/* The form sits beside the result and contract only when the detail pane
+ * itself is wide enough for two readable columns; the pane is measured
+ * directly, because the docs sidebar leaves it far narrower than the viewport.
+ * The media query below is the fallback where container queries are missing. */
+#krabka-kernels .kx-detail {
+  container-type: inline-size;
+}
+
 #krabka-kernels .kx-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -394,6 +402,12 @@
 }
 
 @media (max-width: 1100px) {
+  #krabka-kernels .kx-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 639px) {
   #krabka-kernels .kx-body {
     grid-template-columns: minmax(0, 1fr);
   }

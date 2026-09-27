@@ -457,6 +457,9 @@ function parseLedger(lines: string[], section: RawSection | undefined): { rows: 
     const id = n === 1 ? base : `${base}-${n}`;
     const modules = [...new Set(kernels.map((k) => k.module))];
     const claim = stripInline(contract);
+    // The catalog writes "None." for a contract that accepts every value of
+    // its Rust input types; the site renders that case with its own wording.
+    const noPreconditions = /^none\.?$/i.test(stripInline(preconditions));
     rows.push({
       id,
       module,
@@ -467,7 +470,7 @@ function parseLedger(lines: string[], section: RawSection | undefined): { rows: 
       contract_html: renderInline(contract),
       host_html: renderInline(host),
       proofs: extractLinks(proof),
-      preconditions_html: preconditions.trim() === '' ? '' : renderInline(preconditions),
+      preconditions_html: noPreconditions ? '' : renderInline(preconditions),
       search: [claim, stripInline(host), stripInline(preconditions), ...kernels.map((k) => k.label), ...modules, areaForModule(module)]
         .join(' ')
         .toLowerCase(),

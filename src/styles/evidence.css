@@ -444,7 +444,9 @@
   border: 1px solid var(--el-border);
   border-radius: 8px;
   background: var(--el-panel);
-  overflow: hidden;
+  /* clip, not hidden: a hidden overflow makes the group a scroll container
+   and swallows the rows' scroll-margin-top on deep links. */
+  overflow: clip;
 }
 
 .el-group-title {

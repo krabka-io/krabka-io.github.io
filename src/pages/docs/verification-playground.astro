@@ -61,15 +61,15 @@ if (stats.catalogAvailable) {
         Krabka keeps its safety-critical decisions in <code class="font-mono text-krab-300">krabka-verified</code>,
         a crate of small pure functions whose contracts Creusot proves. The kernels do no I/O, so the crate
         compiles to WebAssembly unchanged, and the explorer below calls the same compiled bodies the broker
-        calls: the answer on screen is the broker's answer, shown beside the
-        <code class="font-mono text-krab-300">requires</code> and
-        <code class="font-mono text-krab-300">ensures</code> contract quoted from the source.
+        calls: the answer on screen is the broker's answer, shown beside
+        the <code class="font-mono text-krab-300">requires</code> and <code class="font-mono text-krab-300">ensures</code> contract
+        quoted from the source.
       </p>
       <p>
         The kernels here are {formatCount(stats.explorerKernels)} of the crate's decision functions, chosen
-        because their inputs fit a form. The
-        <a href={getPath('/docs/broker/verification')} class="text-krab-400 hover:text-krab-300 font-semibold">verification catalog</a>
-        lists every proved kernel and every model, and each kernel's panel below quotes the catalog's row for it.
+        because their inputs fit a form.
+        The <a href={getPath('/docs/broker/verification')} class="text-krab-400 hover:text-krab-300 font-semibold">verification catalog</a> lists
+        every proved kernel and every model, and each kernel's panel below quotes the catalog's row for it.
       </p>
     </div>
 
@@ -78,7 +78,7 @@ if (stats.catalogAvailable) {
     <p class="text-sm text-gray-400 -mt-2">
       Areas: {kernelAreas.join(', ')}. Pick a kernel, edit its inputs, and the result updates as you type. An
       input that breaks a precondition is reported rather than evaluated, because the proof says nothing about
-      inputs outside the contract.
+      inputs outside the contract.{' '}
       {stats.catalogAvailable
         ? 'Each kernel’s panel has a “Proof ledger” drilldown quoting the catalog: what the kernel proves, who calls it in production, which proof sessions cover it, and what the caller must establish.'
         : 'The catalog rows are missing from this build, so the “Proof ledger” drilldown under each kernel is absent; run the docs sync to restore them.'}

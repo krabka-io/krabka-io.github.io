@@ -159,7 +159,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
           aria-selected={g.panelId === initialPanel ? 'true' : 'false'}
           tabindex={g.panelId === initialPanel ? 0 : -1}
         >
-          {g.label}
+          {g.label}{' '}
           <span class="el-tab-count">{formatCount(g.count)}</span>
         </button>
       ))}
@@ -178,7 +178,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
         aria-labelledby={tabbed ? tabId(g.panelId) : undefined}
       >
         <h3 class="el-panel-title">
-          {g.label}
+          {g.label}{' '}
           <span class="el-panel-count">{formatCount(g.count)}</span>
         </h3>
 
@@ -186,7 +186,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
           <details class="el-notes">
             <summary>
               <svg class="el-chevron el-chevron-inline" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              {g.notesTitle}
+              {g.notesTitle}{' '}
               <span class="el-notes-hint">from the broker catalog</span>
             </summary>
             <div class="el-prose">
@@ -211,7 +211,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                 <button type="button" class="el-chip el-chip-all" aria-pressed="true">All</button>
                 {g.areas.map((area) => (
                   <button type="button" class="el-chip" data-area={area.name} aria-pressed="false">
-                    {area.name}
+                    {area.name}{' '}
                     <span class="el-chip-n">{formatCount(area.count)}</span>
                   </button>
                 ))}
@@ -228,7 +228,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
             <section class="el-group" data-area={area.name}>
               {g.areas.length > 1 && (
                 <h4 class="el-group-title">
-                  {area.name}
+                  {area.name}{' '}
                   <span class="el-group-count">{formatCount(area.count)}</span>
                 </h4>
               )}
@@ -244,7 +244,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                           {row.modules.map((m) => <span class="el-module">{m}.rs</span>)}
                         </span>
                         <span class="el-meta">
-                          <span class="el-meta-item">{plural(row.proofs.length, 'proof', 'proofs')}</span>
+                          <span class="el-meta-item">{plural(row.proofs.length, 'proof', 'proofs')}</span>{' '}
                           {row.playground && <span class="el-meta-item el-meta-play">Runs in browser</span>}
                         </span>
                         <span class="el-claim">{row.claim}</span>
@@ -287,7 +287,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
             <section class="el-group" data-area={area.name}>
               {g.areas.length > 1 && (
                 <h4 class="el-group-title">
-                  {area.name}
+                  {area.name}{' '}
                   <span class="el-group-count">{formatCount(area.count)}</span>
                 </h4>
               )}
@@ -304,7 +304,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                           <span class="el-module">{fileStem(model.path)}.rs</span>
                         </span>
                         <span class="el-meta">
-                          {model.pinnedTotal > 0 && <span class="el-meta-item">{compactCount(model.pinnedTotal)} states</span>}
+                          {model.pinnedTotal > 0 && <span class="el-meta-item">{compactCount(model.pinnedTotal)} states</span>}{' '}
                           {model.properties.length > 0 && <span class="el-meta-item">{plural(model.properties.length, 'property', 'properties')}</span>}
                         </span>
                         <span class="el-claim">{model.summary}</span>
@@ -388,7 +388,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
             <section class="el-group" data-area={area.name}>
               {g.areas.length > 1 && (
                 <h4 class="el-group-title">
-                  {area.name}
+                  {area.name}{' '}
                   <span class="el-group-count">{formatCount(area.count)}</span>
                 </h4>
               )}
@@ -554,7 +554,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
       });
     }
 
-    function revealRow(row: HTMLDetailsElement, target: Element) {
+    function revealRow(row: HTMLDetailsElement, target: Element, instant: boolean) {
       const panel = row.closest<HTMLElement>('.el-panel');
       if (panel) {
         activate(panel.id, false);
@@ -568,7 +568,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
         nested = nested.parentElement?.closest('details') ?? null;
       }
       requestAnimationFrame(() => {
-        row.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'instant' : 'auto' });
+        row.scrollIntoView({ block: 'start', behavior: instant || prefersReducedMotion() ? 'instant' : 'auto' });
         row.classList.remove('el-flash');
         void row.offsetWidth;
         row.classList.add('el-flash');
@@ -576,7 +576,9 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
       });
     }
 
-    function applyHash(): boolean {
+    // On first load the jump is instant, like the browser's own fragment
+    // navigation; a later hash change follows the page's scroll-behavior.
+    function applyHash(instant: boolean): boolean {
       const raw = location.hash.slice(1);
       if (raw === '') return false;
       let hash = raw;
@@ -592,17 +594,17 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
       const target = root.querySelector(`#${CSS.escape(hash)}`);
       const row = target?.closest<HTMLDetailsElement>('.el-row');
       if (!target || !row) return false;
-      revealRow(row, target);
+      revealRow(row, target, instant);
       return true;
     }
 
     root.classList.add('el-ready');
-    if (!applyHash()) {
+    if (!applyHash(true)) {
       const initial = root.getAttribute('data-initial') ?? '';
       activate(panels.some((p) => p.id === initial) ? initial : panels[0]?.id ?? '', false);
     }
     window.addEventListener('hashchange', () => {
-      applyHash();
+      applyHash(false);
     });
   }
 
