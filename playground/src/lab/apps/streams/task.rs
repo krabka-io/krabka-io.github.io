@@ -314,6 +314,26 @@ impl StreamTask {
                 emitted.changelogs.extend(self.embedded.drain_changelogs());
             }
         }
+        self.account(&emitted);
+        emitted
+    }
+
+    /// Fire the wall-clock punctuators of a running active task at `wall`.
+    pub fn punctuate(&mut self, wall: i64) -> Emitted {
+        let mut emitted = Emitted::default();
+        if self.role != Role::Active || !self.running || self.closing {
+            return emitted;
+        }
+        if self.embedded.punctuate_wall_clock(wall).is_ok() {
+            emitted.outputs = self.embedded.take_output();
+            emitted.changelogs = self.embedded.drain_changelogs();
+        }
+        self.account(&emitted);
+        emitted
+    }
+
+    /// Mirror the emitted changelog records and count what was emitted.
+    fn account(&mut self, emitted: &Emitted) {
         for record in &emitted.changelogs {
             let store = self
                 .changelogs
@@ -325,7 +345,6 @@ impl StreamTask {
         self.records_in += emitted.piped;
         self.records_out += u64::try_from(emitted.outputs.len()).unwrap_or(u64::MAX);
         self.changelog_out += u64::try_from(emitted.changelogs.len()).unwrap_or(u64::MAX);
-        emitted
     }
 
     /// Apply restored changelog records of `topic`.

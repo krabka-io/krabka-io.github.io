@@ -130,7 +130,7 @@ use serde_json::{Value, json};
 
 use self::{
     membership::{Membership, MembershipEvent, Tasks},
-    task::{Changelog, Decoded, Position, RestoreEnd, Role, StreamTask, TaskId},
+    task::{Changelog, Decoded, Emitted, Position, RestoreEnd, Role, StreamTask, TaskId},
     writer::{Outgoing, RecordWriter, Settled},
 };
 use super::{
@@ -339,6 +339,10 @@ pub struct StreamsNode {
     /// outlives a restart.
     process_id: Option<String>,
     tasks: BTreeMap<TaskId, StreamTask>,
+    /// The coordinator's last assignment.
+    target: Tasks,
+    /// The standby-role tasks that are warm-ups.
+    warmups: BTreeSet<TaskId>,
     writer: RecordWriter,
     pending: BTreeMap<RequestId, Pending>,
     /// Brokers with a fetch on the wire.
@@ -417,6 +421,8 @@ impl StreamsNode {
             membership,
             process_id: None,
             tasks: BTreeMap::new(),
+            target: Tasks::default(),
+            warmups: BTreeSet::new(),
             writer: RecordWriter::default(),
             pending: BTreeMap::new(),
             fetching: BTreeSet::new(),
@@ -529,11 +535,16 @@ impl StreamsNode {
                         json!({ "status": listed, "level": level }),
                     );
                 }
-                MembershipEvent::Assigned(target) => self.reconcile(ctx, &target),
+                MembershipEvent::Assigned(target) => {
+                    self.target = target;
+                    self.reconcile(ctx);
+                }
                 MembershipEvent::Fenced { code } => {
                     // The tasks are lost: closed without a commit.
                     let lost: Vec<String> = self.tasks.keys().map(ToString::to_string).collect();
                     self.tasks.clear();
+                    self.target = Tasks::default();
+                    self.warmups.clear();
                     self.commit = Commit::Idle;
                     self.held.clear();
                     ctx.event(
@@ -563,8 +574,10 @@ impl StreamsNode {
 
     /// Move toward the coordinator's assignment: close the active tasks it
     /// took away (after their commit), drop the standbys it took away,
-    /// promote or open the rest.
-    fn reconcile(&mut self, ctx: &mut Ctx<'_>, target: &Tasks) {
+    /// promote or open the rest. A warm-up task runs as a standby, as Kafka
+    /// Streams runs it, and is reported as a warm-up. An active task that
+    /// became a standby opens as one once it closed.
+    fn reconcile(&mut self, ctx: &mut Ctx<'_>) {
         let wanted = |set: &membership::TaskSet| -> BTreeSet<TaskId> {
             Tasks::list(set)
                 .into_iter()
@@ -574,8 +587,16 @@ impl StreamsNode {
                 })
                 .collect()
         };
-        let active = wanted(&target.active);
-        let standby = wanted(&target.standby);
+        let active = wanted(&self.target.active);
+        let warmup: BTreeSet<TaskId> = wanted(&self.target.warmup)
+            .into_iter()
+            .filter(|id| !active.contains(id))
+            .collect();
+        let standby: BTreeSet<TaskId> = wanted(&self.target.standby)
+            .into_iter()
+            .filter(|id| !active.contains(id))
+            .chain(warmup.iter().cloned())
+            .collect();
         let mut revoked = Vec::new();
         let mut dropped = Vec::new();
         for (id, task) in &mut self.tasks {
@@ -615,14 +636,21 @@ impl StreamsNode {
             }
         }
         for id in &standby {
+            // A closing active task opens as a standby once it closed.
             if self.tasks.contains_key(id) {
                 continue;
             }
             if let Ok(task) = StreamTask::new(&self.compiled, id.clone(), Role::Standby) {
                 self.tasks.insert(id.clone(), task);
-                opened.push(format!("{id} (standby)"));
+                let role = if warmup.contains(id) {
+                    "warm-up"
+                } else {
+                    "standby"
+                };
+                opened.push(format!("{id} ({role})"));
             }
         }
+        self.warmups = warmup;
         if !revoked.is_empty() {
             ctx.event("tasks_revoked", json!({ "tasks": revoked }));
         }
@@ -642,6 +670,7 @@ impl StreamsNode {
         for (id, task) in &self.tasks {
             let set = match task.role {
                 Role::Active => &mut owned.active,
+                Role::Standby if self.warmups.contains(id) => &mut owned.warmup,
                 Role::Standby => &mut owned.standby,
             };
             set.entry(id.subtopology.clone())
@@ -1056,28 +1085,34 @@ impl StreamsNode {
             };
             let schemas = &mut self.schemas;
             let emitted = task.run(|record| decode(ctx, schemas, record));
-            self.records_in += emitted.piped;
-            for (topic, offset, error) in emitted.skipped {
-                self.warn(
-                    ctx,
-                    "record_skipped",
-                    json!({ "topic": topic, "offset": offset, "error": error, "level": "warn" }),
-                );
-            }
-            let now = i64::try_from(ctx.now()).unwrap_or(i64::MAX);
-            for record in emitted.changelogs {
-                self.writer.push(Outgoing {
-                    topic: record.topic,
-                    partition: Some(id.partition),
-                    key: Some(record.key),
-                    value: record.value,
-                    timestamp: record.timestamp.unwrap_or(now),
-                });
-            }
-            self.records_out += u64::try_from(emitted.outputs.len()).unwrap_or(u64::MAX);
-            self.held.extend(emitted.outputs);
-            self.release_held(ctx);
+            self.emit(ctx, id.partition, emitted);
         }
+    }
+
+    /// Hand what a task emitted to the writer: its changelog records to the
+    /// task's partition, its outputs through the sink serializer.
+    fn emit(&mut self, ctx: &mut Ctx<'_>, partition: i32, emitted: Emitted) {
+        self.records_in += emitted.piped;
+        for (topic, offset, error) in emitted.skipped {
+            self.warn(
+                ctx,
+                "record_skipped",
+                json!({ "topic": topic, "offset": offset, "error": error, "level": "warn" }),
+            );
+        }
+        let now = i64::try_from(ctx.now()).unwrap_or(i64::MAX);
+        for record in emitted.changelogs {
+            self.writer.push(Outgoing {
+                topic: record.topic,
+                partition: Some(partition),
+                key: Some(record.key),
+                value: record.value,
+                timestamp: record.timestamp.unwrap_or(now),
+            });
+        }
+        self.records_out += u64::try_from(emitted.outputs.len()).unwrap_or(u64::MAX);
+        self.held.extend(emitted.outputs);
+        self.release_held(ctx);
     }
 
     /// Hand the emitted records to the writer; sink records wait while the
@@ -1242,17 +1277,13 @@ impl StreamsNode {
         self.commit = Commit::Idle;
         self.next_commit_at = now + self.commit_interval_ms;
         let wall = i64::try_from(now).unwrap_or(i64::MAX);
-        let mut outputs = Vec::new();
-        for task in self.tasks.values_mut() {
-            if task.role == Role::Active
-                && task.running
-                && !task.closing
-                && task.embedded.punctuate_wall_clock(wall).is_ok()
-            {
-                outputs.extend(task.embedded.take_output());
+        let ids: Vec<TaskId> = self.tasks.keys().cloned().collect();
+        for id in ids {
+            if let Some(task) = self.tasks.get_mut(&id) {
+                let emitted = task.punctuate(wall);
+                self.emit(ctx, id.partition, emitted);
             }
         }
-        self.held.extend(outputs);
         let closed: Vec<TaskId> = self
             .tasks
             .iter()
@@ -1265,7 +1296,7 @@ impl StreamsNode {
             }
         }
         if !closed.is_empty() {
-            self.report_owned();
+            self.reconcile(ctx);
         }
     }
 
@@ -1640,6 +1671,8 @@ impl Node for StreamsNode {
             now,
         );
         self.tasks.clear();
+        self.target = Tasks::default();
+        self.warmups.clear();
         self.writer.reset();
         self.pending.clear();
         self.fetching.clear();

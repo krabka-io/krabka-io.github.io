@@ -61,6 +61,9 @@ fn node(config: Value) -> Result<StreamsNode, LabError> {
     StreamsNode::from_spec(&NodeSpec::new(APP.0, "streams", "s", config))
 }
 
+/// Tasks of one role: subtopology ids and their partitions.
+type TaskList = Vec<(&'static str, Vec<i32>)>;
+
 /// The scripted KIP-1071 coordinator: it answers every heartbeat with the
 /// member epoch and the assignment the test set last, and records what the
 /// member sent.
@@ -69,7 +72,10 @@ struct Coordinator {
     epoch: i32,
     /// The active tasks the next answer hands out; `None` leaves the task
     /// lists out.
-    next: Option<Vec<(&'static str, Vec<i32>)>>,
+    next: Option<TaskList>,
+    /// The standby and warm-up tasks that go with `next`.
+    next_standby: TaskList,
+    next_warmup: TaskList,
     /// An error code the next answer carries instead.
     error: Option<i16>,
     /// Every heartbeat, with the time it arrived.
@@ -91,6 +97,8 @@ impl Coordinator {
             };
         }
         let tasks = self.next.take();
+        let standby = std::mem::take(&mut self.next_standby);
+        let warmup = std::mem::take(&mut self.next_warmup);
         if request.member_epoch == 0 || tasks.is_some() {
             self.epoch += 1;
         }
@@ -101,23 +109,25 @@ impl Coordinator {
             .or_default()
             .epochs
             .insert(request.member_id.clone(), self.epoch);
+        let ids = |tasks: TaskList| -> Vec<ResponseTaskIds> {
+            tasks
+                .into_iter()
+                .map(|(subtopology, partitions)| ResponseTaskIds {
+                    subtopology_id: subtopology.to_string(),
+                    partitions,
+                    ..Default::default()
+                })
+                .collect()
+        };
+        let lists = tasks.is_some();
         StreamsGroupHeartbeatResponse {
             member_id: request.member_id,
             member_epoch: self.epoch,
             heartbeat_interval_ms: 1_000,
             status: Some(Vec::new()),
-            standby_tasks: tasks.as_ref().map(|_| Vec::new()),
-            warmup_tasks: tasks.as_ref().map(|_| Vec::new()),
-            active_tasks: tasks.map(|tasks| {
-                tasks
-                    .into_iter()
-                    .map(|(subtopology, partitions)| ResponseTaskIds {
-                        subtopology_id: subtopology.to_string(),
-                        partitions,
-                        ..Default::default()
-                    })
-                    .collect()
-            }),
+            active_tasks: tasks.map(ids),
+            standby_tasks: lists.then(|| ids(standby)),
+            warmup_tasks: lists.then(|| ids(warmup)),
             ..Default::default()
         }
     }
@@ -495,6 +505,26 @@ fn owned(pairs: &[(&str, &[i32])]) -> Vec<RequestTaskIds> {
             ..Default::default()
         })
         .collect()
+}
+
+/// A heartbeat after the join that reports the owned tasks of each role.
+fn report_roles(
+    member_id: &str,
+    epoch: i32,
+    active: &[(&str, &[i32])],
+    standby: &[(&str, &[i32])],
+    warmup: &[(&str, &[i32])],
+) -> StreamsGroupHeartbeatRequest {
+    StreamsGroupHeartbeatRequest {
+        group_id: "app".to_string(),
+        member_id: member_id.to_string(),
+        member_epoch: epoch,
+        rebalance_timeout_ms: -1,
+        active_tasks: Some(owned(active)),
+        standby_tasks: Some(owned(standby)),
+        warmup_tasks: Some(owned(warmup)),
+        ..Default::default()
+    }
 }
 
 /// A heartbeat after the join that reports the owned active tasks.
@@ -1247,5 +1277,68 @@ fn values_decode_and_encode_through_the_registry() {
     assert!(
         c.events_of("schema_registered")
             == vec![json!({ "subject": "order-counts-value", "id": 2 })]
+    );
+}
+
+#[test]
+fn standbys_follow_their_changelogs_and_keep_what_they_restored() {
+    let mut c = counting_cluster(&json!({}));
+    // Another member's task 0_1 counted z up to 5 in the changelog.
+    let logged = BatchRecord {
+        timestamp: 1,
+        key: Some(Bytes::from_static(b"z")),
+        value: Some(Bytes::copy_from_slice(&5_i64.to_be_bytes())),
+        headers: Vec::new(),
+    };
+    c.state
+        .borrow_mut()
+        .append_records("app-counts-changelog", 1, &[logged]);
+    c.coordinator.next = Some(vec![("0", vec![0])]);
+    c.coordinator.next_standby = vec![("0", vec![1])];
+    c.start();
+    let member_id = |c: &Cluster| c.node.snapshot()["member_id"].as_str().unwrap().to_string();
+    let reported = |c: &Cluster, request: &StreamsGroupHeartbeatRequest| {
+        c.coordinator.seen.iter().any(|(_, r)| r == request)
+    };
+    assert!(c.run_until(5_000, |c| reported(
+        c,
+        &report_roles(&member_id(c), 1, &[("0", &[0])], &[("0", &[1])], &[])
+    )));
+    // The standby follows its changelog partition and never processes.
+    let standby_store = json!({
+        "name": "counts", "task": "0_1", "changelog": "app-counts-changelog", "entries": [["z", 5]],
+    });
+    assert!(c.run_until(5_000, |c| c.node.snapshot()["stores"][1] == standby_store));
+    assert!(c.node.snapshot()["tasks"][1]["phase"] == "standby");
+
+    // Promoted, it counts on from what it restored.
+    c.coordinator.next = Some(vec![("0", vec![0, 1])]);
+    c.append("orders", 1, &[("z", json!({ "total": 150 }), 2)]);
+    assert!(c.run_until(5_000, |c| c.json("order-counts", 0) == vec![count("z", 6)]));
+
+    // Demoted, it closes as an active task and opens again as a standby.
+    c.coordinator.next = Some(vec![("0", vec![0])]);
+    c.coordinator.next_standby = vec![("0", vec![1])];
+    assert!(c.run_until(5_000, |c| reported(
+        c,
+        &report_roles(&member_id(c), 3, &[("0", &[0])], &[("0", &[1])], &[])
+    )));
+    assert!(c.committed("app") == offsets(&[("orders", 1, 1)]));
+    assert!(c.node.snapshot()["tasks"][1]["phase"] == "standby");
+
+    // A warm-up runs as a standby and is reported as a warm-up.
+    c.coordinator.next = Some(vec![("0", vec![0])]);
+    c.coordinator.next_warmup = vec![("0", vec![1])];
+    assert!(c.run_until(5_000, |c| reported(
+        c,
+        &report_roles(&member_id(c), 4, &[("0", &[0])], &[], &[("0", &[1])])
+    )));
+    assert!(
+        c.events_of("tasks_assigned")
+            == vec![
+                json!({ "tasks": ["0_0", "0_1 (standby)"] }),
+                json!({ "tasks": ["0_1"] }),
+                json!({ "tasks": ["0_1 (standby)"] }),
+            ]
     );
 }
