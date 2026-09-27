@@ -56,6 +56,9 @@ cp "${src}/worker/proof_worker.ml" "${src}/worker/dune" "${why3}/src/proof_worke
   ./configure --enable-local --disable-ide --disable-web-ide --disable-hypothesis-selection \
     --disable-doc --disable-emacs-compilation --disable-coq-libs --disable-pvs-libs \
     --disable-isabelle-libs --disable-java --disable-mpfr --disable-infer --disable-bddinfer --disable-sexp
+  # Two modules the Makefile generates before it calls dune: the install
+  # paths from configure and the parser's handcrafted error messages.
+  make src/util/config.ml src/parser/parser_messages.ml
   dune build src/proof_worker/proof_worker.bc
 )
 
