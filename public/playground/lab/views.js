@@ -413,43 +413,140 @@ function logBlock(lines, field) {
 
 // ---- schema registry --------------------------------------------------------------
 
+// The schema registry (`lab::registry`): its startup and serving state, the
+// write queue, the `_schemas` store on the brokers (its setup step, topic,
+// reader and producer), and the subjects it replayed from that topic.
 function renderRegistry(root, s, used, ctx) {
   const rows = [];
+  addRow(rows, "state", take(s, used, "state"), "state");
+  addRow(rows, "startup error", take(s, used, "error"), "error");
+  addRow(rows, "starts", take(s, used, "started"), "started");
+  const bootstrap = take(s, used, "bootstrap");
+  addRow(rows, "bootstrap", Array.isArray(bootstrap) ? bootstrap.map((b) => ctx.nodeName(b)).join(", ") : null, "bootstrap");
+  addRow(rows, "compatibility", take(s, used, "compatibility"), "compatibility");
+  addRow(rows, "mode", take(s, used, "mode"), "mode");
+  addRow(rows, "schemas", take(s, used, "schemas"), "schemas");
+  addRow(rows, "_schemas records read", take(s, used, "records"), "records");
+  addRow(rows, "applied up to", take(s, used, "applied"), "applied");
+  const unknown = take(s, used, "unknown_records");
+  const undecodable = take(s, used, "undecodable_records");
+  if (unknown || undecodable) addRow(rows, "records skipped", `${unknown ?? 0} unknown · ${undecodable ?? 0} undecodable`, "skipped_records");
+  addRow(rows, "requests", take(s, used, "requests"), "requests");
+  addRow(rows, "error answers", take(s, used, "errors"), "errors");
+  addRow(rows, "connections", take(s, used, "connections"), "connections");
+  addRow(rows, "connections refused", take(s, used, "refused"), "refused");
+  const writes = take(s, used, "writes");
+  if (writes && typeof writes === "object") {
+    addRow(rows, "writes queued", writes.queued, "writes_queued");
+    const a = writes.active;
+    addRow(rows, "write in progress", a ? `${a.op} ${a.path} · ${String(a.stage).replace("_", " ")}` : "none", "writes_active");
+  }
+  root.appendChild(section("Registry", kv(rows)));
+
+  const election = take(s, used, "election");
+  const forwarder = take(s, used, "forwarder");
+  if ((election && typeof election === "object") || (forwarder && typeof forwarder === "object")) root.appendChild(electionSection(election || {}, forwarder, ctx));
+
+  const store = take(s, used, "store");
+  if (store && typeof store === "object") root.appendChild(storeSection(store, ctx));
+  else if (store === null && used.has("store")) root.appendChild(el("p", "lab-muted lab-small", "The node is down: its store is closed."));
+
   const cfg = take(s, used, "config");
-  const compat = take(s, used, "compatibility") ?? (typeof cfg === "object" && cfg ? (cfg.compatibility ?? cfg.compatibilityLevel ?? shortJson(cfg)) : cfg);
-  addRow(rows, "compatibility", compat);
-  addRow(rows, "mode", take(s, used, "mode"));
-  addRow(rows, "schemas", countValue(take(s, used, "schemas", "schema_count")));
-  addRow(rows, "_schemas records", take(s, used, "records"));
-  addRow(rows, "applied", take(s, used, "applied"));
-  addRow(rows, "requests", countValue(take(s, used, "requests", "request_count")));
-  addRow(rows, "errors", take(s, used, "errors"));
-  addRow(rows, "connections", take(s, used, "connections"));
-  addRow(rows, "_schemas offset", take(s, used, "offset", "schemas_offset", "next_offset"));
-  if (rows.length) root.appendChild(section("Registry", kv(rows)));
+  if (cfg && typeof cfg === "object") {
+    const cr = [];
+    for (const [key, value] of Object.entries(cfg)) addRow(cr, key, value, key);
+    root.appendChild(section("kafkastore config", kv(cr), { open: false }));
+  }
 
   const subjects = take(s, used, "subjects");
-  if (subjects && typeof subjects === "object") {
-    const list = Array.isArray(subjects) ? subjects : Object.entries(subjects).map(([subject, versions]) => ({ subject, versions }));
+  if (Array.isArray(subjects)) {
     const body = el("div");
-    for (const sub of list) {
-      const name = sub.subject ?? sub.name ?? "?";
-      const versions = asList(sub.versions ?? sub, "version");
-      const inner = versions
-        ? table(
-            [
-              { key: "version", label: "version" },
-              { key: "id", label: "id" },
-              { key: "schema_type", label: "type", get: (v) => v.schema_type ?? v.schemaType ?? v.type },
-              { key: "deleted", label: "deleted", render: bool },
-            ],
-            versions,
-          )
-        : jsonTree(sub, ctx);
-      body.appendChild(section(name, inner, { open: list.length <= 3, nested: true }));
+    for (const sub of subjects) {
+      const versions = Array.isArray(sub.versions) ? sub.versions : [];
+      const inner = el("div");
+      const sr = [];
+      addRow(sr, "compatibility", sub.compatibility, "subject_compatibility");
+      addRow(sr, "mode", sub.mode, "subject_mode");
+      if (sr.length) inner.appendChild(kv(sr));
+      inner.appendChild(
+        table(
+          [
+            { key: "version", label: "version" },
+            { key: "id", label: "id" },
+            { key: "deleted", label: "deleted", render: bool },
+          ],
+          versions,
+          { rowKey: (v) => `${sub.subject}/${v.version}` },
+        ),
+      );
+      body.appendChild(section(sub.subject, inner, { open: subjects.length <= 3, nested: true }));
     }
-    root.appendChild(section(`Subjects (${list.length})`, body));
+    if (!subjects.length) body.appendChild(el("p", "lab-muted lab-small", "No subject yet."));
+    root.appendChild(section(`Subjects (${subjects.length})`, body));
   }
+}
+
+// The registry's part in its group: whether it is the primary, which
+// instance is, and the writes it forwarded to it.
+function electionSection(e, forwarder, ctx) {
+  const rows = [];
+  addRow(rows, "role", e.is_leader ? "primary" : e.leader ? "secondary: forwards writes to the primary" : e.joined ? "no primary known" : "joining the group", "election_role");
+  addRow(rows, "primary", e.leader ?? "none known", "election_leader");
+  addRow(rows, "this instance", e.url, "election_url");
+  addRow(rows, "may lead", e.eligible, "election_eligible");
+  const m = e.member;
+  if (m && typeof m === "object") {
+    addRow(rows, "group", m.group, "election_group");
+    addRow(rows, "member state", m.state, "election_member_state");
+    addRow(rows, "generation", m.generation, "election_generation");
+    addRow(rows, "joins", m.joins, "election_joins");
+    addRow(rows, "last error", m.last_error, "election_error");
+  }
+  if (forwarder && typeof forwarder === "object") {
+    addRow(rows, "writes forwarded", forwarder.forwarded, "forwarded");
+    addRow(rows, "forwards failed", forwarder.failed, "forward_failed");
+    const a = forwarder.active;
+    if (a && typeof a === "object") addRow(rows, "forwarding", `${a.method} ${a.path} → ${a.to}`, "forward_active");
+  }
+  const body = el("div");
+  body.appendChild(kv(rows));
+  if (m && m.client && typeof m.client === "object") body.appendChild(section("Group client", jsonTree(m.client, ctx), { open: false, nested: true }));
+  return section("Primary election", body);
+}
+
+// The registry's `_schemas` store: Confluent's startup steps, the topic, the
+// reader that replays it, and the producer, consumer and admin client
+// underneath.
+function storeSection(store, ctx) {
+  const rows = [];
+  addRow(rows, "state", store.state, "store_state");
+  addRow(rows, "startup step", store.step ? String(store.step).replace(/_/g, " ") : "done", "store_step");
+  addRow(rows, "error", store.error, "store_error");
+  const t = store.topic;
+  addRow(
+    rows,
+    "topic",
+    t ? `${t.name} · ${t.partitions} partition${t.partitions === 1 ? "" : "s"} · rf ${t.replication_factor} · ${t.cleanup_policy}${t.created ? " · created by this registry" : ""}` : "not set up yet",
+    "store_topic",
+  );
+  const r = store.reader;
+  if (r && typeof r === "object") {
+    addRow(rows, "reader offset", r.offset, "reader_offset");
+    addRow(rows, "reader end offset", r.end_offset ?? "not known yet", "reader_end_offset");
+    addRow(rows, "reader", `${r.phase}${r.leader != null ? ` · from ${ctx.nodeLabelForBroker(r.leader)}` : ""}`, "reader_phase");
+    if (r.last_error != null) addRow(rows, "reader error code", r.last_error, "reader_error");
+  }
+  addRow(rows, "last written offset", store.last_written_offset ?? "unknown", "last_written_offset");
+  const task = store.task;
+  if (task && typeof task === "object") addRow(rows, "store task", `${task.kind} · ${task.stage}${task.records_left != null ? ` · ${task.records_left} left` : ""}`, "store_task");
+  addRow(rows, "records put", store.puts, "store_puts");
+  addRow(rows, "NOOP records", store.noops, "store_noops");
+  const body = el("div");
+  body.appendChild(kv(rows));
+  for (const [name, part] of [["Producer", store.producer], ["Reader consumer", r?.consumer], ["Admin client", store.admin]]) {
+    if (part && typeof part === "object") body.appendChild(section(name, jsonTree(part, ctx), { open: false, nested: true }));
+  }
+  return section("_schemas store", body);
 }
 
 // ---- producer -----------------------------------------------------------------------

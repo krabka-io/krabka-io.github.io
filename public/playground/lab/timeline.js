@@ -2,12 +2,30 @@
 //
 // Events arrive in batches from the world loop. The panel keeps the last few
 // thousand in memory for re-filtering and at most 500 rows in the DOM. Rows
-// are coloured by `detail.level`; clicking one selects its node.
+// are coloured by `detail.level`; the kinds that change who leads what carry
+// a label and the colour of the node kind they concern; clicking a row
+// selects its node.
 
 import { el, button, select, fmtMs, shortJson } from "./dom.js";
+import { KINDS } from "./kinds.js";
 
 const MAX_ROWS = 500;
 const MAX_KEPT = 4000;
+
+// Event kinds shown with a label and a colour; every other kind shows its
+// name as it is.
+const KIND_STYLES = {
+  election: { label: "registry election", color: KINDS["schema-registry"].color },
+  elect: { label: "KRaft election", color: KINDS.broker.color },
+  controller: { label: "active controller", color: KINDS.broker.color },
+  quorum_observer: { label: "quorum observer", color: KINDS.broker.color },
+  leader_change: { label: "leader change", color: KINDS.broker.color },
+};
+
+// The text a kind shows in the list and in the filter.
+export function kindLabel(kind) {
+  return KIND_STYLES[kind]?.label ?? kind;
+}
 
 export class Timeline {
   constructor(container, hooks) {
@@ -117,7 +135,7 @@ export class Timeline {
   refreshKinds() {
     const current = this.kindSel.value;
     this.kindSel.innerHTML = "";
-    for (const o of [{ value: "", label: "all kinds" }, ...[...this.kinds].sort().map((k) => ({ value: k, label: k }))]) {
+    for (const o of [{ value: "", label: "all kinds" }, ...[...this.kinds].sort().map((k) => ({ value: k, label: kindLabel(k) }))]) {
       const opt = document.createElement("option");
       opt.value = o.value;
       opt.textContent = o.label;
@@ -131,7 +149,7 @@ export class Timeline {
     if (this.nodeFilter && this.nodeFilter !== "world" && String(e.node) !== this.nodeFilter) return false;
     if (this.kindFilter && e.kind !== this.kindFilter) return false;
     if (this.textFilter) {
-      const hay = `${e.kind} ${this.nodeName(e.node)} ${shortJson(e.detail, 400)}`.toLowerCase();
+      const hay = `${e.kind} ${kindLabel(e.kind)} ${this.nodeName(e.node)} ${shortJson(e.detail, 400)}`.toLowerCase();
       if (!hay.includes(this.textFilter)) return false;
     }
     return true;
@@ -160,7 +178,13 @@ export class Timeline {
     node.textContent = this.nodeName(e.node);
     if (e.node != null) node.addEventListener("click", () => this.hooks.onSelect(e.node));
     else node.disabled = true;
-    const kind = el("span", "lab-ev-kind", e.kind);
+    const style = KIND_STYLES[e.kind];
+    const kind = el("span", "lab-ev-kind", style ? style.label : e.kind);
+    kind.dataset.kind = e.kind;
+    if (style) {
+      kind.style.color = style.color;
+      kind.title = e.kind;
+    }
     const detail = el("span", "lab-ev-detail", shortJson(e.detail, 120));
     detail.title = typeof e.detail === "object" ? JSON.stringify(e.detail) : String(e.detail ?? "");
     li.append(time, node, kind, detail);

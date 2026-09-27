@@ -30,8 +30,9 @@
 // the page's demo values, written into the spec explicitly wherever they
 // differ from the node's own defaults. `commands` lists the node's control
 // commands (see `inspector.js` and the Send command dialog): `cmd`, a label,
-// `params` (number, text or select inputs whose values join the command
-// object) and `enabled(state)`.
+// `fixed` values and `params` (number, text or select inputs) that join the
+// command object, and `enabled(state)`; `bar: false` keeps a command out of
+// the inspector's command bar, for the dialog's `example` only.
 
 import { renderView } from "./views.js";
 import { MISSING_BUILD, REAL_BROKER_KIND } from "./external.js";
@@ -149,26 +150,58 @@ export const KINDS = {
     label: "Schema registry",
     glyph: "◈",
     color: "#5aa0e0",
-    description: "A Confluent-compatible schema registry: the REST API over the _schemas log, kept in this browser.",
+    description: "A Confluent-compatible schema registry: the REST API over the _schemas topic it keeps on the brokers. Instances of one group elect a primary; the others forward writes to it.",
     listens: HTTP_PORT,
-    probe: {},
+    probe: { bootstrap: [1] },
     fields: [
-      { ...BOOTSTRAP, required: false, help: "The brokers the Kafka-backed store will use; optional until that store lands." },
+      { ...BOOTSTRAP, help: "The brokers that hold the _schemas topic (kafkastore.bootstrap.servers)." },
       { key: "compatibility", label: "Default compatibility", type: "select", default: "BACKWARD", emitDefault: false, options: ["BACKWARD", "BACKWARD_TRANSITIVE", "FORWARD", "FORWARD_TRANSITIVE", "FULL", "FULL_TRANSITIVE", "NONE"] },
       { key: "mode", label: "Mode", type: "select", default: "READWRITE", emitDefault: false, options: ["READWRITE", "READONLY", "IMPORT"] },
+      {
+        key: "leader.eligibility",
+        label: "May lead",
+        type: "boolean",
+        default: true,
+        emitDefault: false,
+        help: "leader.eligibility. The instances of one group elect a primary, the eligible one with the smallest URL; a secondary forwards writes to it.",
+      },
+      {
+        type: "advanced",
+        label: "Advanced: the _schemas store",
+        fields: [
+          { key: "kafkastore.topic", label: "Store topic", type: "text", default: "_schemas", emitDefault: false, help: "kafkastore.topic: one partition, compacted, created on first start." },
+          num("kafkastore.timeout.ms", "Store timeout (ms)", 500, "kafkastore.timeout.ms: how long a write waits for its acknowledgement, and then for the reader to read it back."),
+          num("kafkastore.init.timeout.ms", "Store init timeout (ms)", 60000, "kafkastore.init.timeout.ms: how long each startup step may take."),
+          num("kafkastore.topic.replication.factor", "Store replication factor", 3, "kafkastore.topic.replication.factor, lowered to the live brokers with Confluent's warning.", { min: 1 }),
+        ],
+      },
+      {
+        type: "advanced",
+        label: "Advanced: the primary election",
+        fields: [
+          { key: "schema.registry.group.id", label: "Group", type: "text", default: "schema-registry", emitDefault: false, help: "schema.registry.group.id: the classic group whose members elect the primary." },
+          num("kafkagroup.session.timeout.ms", "Session timeout (ms)", 10000, "kafkagroup.session.timeout.ms: how long the group keeps a member that stopped heartbeating."),
+          num("kafkagroup.heartbeat.interval.ms", "Heartbeat interval (ms)", 3000, "kafkagroup.heartbeat.interval.ms"),
+          num("kafkagroup.rebalance.timeout.ms", "Rebalance timeout (ms)", 300000, "kafkagroup.rebalance.timeout.ms"),
+          num("leader.read.timeout.ms", "Forward timeout (ms)", 60000, "leader.read.timeout.ms: how long a secondary waits for the primary to answer a forwarded write (then 50003)."),
+        ],
+      },
     ],
     commands: [
-      { cmd: "http", label: "GET /subjects", bar: false, example: { cmd: "http", method: "GET", path: "/subjects" } },
+      { cmd: "http", label: "GET", title: "Read a REST resource", fixed: { method: "GET" }, params: [{ key: "path", label: "path", type: "text", default: "/subjects", placeholder: "/subjects" }] },
       { cmd: "http", label: "POST a schema", bar: false, example: { cmd: "http", method: "POST", path: "/subjects/orders-value/versions", body: { schema: JSON.stringify(ORDER_SCHEMA) } } },
+      { cmd: "http", label: "Set compatibility", bar: false, example: { cmd: "http", method: "PUT", path: "/config", body: { compatibility: "FULL" } } },
     ],
     edges: (spec) => (spec.config?.bootstrap || []).map((b) => edge(spec.id, node(b), "bootstrap")),
     status: (s) => {
-      const subjects = countOf(s.subjects);
       const parts = [];
-      if (subjects != null) parts.push(`${subjects} subjects`);
-      const schemas = s.schemas != null ? countOf(s.schemas) : null;
-      if (schemas != null) parts.push(`${schemas} schemas`);
-      if (s.requests != null && typeof s.requests !== "object") parts.push(`${s.requests} req`);
+      if (s.state && s.state !== "ready") parts.push(String(s.state));
+      else if (s.election?.is_leader) parts.push("primary");
+      else if (s.election?.leader) parts.push("secondary");
+      const subjects = countOf(s.subjects);
+      if (subjects != null) parts.push(`${subjects} subject${subjects === 1 ? "" : "s"}`);
+      if (typeof s.schemas === "number") parts.push(`${s.schemas} schema${s.schemas === 1 ? "" : "s"}`);
+      if (s.writes?.queued) parts.push(`${s.writes.queued} queued`);
       return parts.join(" · ");
     },
   },
@@ -505,9 +538,10 @@ export function suggestedConfig(kind, ctx) {
   return k && k.suggest ? k.suggest(ctx) : {};
 }
 
-// The command object a command spec and its parameter values make.
+// The command object a command spec and its parameter values make: its
+// `fixed` values and then the parameters.
 export function commandObject(spec, values = {}) {
-  const out = { cmd: spec.cmd };
+  const out = { cmd: spec.cmd, ...(spec.fixed || {}) };
   for (const p of spec.params || []) if (values[p.key] !== undefined) out[p.key] = values[p.key];
   return out;
 }

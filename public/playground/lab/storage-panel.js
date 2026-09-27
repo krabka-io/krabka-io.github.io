@@ -41,7 +41,7 @@ export class StoragePanel {
         "p",
         "lab-muted lab-small",
         hooks.storage.available
-          ? "Durable node state (logs, metadata, schemas) lives only in this browser's IndexedDB. It never leaves this machine."
+          ? "Durable node state (the brokers' logs and metadata) lives only in this browser's IndexedDB. It never leaves this machine."
           : "This browser has no IndexedDB, so nothing is kept across reloads.",
       ),
     );

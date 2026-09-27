@@ -1,7 +1,7 @@
 // Durable state in the browser: the IndexedDB database behind the lab.
 //
 // A node records every change to its durable state (a broker's partition
-// logs, the controller log, a registry's schemas, the echo node's frame
+// logs and its copy of the KRaft metadata log, the echo node's frame
 // counter) as a `DurableOp`; the world hands them to the page through
 // `drainDurable()` after every step. This module keeps two copies:
 //
