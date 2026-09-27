@@ -13,22 +13,15 @@
 //! - [`AdminNode`] (`"admin"`) creates the scenario's topics.
 //!
 //! [`templates`] renders record keys and values, [`serde`] frames values in
-//! the Confluent wire format, and [`registry_client`] talks to a schema
-//! registry over HTTP.
-
-use serde_json::Value;
-
-use super::{
-    LabError,
-    net::{Ctx, Frame, Node},
-    scenario::NodeSpec,
-};
+//! the Confluent wire format, [`registry_client`] talks to a schema registry
+//! over HTTP, and [`topology`] compiles a streams node's topology spec.
 
 mod admin;
 mod consumer;
 mod producer;
 pub mod registry_client;
 pub mod serde;
+pub mod streams;
 pub mod templates;
 pub mod topology;
 
@@ -36,39 +29,5 @@ pub use self::{
     admin::AdminNode,
     consumer::{ConsumerNode, PartitionRow, Processing, partition_rows},
     producer::{ProducerNode, Rate, RateMeter},
+    streams::StreamsNode,
 };
-
-macro_rules! stub_node {
-    ($name:ident, $kind:literal) => {
-        #[doc = concat!("A `", $kind, "` node.")]
-        pub struct $name;
-
-        impl $name {
-            /// # Errors
-            /// Always fails until the node is implemented.
-            pub fn from_spec(spec: &NodeSpec) -> Result<Self, LabError> {
-                Err(LabError::config(
-                    spec,
-                    concat!("the ", $kind, " node is not implemented yet"),
-                ))
-            }
-        }
-
-        impl Node for $name {
-            fn kind(&self) -> &'static str {
-                $kind
-            }
-            fn start(&mut self, _ctx: &mut Ctx<'_>) {}
-            fn on_frame(&mut self, _ctx: &mut Ctx<'_>, _frame: Frame) {}
-            fn on_timer(&mut self, _ctx: &mut Ctx<'_>) {}
-            fn control(&mut self, _ctx: &mut Ctx<'_>, _command: Value) -> Result<Value, String> {
-                Err("not implemented".to_string())
-            }
-            fn snapshot(&self) -> Value {
-                Value::Null
-            }
-        }
-    };
-}
-
-stub_node!(StreamsNode, "streams");
