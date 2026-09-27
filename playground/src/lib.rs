@@ -19,7 +19,9 @@ use krabka_kraft_core::{sim::Sim, types::NodeId};
 use wasm_bindgen::prelude::*;
 
 mod kernels;
+pub mod lab;
 pub use kernels::{kernel_names, run_kernel};
+pub use lab::wasm::Lab;
 
 /// An interactive, in-browser `KRaft` consensus simulation.
 ///
