@@ -24,8 +24,9 @@ use krabka_protocol::{
 
 use super::{
     ApiSpec, CONN_ID_RANGE, ClientError, ClientEvent, ClientOptions, CoordinatorType, KafkaClient,
-    RequestId, Response, Target, VersionTable, conn_base, draw_conn_id,
+    NodeState, RequestId, Response, Target, VersionTable, conn_base, draw_conn_id,
     fake_broker::{ClusterState, Seen},
+    pick_least_loaded,
     request::{frame_request, response_header_version},
     test_support::{Driven, Harness, client, cluster},
 };
@@ -563,6 +564,337 @@ fn an_unreachable_broker_times_out_the_setup_and_the_backoffs_double() {
             timeout_ms: 30_000
         })
     ));
+}
+
+/// A pick of the least loaded node: its name, the nodes in the order the
+/// client knows them, the node the visit starts from, and the pick.
+type Pick = (&'static str, Vec<NodeState>, usize, Option<usize>);
+
+#[test]
+fn the_least_loaded_node_is_picked_as_kafka_picks_it() {
+    // Kafka's `NetworkClient.leastLoadedNode`, at 1 000 ms with a window of
+    // five requests. A node tried at `t` closed then, and its reconnect
+    // backoff ended 50 ms later.
+    let never = NodeState::Idle {
+        retry_at: 0,
+        last_attempt: None,
+    };
+    let tried = |at: Millis| NodeState::Idle {
+        retry_at: at + 50,
+        last_attempt: Some(at),
+    };
+    let backing_off = NodeState::Idle {
+        retry_at: 1_040,
+        last_attempt: Some(990),
+    };
+    let ready = |load: usize| NodeState::Ready { load };
+    let rows: [Pick; 12] = [
+        (
+            "a ready connection with nothing in flight, at once",
+            vec![ready(1), ready(0), ready(0)],
+            0,
+            Some(1),
+        ),
+        (
+            "the ready connection with the fewest requests",
+            vec![ready(3), ready(1), ready(2)],
+            0,
+            Some(1),
+        ),
+        (
+            "a ready connection before a connection being set up",
+            vec![NodeState::Connecting, ready(4), never],
+            0,
+            Some(1),
+        ),
+        (
+            "a full window is passed over",
+            vec![ready(5), NodeState::Connecting],
+            0,
+            Some(1),
+        ),
+        (
+            "a connection being set up before a new one",
+            vec![never, NodeState::Connecting],
+            0,
+            Some(1),
+        ),
+        (
+            "the last connection being set up the visit meets",
+            vec![NodeState::Connecting, NodeState::Connecting, never],
+            0,
+            Some(1),
+        ),
+        (
+            "a node never tried before a node tried",
+            vec![tried(100), never, tried(200)],
+            0,
+            Some(1),
+        ),
+        (
+            "the node whose last attempt is the oldest",
+            vec![tried(300), tried(100), tried(200)],
+            0,
+            Some(1),
+        ),
+        (
+            "a node in reconnect backoff is passed over",
+            vec![backing_off, tried(900)],
+            0,
+            Some(1),
+        ),
+        (
+            "nothing while every node backs off or is full",
+            vec![backing_off, ready(5), backing_off],
+            0,
+            None,
+        ),
+        (
+            "a tie goes to the first node the visit meets",
+            vec![never, never, never],
+            2,
+            Some(2),
+        ),
+        (
+            "the visit wraps around from the offset",
+            vec![ready(0), tried(100), ready(0)],
+            1,
+            Some(2),
+        ),
+    ];
+    for (name, nodes, offset, expected) in rows {
+        assert!(
+            pick_least_loaded(&nodes, offset, 1_000, 5) == expected,
+            "{name}"
+        );
+    }
+}
+
+/// The state of the client's connection to `node`, as the inspector shows
+/// it, or an empty string when there is none.
+fn conn_state_of(h: &Harness<KafkaClient>, node: u32) -> String {
+    h.client.snapshot()["connections"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["broker"] == node)
+        .and_then(|c| c["state"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The brokers the client opened a connection to from `from` on, in order:
+/// each attempt starts with an `ApiVersions`.
+fn tried_since(h: &Harness<KafkaClient>, from: Millis) -> Vec<NodeId> {
+    h.seen(ApiVersionsRequest::API_KEY)
+        .iter()
+        .filter(|s| s.at >= from)
+        .map(|s| s.broker)
+        .collect()
+}
+
+#[test]
+fn a_request_for_any_broker_leaves_brokers_whose_connection_setup_times_out() {
+    // Brokers 1 and 2 take connections but never answer, not even
+    // `ApiVersions`, as a broker cut off from its controller does; broker 3
+    // answers, but the client's connection to it just closed, so broker 3
+    // waits out its reconnect backoff and was tried last. Kafka's
+    // `NetworkClient.leastLoadedNode` passes over a node in reconnect
+    // backoff and prefers, among the nodes it may connect to, the one whose
+    // last attempt is oldest, a node never tried first. A caller's request
+    // waiting for a connection that fails is sent to the node that rule
+    // picks next, as `KafkaAdminClient` reassigns the calls of a failed
+    // node, and a metadata update that fails waits `retry.backoff.ms` and
+    // picks again, as `DefaultMetadataUpdater` does. So each silent broker
+    // costs one connection setup timeout (10 s, 20 % jitter), and broker 3
+    // answers after two. Rows: a request of the caller for any broker, and
+    // the client's own metadata refresh, which the lost connection asked
+    // for.
+    for caller in [true, false] {
+        let state = cluster(&[]);
+        let mut h = Harness::new(client(&[3]), Rc::clone(&state));
+        bootstrap(&mut h);
+        assert!(h.client.metadata().brokers.len() == 3, "caller {caller}");
+        state.borrow_mut().knobs.silent_brokers = BTreeSet::from([1, 2]);
+        h.kill_broker(NodeId(3));
+        assert!(
+            h.run_until(|h| conn_state_of(h, 3) == "closed", 1_000),
+            "caller {caller}"
+        );
+        h.restart_broker(NodeId(3));
+        let t0 = h.now();
+        let version = h.client.metadata().version;
+        let sent = caller.then(|| h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat())));
+        let answered = |h: &Harness<KafkaClient>| {
+            if caller {
+                !responses_of(&h.events).is_empty()
+            } else {
+                h.client.metadata().version > version
+            }
+        };
+        assert!(h.run_until(answered, 30_000), "caller {caller}");
+        let took = h.now() - t0;
+        assert!(
+            (16_000..=25_000).contains(&took),
+            "caller {caller}: {took} ms"
+        );
+        if let Some(id) = sent {
+            let results = responses(h.take_events());
+            assert!(results.len() == 1, "caller {caller}");
+            let (got, result) = &results[0];
+            assert!(*got == id, "caller {caller}");
+            let endpoint = result.as_ref().map(|r| r.endpoint).ok();
+            assert!(
+                endpoint == Some(Endpoint::kafka(NodeId(3))),
+                "caller {caller}"
+            );
+        }
+        // The metadata refresh follows within its failure backoff.
+        assert!(
+            h.run_until(|h| h.client.metadata().version > version, 1_000),
+            "caller {caller}"
+        );
+        // Each silent broker was tried once, in either order, then broker 3.
+        let tried = tried_since(&h, t0);
+        let mut silent = tried.get(..2).unwrap_or_default().to_vec();
+        silent.sort();
+        assert!(
+            (silent, tried.get(2..).unwrap_or_default().to_vec())
+                == (vec![NodeId(1), NodeId(2)], vec![NodeId(3)]),
+            "caller {caller}: {tried:?}"
+        );
+        // Only broker 3 ever got a request past its `ApiVersions`.
+        let metadata_brokers: BTreeSet<NodeId> = h
+            .seen(MetadataRequest::API_KEY)
+            .iter()
+            .filter(|s| s.at >= t0)
+            .map(|s| s.broker)
+            .collect();
+        assert!(
+            metadata_brokers == BTreeSet::from([NodeId(3)]),
+            "caller {caller}"
+        );
+    }
+}
+
+#[test]
+fn a_request_for_any_broker_that_times_out_leaves_the_silent_broker_for_another() {
+    // Broker 1 answers the bootstrap, then goes silent. The request for any
+    // broker in flight on it fails after `request.timeout.ms`, and the
+    // connection closes, as Kafka's `NetworkClient` fails the calls in
+    // flight on a connection it closes for a request timeout. The next
+    // request for any broker goes to a broker never tried, even once the
+    // reconnect backoff of broker 1 has passed: its last attempt is the
+    // newest.
+    let state = cluster(&[]);
+    let mut h = Harness::new(client(&[1]), Rc::clone(&state));
+    bootstrap(&mut h);
+    state.borrow_mut().knobs.silent_brokers = BTreeSet::from([1]);
+    let first = h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat()));
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 31_000));
+    let results = responses(h.take_events());
+    assert!(results.len() == 1);
+    assert!(results[0].0 == first);
+    assert!(matches!(
+        results[0].1,
+        Err(ClientError::Timeout {
+            api: "Heartbeat",
+            timeout_ms: 30_000
+        })
+    ));
+    h.run_for(1_000);
+    let second = h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat()));
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 1_000));
+    let results = responses(h.take_events());
+    assert!(results.len() == 1);
+    assert!(results[0].0 == second);
+    let endpoint = results[0].1.as_ref().map(|r| r.endpoint.node).ok();
+    assert!(matches!(endpoint, Some(NodeId(2 | 3))), "{endpoint:?}");
+    // Broker 1 was never tried again after the bootstrap.
+    assert!(
+        tried_since(&h, 0)
+            .iter()
+            .filter(|b| **b == NodeId(1))
+            .count()
+            == 1
+    );
+}
+
+#[test]
+fn a_request_for_any_broker_waits_out_the_reconnect_backoff_of_the_only_broker() {
+    // With every known node in reconnect backoff, Kafka's `leastLoadedNode`
+    // picks none, and the request waits. It goes out when the first backoff
+    // ends (`reconnect.backoff.ms`, 50 ms with 20 % jitter) and is answered
+    // 20 ms later, after `ApiVersions`.
+    let state = ClusterState::new(&[(1, 1)]);
+    let mut h = Harness::new(client(&[1]), Rc::clone(&state));
+    bootstrap(&mut h);
+    // The metadata refresh the close asks for is due at once, and waits too.
+    h.run_for(1_000);
+    h.kill_broker(NodeId(1));
+    assert!(h.run_until(|h| conn_state(h) == "closed", 1_000));
+    let closed_at = h.now();
+    h.restart_broker(NodeId(1));
+    let id = h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat()));
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 1_000));
+    let took = h.now() - closed_at;
+    assert!((60..=79).contains(&took), "{took} ms");
+    let results = responses(h.take_events());
+    assert!(results.len() == 1);
+    assert!(results[0].0 == id);
+    assert!(results[0].1.is_ok());
+}
+
+#[test]
+fn a_request_for_any_broker_prefers_the_brokers_of_the_metadata_to_the_bootstrap_brokers() {
+    // Kafka's `leastLoadedNode` picks among the brokers of the metadata;
+    // the bootstrap brokers come back only when none of those can be picked
+    // and no connection to one is ready (the `rebootstrap` of
+    // `metadata.recovery.strategy`). Broker 2 is a bootstrap broker the
+    // metadata leaves out, as it leaves out a fenced broker, and it answers
+    // nothing. The client's connections to brokers 1 and 3 close when both
+    // restart, which makes broker 2 the node whose last attempt is the
+    // oldest; still, once the reconnect backoff of 1 and 3 passed, a request
+    // for any broker goes to one of them and is answered at once.
+    let state = cluster(&[]);
+    let mut h = Harness::new(client(&[1, 2, 3]), Rc::clone(&state));
+    {
+        let mut s = state.borrow_mut();
+        s.brokers.remove(&2);
+        s.knobs.silent_brokers = BTreeSet::from([2]);
+    }
+    assert!(h.run_until(|h| h.client.metadata().updated_at.is_some(), 30_000));
+    let named: Vec<i32> = h.client.metadata().brokers.keys().copied().collect();
+    assert!(named == vec![1, 3]);
+    for broker in [1, 3] {
+        h.with_client(|c, ctx| c.send(ctx, Target::Broker(broker), heartbeat()));
+    }
+    assert!(h.run_until(|h| responses_of(&h.events).len() == 2, 1_000));
+    h.take_events();
+    for node in [1, 3] {
+        h.kill_broker(NodeId(node));
+    }
+    assert!(h.run_until(
+        |h| conn_state_of(h, 1) == "closed" && conn_state_of(h, 3) == "closed",
+        1_000
+    ));
+    for node in [1, 3] {
+        h.restart_broker(NodeId(node));
+    }
+    h.run_for(100);
+    let sent_at = h.now();
+    let id = h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat()));
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 1_000));
+    let took = h.now() - sent_at;
+    assert!(took <= 20, "{took} ms");
+    let results = responses(h.take_events());
+    assert!(results.len() == 1);
+    assert!(results[0].0 == id);
+    let answered_by = results[0].1.as_ref().map(|r| r.endpoint.node).ok();
+    assert!(
+        matches!(answered_by, Some(NodeId(1 | 3))),
+        "{answered_by:?}"
+    );
 }
 
 #[test]

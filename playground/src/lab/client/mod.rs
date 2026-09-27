@@ -22,6 +22,26 @@
 //! `FindCoordinator` lookups started when a request needs one and cached per
 //! key.
 //!
+//! A request for any broker, and the client's own metadata requests and
+//! coordinator lookups, go to the node Kafka's
+//! `NetworkClient.leastLoadedNode` picks among the brokers of the metadata,
+//! visited from a random one on: a ready connection with the fewest
+//! requests and room for another, else a connection being set up, else the
+//! node whose last connection attempt is the oldest, a node never tried
+//! first, and never a node in reconnect backoff. With no metadata yet, or
+//! when no broker of the metadata can be picked and no connection to one is
+//! ready, the pick is among the bootstrap brokers, as Kafka's default
+//! `metadata.recovery.strategy`, `rebootstrap`, does. When the connection a
+//! request waits on fails, by a close, a
+//! request timeout or a setup timeout, a caller's request goes to the node
+//! its target names then, as `KafkaAdminClient.unassignUnsentCalls` hands
+//! the calls of a failed node back for another pick, while the client's own
+//! metadata request and lookup fail and pick again after their backoff, as
+//! `DefaultMetadataUpdater.handleServerDisconnect` and
+//! `ConsumerNetworkClient.checkDisconnects` fail them. So a broker that
+//! takes connections but never answers is left for another once its
+//! connection setup or its request times out.
+//!
 //! The metadata refresh keeps Kafka's `Metadata` bookkeeping. A request for
 //! a refresh (`requestUpdate`) is met by the next answer; a topic the client
 //! starts to track (`requestUpdateForNewTopics`) goes out at once and stays
@@ -197,8 +217,10 @@ pub type CoordinatorKey = (CoordinatorType, String);
 /// Where a request goes.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Target {
-    /// The least loaded broker the client is connected to, or a bootstrap
-    /// broker. Kafka's `leastLoadedNode`.
+    /// The broker Kafka's `leastLoadedNode` picks among the brokers of the
+    /// metadata, or the bootstrap brokers when none of those can be picked;
+    /// see the module documentation. A request that waits on a connection
+    /// that fails goes to the next pick.
     Any,
     /// One broker by id, from the metadata cache.
     Broker(i32),
@@ -420,8 +442,28 @@ impl Refresh {
 /// How a target resolved.
 enum Resolved {
     Endpoint(Endpoint),
+    /// No known node can take the request now: each backs off from a
+    /// failed connection or has a full in-flight window. The request waits
+    /// and is routed again.
+    Wait,
     NeedMetadata,
     NeedCoordinator,
+}
+
+/// What [`pick_least_loaded`] knows of one node it may pick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NodeState {
+    /// A ready connection with `load` requests in flight or queued.
+    Ready { load: usize },
+    /// A connection waiting for its `ApiVersions` answer.
+    Connecting,
+    /// No open connection: none yet, or a closed one whose reconnect
+    /// backoff lasts until `retry_at`. `last_attempt` is
+    /// [`Connection::last_attempt`].
+    Idle {
+        retry_at: Millis,
+        last_attempt: Option<Millis>,
+    },
 }
 
 /// The sans-IO Kafka client. See the module documentation.
@@ -429,7 +471,6 @@ pub struct KafkaClient {
     client_id: String,
     opts: ClientOptions,
     bootstrap: Vec<Endpoint>,
-    bootstrap_cursor: usize,
     conns: BTreeMap<Endpoint, Connection>,
     next_conn: u32,
     next_request: u64,
@@ -457,7 +498,6 @@ impl KafkaClient {
             client_id: client_id.to_string(),
             opts,
             bootstrap,
-            bootstrap_cursor: 0,
             conns: BTreeMap::new(),
             next_conn: 0,
             next_request: 0,
@@ -738,8 +778,9 @@ impl KafkaClient {
         if let Target::Leader { topic, .. } = &request.target {
             self.track_topic(topic);
         }
-        match self.resolve(&request.target, ctx.now()) {
+        match self.resolve(ctx, &request.target) {
             Resolved::Endpoint(endpoint) => self.dispatch(ctx, endpoint, request),
+            Resolved::Wait => self.waiting.push(request),
             Resolved::NeedMetadata => {
                 self.refresh.needed = true;
                 self.waiting.push(request);
@@ -757,11 +798,11 @@ impl KafkaClient {
         }
     }
 
-    fn resolve(&mut self, target: &Target, now: Millis) -> Resolved {
+    fn resolve(&self, ctx: &mut Ctx<'_>, target: &Target) -> Resolved {
         match target {
             Target::Any => self
-                .least_loaded(now)
-                .map_or(Resolved::NeedMetadata, Resolved::Endpoint),
+                .least_loaded(ctx)
+                .map_or(Resolved::Wait, Resolved::Endpoint),
             Target::Broker(id) => self
                 .metadata
                 .broker_endpoint(*id)
@@ -771,8 +812,8 @@ impl KafkaClient {
                 match self.metadata.broker_endpoint(controller) {
                     Some(endpoint) => Resolved::Endpoint(endpoint),
                     None if self.metadata.updated_at.is_some() => self
-                        .least_loaded(now)
-                        .map_or(Resolved::NeedMetadata, Resolved::Endpoint),
+                        .least_loaded(ctx)
+                        .map_or(Resolved::Wait, Resolved::Endpoint),
                     None => Resolved::NeedMetadata,
                 }
             }
@@ -790,53 +831,51 @@ impl KafkaClient {
         }
     }
 
-    /// Kafka's `leastLoadedNode`: a ready connection with the fewest requests
-    /// in flight, else one that is connecting, else a known broker or a
-    /// bootstrap broker whose backoff passed, else the one whose backoff ends
-    /// first.
-    fn least_loaded(&mut self, now: Millis) -> Option<Endpoint> {
-        if let Some(endpoint) = self
-            .conns
-            .iter()
-            .filter(|(_, c)| c.is_ready())
-            .min_by_key(|(_, c)| c.in_flight_len() + c.queue_len())
-            .map(|(e, _)| *e)
-        {
-            return Some(endpoint);
+    /// Kafka's `NetworkClient.leastLoadedNode` over the brokers of the
+    /// metadata. With no metadata yet, or when no broker of the metadata can
+    /// take a request and no connection to one is ready, it picks among the
+    /// bootstrap brokers instead: the `rebootstrap` of Kafka's default
+    /// `metadata.recovery.strategy`, which `DefaultMetadataUpdater` and the
+    /// admin client's `MetadataUpdateNodeIdProvider` start then. `None` when
+    /// no node can take a request now.
+    fn least_loaded(&self, ctx: &mut Ctx<'_>) -> Option<Endpoint> {
+        let brokers: Vec<Endpoint> = self.metadata.brokers.values().map(|b| b.endpoint).collect();
+        let (picked, ready) = self.pick_among(ctx, &brokers);
+        if picked.is_some() || ready {
+            return picked;
         }
-        if let Some(endpoint) = self
-            .conns
+        self.pick_among(ctx, &self.bootstrap).0
+    }
+
+    /// The node [`pick_least_loaded`] picks among `nodes`, visited from a
+    /// random one on as Kafka's `randOffset` does, and whether a connection
+    /// to one of them is ready: Kafka's `LeastLoadedNode`, whose
+    /// `hasNodeAvailableOrConnectionReady` decides a rebootstrap.
+    fn pick_among(&self, ctx: &mut Ctx<'_>, nodes: &[Endpoint]) -> (Option<Endpoint>, bool) {
+        let states: Vec<NodeState> = nodes
             .iter()
-            .find(|(_, c)| c.is_negotiating())
-            .map(|(e, _)| *e)
-        {
-            return Some(endpoint);
-        }
-        let candidates: Vec<Endpoint> = self
-            .metadata
-            .brokers
-            .values()
-            .map(|b| b.endpoint)
-            .chain(self.bootstrap.iter().copied())
+            .map(|endpoint| match self.conns.get(endpoint) {
+                Some(c) if c.is_ready() => NodeState::Ready {
+                    load: c.in_flight_len() + c.queue_len(),
+                },
+                Some(c) if c.is_negotiating() => NodeState::Connecting,
+                c => NodeState::Idle {
+                    retry_at: c.map_or(0, Connection::retry_at),
+                    last_attempt: c.and_then(Connection::last_attempt),
+                },
+            })
             .collect();
-        if candidates.is_empty() {
-            return None;
-        }
-        let start = self.bootstrap_cursor % candidates.len();
-        for offset in 0..candidates.len() {
-            let endpoint = candidates[(start + offset) % candidates.len()];
-            let usable = self
-                .conns
-                .get(&endpoint)
-                .is_none_or(|c| c.is_closed() && c.retry_at() <= now);
-            if usable {
-                self.bootstrap_cursor = start + offset + 1;
-                return Some(endpoint);
-            }
-        }
-        candidates
-            .into_iter()
-            .min_by_key(|e| self.conns.get(e).map_or(0, Connection::retry_at))
+        let ready = states
+            .iter()
+            .any(|state| matches!(state, NodeState::Ready { .. }));
+        // A single node needs no draw: the offset is 0 whatever it would be.
+        let offset = match u64::try_from(nodes.len()) {
+            Ok(len) if len > 1 => usize::try_from(ctx.rand(len)).unwrap_or(0),
+            _ => 0,
+        };
+        let picked = pick_least_loaded(&states, offset, ctx.now(), self.opts.max_in_flight)
+            .map(|i| nodes[i]);
+        (picked, ready)
     }
 
     fn dispatch(&mut self, ctx: &mut Ctx<'_>, endpoint: Endpoint, request: Outbound) {
@@ -1028,6 +1067,9 @@ impl KafkaClient {
 
     // ---- connection lifecycle ---------------------------------------------------
 
+    /// The broker or the world closed the connection to `endpoint`: fail
+    /// what was in flight, hand back what was queued (see
+    /// [`KafkaClient::requeue`]), and back off.
     fn on_peer_close(&mut self, ctx: &mut Ctx<'_>, endpoint: Endpoint, out: &mut Vec<ClientEvent>) {
         if self.conns.get(&endpoint).is_none_or(Connection::is_closed) {
             return;
@@ -1048,11 +1090,48 @@ impl KafkaClient {
             };
             self.complete(ctx, endpoint, completion, out);
         }
+        self.requeue(ctx, endpoint, out);
+    }
+
+    /// Hand back the requests queued on the connection to `endpoint`, which
+    /// failed before it sent them. A caller's request goes to the node its
+    /// target names now, as `KafkaAdminClient.unassignUnsentCalls` gives the
+    /// calls of a node whose connection failed another pick, so a request
+    /// for any broker moves on to the next node `leastLoadedNode` picks. The
+    /// client's own metadata request and coordinator lookup fail, and pick a
+    /// node again after their backoff: `DefaultMetadataUpdater` counts the
+    /// disconnect as a failed update (`handleServerDisconnect`), and
+    /// `ConsumerNetworkClient.checkDisconnects` fails the requests not yet
+    /// sent to the node.
+    fn requeue(&mut self, ctx: &mut Ctx<'_>, endpoint: Endpoint, out: &mut Vec<ClientEvent>) {
+        if self.closed {
+            return;
+        }
+        let queued = self
+            .conns
+            .get_mut(&endpoint)
+            .map(Connection::take_queue)
+            .unwrap_or_default();
+        for request in queued {
+            if request.purpose == Purpose::User {
+                self.route(ctx, request);
+            } else {
+                let api = request.api.name;
+                self.fail(
+                    ctx,
+                    request,
+                    ClientError::Disconnected { api, endpoint },
+                    out,
+                );
+            }
+        }
     }
 
     /// Close a connection from this side: send `Close`, fail what was in
-    /// flight, and back off. `error` names why; `None` means a request timed
-    /// out, and the requests past their deadline fail with a timeout.
+    /// flight, hand back what was queued (see [`KafkaClient::requeue`]), and
+    /// back off. `error` names why; `None` means a request or the connection
+    /// setup timed out, and the requests past their deadline fail with a
+    /// timeout.
     fn close_connection(
         &mut self,
         ctx: &mut Ctx<'_>,
@@ -1092,6 +1171,7 @@ impl KafkaClient {
             };
             self.complete(ctx, endpoint, completion, out);
         }
+        self.requeue(ctx, endpoint, out);
     }
 
     fn backoff_for(&self, ctx: &mut Ctx<'_>, endpoint: Endpoint) -> Millis {
@@ -1241,13 +1321,26 @@ impl KafkaClient {
     }
 
     /// The next time the client needs [`KafkaClient::on_tick`]: a request
-    /// deadline, a connection setup timeout, a reconnect, a metadata
-    /// refresh, a coordinator lookup to retry, or events queued outside a
-    /// tick.
+    /// deadline, a connection setup timeout, a reconnect, the end of the
+    /// first reconnect backoff when a request waits for a node to pick, a
+    /// metadata refresh, a coordinator lookup to retry, or events queued
+    /// outside a tick.
     #[must_use]
     pub fn next_deadline(&self, now: Millis) -> Option<Millis> {
         let conns = self.conns.values().filter_map(Connection::next_deadline);
         let waiting = self.waiting.iter().map(|r| r.deadline);
+        let reconnect = self
+            .waiting
+            .iter()
+            .any(|r| matches!(r.target, Target::Any | Target::Controller))
+            .then(|| {
+                self.conns
+                    .values()
+                    .map(Connection::retry_at)
+                    .filter(|at| *at > now)
+                    .min()
+            })
+            .flatten();
         let metadata = if self.refresh.out.is_some() {
             None
         } else if self.refresh.requested() || self.metadata.updated_at.is_none() {
@@ -1266,6 +1359,7 @@ impl KafkaClient {
         let pending = (!self.pending_events.is_empty()).then_some(now);
         conns
             .chain(waiting)
+            .chain(reconnect)
             .chain(metadata)
             .chain(lookups)
             .chain(pending)
@@ -1317,6 +1411,51 @@ fn draw_conn_id(conn_base: u32, drawn: u32, held: &BTreeSet<ConnId>) -> (ConnId,
         }
     }
     (id, drawn)
+}
+
+/// The node Kafka's `NetworkClient.leastLoadedNode` picks among `nodes`,
+/// visited from `offset` on: the first ready connection with nothing in
+/// flight, else the ready connection with the fewest requests, else the
+/// last connection being set up that the visit meets, else, among the nodes
+/// it may connect to, the one whose last attempt is the oldest, a node never
+/// tried first and the first visited on a tie. A ready connection whose
+/// `max_in_flight` window is full, and a node whose reconnect backoff lasts
+/// past `now`, are passed over, so `None` means no node can take a request
+/// now.
+fn pick_least_loaded(
+    nodes: &[NodeState],
+    offset: usize,
+    now: Millis,
+    max_in_flight: usize,
+) -> Option<usize> {
+    let mut ready: Option<(usize, usize)> = None;
+    let mut connecting = None;
+    let mut idle: Option<(Option<Millis>, usize)> = None;
+    for step in 0..nodes.len() {
+        let i = (offset + step) % nodes.len();
+        match nodes[i] {
+            NodeState::Ready { load: 0 } if max_in_flight > 0 => return Some(i),
+            NodeState::Ready { load } if load < max_in_flight => {
+                if ready.is_none_or(|(fewest, _)| load < fewest) {
+                    ready = Some((load, i));
+                }
+            }
+            NodeState::Connecting => connecting = Some(i),
+            NodeState::Idle {
+                retry_at,
+                last_attempt,
+            } if retry_at <= now => {
+                if idle.is_none_or(|(oldest, _)| last_attempt < oldest) {
+                    idle = Some((last_attempt, i));
+                }
+            }
+            NodeState::Ready { .. } | NodeState::Idle { .. } => {}
+        }
+    }
+    ready
+        .map(|(_, i)| i)
+        .or(connecting)
+        .or(idle.map(|(_, i)| i))
 }
 
 /// The coordinator a `FindCoordinator` response names for `key`: the row of

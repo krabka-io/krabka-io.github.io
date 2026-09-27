@@ -2,7 +2,7 @@
 //! partitioners, acks, idempotent sequences across retries, the epoch a
 //! failed batch raises, deduplicated resends, and the delivery timeout.
 
-use std::{collections::BTreeMap, rc::Rc};
+use std::{collections::BTreeMap, ops::RangeInclusive, rc::Rc};
 
 use assert2::assert;
 use bytes::Bytes;
@@ -806,6 +806,108 @@ fn a_record_that_cannot_be_placed_waits_up_to_max_block_ms() {
             lookups.iter().all(|(_, r)| *r == named(&["orders"])),
             "{name}"
         );
+    }
+}
+
+/// The lookups a producer makes while its records wait for a leader: the
+/// error code the broker gives a partition without one, when the leader is
+/// back (after the send, `0` for before it), and the gap between each
+/// lookup and the next up to the one that finds the leader.
+type LeaderlessRow = (&'static str, i16, Millis, Vec<RangeInclusive<Millis>>);
+
+#[test]
+fn records_for_a_topic_without_leaders_look_it_up_until_the_leaders_are_back() {
+    // For a moment after every broker restarted, no partition has a leader.
+    // The producer here tracks no topic when its first metadata answer,
+    // which names every topic, shows `orders` that way, so no answer asks
+    // for `orders` again by itself. As Kafka's `Sender.sendProducerData`
+    // does, a record waiting for a leader puts its topic among
+    // `RecordAccumulator.ready`'s `unknownLeaderTopics`, and each pass of
+    // the sender asks for a metadata update (`requestUpdate`): the client
+    // looks the topic up at once, then again after every answer that still
+    // shows no leader, at its backoff of `retry.backoff.ms` (100 ms)
+    // doubling while the answers bring no newer leader epoch, with 20 %
+    // jitter. The gaps add the 10 ms round trip. Kafka's brokers answer a
+    // partition without a leader with `LEADER_NOT_AVAILABLE`, which asks
+    // again by itself; with `NONE` only the producer does.
+    let doubling = vec![90..=129, 170..=249, 330..=489, 650..=969];
+    let rows: [LeaderlessRow; 4] = [
+        (
+            "LEADER_NOT_AVAILABLE, the leader back before the send",
+            codes::LEADER_NOT_AVAILABLE,
+            0,
+            vec![],
+        ),
+        (
+            "NONE, the leader back before the send",
+            codes::NONE,
+            0,
+            vec![],
+        ),
+        (
+            "LEADER_NOT_AVAILABLE, the leader back a second after the send",
+            codes::LEADER_NOT_AVAILABLE,
+            1_000,
+            doubling.clone(),
+        ),
+        (
+            "NONE, the leader back a second after the send",
+            codes::NONE,
+            1_000,
+            doubling,
+        ),
+    ];
+    for (name, code, back_after, gaps) in rows {
+        let state = cluster(&[("orders", 1)]);
+        {
+            let mut s = state.borrow_mut();
+            s.knobs.leaderless_error = code;
+            s.set_leader("orders", 0, -1);
+        }
+        let mut h = Harness::new(producer(ProducerConfig::default()), Rc::clone(&state));
+        ready(&mut h);
+        assert!(
+            h.client.client().metadata().leader("orders", 0).is_none(),
+            "{name}"
+        );
+        // The backoff after the first answer passes, and nothing else asks
+        // for the metadata.
+        h.run_for(1_000);
+        let t0 = h.now();
+        if back_after == 0 {
+            state.borrow_mut().set_leader("orders", 0, 1);
+        }
+        send(&mut h, record("orders", Some("k"), "v"));
+        if back_after > 0 {
+            h.run_for(back_after);
+            assert!(metadata_since(&h, t0).len() == gaps.len(), "{name}");
+            assert!(h.events.is_empty(), "{name}");
+            state.borrow_mut().set_leader("orders", 0, 1);
+        }
+        assert!(h.run_until(|h| !h.events.is_empty(), 3_000), "{name}");
+        let latency_ms = h.now() - t0;
+        assert!(
+            h.take_events()
+                == vec![ProducerEvent::Acked {
+                    seq: SeqNo(1),
+                    topic: "orders".to_string(),
+                    partition: 0,
+                    offset: 0,
+                    latency_ms,
+                }],
+            "{name}"
+        );
+        let lookups = metadata_since(&h, t0);
+        let requests: Vec<MetadataRequest> = lookups.iter().map(|(_, r)| r.clone()).collect();
+        assert!(
+            requests == vec![named(&["orders"]); gaps.len() + 1],
+            "{name}"
+        );
+        assert!(lookups[0].0 == t0 + 5, "{name}");
+        for (i, range) in gaps.iter().enumerate() {
+            let gap = lookups[i + 1].0 - lookups[i].0;
+            assert!(range.contains(&gap), "{name}: gap {i}: {gap} ms");
+        }
     }
 }
 

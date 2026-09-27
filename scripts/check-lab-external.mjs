@@ -203,6 +203,14 @@ function serve(dir, guest) {
       serveSlowly(res, guest, req.method === 'HEAD');
       return;
     }
+    // The site this check serves has no broker build, whatever `dist/` holds:
+    // after `npm run build:broker` it holds the real module, and the
+    // missing-build flow needs it absent. Every other flow runs the guest
+    // through `useModule`.
+    if (p === BROKER_BUILD) {
+      res.writeHead(404).end('not found');
+      return;
+    }
     let file = p === GUEST_URL ? guest : path.join(dir, p);
     if (file !== guest && !file.startsWith(dir)) {
       res.writeHead(403).end();

@@ -100,6 +100,10 @@ pub struct Connection {
     /// Attempts that closed before they were ready: Kafka's
     /// `failedConnectAttempts`, which drives the setup timeout.
     setup_failures: u32,
+    /// When the last attempt started or the connection last closed, `None`
+    /// before the first attempt: Kafka's `lastConnectAttemptMs`, which
+    /// `leastLoadedNode` compares.
+    last_attempt: Option<Millis>,
     /// The broker id metadata maps this endpoint to.
     broker_id: Option<i32>,
     stats: Stats,
@@ -120,6 +124,7 @@ impl Connection {
             queue: VecDeque::new(),
             failures: 0,
             setup_failures: 0,
+            last_attempt: None,
             broker_id: None,
             stats: Stats::default(),
         }
@@ -174,6 +179,15 @@ impl Connection {
         self.failures
     }
 
+    /// When the last attempt started or the connection last closed, `None`
+    /// before the first attempt: Kafka's
+    /// `ClusterConnectionStates.lastConnectAttemptMs`, which `connecting`
+    /// and `disconnected` set.
+    #[must_use]
+    pub fn last_attempt(&self) -> Option<Millis> {
+        self.last_attempt
+    }
+
     pub fn set_broker_id(&mut self, id: Option<i32>) {
         self.broker_id = id;
     }
@@ -204,6 +218,7 @@ impl Connection {
         self.client = Endpoint::client(ctx.me());
         self.conn = conn;
         self.in_flight.clear();
+        self.last_attempt = Some(ctx.now());
         self.stats.opened += 1;
         let setup_timeout = retry::exponential_backoff(
             opts.connection_setup_timeout_ms,
@@ -362,15 +377,16 @@ impl Connection {
     /// The connection closed: the peer or the world sent `Close`, or the
     /// caller gave up on it. Everything in flight is returned so the caller
     /// can fail it, and the next attempt waits `backoff`. As in Kafka's
-    /// `ClusterConnectionStates.disconnected`, an attempt that closes before
-    /// it was ready lengthens the next setup timeout, and any other close
-    /// resets it.
+    /// `ClusterConnectionStates.disconnected`, the close counts as the last
+    /// attempt, an attempt that closes before it was ready lengthens the
+    /// next setup timeout, and any other close resets it.
     pub fn on_close(&mut self, now: Millis, backoff: Millis) -> Vec<InFlight> {
         self.setup_failures = if self.is_negotiating() {
             self.setup_failures.saturating_add(1)
         } else {
             0
         };
+        self.last_attempt = Some(now);
         self.state = State::Closed {
             retry_at: now + backoff,
         };

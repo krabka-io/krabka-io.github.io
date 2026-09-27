@@ -15,7 +15,8 @@
 // The cluster presets run at 20× in a browser context of their own. Three
 // brokers form one KRaft quorum, create the topic and serve two consumers
 // that share its partitions; the inspector shows the quorum and the
-// partitions; the command bars pause, resume, send, set rates and
+// partitions, and a section the reader opens stays open as the State tab
+// renders again; the command bars pause, resume, send, set rates and
 // processing times, commit, seek, close and query; killing the leader of a partition
 // moves the leadership in the inspector while the group keeps consuming,
 // and the restarted broker rejoins the ISR; a page reload brings the brokers
@@ -409,8 +410,17 @@ async function checkThreeBrokers(page, preset) {
   const insp = { votes: await field(page, 'quorum_votes'), state: await field(page, 'state'), leader: await cell(page, 'orders-0', 'leader'), isr: await cell(page, 'orders-0', 'isr') };
   check('the broker inspector shows the quorum and the partitions', insp.votes === 'yes: a voter' && insp.state === 'RUNNING' && /^[123]$/.test(insp.leader) && insp.isr.split(' ').length === 3, JSON.stringify(insp));
 
-  // The producer's command bar.
+  // A section the reader opens stays open through the State tab's renders,
+  // each of which builds every section afresh.
   await inspect(page, 4, 'orders-producer');
+  const clientSection = `[...document.querySelectorAll('#krabka-lab .lab-inspector details.lab-sec')].find((d) => d.querySelector(':scope > summary')?.textContent === 'Client')`;
+  await page.locator('#krabka-lab .lab-inspector details.lab-sec > summary', { hasText: /^Client$/ }).first().click();
+  const sectionOpened = await page.evaluate(`(() => { const d = ${clientSection}; if (d) d.dataset.seen = 'yes'; return d?.open === true; })()`);
+  await waitFor(page, `(() => { const d = ${clientSection}; return Boolean(d) && d.dataset.seen !== 'yes'; })()`, 'the State tab to render again');
+  const sectionKept = await page.evaluate(`${clientSection}?.open === true`);
+  check('a section the reader opens stays open when the State tab renders again', sectionOpened && sectionKept, `opened ${sectionOpened}, after a render ${sectionKept}`);
+
+  // The producer's command bar.
   const paused = await command(page, 'pause');
   const atPause = await until(page, 'the producer to pause', `(n) => n[4].state.paused === true && { generated: n[4].state.generated, now: window.krabkaLab.world.now() }`);
   await waitFor(page, `window.krabkaLab.world.now() > ${atPause.now} + 3000`, 'three seconds to pass');

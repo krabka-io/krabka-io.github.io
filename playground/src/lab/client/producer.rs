@@ -19,6 +19,12 @@
 //! flight return first, and the partition then starts again at sequence 0.
 //! A routing error adopts the leader its answer names (KIP-951).
 //!
+//! A partition that holds records and has no known leader asks for the
+//! metadata at every drain, as Kafka's `Sender.sendProducerData` requests an
+//! update for the `unknownLeaderTopics` of `RecordAccumulator.ready`, so the
+//! lookups repeat at the client's metadata backoff until the leaders are
+//! back, as for a moment after every broker restarted.
+//!
 //! A record for a topic the metadata does not know yet, or for a partition
 //! beyond the topic's partition count, waits for the metadata as Kafka's
 //! `KafkaProducer.waitOnMetadata` blocks `send`: the producer asks for the
@@ -28,7 +34,7 @@
 //! A record that waited takes its timestamp and joins a batch when the
 //! metadata arrives, as `send` does after the wait.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use bytes::Bytes;
 use derive_more::{Display, From, Into};
@@ -816,9 +822,10 @@ impl Producer {
         let client = self.client.next_deadline(now);
         // A batch counts only when a drain could send it. A batch blocked by
         // the requests in flight waits for their answers, a batch without a
-        // leader for the metadata, and every batch of an idempotent producer
-        // for its producer id; each of those arrives as a frame.
-        let can_drain = !self.config.idempotent() || self.current_epoch().is_some();
+        // leader for the metadata lookup the last drain asked for, and every
+        // batch of an idempotent producer for its producer id; each of those
+        // arrives as a frame.
+        let can_drain = self.may_send();
         let epoch = self.current_epoch();
         let batches = self.partitions.iter().filter(|_| can_drain).filter_map(
             |((topic, partition), queue)| {
@@ -1053,13 +1060,54 @@ impl Producer {
         self.deferred.retain(|_, records| !records.is_empty());
     }
 
+    /// Whether the producer may send batches: an idempotent producer waits
+    /// for its producer id, as Kafka's `Sender.runOnce` sends no produce
+    /// data while the `InitProducerId` of its `TransactionManager` is
+    /// pending.
+    fn may_send(&self) -> bool {
+        match self.identity {
+            ProducerId::Ready { .. } => true,
+            ProducerId::Requested(_) => false,
+            ProducerId::Absent => !self.config.idempotent(),
+        }
+    }
+
     /// Send every ready batch, one per partition per request, until nothing
-    /// is ready.
+    /// is ready. First ask for the metadata of the topics whose records wait
+    /// for a leader, as Kafka's `Sender.sendProducerData` does before it
+    /// drains (see [`Producer::look_up_unknown_leaders`]).
     fn drain(&mut self, ctx: &mut Ctx<'_>) {
-        if self.closed {
+        if self.closed || !self.may_send() {
             return;
         }
+        self.look_up_unknown_leaders();
         while self.drain_once(ctx) {}
+    }
+
+    /// Ask for a metadata update while a partition with records has no
+    /// leader. Kafka's `RecordAccumulator.ready` puts the topic of every
+    /// partition that holds a batch and has no known leader, ready or not,
+    /// among its `unknownLeaderTopics`, and `Sender.sendProducerData` adds
+    /// each to the metadata (`ProducerMetadata.add`) and calls
+    /// `Metadata.requestUpdate`. Every drain after an answer that still
+    /// shows no leader asks again, so the lookups repeat at the client's
+    /// metadata backoff until the leaders are back, whether or not the
+    /// topic was tracked when the metadata last named it.
+    fn look_up_unknown_leaders(&mut self) {
+        let metadata = self.client.metadata();
+        let unknown: BTreeSet<String> = self
+            .partitions
+            .iter()
+            .filter(|((topic, partition), queue)| {
+                !queue.batches.is_empty() && metadata.leader(topic, *partition).is_none()
+            })
+            .map(|((topic, _), _)| topic.clone())
+            .collect();
+        if unknown.is_empty() {
+            return;
+        }
+        self.client.add_topics(unknown.iter().map(String::as_str));
+        self.client.request_metadata_refresh();
     }
 
     fn drain_once(&mut self, ctx: &mut Ctx<'_>) -> bool {
@@ -1072,7 +1120,6 @@ impl Producer {
         };
         let epoch = stamp.map(|(_, epoch)| epoch);
         let mut per_leader: BTreeMap<i32, Vec<(String, i32, ProducerBatch)>> = BTreeMap::new();
-        let mut needs_metadata = false;
         for ((topic, partition), queue) in &mut self.partitions {
             let Some(head) = queue.batches.front() else {
                 continue;
@@ -1093,8 +1140,9 @@ impl Producer {
             if queue.in_flight > 0 && (is_retry || queue.in_flight_epoch != epoch) {
                 continue;
             }
+            // A partition without a leader waits for the lookup `drain`
+            // asked for.
             let Some(leader) = self.client.metadata().leader(topic, *partition) else {
-                needs_metadata = true;
                 continue;
             };
             let Some(mut batch) = queue.batches.pop_front() else {
@@ -1111,9 +1159,6 @@ impl Producer {
                 .entry(leader)
                 .or_default()
                 .push((topic.clone(), *partition, batch));
-        }
-        if needs_metadata {
-            self.client.request_metadata_refresh();
         }
         let sent = !per_leader.is_empty();
         for (leader, batches) in per_leader {

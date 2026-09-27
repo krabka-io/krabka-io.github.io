@@ -224,6 +224,15 @@ pub struct Knobs {
     pub produce_delay_ms: Millis,
     /// Do not answer any request.
     pub silent: bool,
+    /// Brokers, by id, that take connections and requests but answer none,
+    /// `ApiVersions` included, as a broker cut off from its controller
+    /// never answers its clients.
+    pub silent_brokers: BTreeSet<i32>,
+    /// The error code a `Metadata` answer gives a partition without a
+    /// leader: `LEADER_NOT_AVAILABLE`, as Kafka's
+    /// `KRaftMetadataCache.getPartitionMetadata` answers, unless a test sets
+    /// another.
+    pub leaderless_error: i16,
     /// Handle this many requests but lose their answers, as a network that
     /// drops them after the broker acted.
     pub drop_responses: u32,
@@ -333,6 +342,7 @@ impl ClusterState {
             producers: BTreeMap::new(),
             knobs: Knobs {
                 sequence_checks: true,
+                leaderless_error: codes::LEADER_NOT_AVAILABLE,
                 ..Knobs::default()
             },
             requests: Vec::new(),
@@ -727,7 +737,11 @@ impl FakeBroker {
             client_id: header.client_id.clone(),
             body: body.clone(),
         });
-        if self.state.borrow().knobs.silent {
+        let silent = {
+            let knobs = &self.state.borrow().knobs;
+            knobs.silent || knobs.silent_brokers.contains(&self.broker_id)
+        };
+        if silent {
             return;
         }
         let reply = self.dispatch(ctx, src, conn, &header, version, &body);
@@ -941,7 +955,11 @@ impl FakeBroker {
                         .partitions
                         .iter()
                         .map(|(index, p)| MetadataResponsePartition {
-                            error_code: codes::NONE,
+                            error_code: if p.leader < 0 {
+                                state.knobs.leaderless_error
+                            } else {
+                                codes::NONE
+                            },
                             partition_index: *index,
                             leader_id: p.leader,
                             leader_epoch: p.leader_epoch,

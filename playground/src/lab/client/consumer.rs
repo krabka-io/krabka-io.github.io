@@ -1106,8 +1106,12 @@ impl Consumer {
             return client.map(|at| at.max(now));
         }
         // Only what a tick can act on counts. A request in flight wakes the
-        // member with its answer, and a partition without a leader waits for
-        // the metadata the client refreshes.
+        // member with its answer. A partition without a leader asks for the
+        // metadata once its retry backoff passed, as Kafka's
+        // `AbstractFetch.maybeNodeForPosition` and
+        // `OffsetFetcher.groupListOffsetRequests` do on every poll, so it is
+        // due at the end of the backoff, and then waits for the refresh it
+        // asked for.
         let membership = match (self.state, self.config.group_protocol) {
             _ if self.manual => None,
             (MemberState::Joining, GroupProtocol::Classic)
@@ -1127,17 +1131,19 @@ impl Consumer {
         };
         let partitions = self.assigned.iter().filter_map(|((topic, partition), p)| {
             let leader = self.client.metadata().leader(topic, *partition);
+            let backs_off_without_leader = leader.is_none() && p.retry_at > now;
             let due = match p.state {
                 PositionState::Init => {
                     self.offset_fetch.is_none()
                         && (self.manual || self.state == MemberState::Stable)
                 }
-                PositionState::NeedReset(_) => leader.is_some(),
+                PositionState::NeedReset(_) => leader.is_some() || backs_off_without_leader,
                 PositionState::Ready => {
                     !p.fetch_in_flight
                         && !p.pending_revocation
                         && p.buffered.is_empty()
-                        && leader.is_some_and(|l| !self.fetch_brokers.contains(&l))
+                        && (leader.is_some_and(|l| !self.fetch_brokers.contains(&l))
+                            || backs_off_without_leader)
                 }
                 PositionState::FetchingCommitted | PositionState::Resetting(_) => false,
             };

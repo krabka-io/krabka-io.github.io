@@ -308,7 +308,7 @@ export class Inspector {
     this.lastStateWall = now;
     let ts = this.treeState.get(n.id);
     if (!ts) {
-      ts = { expanded: new Set(), collapsed: new Set() };
+      ts = { expanded: new Set(), collapsed: new Set(), sections: new Map() };
       this.treeState.set(n.id, ts);
     }
     const ctx = {
@@ -319,6 +319,7 @@ export class Inspector {
       spec: this.data?.scenario?.nodes?.find((s) => s.id === n.id) || null,
     };
     const view = renderState(n, ctx);
+    keepSectionsOpen(view, ts.sections);
     const panel = this.panels.state;
     // Keep the scroll position of a panel that only changed numbers.
     const scroll = panel.scrollTop;
@@ -465,4 +466,20 @@ function answerText(answer) {
   if (typeof answer !== "object") return String(answer);
   const text = JSON.stringify(answer);
   return text.length > 160 ? `${text.slice(0, 159)}…` : text;
+}
+
+// Every render of the State tab builds its sections afresh, each open or
+// closed by its default, so a section the reader opened would close again at
+// the next render. `sections` keeps what the reader chose, keyed by the
+// titles from the outermost section down, and puts it back on the new view.
+function keepSectionsOpen(view, sections) {
+  for (const d of view.querySelectorAll("details.lab-sec")) {
+    const titles = [];
+    for (let e = d; e && e !== view; e = e.parentElement) {
+      if (e.matches("details.lab-sec")) titles.unshift(e.querySelector(":scope > summary")?.textContent ?? "");
+    }
+    const key = titles.join("\u0000");
+    if (sections.has(key)) d.open = sections.get(key);
+    d.addEventListener("toggle", () => sections.set(key, d.open));
+  }
 }
