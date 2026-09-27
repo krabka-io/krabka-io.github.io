@@ -67,13 +67,12 @@ use self::{
 };
 use crate::lab::{
     client::{
-        ClientEvent, ClientOptions, KafkaClient, Producer, ProducerConfig, ProducerEvent,
-        ProducerRecord, SeqNo,
+        ClientOptions, KafkaClient, Producer, ProducerConfig, ProducerEvent, ProducerRecord, SeqNo,
     },
     net::{Ctx, Endpoint, Frame, Millis, NodeId},
     registry::{
+        Role,
         ids::LogOffset,
-        lane::{self, Lane},
         record::{self, RawRecord},
     },
 };
@@ -109,6 +108,13 @@ impl Default for StoreConfig {
             replication_factor: 3,
         }
     }
+}
+
+/// The records the reader read, with their offsets as log offsets.
+fn offsets(read: Vec<(i64, RawRecord)>) -> Vec<(LogOffset, RawRecord)> {
+    read.into_iter()
+        .map(|(offset, record)| (LogOffset(offset), record))
+        .collect()
 }
 
 /// Why a store task failed.
@@ -187,7 +193,7 @@ pub struct KafkaStore {
     layout: Option<TopicLayout>,
     cluster_id: Option<String>,
     reader: Reader,
-    producer: Lane<Producer>,
+    producer: Producer,
     /// Confluent's `lastWrittenOffset`: `None` while unknown.
     last_written: Option<i64>,
     task: Option<Task>,
@@ -198,8 +204,9 @@ pub struct KafkaStore {
 
 impl KafkaStore {
     /// Start a store over `bootstrap`. `generation` counts the node's
-    /// starts, so the clients of a restarted node open connections that no
-    /// broker confuses with those of the one before.
+    /// starts: each start's clients draw their connection ids from lanes of
+    /// their own, so a late answer to a client of an earlier start reaches
+    /// none of this one's.
     pub fn start(
         config: StoreConfig,
         bootstrap: &[NodeId],
@@ -207,28 +214,26 @@ impl KafkaStore {
         ctx: &mut Ctx<'_>,
     ) -> Self {
         let endpoints: Vec<Endpoint> = bootstrap.iter().map(|n| Endpoint::kafka(*n)).collect();
-        let lane =
-            |role: u32, ctx: &mut Ctx<'_>| (lane::index(generation, role), ctx.rand(u64::MAX));
-        let (index, seed) = lane(lane::ADMIN, ctx);
-        let admin = KafkaClient::new(endpoints.clone(), "adminclient-1", ClientOptions::default());
+        let client = |role: Role, client_id: &str| {
+            let options = ClientOptions {
+                conn_base: role.conn_base(generation),
+                ..ClientOptions::default()
+            };
+            KafkaClient::new(endpoints.clone(), client_id, options)
+        };
         let setup = Setup::new(
-            Lane::new(admin, index, seed),
+            client(Role::Admin, "adminclient-1"),
             &config.topic,
             config.replication_factor,
             config.init_timeout_ms,
             ctx.now(),
         );
-        let (index, seed) = lane(lane::READER, ctx);
-        let reader_client = KafkaClient::new(
-            endpoints.clone(),
-            &format!("KafkaStore-reader-{}", config.topic),
-            ClientOptions::default(),
+        let reader = Reader::new(
+            client(Role::Reader, &format!("KafkaStore-reader-{}", config.topic)),
+            &config.topic,
         );
-        let reader = Reader::new(Lane::new(reader_client, index, seed), &config.topic);
-        let (index, seed) = lane(lane::PRODUCER, ctx);
-        let producer_client = KafkaClient::new(endpoints, "producer-1", ClientOptions::default());
         let producer = Producer::new(
-            producer_client,
+            client(Role::Producer, "producer-1"),
             ProducerConfig::default(),
             ctx.rand(u64::MAX),
         );
@@ -239,7 +244,7 @@ impl KafkaStore {
             layout: None,
             cluster_id: None,
             reader,
-            producer: Lane::new(producer, index, seed),
+            producer,
             last_written: None,
             task: None,
             outcome: None,
@@ -280,63 +285,48 @@ impl KafkaStore {
     /// looks at the task's outcome.
     pub fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) -> Vec<(LogOffset, RawRecord)> {
         let mut read = Vec::new();
-        if self.producer.owns(frame.conn) {
-            let frame = self.producer.inbound(frame);
-            let (events, _) = self
-                .producer
-                .run(ctx, |producer, ctx| producer.on_frame(ctx, frame));
+        if self.producer.client().owns_conn(frame.conn) {
+            let (events, _) = self.producer.on_frame(ctx, frame);
             self.on_producer_events(ctx.now(), events);
-        } else if self.reader.lane().owns(frame.conn) {
-            let frame = self.reader.lane().inbound(frame);
-            let events = self
-                .reader
-                .lane_mut()
-                .run(ctx, |client, ctx| client.on_frame(ctx, frame));
-            read = self.on_reader_events(ctx, events);
+        } else if self.reader.owns_conn(frame.conn) {
+            let version = self.reader.metadata_version();
+            read = self.reader.on_frame(ctx, frame);
+            self.after_reader(ctx, version);
         } else if let Some(setup) = &mut self.setup
-            && setup.lane().owns(frame.conn)
+            && setup.client().owns_conn(frame.conn)
         {
-            let frame = setup.lane().inbound(frame);
-            let events = setup
-                .lane_mut()
-                .run(ctx, |client, ctx| client.on_frame(ctx, frame));
+            let events = setup.client_mut().on_frame(ctx, frame);
             let progress = setup.on_events(ctx, events);
             self.on_setup_progress(ctx, progress);
         }
         self.advance(ctx);
-        read
+        offsets(read)
     }
 
     /// The timer fired: drive every client, the startup and the task.
     pub fn on_tick(&mut self, ctx: &mut Ctx<'_>) -> Vec<(LogOffset, RawRecord)> {
-        let (events, _) = self.producer.run(ctx, Producer::on_tick);
+        let (events, _) = self.producer.on_tick(ctx);
         self.on_producer_events(ctx.now(), events);
-        let (events, _) = self.reader.lane_mut().run(ctx, KafkaClient::on_tick);
-        let read = self.on_reader_events(ctx, events);
+        let version = self.reader.metadata_version();
+        let read = self.reader.on_tick(ctx);
+        self.after_reader(ctx, version);
         if let Some(setup) = &mut self.setup {
-            let (events, _) = setup.lane_mut().run(ctx, KafkaClient::on_tick);
+            let (events, _) = setup.client_mut().on_tick(ctx);
             let progress = setup.on_events(ctx, events);
             self.on_setup_progress(ctx, progress);
         }
         self.advance(ctx);
-        read
+        offsets(read)
     }
 
-    fn on_reader_events(
-        &mut self,
-        ctx: &mut Ctx<'_>,
-        events: Vec<ClientEvent>,
-    ) -> Vec<(LogOffset, RawRecord)> {
-        let metadata_changed = events
-            .iter()
-            .any(|e| matches!(e, ClientEvent::MetadataUpdated));
-        let read = self.reader.on_events(ctx.now(), events);
-        if metadata_changed && let State::Locate { waiting: true, .. } = self.state {
+    /// The reader's client applied a metadata answer since `version`: the
+    /// answer to a look-up, while the store waits for one.
+    fn after_reader(&mut self, ctx: &mut Ctx<'_>, version: u64) {
+        if self.reader.metadata_version() != version
+            && let State::Locate { waiting: true, .. } = self.state
+        {
             self.check_located(ctx);
         }
-        read.into_iter()
-            .map(|(offset, record)| (LogOffset(offset), record))
-            .collect()
     }
 
     fn on_setup_progress(&mut self, ctx: &mut Ctx<'_>, progress: Progress) {
@@ -347,7 +337,7 @@ impl KafkaStore {
                     self.layout = setup.layout().cloned();
                     self.cluster_id = setup.cluster_id().map(str::to_string);
                     // The admin client closes once the topic is set up.
-                    setup.lane_mut().run(ctx, KafkaClient::close);
+                    setup.client_mut().close(ctx);
                 }
                 self.state = State::Locate {
                     attempt: 0,
@@ -363,10 +353,10 @@ impl KafkaStore {
     /// pending fails.
     pub fn close(&mut self, ctx: &mut Ctx<'_>) {
         if let Some(mut setup) = self.setup.take() {
-            setup.lane_mut().run(ctx, KafkaClient::close);
+            setup.client_mut().close(ctx);
         }
-        self.reader.lane_mut().run(ctx, KafkaClient::close);
-        self.producer.run(ctx, Producer::close);
+        self.reader.close(ctx);
+        self.producer.close(ctx);
         self.task = None;
     }
 
@@ -388,7 +378,10 @@ impl KafkaStore {
         };
         match self.reader.partitions() {
             Some(1) => {
-                self.reader.start(ctx.now());
+                if let Err(error) = self.reader.start(ctx) {
+                    self.fail(ctx, error.to_string());
+                    return;
+                }
                 self.state = State::CatchUp;
                 self.begin_task(ctx, None, self.config.init_timeout_ms);
             }
@@ -447,7 +440,6 @@ impl KafkaStore {
                 waiting: true,
             };
         }
-        self.reader.poll(ctx);
         self.check_task(ctx);
         self.advance_startup(ctx);
     }
@@ -547,7 +539,7 @@ impl KafkaStore {
 
     /// Hand a record to the producer, for partition 0 of the topic.
     fn send(&mut self, now: Millis, record: RawRecord, noop: bool, timeout_ms: Millis) -> Stage {
-        let seq = self.producer.get_mut().send(
+        let seq = self.producer.send(
             now,
             ProducerRecord {
                 topic: self.config.topic.clone(),
@@ -689,7 +681,7 @@ impl KafkaStore {
             .chain(locate)
             .chain(task)
             .chain(self.reader.next_deadline(now))
-            .chain(self.producer.get().next_deadline(now))
+            .chain(self.producer.next_deadline(now))
             .min()
     }
 
@@ -731,8 +723,8 @@ impl KafkaStore {
             "noops": self.noops,
             "puts": self.puts,
             "reader": self.reader.snapshot(),
-            "producer": self.producer.get().snapshot(),
-            "admin": self.setup.as_ref().map(|s| s.lane().get().snapshot()),
+            "producer": self.producer.snapshot(),
+            "admin": self.setup.as_ref().map(|s| s.client().snapshot()),
         })
     }
 }

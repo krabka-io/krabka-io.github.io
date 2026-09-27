@@ -9,6 +9,12 @@
 //! which Confluent reports as an `IOException` and the lab as
 //! [`Forwarded::Failed`].
 //!
+//! The forwarder is no Kafka client, but it sends from the node's client
+//! endpoint as the registry's Kafka clients do, so it draws its connection
+//! ids from a range of its own, one [`CONN_ID_RANGE`] from a base the node
+//! gives it, as [`conn_base`](crate::lab::client::conn_base) spaces the
+//! Kafka clients' ranges.
+//!
 //! [`relay`] turns the primary's answer into the secondary's: a success
 //! passes through, and an error becomes Confluent's `RestException` of the
 //! `RestClientException` the primary's body makes, whose message ends in
@@ -18,6 +24,7 @@ use bytes::BytesMut;
 use serde_json::{Value, json};
 
 use crate::lab::{
+    client::CONN_ID_RANGE,
     net::{ConnId, Ctx, Endpoint, Frame, Millis, NodeId, Payload},
     registry::http::{HttpError, HttpRequest, HttpResponse},
 };
@@ -46,15 +53,35 @@ struct Call {
 }
 
 /// The forwarding client. See the module documentation.
-#[derive(Default)]
 pub struct Forwarder {
-    next_conn: u32,
+    conn_base: u32,
+    /// The connections opened so far.
+    opened: u32,
     call: Option<Call>,
     forwarded: u64,
     failed: u64,
 }
 
 impl Forwarder {
+    /// A forwarder that numbers its connections from `conn_base + 1` to
+    /// `conn_base + CONN_ID_RANGE - 1`, then starts over.
+    #[must_use]
+    pub fn new(conn_base: u32) -> Self {
+        Self {
+            conn_base,
+            opened: 0,
+            call: None,
+            forwarded: 0,
+            failed: 0,
+        }
+    }
+
+    /// Whether a connection id is in the forwarder's range.
+    #[must_use]
+    pub fn owns_conn(&self, conn: ConnId) -> bool {
+        conn.0.wrapping_sub(self.conn_base).wrapping_sub(1) < CONN_ID_RANGE - 1
+    }
+
     /// Send `request` to the registry on `to`. The outcome comes from
     /// [`Forwarder::on_frame`] or, after `timeout_ms`, from
     /// [`Forwarder::on_tick`].
@@ -66,8 +93,11 @@ impl Forwarder {
         timeout_ms: Millis,
     ) {
         self.abort(ctx);
-        self.next_conn += 1;
-        let conn = ConnId(self.next_conn);
+        let conn = ConnId(
+            self.conn_base
+                .wrapping_add(1 + self.opened % (CONN_ID_RANGE - 1)),
+        );
+        self.opened = self.opened.wrapping_add(1);
         let me = Endpoint::client(ctx.me());
         let target = Endpoint::http(to);
         let mut request = request.clone();
@@ -189,7 +219,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::lab::testing::CtxBuffers;
+    use crate::lab::{client::conn_base, testing::CtxBuffers};
 
     #[test]
     fn an_answer_relays_a_success_as_it_came_and_an_error_as_a_rest_client_exception() {
@@ -225,17 +255,20 @@ mod tests {
         let request = HttpRequest::new("POST", "/subjects/s/versions");
         let primary = Endpoint::http(NodeId(4));
         let me = Endpoint::client(NodeId(5));
-        let data = |bytes: Bytes| Frame::data(primary, me, ConnId(1), bytes);
+        // The forwarder numbers its connections from its base on.
+        let base = conn_base(4);
+        let conn = |n: u32| ConnId(base + n);
+        let data = |bytes: Bytes| Frame::data(primary, me, conn(1), bytes);
 
-        let mut forwarder = Forwarder::default();
+        let mut forwarder = Forwarder::new(base);
         buffers.with(0, |ctx| forwarder.send(ctx, NodeId(4), &request, 60_000));
         let mut sent = request.clone();
         sent.close = true;
         assert!(
             buffers.outbox
                 == vec![
-                    Frame::open(me, primary, ConnId(1)),
-                    Frame::data(me, primary, ConnId(1), sent.encode()),
+                    Frame::open(me, primary, conn(1)),
+                    Frame::data(me, primary, conn(1), sent.encode()),
                 ]
         );
         let answer = HttpResponse::ok(&json!({ "id": 1 })).encode();
@@ -252,13 +285,13 @@ mod tests {
         // The primary's close after its answer belongs to no call.
         assert!(
             forwarder
-                .on_frame(&Frame::close(primary, me, ConnId(1)))
+                .on_frame(&Frame::close(primary, me, conn(1)))
                 .is_none()
         );
 
         buffers.with(10, |ctx| forwarder.send(ctx, NodeId(4), &request, 60_000));
         assert!(
-            forwarder.on_frame(&Frame::close(primary, me, ConnId(2)))
+            forwarder.on_frame(&Frame::close(primary, me, conn(2)))
                 == Some(Forwarded::Failed(
                     "the primary refused or closed the connection".to_string()
                 ))
@@ -272,7 +305,40 @@ mod tests {
             buffers.with(60_020, |ctx| forwarder.on_tick(ctx))
                 == Some(Forwarded::Failed("Read timed out".to_string()))
         );
-        assert!(buffers.outbox == vec![Frame::close(me, primary, ConnId(3))]);
+        assert!(buffers.outbox == vec![Frame::close(me, primary, conn(3))]);
         assert!(forwarder.snapshot() == json!({ "active": null, "forwarded": 1, "failed": 2 }));
+    }
+
+    #[test]
+    fn the_forwarder_owns_the_range_above_its_base_and_wraps_within_it() {
+        let base = conn_base(9);
+        let forwarder = Forwarder::new(base);
+        let owned: Vec<bool> = [
+            base,
+            base + 1,
+            base + CONN_ID_RANGE - 1,
+            base + CONN_ID_RANGE,
+            conn_base(8) + 1,
+        ]
+        .into_iter()
+        .map(|id| forwarder.owns_conn(ConnId(id)))
+        .collect();
+        assert!(owned == vec![false, true, true, false, false]);
+        // After the last id of the range, the next call opens the first.
+        let mut buffers = CtxBuffers::new(NodeId(5));
+        let mut forwarder = Forwarder::new(base);
+        forwarder.opened = CONN_ID_RANGE - 2;
+        let request = HttpRequest::new("DELETE", "/config");
+        for expected in [base + CONN_ID_RANGE - 1, base + 1] {
+            buffers.outbox.clear();
+            buffers.with(0, |ctx| forwarder.send(ctx, NodeId(4), &request, 1_000));
+            let opened: Vec<ConnId> = buffers
+                .outbox
+                .iter()
+                .filter(|f| f.payload == Payload::Open)
+                .map(|f| f.conn)
+                .collect();
+            assert!(opened == vec![ConnId(expected)]);
+        }
     }
 }

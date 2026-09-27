@@ -42,7 +42,6 @@ use crate::lab::{
     },
     codes,
     net::{Ctx, Millis},
-    registry::lane::Lane,
 };
 
 /// The admin client's `retry.backoff.ms`.
@@ -113,7 +112,7 @@ pub enum Progress {
 
 /// The admin half of the startup. See the module documentation.
 pub struct Setup {
-    lane: Lane<KafkaClient>,
+    client: KafkaClient,
     topic: String,
     desired_replication_factor: i16,
     init_timeout_ms: Millis,
@@ -127,17 +126,17 @@ pub struct Setup {
 }
 
 impl Setup {
-    /// A setup of `topic` over the admin client on `lane`, starting now.
+    /// A setup of `topic` over the admin `client`, starting now.
     #[must_use]
     pub fn new(
-        lane: Lane<KafkaClient>,
+        client: KafkaClient,
         topic: &str,
         desired_replication_factor: i16,
         init_timeout_ms: Millis,
         now: Millis,
     ) -> Self {
         Self {
-            lane,
+            client,
             topic: topic.to_string(),
             desired_replication_factor,
             init_timeout_ms,
@@ -151,15 +150,15 @@ impl Setup {
         }
     }
 
-    /// The lane of the admin client, for routing frames.
+    /// The admin client, for routing frames.
     #[must_use]
-    pub fn lane(&self) -> &Lane<KafkaClient> {
-        &self.lane
+    pub fn client(&self) -> &KafkaClient {
+        &self.client
     }
 
-    /// The lane of the admin client.
-    pub fn lane_mut(&mut self) -> &mut Lane<KafkaClient> {
-        &mut self.lane
+    /// The admin client.
+    pub fn client_mut(&mut self) -> &mut KafkaClient {
+        &mut self.client
     }
 
     #[must_use]
@@ -210,7 +209,7 @@ impl Setup {
         message: String,
     ) -> Progress {
         if error_class(code).is_retriable() {
-            self.lane.get_mut().note_error(code, target);
+            self.client.note_error(code, target);
             self.retry(ctx);
             Progress::Working
         } else {
@@ -558,8 +557,7 @@ impl Setup {
         R: krabka_protocol::ProtocolRequest + 'static,
         R::Response: 'static,
     {
-        self.lane
-            .run(ctx, |client, ctx| client.send(ctx, target, request))
+        self.client.send(ctx, target, request)
     }
 
     /// The next time the setup needs a tick: the admin client's deadline,
@@ -567,8 +565,7 @@ impl Setup {
     #[must_use]
     pub fn next_deadline(&self, now: Millis) -> Option<Millis> {
         let retry = self.out.is_none().then_some(self.retry_at.max(now));
-        self.lane
-            .get()
+        self.client
             .next_deadline(now)
             .into_iter()
             .chain(retry)

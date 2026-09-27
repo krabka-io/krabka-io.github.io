@@ -42,8 +42,7 @@ use crate::lab::{
         exponential_backoff,
     },
     codes,
-    net::{Ctx, Frame, Millis, NodeId, node_for_ip},
-    registry::lane::Lane,
+    net::{ConnId, Ctx, Frame, Millis, NodeId, node_for_ip},
 };
 
 /// The protocol type of the group: `SchemaRegistryCoordinator.protocolType`.
@@ -290,7 +289,7 @@ impl Phase {
 
 /// The member of the `schema-registry` group. See the module documentation.
 pub struct Elector {
-    lane: Lane<KafkaClient>,
+    client: KafkaClient,
     config: ElectorConfig,
     identity: Identity,
     phase: Phase,
@@ -313,12 +312,11 @@ pub struct Elector {
 }
 
 impl Elector {
-    /// A member for `identity` over the client on `lane`; it joins at its
-    /// first tick.
+    /// A member for `identity` over `client`; it joins at its first tick.
     #[must_use]
-    pub fn new(lane: Lane<KafkaClient>, config: ElectorConfig, identity: Identity) -> Self {
+    pub fn new(client: KafkaClient, config: ElectorConfig, identity: Identity) -> Self {
         Self {
-            lane,
+            client,
             config,
             identity,
             phase: Phase::Joining,
@@ -338,18 +336,15 @@ impl Elector {
         }
     }
 
-    /// The lane of the member's client, for routing frames.
+    /// Whether a connection id belongs to the member's client.
     #[must_use]
-    pub fn lane(&self) -> &Lane<KafkaClient> {
-        &self.lane
+    pub fn owns_conn(&self, conn: ConnId) -> bool {
+        self.client.owns_conn(conn)
     }
 
     /// A frame for the member's client.
     pub fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) -> Vec<ElectionEvent> {
-        let frame = self.lane.inbound(frame);
-        let events = self
-            .lane
-            .run(ctx, |client, ctx| client.on_frame(ctx, frame));
+        let events = self.client.on_frame(ctx, frame);
         let mut out = Vec::new();
         self.on_client_events(ctx, events, &mut out);
         self.drive(ctx, &mut out);
@@ -358,7 +353,7 @@ impl Elector {
 
     /// The timer fired: drive the client and the membership.
     pub fn on_tick(&mut self, ctx: &mut Ctx<'_>) -> Vec<ElectionEvent> {
-        let (events, _) = self.lane.run(ctx, KafkaClient::on_tick);
+        let (events, _) = self.client.on_tick(ctx);
         let mut out = Vec::new();
         self.on_client_events(ctx, events, &mut out);
         self.drive(ctx, &mut out);
@@ -368,7 +363,7 @@ impl Elector {
     /// Close the client. The member does not leave: the coordinator expires
     /// it once its session runs out.
     pub fn close(&mut self, ctx: &mut Ctx<'_>) {
-        self.lane.run(ctx, KafkaClient::close);
+        self.client.close(ctx);
         self.join = None;
         self.sync = None;
         self.heartbeats.clear();
@@ -387,8 +382,7 @@ impl Elector {
         R::Response: 'static,
     {
         let target = self.coordinator();
-        self.lane
-            .run(ctx, |client, ctx| client.send(ctx, target, request))
+        self.client.send(ctx, target, request)
     }
 
     /// Send what is due: the join, or the heartbeat; and forget the
@@ -448,8 +442,7 @@ impl Elector {
     }
 
     fn forget_coordinator(&mut self) {
-        self.lane
-            .get_mut()
+        self.client
             .invalidate_coordinator(CoordinatorType::Group, &self.config.group_id);
     }
 
@@ -459,7 +452,7 @@ impl Elector {
     fn note_error(&mut self, code: i16) {
         self.last_error = Some(code);
         let target = self.coordinator();
-        self.lane.get_mut().note_error(code, &target);
+        self.client.note_error(code, &target);
     }
 
     /// Join again: at once after a rebalance or a reset member, after the
@@ -656,9 +649,7 @@ impl Elector {
             ),
             Phase::Joining | Phase::Syncing => None,
         };
-        own.into_iter()
-            .chain(self.lane.get().next_deadline(now))
-            .min()
+        own.into_iter().chain(self.client.next_deadline(now)).min()
     }
 
     /// The member for the inspector.
@@ -677,7 +668,7 @@ impl Elector {
                 "leader_url": a.leader_identity.as_ref().map(Identity::url),
             })),
             "last_error": self.last_error,
-            "client": self.lane.get().snapshot(),
+            "client": self.client.snapshot(),
         })
     }
 }

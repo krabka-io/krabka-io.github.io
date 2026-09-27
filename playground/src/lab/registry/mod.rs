@@ -131,7 +131,6 @@ mod forward;
 pub mod http;
 pub mod ids;
 pub mod kafkastore;
-mod lane;
 pub mod record;
 pub mod rest;
 pub mod service;
@@ -148,14 +147,13 @@ use self::{
     http::{HttpError, HttpRequest, HttpResponse},
     ids::LogOffset,
     kafkastore::{KafkaStore, StoreConfig},
-    lane::Lane,
     record::RawRecord,
     rest::WriteOp,
     service::RegistryService,
 };
 use super::{
     LabError,
-    client::{ClientOptions, KafkaClient},
+    client::{ClientOptions, KafkaClient, conn_base},
     config_field, config_field_or,
     net::{ConnId, Ctx, Endpoint, Frame, HTTP_PORT, Millis, Node, NodeId, Payload},
     scenario::NodeSpec,
@@ -181,6 +179,39 @@ const CONFIG_KEYS: [&str; 13] = [
 /// The failure of a group that was not joined within
 /// `kafkastore.init.timeout.ms`: Confluent's `SchemaRegistryTimeoutException`.
 const JOIN_TIMEOUT: &str = "Timed out waiting for join group to complete";
+
+/// A client of one start of the node, each on connection ids of its own:
+/// Confluent's store runs an admin client, a reader and a producer, its
+/// leader elector a group member, and a secondary an HTTP client to the
+/// primary. All send from the node's client endpoint.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Role {
+    Admin,
+    Reader,
+    Producer,
+    Elector,
+    Forwarder,
+}
+
+impl Role {
+    /// The clients of one start.
+    const COUNT: u32 = 5;
+
+    /// The connection-id base of this client in the node's
+    /// `generation`-th start: each start takes the next [`Role::COUNT`]
+    /// lanes of the client module's [`conn_base`], so a late answer to a
+    /// client of an earlier start reaches none of this one's.
+    fn conn_base(self, generation: u32) -> u32 {
+        let lane = match self {
+            Self::Admin => 0,
+            Self::Reader => 1,
+            Self::Producer => 2,
+            Self::Elector => 3,
+            Self::Forwarder => 4,
+        };
+        conn_base(generation.wrapping_mul(Self::COUNT).wrapping_add(lane))
+    }
+}
 
 /// Where a request came from, and where its answer goes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -262,7 +293,7 @@ pub struct RegistryNode {
     service: RegistryService,
     store: Option<KafkaStore>,
     elector: Option<Elector>,
-    forwarder: Option<Lane<Forwarder>>,
+    forwarder: Option<Forwarder>,
     leadership: Leadership,
     /// Why the startup failed outside the store: the group was not joined.
     failure: Option<String>,
@@ -417,7 +448,7 @@ impl RegistryNode {
             self.elector.as_ref().and_then(|e| e.next_deadline(now)),
             self.forwarder
                 .as_ref()
-                .and_then(|f| f.get().next_deadline())
+                .and_then(Forwarder::next_deadline)
                 .map(|at| at.max(now)),
             self.leadership
                 .join_deadline
@@ -438,22 +469,17 @@ impl RegistryNode {
             .iter()
             .map(|n| Endpoint::kafka(*n))
             .collect();
-        let client = KafkaClient::new(endpoints, "sr-1", ClientOptions::default());
-        let lane = Lane::new(
-            client,
-            lane::index(self.generation, lane::ELECTOR),
-            ctx.rand(u64::MAX),
-        );
+        let options = ClientOptions {
+            conn_base: Role::Elector.conn_base(self.generation),
+            ..ClientOptions::default()
+        };
+        let client = KafkaClient::new(endpoints, "sr-1", options);
         self.elector = Some(Elector::new(
-            lane,
+            client,
             self.settings.elector.clone(),
             self.identity(),
         ));
-        self.forwarder = Some(Lane::new(
-            Forwarder::default(),
-            lane::index(self.generation, lane::FORWARDER),
-            ctx.rand(u64::MAX),
-        ));
+        self.forwarder = Some(Forwarder::new(Role::Forwarder.conn_base(self.generation)));
         self.leadership.join_deadline = Some(ctx.now() + self.settings.store.init_timeout_ms);
     }
 
@@ -476,7 +502,7 @@ impl RegistryNode {
             elector.close(ctx);
         }
         if let Some(forwarder) = &mut self.forwarder {
-            forwarder.run(ctx, Forwarder::abort);
+            forwarder.abort(ctx);
         }
     }
 
@@ -674,7 +700,7 @@ impl RegistryNode {
         };
         let timeout = self.settings.leader_read_timeout_ms;
         if let (Some(node), Some(forwarder)) = (leader.node(), self.forwarder.as_mut()) {
-            forwarder.run(ctx, |f, ctx| f.send(ctx, node, &pending.request, timeout));
+            forwarder.send(ctx, node, &pending.request, timeout);
             self.writer = Writer::Forwarding(pending);
         } else {
             // A primary whose host names no lab node cannot be reached.
@@ -872,14 +898,13 @@ impl RegistryNode {
     /// member, or the store's.
     fn on_client_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) {
         if let Some(forwarder) = &mut self.forwarder
-            && forwarder.owns(frame.conn)
+            && forwarder.owns_conn(frame.conn)
         {
-            let frame = forwarder.inbound(frame);
-            if let Some(outcome) = forwarder.get_mut().on_frame(&frame) {
+            if let Some(outcome) = forwarder.on_frame(&frame) {
                 self.on_forwarded(ctx, outcome);
             }
         } else if let Some(elector) = &mut self.elector
-            && elector.lane().owns(frame.conn)
+            && elector.owns_conn(frame.conn)
         {
             let events = elector.on_frame(ctx, frame);
             self.on_election(ctx, events);
@@ -1078,11 +1103,7 @@ impl Node for RegistryNode {
             let events = elector.on_tick(ctx);
             self.on_election(ctx, events);
         }
-        if let Some(outcome) = self
-            .forwarder
-            .as_mut()
-            .and_then(|f| f.run(ctx, Forwarder::on_tick))
-        {
+        if let Some(outcome) = self.forwarder.as_mut().and_then(|f| f.on_tick(ctx)) {
             self.on_forwarded(ctx, outcome);
         }
         self.settle(ctx);
@@ -1156,7 +1177,7 @@ impl Node for RegistryNode {
                 "is_leader": self.is_leader(),
                 "member": self.elector.as_ref().map(Elector::snapshot),
             },
-            "forwarder": self.forwarder.as_ref().map(|f| f.get().snapshot()),
+            "forwarder": self.forwarder.as_ref().map(Forwarder::snapshot),
             "store": self.store.as_ref().map(KafkaStore::snapshot),
         })
     }
@@ -1271,6 +1292,37 @@ mod tests {
             };
             assert!(actual.starts_with(reason), "{config}: {actual}");
         }
+    }
+
+    #[test]
+    fn each_start_draws_its_clients_connection_ids_from_fresh_lanes() {
+        use crate::lab::client::{CONN_ID_LANES, CONN_ID_RANGE};
+        let roles = [
+            Role::Admin,
+            Role::Reader,
+            Role::Producer,
+            Role::Elector,
+            Role::Forwarder,
+        ];
+        let bases = |generation: u32| -> Vec<u32> {
+            roles.iter().map(|r| r.conn_base(generation)).collect()
+        };
+        // Two starts: ten ranges, all apart, all below the ids from 1 << 30
+        // that belong to the node's other connections.
+        let mut both = bases(1);
+        both.extend(bases(2));
+        assert!(both == (5..15).map(|lane| lane * CONN_ID_RANGE).collect::<Vec<_>>());
+        assert!(both.iter().all(|b| b + CONN_ID_RANGE <= 1 << 30));
+        // The starts go round the client module's lanes: start 205 takes
+        // lanes 1 to 5 again, and start 1024 is laid out as start 0.
+        assert!(
+            bases(205)
+                == bases(0)
+                    .into_iter()
+                    .map(|b| b + CONN_ID_RANGE)
+                    .collect::<Vec<_>>()
+        );
+        assert!(bases(CONN_ID_LANES) == bases(0));
     }
 
     #[test]
