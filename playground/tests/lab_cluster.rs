@@ -87,6 +87,11 @@ const ANSWER_WAIT_MS: Millis = 5_000;
 
 /// Three brokers on 5 ms links, each told the quorum's voters.
 fn scenario() -> Scenario {
+    scenario_with_topics(&json!([]))
+}
+
+/// The three brokers, and `topics` for the world's admin node to create.
+fn scenario_with_topics(topics: &Value) -> Scenario {
     let nodes: Vec<Value> = BROKERS
         .iter()
         .map(|broker| {
@@ -98,6 +103,7 @@ fn scenario() -> Scenario {
         .collect();
     serde_json::from_value(json!({
         "version": 1, "seed": 7, "links": { "default_latency_ms": 5 }, "nodes": nodes,
+        "topics": topics,
     }))
     .unwrap()
 }
@@ -126,10 +132,15 @@ struct Cluster {
 }
 
 impl Cluster {
-    /// The scenario's cluster, built and started through [`TestWorld`], with
-    /// the client outside it. Nothing has run yet.
+    /// The three brokers alone. Nothing has run yet.
     fn new() -> Self {
-        let mut test_world = TestWorld::from_scenario(&scenario());
+        Self::of(&scenario())
+    }
+
+    /// A scenario's cluster, built and started through [`TestWorld`], with
+    /// the client outside it. Nothing has run yet.
+    fn of(scenario: &Scenario) -> Self {
+        let mut test_world = TestWorld::from_scenario(scenario);
         test_world.world_mut().set_hosted(&BROKERS);
         Self::around(test_world.take())
     }
@@ -576,6 +587,16 @@ fn orders_metadata(
     }
 }
 
+/// The partitions of `orders` as the controller stripes them over three
+/// unfenced brokers: partition `p` led by broker `p + 1`.
+fn striped_orders() -> [MetadataResponsePartition; 3] {
+    [
+        partition_row(0, 1, 0, &[1, 2, 3], &[1, 2, 3], &[]),
+        partition_row(1, 2, 0, &[2, 3, 1], &[2, 3, 1], &[]),
+        partition_row(2, 3, 0, &[3, 1, 2], &[3, 1, 2], &[]),
+    ]
+}
+
 /// `Metadata` from every broker in `live` agrees with `partitions`, and each
 /// names one of `live` as its controller.
 fn every_broker_agrees(
@@ -684,12 +705,35 @@ fn a_topic_created_through_any_broker_is_striped_and_every_broker_agrees() {
     // Broker 3 is not the controller: it forwards the request in an
     // `Envelope`.
     let topic_id = cluster.create_orders(NodeId(3));
-    let striped = [
-        partition_row(0, 1, 0, &[1, 2, 3], &[1, 2, 3], &[]),
-        partition_row(1, 2, 0, &[2, 3, 1], &[2, 3, 1], &[]),
-        partition_row(2, 3, 0, &[3, 1, 2], &[3, 1, 2], &[]),
-    ];
-    every_broker_agrees(&mut cluster, &[1, 2, 3], topic_id, &striped);
+    every_broker_agrees(&mut cluster, &[1, 2, 3], topic_id, &striped_orders());
+}
+
+#[test]
+fn the_scenario_topics_are_created_through_a_forwarding_broker() {
+    let topics = json!([{ "name": "orders", "partitions": 3, "replication_factor": 3 }]);
+    let mut cluster = Cluster::of(&scenario_with_topics(&topics));
+    cluster.wait_until_serving(5_000);
+    // The world's admin node, the next free id, sends `CreateTopics` to the
+    // broker its metadata names as controller, a random live broker, which
+    // forwards it to the active controller.
+    let admin = NodeId(4);
+    let created = cluster.run_until(5_000, |c| {
+        c.snapshot(admin)["topics"][0]["status"] == "created"
+    });
+    assert!(created);
+    let expected = json!([{
+        "name": "orders", "partitions": 3, "replication_factor": 3,
+        "status": "created", "error": null, "attempts": 1,
+    }]);
+    assert!(cluster.snapshot(admin)["topics"] == expected);
+    let applied = cluster.run_until(1_000, |c| {
+        BROKERS
+            .iter()
+            .all(|broker| c.partition(*broker, "orders", 2)["leader"].is_i64())
+    });
+    assert!(applied);
+    let topic_id = cluster.metadata(NodeId(1), &["orders"]).topics[0].topic_id;
+    every_broker_agrees(&mut cluster, &[1, 2, 3], topic_id, &striped_orders());
 }
 
 #[test]
