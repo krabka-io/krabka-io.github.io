@@ -7,24 +7,18 @@
 //! metadata and configs. Their frames enter through `push_ingress` and the
 //! answers leave through `drain_egress`.
 //!
-//! Brokers that run no `KRaft` controller each know only themselves. The
-//! tests then play the controller's part where they need a cluster: they
-//! register every broker with every other, copy the records of the topic
-//! the registry created to the brokers that did not create it, and elect a
-//! new leader when the old one dies. With brokers that run a controller,
-//! the tests leave all of that to it.
+//! The brokers form one `KRaft` cluster, as the world gives a scenario's
+//! brokers one controller quorum: the registry's `CreateTopics` is forwarded
+//! to the active controller, and a dead leader is fenced once its session
+//! expires and replaced from the ISR.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use assert2::assert;
 use bytes::Bytes;
-use krabka_metadata::{MetadataRecord, TopicConfigRecord, TopicRecord};
 use krabka_playground::lab::{
     Endpoint, Fault, NodeId, World,
-    broker::{
-        partition_record, registration_record,
-        test_support::{TestClient, decode_response},
-    },
+    broker::test_support::{TestClient, decode_response},
     net::{ConnId, DurableOp, Frame, Millis, Payload},
     registry::http::{HttpRequest, HttpResponse},
     scenario::{NodeSpec, Scenario},
@@ -42,7 +36,6 @@ use krabka_protocol::{
     records::RecordsPayload,
 };
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 const REGISTRY: NodeId = NodeId(4);
 const HTTP_CLIENT: NodeId = NodeId(99);
@@ -110,8 +103,6 @@ const ACK_TIMEOUT: &str = "Put operation timed out while waiting for an ack from
 struct Lab {
     world: World,
     brokers: Vec<NodeId>,
-    /// The brokers run no controller, so the test plays its part.
-    relay: bool,
     kafka: BTreeMap<NodeId, TestClient>,
     next_http: u32,
     /// Frames that left the world for the test's clients, not read yet.
@@ -126,7 +117,8 @@ impl Lab {
         lab.with_registry(config)
     }
 
-    /// `count` brokers, formed into a cluster.
+    /// `count` brokers, run until each serves and knows every other as
+    /// unfenced.
     fn brokers(count: u32) -> Self {
         let nodes: Vec<Value> = (1..=count)
             .map(|id| json!({ "id": id, "kind": "broker", "config": { "broker_id": id } }))
@@ -141,31 +133,26 @@ impl Lab {
         let mut lab = Self {
             world: World::from_scenario_hosted(&scenario, &hosted).unwrap(),
             brokers,
-            relay: false,
             kafka: BTreeMap::new(),
             next_http: 0,
             inbox: Vec::new(),
         };
-        lab.run(5_000);
-        let first = lab.brokers[0];
-        let known = lab.metadata(first, None).brokers.len();
-        lab.relay = known < lab.brokers.len();
-        if lab.relay {
-            let registrations: Vec<MetadataRecord> = lab
-                .brokers
-                .iter()
-                .map(|b| {
-                    MetadataRecord::V1BrokerRegistration(registration_record(
-                        i32::try_from(b.0).unwrap(),
-                        None,
-                        Uuid::from_u128(u128::from(b.0)),
-                    ))
+        let formed = lab.run_until(
+            |lab| {
+                lab.brokers.iter().all(|b| {
+                    let snapshot = lab.snapshot(*b);
+                    let unfenced = snapshot["brokers"].as_array().map(|all| {
+                        all.iter()
+                            .filter(|broker| broker["fenced"] == false)
+                            .count()
+                    });
+                    snapshot["state"] == "RUNNING" && unfenced == Some(lab.brokers.len())
                 })
-                .collect();
-            for broker in lab.brokers.clone() {
-                lab.apply_metadata(broker, &registrations);
-            }
-        }
+            },
+            30_000,
+        );
+        assert!(formed, "{}", lab.snapshot(lab.brokers[0]));
+        let first = lab.brokers[0];
         assert!(lab.metadata(first, None).brokers.len() == lab.brokers.len());
         lab
     }
@@ -188,14 +175,8 @@ impl Lab {
         self
     }
 
-    /// Run until the registry serves, relaying `_schemas` to every broker
-    /// when the test plays the controller and the registry just created it.
+    /// Run until the registry serves.
     fn await_ready(&mut self) {
-        if self.relay && self.topic_holder().is_none() {
-            let created = self.run_until(|lab| lab.topic_holder().is_some(), 10_000);
-            assert!(created, "{}", self.snapshot(REGISTRY));
-            self.relay_topic();
-        }
         let ready = self.run_until(|lab| lab.snapshot(REGISTRY)["state"] == "ready", 60_000);
         assert!(ready, "{}", self.snapshot(REGISTRY));
     }
@@ -338,93 +319,6 @@ impl Lab {
             .iter()
             .find(|b| snapshot.nodes.iter().any(|n| n.id == **b && n.alive))
             .unwrap()
-    }
-
-    // ---- the controller's part ----------------------------------------------------
-
-    fn apply_metadata(&mut self, broker: NodeId, records: &[MetadataRecord]) {
-        self.world
-            .control(
-                broker,
-                json!({ "cmd": "apply_metadata", "records": records }),
-            )
-            .unwrap();
-    }
-
-    /// The broker whose image holds `_schemas`, when one does.
-    fn topic_holder(&self) -> Option<NodeId> {
-        self.brokers.iter().copied().find(|b| {
-            self.snapshot(*b)["topics"]
-                .as_array()
-                .is_some_and(|ts| ts.iter().any(|t| t["name"] == TOPIC))
-        })
-    }
-
-    /// Copy the records of `_schemas` from the broker that created it to
-    /// the others, as the controller's commit would reach them.
-    fn relay_topic(&mut self) {
-        let holder = self.topic_holder().unwrap();
-        let (topic, partition) = self.schemas_partition(holder);
-        let replicas = partition.replica_nodes.clone();
-        let records = vec![
-            MetadataRecord::V1Topic(TopicRecord {
-                name: TOPIC.to_string(),
-                topic_id: Uuid::from_bytes(topic.topic_id.0),
-                partitions: 1,
-                replication_factor: i16::try_from(replicas.len()).unwrap(),
-            }),
-            partition_record(
-                TOPIC,
-                0,
-                &replicas,
-                &partition.isr_nodes,
-                partition.leader_epoch,
-            ),
-            MetadataRecord::V1TopicConfig(TopicConfigRecord {
-                topic: TOPIC.to_string(),
-                overrides: BTreeMap::from([("cleanup.policy".to_string(), "compact".to_string())]),
-            }),
-        ];
-        for broker in self.brokers.clone() {
-            if broker != holder {
-                self.apply_metadata(broker, &records);
-            }
-        }
-    }
-
-    /// The controller's answer to the death of `dead`: fence it, and move
-    /// the leadership of `_schemas` to the first live member of the ISR,
-    /// with the next leader epoch.
-    fn elect_without(&mut self, dead: NodeId) {
-        let survivors: Vec<NodeId> = self
-            .brokers
-            .iter()
-            .copied()
-            .filter(|b| *b != dead)
-            .collect();
-        let (_, partition) = self.schemas_partition(survivors[0]);
-        let dead_id = i32::try_from(dead.0).unwrap();
-        let isr: Vec<i32> = partition
-            .replica_nodes
-            .iter()
-            .copied()
-            .filter(|r| *r != dead_id && partition.isr_nodes.contains(r))
-            .collect();
-        let mut fenced = registration_record(dead_id, None, Uuid::from_u128(u128::from(dead.0)));
-        fenced.fenced = true;
-        let records = vec![
-            MetadataRecord::V1BrokerRegistration(fenced),
-            partition_record(
-                TOPIC,
-                0,
-                &partition.replica_nodes,
-                &isr,
-                partition.leader_epoch + 1,
-            ),
-        ];
-        for broker in survivors {
-            self.apply_metadata(broker, &records);
-        }
     }
 
     // ---- the HTTP client ----------------------------------------------------------
@@ -849,11 +743,8 @@ fn killing_the_leader_before_a_registration_loses_and_duplicates_nothing() {
             == HttpResponse::error(500, 50002, "Register operation timed out")
     );
     assert!(write_failures(&lab) == vec![ACK_TIMEOUT.to_string()]);
-    if lab.relay {
-        lab.run(1_000);
-        lab.elect_without(leader);
-    }
-    // The producer retries the record until the new leader takes it.
+    // The producer retries the record until the controller has fenced the
+    // dead broker and a new leader takes it.
     let landed = lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 2, 60_000);
     assert!(landed, "{}", lab.snapshot(REGISTRY));
     assert!(lab.leader() != leader);
@@ -899,10 +790,6 @@ fn killing_the_leader_before_it_acknowledges_a_committed_record_duplicates_nothi
     );
     assert!(committed);
     lab.world.fault(Fault::Kill { node: leader });
-    if lab.relay {
-        lab.run(1_000);
-        lab.elect_without(leader);
-    }
     assert!(lab.run_until(|lab| lab.has_http_reply(conn), 60_000));
     let answer = response(&lab.http_replies(conn)[0]);
     assert!(answer == HttpResponse::error(500, 50002, "Register operation timed out"));
