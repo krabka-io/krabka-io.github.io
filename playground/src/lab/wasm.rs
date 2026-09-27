@@ -2,7 +2,9 @@
 //!
 //! Every argument and result is a JSON string, so the page never sees a Rust
 //! type and the same JSON travels unchanged between browser tabs. Bytes inside
-//! JSON are base64.
+//! JSON are base64. Times and seeds cross the boundary as 32-bit numbers, so
+//! the page passes plain JavaScript numbers and never a `BigInt`; a session
+//! clock in milliseconds fits for 49 days.
 
 use wasm_bindgen::prelude::*;
 
@@ -39,10 +41,10 @@ impl Lab {
     /// An empty world with `seed`.
     #[wasm_bindgen(constructor)]
     #[must_use]
-    pub fn new(seed: u64) -> Self {
+    pub fn new(seed: u32) -> Self {
         console_error_panic_hook::set_once();
         Self {
-            world: World::new(seed),
+            world: World::new(u64::from(seed)),
         }
     }
 
@@ -152,22 +154,23 @@ impl Lab {
         self.world.set_position(NodeId(id), x, y);
     }
 
+    /// The logical clock in milliseconds, saturated at the 32-bit limit.
     #[must_use]
-    pub fn now(&self) -> u64 {
-        self.world.now()
+    pub fn now(&self) -> u32 {
+        u32::try_from(self.world.now()).unwrap_or(u32::MAX)
     }
 
     /// Run everything due at or before `until_ms` and return the step count.
     #[wasm_bindgen(js_name = stepUntil)]
-    pub fn step_until(&mut self, until_ms: u64) -> u32 {
-        u32::try_from(self.world.step_until(until_ms)).unwrap_or(u32::MAX)
+    pub fn step_until(&mut self, until_ms: u32) -> u32 {
+        u32::try_from(self.world.step_until(u64::from(until_ms))).unwrap_or(u32::MAX)
     }
 
     /// Whether anything is due at or before `until_ms`.
     #[wasm_bindgen(js_name = hasWorkBy)]
     #[must_use]
-    pub fn has_work_by(&self, until_ms: u64) -> bool {
-        self.world.has_work_by(until_ms)
+    pub fn has_work_by(&self, until_ms: u32) -> bool {
+        self.world.has_work_by(u64::from(until_ms))
     }
 
     /// Apply a `Fault` JSON object.

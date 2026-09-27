@@ -287,6 +287,7 @@ On top of it: `Producer` (record accumulator per partition, `linger_ms`, `batch_
 
 ```
 class Lab {
+  // Times and seeds are plain JavaScript numbers (32-bit): never a BigInt.
   constructor(seed: number)
   loadScenario(json: string): void
   scenario(): string                       // current scenario JSON (positions included)
