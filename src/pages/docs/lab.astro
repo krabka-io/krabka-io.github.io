@@ -18,8 +18,9 @@ const controls = [
   { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables the link faults for that pair.' },
   { control: 'Kill / Restart / Wipe', effect: 'Halts a node with its state kept, boots it again from that state, or boots it from nothing.' },
   { control: 'Isolate / Reconnect, Partition / Heal, Latency, Loss', effect: 'Cuts or restores every link of a node or one link between two, or sets that link’s latency and loss rate.' },
-  { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command, faults, remove.' },
-  { control: 'Inspector tabs', effect: 'State shows what the node reports (partitions, ISR, groups, lag, schemas); Config edits it and restarts the node; Raw JSON is the snapshot.' },
+  { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command as JSON, faults, remove.' },
+  { control: 'Inspector tabs', effect: 'State shows what the node reports: a broker’s lifecycle, its part in the KRaft quorum, its channels to the controller, pending ISR changes, producer-id blocks, the groups it coordinates and its partitions; a client’s assignment, positions, commits and lag; a streams app’s tasks, stores and topology. Config edits the node and restarts it; Raw JSON is the snapshot.' },
+  { control: 'Command bar', effect: 'The selected node’s control commands: a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
 ];
 ---
 
@@ -60,18 +61,23 @@ const controls = [
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
       <h2 class="text-xl font-bold text-white pt-2">What to try</h2>
       <p>
-        Load <strong class="text-white">Three brokers, a producer, a consumer group</strong> from the presets and press
-        <strong class="text-white">Settle</strong>. The brokers hold a KRaft election, the controller creates the topic, the
-        producer's records flow through a replicated partition to the two consumers. Select the broker the inspector names as
-        controller and <strong class="text-white">Kill</strong> it: leadership moves, the consumers keep reading, and the
-        acked records are still there when you <strong class="text-white">Restart</strong> it. Shift+click two brokers and
-        <strong class="text-white">Partition</strong> them, then heal the link and watch the ISR shrink and grow back.
+        Load <strong class="text-white">Three brokers, a producer and a consumer group</strong> from the presets and set the
+        speed to 5×. The three brokers form one KRaft quorum; its leader becomes the active controller, registers the brokers,
+        unfences them once they have caught up with the metadata log, and creates <code class="font-mono text-krab-300">orders</code>.
+        The producer's records flow through replicated partitions to two KIP-848 consumers that share them. Select a broker:
+        its inspector shows its role in the quorum, the active controller, and which broker leads each partition. Select the
+        leader of a partition and <strong class="text-white">Kill</strong> it: once its 9 s session runs out, the controller
+        fences it and moves the leadership to another replica in the ISR, and the consumers keep reading.
+        <strong class="text-white">Restart</strong> it and it catches up and rejoins the ISR. Add a broker to the running
+        cluster: a KRaft quorum without KIP-853 is static, so the new broker observes it, and its inspector says why.
       </p>
       <p>
-        <strong class="text-white">Network probe</strong> runs on two diagnostic node kinds, an echo and a pinger, and needs
-        nothing but the virtual network: set a latency or a loss on the link and read the round trip in the inspector. A preset
-        marked <em>full build</em> uses a node kind the loaded module does not carry yet; the badge disappears by itself once
-        it does.
+        <strong class="text-white">Schema registry with an Avro producer and a decoding consumer</strong> registers a schema
+        before the first record and decodes every value by its schema id. <strong class="text-white">Kafka Streams word
+        count</strong> joins a KIP-1071 streams group, counts words in a state store backed by the changelog topic the group
+        creates, and answers a store query from the command bar. <strong class="text-white">Network probe</strong> runs on two
+        diagnostic node kinds, an echo and a pinger, and needs nothing but the virtual network: set a latency or a loss on the
+        link and read the round trip in the inspector.
       </p>
 
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
