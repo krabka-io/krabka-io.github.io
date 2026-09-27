@@ -1,8 +1,10 @@
 name: Playground crate
 
-# The consensus playground is the only Rust in this repository. The deploy
-# workflow compiles it to WASM, which proves it builds but not that it behaves.
-# This workflow runs its tests and clippy, and only when the crate changes.
+# The Rust in this repository is the consensus playground and Cluster Lab
+# crate, `playground/`, and the real broker's WebAssembly entry crate,
+# `playground/broker-wasi/`. The deploy workflow compiles both to WASM, which
+# proves they build but not that they behave. This workflow runs their tests
+# and clippy, and only when one of them changes.
 
 on:
   push:
@@ -29,16 +31,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust with clippy and the wasm32 target
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
+          toolchain: stable
           components: clippy
           targets: wasm32-unknown-unknown
 
       - name: Cache the playground build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: playground
 
@@ -52,3 +55,73 @@ jobs:
             --target wasm32-unknown-unknown \
             --locked \
             -- -D warnings
+
+  # The entry crate that runs the real krabka-broker in the lab: its own
+  # workspace, on the broker's revision. Its unit tests (the process
+  # contract, the configuration profile, the dialer protocol) run natively;
+  # clippy covers both the native build and wasm32-wasip1, the target the lab
+  # runs, whose C code compiles against the WASI sysroot of wasi-sdk.
+  # `.cargo/config.toml` gives that target `--cfg tokio_unstable`, which a
+  # `RUSTFLAGS` variable would replace, so the job sets none.
+  broker-wasi:
+    name: broker entry crate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: playground/broker-wasi
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust with clippy, rustfmt and the wasm32-wasip1 target
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+          targets: wasm32-wasip1
+
+      - name: Cache the entry crate's build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: playground/broker-wasi
+
+      - name: Install the WASI sysroot
+        env:
+          WASI_SYSROOT_URL: https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sysroot-25.0.tar.gz
+        run: |
+          set -euo pipefail
+          curl -LsSf --retry 5 --retry-all-errors \
+            --output "${RUNNER_TEMP}/wasi-sysroot.tar.gz" "${WASI_SYSROOT_URL}"
+          tar -xzf "${RUNNER_TEMP}/wasi-sysroot.tar.gz" -C "${RUNNER_TEMP}"
+          sysroot="${RUNNER_TEMP}/wasi-sysroot-25.0"
+          test -d "${sysroot}/include"
+          {
+            echo "CC_wasm32_wasip1=clang"
+            echo "CFLAGS_wasm32_wasip1=--sysroot=${sysroot}"
+          } >> "${GITHUB_ENV}"
+
+      # `clang -print-prog-name` gives the path of the archiver that clang
+      # finds for itself, or only the bare name when it finds none. For a bare
+      # name, take the `llvm-ar` of the newest LLVM on the runner.
+      - name: Find the LLVM archiver
+        run: |
+          set -euo pipefail
+          command -v clang
+          ar="$(clang -print-prog-name=llvm-ar)"
+          if ! command -v "${ar}" >/dev/null 2>&1; then
+            ar="$(ls /usr/lib/llvm-*/bin/llvm-ar | sort -V | tail -n 1)"
+          fi
+          "${ar}" --version
+          echo "AR_wasm32_wasip1=${ar}" >> "${GITHUB_ENV}"
+
+      - name: Check the formatting
+        run: cargo fmt --check
+
+      - name: Test on the host target
+        run: cargo test --locked
+
+      - name: Lint the host target and the tests
+        run: cargo clippy --locked --tests -- -D warnings
+
+      - name: Lint the wasm32-wasip1 target
+        run: cargo clippy --locked --target wasm32-wasip1 -- -D warnings
