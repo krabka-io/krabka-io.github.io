@@ -70,8 +70,13 @@ echo "==> Building krabka-playground (release)"
 (cd "${crate_dir}" && cargo build --target wasm32-unknown-unknown --release)
 
 # Cargo writes to CARGO_TARGET_DIR when it is set, and to the crate's own
-# target directory otherwise.
+# target directory otherwise. Cargo ran inside the crate, so a relative
+# CARGO_TARGET_DIR is relative to the crate, not to the caller.
 target_dir="${CARGO_TARGET_DIR:-${crate_dir}/target}"
+case "${target_dir}" in
+  /*) ;;
+  *) target_dir="${crate_dir}/${target_dir}" ;;
+esac
 wasm_in="${target_dir}/wasm32-unknown-unknown/release/krabka_playground.wasm"
 
 echo "==> Running wasm-bindgen --target web"
