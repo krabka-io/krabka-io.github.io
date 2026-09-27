@@ -8,18 +8,15 @@ const { source, totals } = sessions;
 const formatCount = (n: number) => n.toLocaleString('en-US');
 const formatSeconds = (s: number) => `${s.toFixed(1)} s`;
 
-// The explorer reads the sessions from the page. Formulas are cut to what a
-// row can show, and the derived Clone impls, which carry no obligations of
+// The explorer reads the sessions from the page. Derived Clone impls, which carry no obligations of
 // their own, ship without an obligations list; the Coma text itself is fetched
 // on demand from /proofs/coma/<id>.coma.
-const FORMULA_MAX = 160;
-const truncate = (text: string) => (text.length > FORMULA_MAX ? `${text.slice(0, FORMULA_MAX - 1)}…` : text);
 const embedded = sessions.sessions.map((s) => {
   const { obligations, ...rest } = s;
   if (s.kind === 'derived') return rest;
   return {
     ...rest,
-    obligations: obligations.map((o) => ({ ...o, formula: typeof o.formula === 'string' ? truncate(o.formula) : o.formula })),
+    obligations,
   };
 });
 // `<` is escaped so no field can end the JSON script block early.
@@ -48,6 +45,7 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
   title="Proof Explorer"
   description="Browse the Why3 proof sessions of Krabka's Creusot-verified kernels, tactic by tactic and prover by prover, and re-check one in the browser with Alt-Ergo compiled to JavaScript."
   currentSlug="/docs/proof-explorer"
+  wide
 >
   <div class="space-y-6 font-sans min-w-0">
     <div class="border-b border-white/10 pb-4 min-w-0">
@@ -67,7 +65,7 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
       </p>
     </div>
 
-    <div class="space-y-3 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
+    <div class="grid gap-4 xl:grid-cols-2 xl:gap-8 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
       <p>
         A <strong class="text-white">session</strong> is what why3find records when it proves one function.
         Creusot translates the Rust into a Coma program, Why3 derives one verification condition per <code class="font-mono text-krab-300">vc_</code> goal, and why3find tries the configured provers on each

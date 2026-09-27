@@ -17,6 +17,8 @@
 // Site-relative. The page passes the deployment's base path in `data-base` on
 // the root element, and `sitePath` prefixes it.
 
+import { obligationSummary, formulaTokens, operators, tokenText, readableTokens } from "./readability.js";
+
 const COMA_DIR = "/proofs/coma/";
 const WHY3_WEB_DIR = "/why3-web/";
 const MANIFEST_PATH = WHY3_WEB_DIR + "manifest.json";
@@ -50,6 +52,7 @@ let sessions = [];
 let byId = new Map();
 let selectedId = null;
 let filterText = "";
+let useFormulaWords = false;
 const kindsOn = new Set(KINDS.filter((k) => k.on).map((k) => k.key));
 
 // The DOM the module owns.
@@ -208,18 +211,20 @@ function renderList() {
     groups.get(s.module).push(s);
   }
   for (const [module, rows] of groups) {
-    const group = el("section", "px-group");
-    const title = el("h3", "px-group-title");
+    const group = el("details", "px-group");
+    group.open = true;
+    const title = el("summary", "px-group-title");
     title.append(el("span", "", module), el("span", "px-group-n", fmtCount(rows.length)));
     group.appendChild(title);
     for (const s of rows) {
       const item = el("button", "px-item");
       item.type = "button";
       item.dataset.id = s.id;
+      item.title = `${displayName(s)} — ${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
+      item.setAttribute("aria-label", item.title);
       if (s.id === selectedId) item.classList.add("px-active");
-      const name = el("span", "px-item-name", s.name);
-      if (s.impl) name.prepend(el("span", "px-item-impl", s.impl));
-      const meta = el("span", "px-item-meta", `${s.stats.leaves} · ${fmtTime(s.stats.time)}`);
+      const name = el("span", "px-item-name", displayName(s));
+      const meta = el("span", "px-item-meta", fmtTime(s.stats.time));
       meta.title = `${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.append(name, meta);
       item.addEventListener("click", () => {
@@ -236,6 +241,7 @@ function markActive() {
     item.classList.toggle("px-active", item.dataset.id === selectedId);
   }
   const active = listEl.querySelector(".px-item.px-active");
+  if (active) active.closest("details").open = true;
   if (active && typeof active.scrollIntoView === "function") {
     active.scrollIntoView({ block: "nearest" });
   }
@@ -335,7 +341,14 @@ function renderTree(session) {
       bar.title = `${fmtTime(time)} of ${fmtTime(maxTime)} max`;
       const live = el("span", "px-live");
       live.setAttribute("aria-live", "polite");
-      leaf.append(el("span", "px-leaf-idx", String(leafNo)), el("span", `px-prover ${proverClass(node.prover)}`, node.prover), el("span", "px-leaf-time", fmtTime(time)), bar, live);
+      const prover = el("span", `px-prover ${proverClass(node.prover)}`, node.prover);
+      prover.tabIndex = 0;
+      const help = el("span", "px-prover-help", `${node.prover === "alt-ergo" ? "Alt-Ergo" : node.prover} is an automated theorem prover. It checked this proof condition and recorded it as proved. The time beside it is the recorded solver runtime.`);
+      help.id = `px-prover-help-${gi}-${leafNo}`;
+      help.setAttribute("role", "tooltip");
+      prover.setAttribute("aria-describedby", help.id);
+      prover.appendChild(help);
+      leaf.append(el("span", "px-leaf-idx", String(leafNo)), prover, el("span", "px-leaf-time", fmtTime(time)), bar, live);
       leafCells.set(key, { cell: live, recorded: time, prover: node.prover });
       return leaf;
     };
@@ -393,6 +406,51 @@ function renderObligations(session) {
   filter.spellcheck = false;
   shead.append(hint, filter);
   section.appendChild(shead);
+  const wordsLabel = el("label", "px-formula-toggle");
+  const words = el("input");
+  words.type = "checkbox";
+  words.checked = useFormulaWords;
+  wordsLabel.append(words, document.createTextNode("Readable mode"));
+  section.appendChild(wordsLabel);
+  const typeKey = el("div", "px-type-key");
+  typeKey.hidden = !useFormulaWords;
+  typeKey.append(el("span", "px-type-integer", "Integer"), el("span", "px-type-boolean", "Boolean"), el("span", "px-type-unsigned", "Unsigned integer"));
+  typeKey.append(el("span", "", "▣ value present · □ no value"));
+  section.appendChild(typeKey);
+  const formulaViews = [];
+  const paintFormula = (view) => {
+    const tokens = useFormulaWords ? readableTokens(view.tokens) : view.tokens;
+    view.element.replaceChildren();
+    let line = view.element;
+    for (const [index, token] of tokens.entries()) {
+      let display = useFormulaWords ? token.display : token.text;
+      if (useFormulaWords && (index === 0 || display.startsWith("\n"))) {
+        const indent = /^\n( *)/.exec(display);
+        line = el("span", "px-formula-line");
+        line.style.paddingInlineStart = `${indent ? indent[1].length : 0}ch`;
+        display = display.replace(/^\n */, "");
+        view.element.appendChild(line);
+      }
+      const span = el("span", `px-token-${token.kind}${useFormulaWords && token.dataType ? ` px-type-${token.dataType}` : ""}`, display);
+      if (operators.has(token.text)) span.title = operators.get(token.text);
+      if (token.dataType) span.title = `${token.dataType} — ${token.text}`;
+      if (token.kind === "comparison" || token.kind === "projection") span.title = useFormulaWords ? token.text : tokenText(token, true);
+      if (token.kind === "annotation") span.title = token.text.startsWith("[%#") ? "Source-location marker: links this condition to its position in the Rust source. Hidden in word mode." : "Proof metadata used by the verification tools.";
+      if (token.kind === "return") span.title = `The value returned by ${view.functionName}.`;
+      if (token.kind === "some" || token.kind === "none") {
+        span.title = token.kind === "some" ? "Some: a value is present; the following expression is that value." : "None: the optional value is empty.";
+        span.setAttribute("role", "img");
+        span.setAttribute("aria-label", token.kind === "some" ? "Value present" : "No value");
+        span.tabIndex = 0;
+      }
+      line.appendChild(span);
+    }
+  };
+  words.addEventListener("change", () => {
+    useFormulaWords = words.checked;
+    typeKey.hidden = !useFormulaWords;
+    formulaViews.forEach(paintFormula);
+  });
 
   const list = el("div", "px-oblist");
   const rows = groups.map((g) => {
@@ -412,9 +470,25 @@ function renderObligations(session) {
         h.appendChild(s);
       }
     }
+    const explanation = obligationSummary(g.expl, g.formula);
     row.appendChild(h);
-    if (g.formula) row.appendChild(el("pre", "px-ob-formula", g.formula));
-    row.dataset.search = `${g.expl || ""} ${g.span ? g.span.file : ""} ${g.formula || ""}`.toLowerCase();
+    if (explanation) row.appendChild(el("p", "px-ob-summary", explanation));
+    if (g.formula) {
+      const details = el("details", "px-ob-source");
+      details.open = !explanation;
+      details.appendChild(el("summary", "", g.formula.endsWith("…") ? "Show formula excerpt" : "Show formula"));
+      const formula = el("pre", "px-ob-formula");
+      formula.tabIndex = 0;
+      formula.setAttribute("role", "region");
+      formula.setAttribute("aria-label", `${g.expl || "Unlabelled condition"} formula`);
+      const view = { element: formula, tokens: formulaTokens(g.formula), functionName: g.expl?.split(' ensures')[0] || session.id };
+      formulaViews.push(view);
+      paintFormula(view);
+      details.appendChild(formula);
+      if (g.formula.endsWith("…")) details.appendChild(link(comaGithubUrl(session.id), "Read the full condition in Coma ↗", "px-link", true));
+      row.appendChild(details);
+    }
+    row.dataset.search = `${g.expl || ""} ${g.span ? g.span.file : ""} ${g.formula || ""} ${explanation}`.toLowerCase();
     list.appendChild(row);
     return row;
   });
@@ -527,7 +601,10 @@ function buildShell() {
   root.replaceChildren();
   const layout = el("div", "px-layout");
 
-  const sidebar = el("aside", "px-sidebar");
+  const sidebar = el("details", "px-sidebar");
+  sidebar.open = true;
+  sidebar.appendChild(el("summary", "px-sidebar-toggle", "Browse sessions"));
+  const controls = el("div", "px-sidebar-controls");
   const filter = el("input", "px-input px-filter");
   filter.type = "search";
   filter.placeholder = "Filter by name, module or kernel";
@@ -560,7 +637,8 @@ function buildShell() {
   countEl.setAttribute("role", "status");
   listEl = el("nav", "px-list");
   listEl.setAttribute("aria-label", "Proof sessions");
-  sidebar.append(filter, chips, countEl, listEl);
+  controls.append(filter, chips, countEl, listEl);
+  sidebar.appendChild(controls);
 
   detailEl = el("section", "px-detail");
   detailEl.setAttribute("aria-live", "polite");

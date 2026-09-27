@@ -156,7 +156,7 @@ function parseObligations(coma, spans) {
       j += 1;
     }
     const formula = coma.slice(i, j).replace(/\s+/g, ' ').trim();
-    obligations.push({ expl, span, formula: formula.length > 600 ? `${formula.slice(0, 600)}…` : formula });
+    obligations.push({ expl, span, formula });
   }
   return obligations;
 }
