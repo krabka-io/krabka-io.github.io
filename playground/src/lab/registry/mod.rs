@@ -57,7 +57,7 @@
 //! # Snapshot
 //!
 //! ```json
-//! { "state": "loading" | "ready" | "failed", "started": 1,
+//! { "state": "stopped" | "loading" | "ready" | "failed", "started": 1,
 //!   "bootstrap": [1, 2, 3],
 //!   "config": { "kafkastore.topic": "_schemas", "kafkastore.timeout.ms": 500,
 //!               "kafkastore.init.timeout.ms": 60000,
@@ -72,12 +72,13 @@
 //!   "store": { ...the store's snapshot... } }
 //! ```
 //!
-//! `records` counts the records the reader applied and `applied` is the
-//! offset after the last one. `writes.active` is `{"op", "path", "stage":
-//! "catch_up" | "write"}` while a write holds the lock. `store` is
-//! [`KafkaStore::snapshot`]: the startup
-//! step, the topic, the reader's `offset` and `end_offset`, the running
-//! task, and the admin, reader and producer clients with their connections.
+//! `state` is the store's, or `stopped` while the node is down, when
+//! `store` is `null`. `records` counts the records the reader applied and
+//! `applied` is the offset after the last one. `writes.active` is
+//! `{"op", "path", "stage": "catch_up" | "write"}` while a write holds the
+//! lock. `store` is [`KafkaStore::snapshot`]: the startup step, the topic,
+//! the reader's `offset` and `end_offset`, the running task, and the admin,
+//! reader and producer clients with their connections.
 //!
 //! # Events
 //!
