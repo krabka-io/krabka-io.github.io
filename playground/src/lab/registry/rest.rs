@@ -37,7 +37,7 @@ impl Outcome {
     fn after<T>(written: &Written<T>, response: HttpResponse) -> Self {
         Self {
             response,
-            wait_for: Some(written.offset),
+            wait_for: written.offset,
         }
     }
 }

@@ -37,11 +37,13 @@ pub struct RegisterRequest<'a> {
 }
 
 /// The outcome of a mutation: its value and the offset of the last record it
-/// wrote, which the response must wait for.
+/// wrote, which the response must wait for. `None` when the mutation wrote
+/// nothing (an idempotent registration, a clear of something already clear),
+/// so the response goes out at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written<T> {
     pub value: T,
-    pub offset: LogOffset,
+    pub offset: Option<LogOffset>,
 }
 
 /// The registry over its log.
@@ -240,7 +242,7 @@ impl<S: SchemaStore> RegistryService<S> {
             }));
             return Ok(Written {
                 value: Registered { id, version },
-                offset,
+                offset: Some(offset),
             });
         }
         if let Some(existing) =
@@ -249,7 +251,7 @@ impl<S: SchemaStore> RegistryService<S> {
         {
             return Ok(Written {
                 value: existing,
-                offset: self.applied,
+                offset: None,
             });
         }
         compat::check_registration(
@@ -278,7 +280,7 @@ impl<S: SchemaStore> RegistryService<S> {
         }));
         Ok(Written {
             value: registered,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -304,7 +306,10 @@ impl<S: SchemaStore> RegistryService<S> {
             )));
         }
         let offset = self.write(record::encode_config(subject, level));
-        Ok(Written { value: (), offset })
+        Ok(Written {
+            value: (),
+            offset: Some(offset),
+        })
     }
 
     /// Remove a subject's level so it inherits the global one. Returns the
@@ -320,13 +325,13 @@ impl<S: SchemaStore> RegistryService<S> {
         let Some(level) = self.state.subject_compat(subject).map(str::to_string) else {
             return Ok(Written {
                 value: None,
-                offset: self.applied,
+                offset: None,
             });
         };
         let offset = self.write(record::config_tombstone(Some(subject)));
         Ok(Written {
             value: Some(level),
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -345,7 +350,7 @@ impl<S: SchemaStore> RegistryService<S> {
         let offset = self.write(record::config_tombstone(None));
         Ok(Written {
             value: level,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -401,7 +406,7 @@ impl<S: SchemaStore> RegistryService<S> {
         }));
         Ok(Written {
             value: found.version,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -446,7 +451,7 @@ impl<S: SchemaStore> RegistryService<S> {
         let offset = self.write_all(records);
         Ok(Written {
             value: version,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -486,7 +491,7 @@ impl<S: SchemaStore> RegistryService<S> {
         let offset = self.write(record::encode_delete_subject(subject, high));
         Ok(Written {
             value: versions,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -553,7 +558,7 @@ impl<S: SchemaStore> RegistryService<S> {
         let offset = self.write_all(records);
         Ok(Written {
             value: versions,
-            offset,
+            offset: Some(offset),
         })
     }
 
@@ -589,7 +594,10 @@ impl<S: SchemaStore> RegistryService<S> {
             }
         }
         let offset = self.write(record::encode_mode(subject, mode));
-        Ok(Written { value: (), offset })
+        Ok(Written {
+            value: (),
+            offset: Some(offset),
+        })
     }
 
     /// Remove the global mode so the configured default applies again.
@@ -599,7 +607,7 @@ impl<S: SchemaStore> RegistryService<S> {
         let offset = self.write(record::mode_tombstone(None));
         Written {
             value: mode,
-            offset,
+            offset: Some(offset),
         }
     }
 
@@ -609,13 +617,13 @@ impl<S: SchemaStore> RegistryService<S> {
         let Some(mode) = self.state.subject_mode(subject).map(str::to_string) else {
             return Written {
                 value: None,
-                offset: self.applied,
+                offset: None,
             };
         };
         let offset = self.write(record::mode_tombstone(Some(subject)));
         Written {
             value: Some(mode),
-            offset,
+            offset: Some(offset),
         }
     }
 }
@@ -659,7 +667,7 @@ mod tests {
                         id: SchemaId(1),
                         version: SchemaVersion(1)
                     },
-                    offset: LogOffset(0)
+                    offset: Some(LogOffset(0))
                 }
         );
         assert!(s.applied() == LogOffset(1));

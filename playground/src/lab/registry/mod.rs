@@ -545,6 +545,29 @@ mod tests {
     }
 
     #[test]
+    fn a_mutation_that_writes_nothing_is_answered_at_once() {
+        let mut node = node(json!({}));
+        let mut buffers = CtxBuffers::new(NodeId(4));
+        buffers.with(0, |ctx| node.start(ctx));
+        let register = HttpRequest::new("POST", "/subjects/orders-value/versions")
+            .with_json(&json!({ "schema": av("Order") }));
+        let (first, _) = request(&mut node, &mut buffers, &register);
+        assert!(first.body == r#"{"id":1}"#);
+        assert!(buffers.take_durable().len() == 1);
+        // Registering the same schema again appends no record, so there is
+        // nothing to wait for.
+        let (again, _) = request(&mut node, &mut buffers, &register);
+        assert!(again.status == 200);
+        assert!(again.body == r#"{"id":1}"#);
+        // Neither does clearing a subject mode that was never set.
+        let clear = HttpRequest::new("DELETE", "/mode/orders-value");
+        let (cleared, _) = request(&mut node, &mut buffers, &clear);
+        assert!(cleared.status < 500);
+        assert!(buffers.take_durable().is_empty());
+        assert!(node.held.is_empty());
+    }
+
+    #[test]
     fn pipelined_and_split_requests_are_served_in_order() {
         let mut node = node(json!({}));
         let mut buffers = CtxBuffers::new(NodeId(4));
