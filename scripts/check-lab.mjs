@@ -24,7 +24,8 @@
 // registry preset's producer registers its schema, the registry answers
 // `GET /subjects` and the consumer decodes every value; the streams preset
 // counts words into its store, with the changelog topic the group created,
-// and answers a store query.
+// and answers a store query; in the five-broker preset the majority serves
+// while two brokers are cut off, and they join once the links heal.
 //
 // Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--no-cluster] [--headed]
 // Needs `playwright` or `playwright-core`, project-local or global (found
@@ -365,6 +366,7 @@ async function checkClusters(browser, base, errors) {
     [checkThreeBrokers, 'three-brokers'],
     [checkRegistryPreset, 'schema-registry'],
     [checkWordCount, 'streams-word-count'],
+    [checkPartitionPreset, 'five-brokers-partition'],
   ]) {
     try {
       await flow(page, byId(preset));
@@ -554,6 +556,25 @@ async function checkRegistryPreset(page, preset) {
   await inspect(page, 6, 'billing');
   const shown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector td[data-col="schema_id"]')?.textContent || null`, 'the schema column');
   check('the consumer inspector shows the schema id of each record', shown === `id ${registered.schema_id}`, shown);
+}
+
+async function checkPartitionPreset(page, preset) {
+  console.log(`Cluster Lab: ${preset.name}`);
+  await openPreset(page, preset);
+  // Brokers 1 to 5, with 4 and 5 cut off from the rest; the producer 6, the consumer 7.
+  const split = await until(page, 'the majority to serve', `(n) => {
+    const b = [1, 2, 3, 4, 5].map((i) => n[i].state);
+    if (!b.slice(0, 3).every((s) => s.state === 'RUNNING') || !(n[7].state.processed > 0)) return null;
+    return { states: b.map((s) => s.state), voters: b[0].quorum.voters, hwm: b[0].quorum.hwm, processed: n[7].state.processed };
+  }`, 90_000);
+  check(
+    'with brokers 4 and 5 cut off, the majority of five voters elects a controller and serves the group',
+    split.voters.length === 5 && split.states.slice(3).every((s) => s !== 'RUNNING') && split.processed > 0,
+    JSON.stringify(split),
+  );
+  for (const a of [4, 5]) for (const b of [1, 2, 3]) await page.evaluate(([a, b]) => window.krabkaLab.fault({ kind: 'heal', a, b }), [a, b]);
+  const healed = await until(page, 'the minority to catch up and join', `(n) => [4, 5].every((i) => n[i].state.state === 'RUNNING' && n[i].state.lifecycle.fenced === false) && [1, 2, 3, 4, 5].map((i) => n[i].state.quorum.hwm)`, 90_000);
+  check('healed, brokers 4 and 5 catch up with the metadata log, register and are unfenced', healed.slice(3).every((h) => h >= split.hwm), JSON.stringify({ before: split.hwm, healed }));
 }
 
 async function checkWordCount(page, preset) {
