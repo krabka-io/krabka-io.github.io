@@ -176,11 +176,20 @@ A world can be **partial**: it holds the full scenario (all `NodeSpec`s) but run
 
 Faults on a link between a local and a remote node are applied locally on the sending side (a `cut` link drops frames before they reach egress) and mirrored by the page to the other tab, which applies the same fault.
 
+## Durable state (`lab::net::DurableOp`, `lab::net::DurableImage`)
+
+A node's durable state (a broker's partition logs and metadata, the controller's log, a registry's schemas) must survive a page reload, so the page keeps it in the browser's IndexedDB. The crate never touches storage itself: a node records every change through `Ctx::persist(DurableOp)`, the world collects the ops per node, and the page drains them with `drainDurable()` after every step and writes them to IndexedDB in order. When the page loads a scenario it read from storage, it folds the stored ops into one `DurableImage` per node (`DurableImage::apply` is the reference fold; the JavaScript store applies the same rules) and calls `loadScenarioWithState(scenario, hosted, images)`, which hands each image to `Node::load` before the node starts.
+
+Two kinds of store, both named by the node: an append-only **log** whose entries the node numbers itself (a partition log uses the batch base offset, the controller its log offset) with `Append`, `TruncateBefore` and `TruncateFrom`, and a **key-value** store with `Put` and `Delete`. `Clear` drops one store; the world emits `ClearAll` for a node on `Fault::Wipe`, on `update_node` and on `remove_node`, so the page drops what it kept. A node that keeps everything in memory ignores `load` and persists nothing.
+
+Store names are conventions per node kind, documented on the node type. The broker uses `log/<topic>/<partition>` for partition batches, `meta/<topic>/<partition>` for the partition's checkpoints (high watermark, leader epoch cache, producer state), `metadata` for the committed metadata records, and `kraft` for the quorum log and state.
+
 ## Scenario format (`lab::scenario`)
 
 ```json
 {
   "version": 1,
+  "id": "6f1c2a9e-…",
   "seed": 42,
   "name": "Three brokers, one producer, one consumer group",
   "links": { "default_latency_ms": 5 },
@@ -208,7 +217,7 @@ Faults on a link between a local and a remote node are applied locally on the se
 }
 ```
 
-`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `topics` are created by the first controller once the quorum has a leader, exactly as `kafka-topics --create` would, through a real `CreateTopics` request from an admin connection the world owns.
+`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `id` is the identity the page assigns when it first saves a scenario; the durable state in IndexedDB is keyed by it. `topics` are created by the first controller once the quorum has a leader, exactly as `kafka-topics --create` would, through a real `CreateTopics` request from an admin connection the world owns.
 
 Node config keys are owned by the node kind's module and documented in that module's rustdoc. Unknown keys are an error at load time, not ignored.
 
@@ -278,6 +287,7 @@ On top of it: `Producer` (record accumulator per partition, `linger_ms`, `batch_
 
 ```
 class Lab {
+  // Times and seeds are plain JavaScript numbers (32-bit): never a BigInt.
   constructor(seed: number)
   loadScenario(json: string): void
   scenario(): string                       // current scenario JSON (positions included)
@@ -290,6 +300,9 @@ class Lab {
   control(id: number, json: string): string
   snapshot(): string                       // WorldSnapshot JSON
   eventsSince(index: number): string       // JSON array
+  // durable state
+  loadScenarioWithState(json: string, idsJson: string, imagesJson: string): void   // images: {"<node id>": DurableImage}
+  drainDurable(): string                   // JSON array of {node, op: "append"|..., ...}; bytes base64
   // hosting
   setHosted(idsJson: string): void
   drainEgress(): string                    // JSON array of {deliver_at, frame}; payload bytes base64

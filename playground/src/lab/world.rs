@@ -23,7 +23,8 @@ use super::{
     LabError, build_node,
     events::{Event, EventLog},
     net::{
-        ConnId, Ctx, Endpoint, Frame, KAFKA_PORT, Millis, Node, NodeId, Payload, Rng, TimedFrame,
+        ConnId, Ctx, DurableImage, DurableOp, Endpoint, Frame, KAFKA_PORT, Millis, Node, NodeId,
+        Payload, Rng, TimedFrame,
     },
     scenario::{LinkOverride, NodeSpec, Scenario, TopicSpec},
 };
@@ -175,6 +176,7 @@ pub struct WorldSnapshot {
 /// The simulator.
 pub struct World {
     seed: u64,
+    id: String,
     name: String,
     now: Millis,
     seq: u64,
@@ -190,7 +192,11 @@ pub struct World {
     /// later frame overtake an earlier one.
     last_delivery: BTreeMap<(Endpoint, ConnId, bool), Millis>,
     hosted: Option<BTreeSet<NodeId>>,
+    /// The hidden admin node that creates the scenario's topics, with the
+    /// broker it bootstraps from. The admin is hosted wherever that broker is.
+    admin: Option<(NodeId, NodeId)>,
     egress: Vec<TimedFrame>,
+    durable: Vec<(NodeId, DurableOp)>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     topics: Vec<TopicSpec>,
@@ -203,6 +209,7 @@ impl World {
     pub fn new(seed: u64) -> Self {
         Self {
             seed,
+            id: String::new(),
             name: String::new(),
             now: 0,
             seq: 0,
@@ -213,7 +220,9 @@ impl World {
             conns: BTreeMap::new(),
             last_delivery: BTreeMap::new(),
             hosted: None,
+            admin: None,
             egress: Vec::new(),
+            durable: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
             topics: Vec::new(),
@@ -238,6 +247,21 @@ impl World {
     /// Returns an error when a node kind is unknown, a node id repeats, or a
     /// node rejects its configuration.
     pub fn from_scenario_hosted(scenario: &Scenario, hosted: &[NodeId]) -> Result<Self, LabError> {
+        Self::from_scenario_with_state(scenario, hosted, BTreeMap::new())
+    }
+
+    /// Build a world from a scenario, hosting `hosted` (empty = all), and hand
+    /// each node in `images` its durable state before it starts. This is how
+    /// the page restores what `IndexedDB` kept across a reload.
+    ///
+    /// # Errors
+    /// Returns an error when a node kind is unknown, a node id repeats, or a
+    /// node rejects its configuration.
+    pub fn from_scenario_with_state(
+        scenario: &Scenario,
+        hosted: &[NodeId],
+        mut images: BTreeMap<NodeId, DurableImage>,
+    ) -> Result<Self, LabError> {
         if scenario.version != super::scenario::SCENARIO_VERSION {
             return Err(LabError::InvalidScenario(format!(
                 "unsupported scenario version {}",
@@ -245,17 +269,26 @@ impl World {
             )));
         }
         let mut world = Self::new(scenario.seed);
+        world.id.clone_from(&scenario.id);
         world.name.clone_from(&scenario.name);
         world.default_latency = scenario.links.default_latency_ms;
         world.topics.clone_from(&scenario.topics);
         if !hosted.is_empty() {
             world.hosted = Some(hosted.iter().copied().collect());
         }
-        for spec in &scenario.nodes {
-            world.add_node(spec.clone())?;
+        if let Some(spec) = scenario.nodes.iter().find(|s| s.id.0 == 0) {
+            return Err(LabError::InvalidScenario(format!(
+                "node `{}` has id 0, which is reserved for `add_node` to allocate",
+                spec.display_name()
+            )));
         }
+        // Links first: a node's startup frames must already see a cut or slow link.
         for o in &scenario.link_overrides {
             world.apply_link_override(o);
+        }
+        for spec in &scenario.nodes {
+            let image = images.remove(&spec.id).filter(|image| !image.is_empty());
+            world.add_node_with_state(spec.clone(), image)?;
         }
         if !scenario.topics.is_empty() {
             world.add_admin_for_topics()?;
@@ -279,6 +312,13 @@ impl World {
             ));
         }
         let id = self.next_free_id();
+        let broker = bootstrap[0];
+        self.admin = Some((id, broker));
+        if let Some(set) = &mut self.hosted
+            && set.contains(&broker)
+        {
+            set.insert(id);
+        }
         let spec = NodeSpec::new(
             id.0,
             "admin",
@@ -298,7 +338,20 @@ impl World {
     /// # Errors
     /// Returns an error when the id is taken, the kind is unknown, or the node
     /// rejects its configuration.
-    pub fn add_node(&mut self, mut spec: NodeSpec) -> Result<NodeId, LabError> {
+    pub fn add_node(&mut self, spec: NodeSpec) -> Result<NodeId, LabError> {
+        self.add_node_with_state(spec, None)
+    }
+
+    /// Add a node, hand it `image` when there is one, and start it.
+    ///
+    /// # Errors
+    /// Returns an error when the id is taken, the kind is unknown, or the node
+    /// rejects its configuration.
+    pub fn add_node_with_state(
+        &mut self,
+        mut spec: NodeSpec,
+        image: Option<DurableImage>,
+    ) -> Result<NodeId, LabError> {
         if spec.id.0 == 0 {
             spec.id = self.next_free_id();
         }
@@ -311,7 +364,10 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let node = build_node(&spec)?;
+        let mut node = build_node(&spec)?;
+        if let Some(image) = image {
+            node.load(image);
+        }
         let id = spec.id;
         let rng = Rng::new(self.seed ^ (u64::from(id.0) << 32) ^ u64::from(id.0));
         self.nodes.insert(
@@ -340,9 +396,10 @@ impl World {
             return;
         }
         self.purge_frames(|f| f.src.node == id || f.dst.node == id);
-        self.close_connections_of(id);
+        self.close_connections_of(id, false);
         self.nodes.remove(&id);
         self.links.retain(|(a, b), _| *a != id && *b != id);
+        self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_removed", serde_json::json!({}));
     }
 
@@ -365,7 +422,8 @@ impl World {
         slot.alive = true;
         slot.timer = None;
         self.purge_frames(|f| f.src.node == id || f.dst.node == id);
-        self.close_connections_of(id);
+        self.close_connections_of(id, false);
+        self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_updated", serde_json::json!({}));
         if self.is_hosted(id) {
             self.call(id, |node, ctx| node.start(ctx));
@@ -385,6 +443,7 @@ impl World {
     #[must_use]
     pub fn scenario(&self) -> Scenario {
         let mut s = Scenario::empty(self.seed);
+        s.id.clone_from(&self.id);
         s.name.clone_from(&self.name);
         s.links.default_latency_ms = self.default_latency;
         s.nodes = self
@@ -498,7 +557,7 @@ impl World {
         }
         *self.delivered.entry((frame.src.node, dst)).or_insert(0) += 1;
         if matches!(frame.payload, Payload::Close) {
-            self.conns.remove(&frame.conn_key());
+            self.forget_conn(frame.conn_key());
         }
         self.call(dst, |node, ctx| node.on_frame(ctx, frame));
     }
@@ -523,14 +582,24 @@ impl World {
         let mut outbox = Vec::new();
         let mut timer = None;
         let mut events = Vec::new();
+        let mut durable = Vec::new();
         let now = self.now;
         {
-            let mut ctx = Ctx::new(now, id, &mut outbox, &mut timer, &mut events, &mut slot.rng);
+            let mut ctx = Ctx::new(
+                now,
+                id,
+                &mut outbox,
+                &mut timer,
+                &mut events,
+                &mut durable,
+                &mut slot.rng,
+            );
             f(slot.node.as_mut(), &mut ctx);
         }
         if let Some(at) = timer {
             self.arm(id, at);
         }
+        self.durable.extend(durable.into_iter().map(|op| (id, op)));
         for (kind, detail) in events {
             self.events.push(now, Some(id), kind, detail);
         }
@@ -563,19 +632,17 @@ impl World {
             return;
         }
         let key = frame.conn_key();
-        match frame.payload {
-            Payload::Open => {
-                self.conns.insert(key, frame.dst);
-            }
-            Payload::Close => {
-                self.conns.remove(&key);
-            }
-            Payload::Data(_) => {}
+        if frame.payload == Payload::Open {
+            self.conns.insert(key, frame.dst);
         }
+        let closing = frame.payload == Payload::Close;
         let (a, b) = (frame.src.node, frame.dst.node);
         let link = self.link(a, b);
         let isolated = |w: &Self, n: NodeId| w.nodes.get(&n).is_some_and(|s| s.isolated);
         if a != b && (link.cut || isolated(self, a) || isolated(self, b)) {
+            if closing {
+                self.forget_conn(key);
+            }
             return;
         }
         if matches!(frame.payload, Payload::Data(_))
@@ -610,6 +677,11 @@ impl World {
                 frame,
             });
         }
+        // The close took its place behind the connection's earlier frames;
+        // only now can the floors go.
+        if closing {
+            self.forget_conn(key);
+        }
     }
 
     fn link(&self, a: NodeId, b: NodeId) -> Link {
@@ -641,11 +713,24 @@ impl World {
             })
             .collect();
         self.queue = kept.into_iter().collect();
+        // Frames waiting for another host are on the same wire.
+        self.egress.retain(|t| !pred(&t.frame));
     }
 
-    /// Close every connection with `id` on either side: the other side gets a
-    /// `Close` frame, the way a peer's TCP stack reports a reset.
-    fn close_connections_of(&mut self, id: NodeId) {
+    /// Forget a connection and the delivery floors that kept its frames in
+    /// order, so a later connection that reuses the id starts fresh.
+    fn forget_conn(&mut self, key: (Endpoint, ConnId)) {
+        self.conns.remove(&key);
+        self.last_delivery.remove(&(key.0, key.1, true));
+        self.last_delivery.remove(&(key.0, key.1, false));
+    }
+
+    /// Close every connection with `id` on either side. Every peer gets a
+    /// `Close` frame, the way its TCP stack reports a reset, and so does the
+    /// node itself when `notify_self` is set, which is what an isolated but
+    /// live node needs; a node that halted, was rebuilt or moved away never
+    /// sees its own closes.
+    fn close_connections_of(&mut self, id: NodeId, notify_self: bool) {
         let affected: Vec<((Endpoint, ConnId), Endpoint)> = self
             .conns
             .iter()
@@ -653,19 +738,28 @@ impl World {
             .map(|(k, v)| (*k, *v))
             .collect();
         for ((client, conn), server) in affected {
-            self.conns.remove(&(client, conn));
-            let (src, dst) = if client.node == id {
+            self.forget_conn((client, conn));
+            let at = self.now
+                + self
+                    .link(client.node, server.node)
+                    .latency_ms
+                    .unwrap_or(self.default_latency);
+            let (own, peer) = if client.node == id {
                 (client, server)
             } else {
                 (server, client)
             };
-            let at = self.now
-                + self
-                    .link(src.node, dst.node)
-                    .latency_ms
-                    .unwrap_or(self.default_latency);
-            self.schedule(at, Item::Deliver(Frame::close(src, dst, conn)));
+            self.schedule(at, Item::Deliver(Frame::close(own, peer, conn)));
+            if notify_self {
+                self.schedule(at, Item::Deliver(Frame::close(peer, own, conn)));
+            }
         }
+    }
+
+    /// The number of per-connection delivery floors still tracked.
+    #[cfg(test)]
+    fn delivery_floors(&self) -> usize {
+        self.last_delivery.len()
     }
 
     /// Close every connection that crosses the `a`–`b` link.
@@ -677,7 +771,7 @@ impl World {
             .map(|(k, v)| (*k, *v))
             .collect();
         for ((client, conn), server) in affected {
-            self.conns.remove(&(client, conn));
+            self.forget_conn((client, conn));
             let at = self.now + self.link(a, b).latency_ms.unwrap_or(self.default_latency);
             self.schedule(at, Item::Deliver(Frame::close(server, client, conn)));
             self.schedule(at, Item::Deliver(Frame::close(client, server, conn)));
@@ -698,8 +792,10 @@ impl World {
                     slot.timer = None;
                     slot.node.stop();
                 }
-                self.purge_frames(|f| f.dst.node == node);
-                self.close_connections_of(node);
+                // A halted node's unsent frames are lost, like the bytes still
+                // in a crashed machine's buffers.
+                self.purge_frames(|f| f.src.node == node || f.dst.node == node);
+                self.close_connections_of(node, false);
             }
             Fault::Restart { node } => {
                 if let Some(slot) = self.nodes.get_mut(&node) {
@@ -729,7 +825,7 @@ impl World {
                     slot.isolated = true;
                 }
                 self.purge_frames(|f| (f.src.node == node) != (f.dst.node == node));
-                self.close_connections_of(node);
+                self.close_connections_of(node, true);
             }
             Fault::Reconnect { node } => {
                 if let Some(slot) = self.nodes.get_mut(&node) {
@@ -882,11 +978,16 @@ impl World {
     /// empty list means this world runs everything. A node that becomes hosted
     /// starts; one that stops being hosted halts and drops its connections.
     pub fn set_hosted(&mut self, nodes: &[NodeId]) {
-        let new: Option<BTreeSet<NodeId>> = if nodes.is_empty() {
+        let mut new: Option<BTreeSet<NodeId>> = if nodes.is_empty() {
             None
         } else {
             Some(nodes.iter().copied().collect())
         };
+        if let (Some(set), Some((admin, broker))) = (&mut new, self.admin)
+            && set.contains(&broker)
+        {
+            set.insert(admin);
+        }
         let before: Vec<(NodeId, bool)> = self
             .nodes
             .keys()
@@ -896,15 +997,14 @@ impl World {
         for (id, was) in before {
             let is = self.is_hosted(id);
             if was && !is {
-                self.close_connections_of(id);
+                self.close_connections_of(id, false);
                 if let Some(slot) = self.nodes.get_mut(&id) {
                     slot.timer = None;
                     slot.node.stop();
                 }
-            } else if !was && is {
-                if let Some(slot) = self.nodes.get_mut(&id) {
-                    slot.alive = true;
-                }
+            } else if !was && is && self.nodes.get(&id).is_some_and(|slot| slot.alive) {
+                // A node killed while it was hosted elsewhere stays down until
+                // a restart; only a live node starts here.
                 self.call(id, |node, ctx| node.start(ctx));
             }
         }
@@ -925,6 +1025,12 @@ impl World {
         std::mem::take(&mut self.egress)
     }
 
+    /// Durable-state ops recorded since the last drain, in order, for the
+    /// host to write to `IndexedDB`.
+    pub fn drain_durable(&mut self) -> Vec<(NodeId, DurableOp)> {
+        std::mem::take(&mut self.durable)
+    }
+
     /// Frames that arrived from another peer. They deliver at the current
     /// time, in order; the sender's link model already applied.
     pub fn push_ingress(&mut self, frames: Vec<Frame>) {
@@ -935,7 +1041,7 @@ impl World {
                     self.conns.insert(key, frame.dst);
                 }
                 Payload::Close => {
-                    self.conns.remove(&key);
+                    self.forget_conn(key);
                 }
                 Payload::Data(_) => {}
             }
@@ -1093,6 +1199,125 @@ mod tests {
     }
 
     #[test]
+    fn kill_loses_the_killed_nodes_unsent_frames() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        // The ping arrives at 110 and the echo is on the wire until 120.
+        w.run_for(111);
+        w.world_mut().fault(Fault::Kill { node: NodeId(1) });
+        w.run_for(100);
+        assert!(w.snapshot(NodeId(3))["echoes"] == 0);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+    }
+
+    #[test]
+    fn faults_purge_frames_waiting_for_another_host() {
+        let mut world = World::from_scenario_hosted(&scenario(), &[NodeId(3)]).unwrap();
+        world.step_until(100); // open + ping wait in egress
+        world.fault(Fault::Partition {
+            a: NodeId(1),
+            b: NodeId(3),
+        });
+        let egress = world.drain_egress();
+        assert!(egress.iter().all(|t| t.frame.payload == Payload::Close));
+    }
+
+    #[test]
+    fn a_closed_connection_leaves_no_delivery_floor_behind() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(101);
+        assert!(w.world().delivery_floors() == 1); // the pinger's connection, client to server
+        w.world_mut().fault(Fault::Partition {
+            a: NodeId(1),
+            b: NodeId(3),
+        });
+        assert!(w.world().delivery_floors() == 0);
+        w.world_mut().fault(Fault::Heal {
+            a: NodeId(1),
+            b: NodeId(3),
+        });
+        w.run_for(200); // the pinger reopens and its echoes flow again
+        assert!(w.world().delivery_floors() == 2);
+    }
+
+    #[test]
+    fn a_close_never_overtakes_the_connections_earlier_frames() {
+        // A node that closes right after sending data, on a link that just got
+        // faster, must still deliver the data first.
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1, "links": { "default_latency_ms": 100 },
+            "nodes": [
+                { "id": 1, "kind": "echo" },
+                { "id": 3, "kind": "pinger", "config": { "target": 1, "period_ms": 1000 } }
+            ]
+        }))
+        .unwrap();
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.step_until(50); // the open is on the wire until 100
+        world.fault(Fault::Latency {
+            a: NodeId(1),
+            b: NodeId(3),
+            ms: 1,
+        });
+        world.push_ingress(vec![Frame::close(
+            Endpoint::client(NodeId(3)),
+            Endpoint::kafka(NodeId(1)),
+            ConnId(1),
+        )]);
+        // Ingress frames deliver at once: this one is a peer's close arriving
+        // on the wire, so it must still queue behind the open.
+        world.step_until(200);
+        let snap = world.node_snapshot(NodeId(1)).unwrap();
+        assert!(snap["frames"] == 2);
+        assert!(snap["closes"] == 1);
+    }
+
+    #[test]
+    fn isolation_closes_the_isolated_nodes_own_connections() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(50);
+        w.world_mut().fault(Fault::Isolate { node: NodeId(3) });
+        // The close reaches the isolated node itself after one link latency.
+        w.run_for(10);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+        assert!(w.snapshot(NodeId(3))["open"] == false);
+        w.world_mut().fault(Fault::Reconnect { node: NodeId(3) });
+        w.run_for(300);
+        assert!(w.snapshot(NodeId(3))["echoes"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn link_overrides_apply_before_the_nodes_start() {
+        let mut s = scenario();
+        s.link_overrides.push(LinkOverride {
+            a: NodeId(1),
+            b: NodeId(3),
+            latency_ms: None,
+            loss_permille: None,
+            cut: true,
+        });
+        let mut w = TestWorld::from_scenario(&s);
+        w.run_for(250);
+        assert!(w.snapshot(NodeId(1))["frames"] == 0);
+    }
+
+    #[test]
+    fn a_takeover_keeps_a_killed_node_down() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(50);
+        let world = w.world_mut();
+        world.fault(Fault::Kill { node: NodeId(1) });
+        world.set_hosted(&[NodeId(3)]);
+        world.set_hosted(&[NodeId(1), NodeId(3)]);
+        world.step_until(400);
+        let snap = world.snapshot();
+        let n1 = snap.nodes.iter().find(|n| n.id == NodeId(1)).unwrap();
+        assert!(!n1.alive);
+        assert!(n1.state["started"] == 1);
+        world.fault(Fault::Restart { node: NodeId(1) });
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["started"] == 2);
+    }
+
+    #[test]
     fn loss_drops_data_frames_deterministically() {
         let mut a = TestWorld::from_scenario(&scenario());
         a.world_mut().fault(Fault::Loss {
@@ -1216,6 +1441,14 @@ mod tests {
         ));
         let s: Scenario = serde_json::from_value(serde_json::json!({
             "version": 1, "nodes": [{ "id": 1, "kind": "echo" }, { "id": 1, "kind": "echo" }]
+        }))
+        .unwrap();
+        assert!(matches!(
+            World::from_scenario(&s),
+            Err(LabError::InvalidScenario(_))
+        ));
+        let s: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1, "nodes": [{ "id": 0, "kind": "echo" }]
         }))
         .unwrap();
         assert!(matches!(

@@ -22,6 +22,10 @@ pub const DEFAULT_LATENCY_MS: Millis = 5;
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     pub version: u32,
+    /// A stable identity the page assigns, which keys the durable state it
+    /// keeps in `IndexedDB`. Empty means the scenario is not persisted.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     #[serde(default)]
     pub seed: u64,
     #[serde(default)]
@@ -43,6 +47,7 @@ impl Scenario {
     pub fn empty(seed: u64) -> Self {
         Self {
             version: SCENARIO_VERSION,
+            id: String::new(),
             seed,
             name: String::new(),
             links: LinkDefaults::default(),

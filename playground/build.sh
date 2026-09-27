@@ -64,11 +64,10 @@ else
   wasm_bindgen="${cached}"
 fi
 
+# Run cargo from inside the crate so that its .cargo/config.toml (the
+# getrandom backend cfg for wasm32) applies.
 echo "==> Building krabka-playground (release)"
-cargo build \
-  --manifest-path "${crate_dir}/Cargo.toml" \
-  --target wasm32-unknown-unknown \
-  --release
+(cd "${crate_dir}" && cargo build --target wasm32-unknown-unknown --release)
 
 wasm_in="${crate_dir}/target/wasm32-unknown-unknown/release/krabka_playground.wasm"
 

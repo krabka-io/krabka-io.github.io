@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 
 use super::{
     LabError, config_field, config_field_or,
-    net::{ConnId, Ctx, Endpoint, Frame, Millis, Node, NodeId, Payload, Rng},
+    net::{
+        ConnId, Ctx, DurableImage, DurableOp, Endpoint, Frame, Millis, Node, NodeId, Payload, Rng,
+    },
     scenario::{NodeSpec, Scenario},
     world::World,
 };
@@ -114,6 +116,7 @@ pub struct CtxBuffers {
     pub outbox: Vec<Frame>,
     pub timer: Option<Millis>,
     pub events: Vec<(&'static str, Value)>,
+    pub durable: Vec<DurableOp>,
     pub rng: Rng,
 }
 
@@ -126,6 +129,7 @@ impl CtxBuffers {
             outbox: Vec::new(),
             timer: None,
             events: Vec::new(),
+            durable: Vec::new(),
             rng: Rng::new(1),
         }
     }
@@ -139,9 +143,15 @@ impl CtxBuffers {
             &mut self.outbox,
             &mut self.timer,
             &mut self.events,
+            &mut self.durable,
             &mut self.rng,
         );
         f(&mut ctx)
+    }
+
+    /// Take every durable op recorded so far.
+    pub fn take_durable(&mut self) -> Vec<DurableOp> {
+        std::mem::take(&mut self.durable)
     }
 
     /// Take every frame queued so far.
@@ -151,6 +161,10 @@ impl CtxBuffers {
 }
 
 /// Answers every data frame with the same bytes on the same connection.
+///
+/// The frame counter is durable: the node persists it under the key-value
+/// store `counters` and restores it through [`Node::load`], so the storage
+/// path can be exercised without a broker.
 pub struct EchoNode {
     id: NodeId,
     frames: u64,
@@ -178,6 +192,16 @@ impl Node for EchoNode {
         "echo"
     }
 
+    fn load(&mut self, image: DurableImage) {
+        self.frames = image
+            .kv
+            .get("counters")
+            .and_then(|kv| kv.get("frames"))
+            .and_then(|v| std::str::from_utf8(&v.0).ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+    }
+
     fn start(&mut self, _ctx: &mut Ctx<'_>) {
         self.started += 1;
     }
@@ -187,6 +211,11 @@ impl Node for EchoNode {
             return;
         }
         self.frames += 1;
+        ctx.persist(DurableOp::Put {
+            store: "counters".to_string(),
+            key: "frames".to_string(),
+            value: Bytes::from(self.frames.to_string()),
+        });
         match &frame.payload {
             Payload::Data(bytes) => {
                 if let Some(seq) = std::str::from_utf8(bytes)
@@ -354,6 +383,7 @@ mod tests {
     use assert2::assert;
 
     use super::*;
+    use crate::lab::world::Fault;
 
     #[test]
     fn pinger_reports_round_trip_time() {
@@ -368,6 +398,41 @@ mod tests {
         // The fifth ping left at 1000 and is still on the wire.
         assert!(w.snapshot(NodeId(2))["pending"] == 1);
         assert!(w.snapshot(NodeId(1))["last_seq"] == 4);
+    }
+
+    #[test]
+    fn echo_restores_its_frame_counter_from_a_durable_image() {
+        let scenario = r#"{"version":1,"nodes":[
+            {"id":1,"kind":"echo"},
+            {"id":2,"kind":"pinger","config":{"target":1,"period_ms":100}}]}"#;
+        let mut w = TestWorld::from_json(scenario);
+        w.run_for(350);
+        let ops = w.world_mut().drain_durable();
+        assert!(ops.iter().all(|(node, _)| *node == NodeId(1)));
+        let mut image = DurableImage::default();
+        for (_, op) in ops {
+            image.apply(op);
+        }
+        let frames = w.snapshot(NodeId(1))["frames"].as_u64().unwrap();
+        assert!(frames == 4);
+        // A reload: the host folds the ops and hands the image to the new node.
+        let scenario: Scenario = serde_json::from_str(scenario).unwrap();
+        let mut reloaded = World::from_scenario_with_state(
+            &scenario,
+            &[],
+            std::collections::BTreeMap::from([(NodeId(1), image)]),
+        )
+        .unwrap();
+        assert!(reloaded.node_snapshot(NodeId(1)).unwrap()["frames"] == 4);
+        reloaded.step_until(150);
+        assert!(reloaded.node_snapshot(NodeId(1)).unwrap()["frames"] == 6);
+        // A wipe clears the host's stores too.
+        reloaded.fault(Fault::Wipe { node: NodeId(1) });
+        let ops = reloaded.drain_durable();
+        assert!(
+            ops.iter()
+                .any(|(node, op)| *node == NodeId(1) && *op == DurableOp::ClearAll)
+        );
     }
 
     #[test]
