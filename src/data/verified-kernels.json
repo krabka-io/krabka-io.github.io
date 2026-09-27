@@ -6,7 +6,7 @@
     "module": "consensus",
     "function": "majority_size",
     "summary": "Majority size for a voter set: floor(n / 2) + 1.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/consensus.rs#L15",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/consensus.rs#L15",
     "signature": "pub const fn majority_size(voter_count: usize) -> usize",
     "requires": [],
     "ensures": [
@@ -30,7 +30,7 @@
     "module": "consensus",
     "function": "election_has_quorum",
     "summary": "Whether the unique grants from current voters reach a majority.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/consensus.rs#L22",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/consensus.rs#L22",
     "signature": "pub const fn election_has_quorum(voter_count: usize, current_grants: usize) -> bool",
     "requires": [],
     "ensures": [
@@ -55,7 +55,7 @@
     "module": "consensus",
     "function": "log_is_up_to_date",
     "summary": "True if the candidate's log is at least as up-to-date as ours. Per KIP-595 the higher last epoch wins; on a tie, the higher or equal offset wins.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/consensus.rs#L444",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/consensus.rs#L456",
     "signature": "pub const fn log_is_up_to_date(my_epoch: u32, my_end: i64, cand_epoch: u32, cand_offset: i64) -> bool",
     "requires": [],
     "ensures": [
@@ -82,7 +82,7 @@
     "module": "consensus",
     "function": "recompute_high_watermark",
     "summary": "The HWM as the majority-th largest match offset across the leader's own log end, when leader_counts, and every follower's acknowledged fetch offset. The leader-completeness rule of Raft Fig. 8 and KIP-595 gates this value: the HWM may only advance once the majority offset is strictly past epoch_start_offset, and it never regresses below current_hwm.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/consensus.rs#L513",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/consensus.rs#L529",
     "signature": "pub fn recompute_high_watermark(log_end: i64, follower_offsets: &[i64], majority: usize, epoch_start_offset: i64, current_hwm: i64, leader_counts: bool) -> i64",
     "requires": [
       "1 <= majority@ && majority@ <= follower_offsets@.len() + 1",
@@ -118,8 +118,8 @@
     "area": "KRaft consensus",
     "module": "consensus",
     "function": "election_jitter_ms",
-    "summary": "Deterministic per-(node, epoch) election-timeout jitter in [0, base_ms). This is Raft's randomized backoff made reproducible for the deterministic sims: different nodes get different spreads, and the same node gets a different spread in each re-election epoch, so closely-synchronized voters do not split the vote indefinitely.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/consensus.rs#L426",
+    "summary": "Deterministic per-(node, epoch) election-timeout jitter in [0, base_ms). This is Raft's randomized backoff made reproducible for the deterministic sims: the jitter is a fixed hash of the node id and the epoch, so the same run replays the same way. The contract proves only the range, 0 for a zero base and below base_ms otherwise. It does not prove that two nodes, or two epochs of one node, get different values: the hash usually spreads them, but a collision is possible and nothing here rules it out.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/consensus.rs#L438",
     "signature": "pub fn election_jitter_ms(me: u64, epoch: u32, base_ms: u64) -> u64",
     "requires": [],
     "ensures": [
@@ -146,7 +146,7 @@
     "module": "throttle",
     "function": "plan_consume",
     "summary": "Caps a refill, grants at most the request, and returns the new balance.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/throttle.rs#L94",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/throttle.rs#L96",
     "signature": "pub fn plan_consume(available: AvailableTokens, refill: RefillTokens, burst: BurstCapacity, requested: RequestedTokens) -> (GrantedTokens, NewAvailable)",
     "requires": [],
     "ensures": [
@@ -175,27 +175,26 @@
     "area": "Security and quotas",
     "module": "authz",
     "function": "acl_decision",
-    "summary": "Decides a request from whether any matching ACL allowed or denied it, with Kafka's ACL precedence: super-user bypass, deny wins over allow, and default deny when nothing matched.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/authz.rs#L144",
-    "signature": "pub fn acl_decision(super_user: bool, saw_allow: bool, saw_deny: bool) -> AclDecision",
+    "summary": "Decides a request from whether any matching ACL allowed or denied it, in the order of Kafka's AclAuthorizer.authorizeAction: a super user is always allowed; otherwise a matching DENY wins over any ALLOW; otherwise a matching ALLOW allows; otherwise the default decides. The default reflects allow.everyone.if.no.acl.found (default false), which allows a request only when no ACL at all applies to the resource, so it never overrides an explicit ALLOW or DENY.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/authz.rs#L228",
+    "signature": "pub fn acl_decision(facts: AclFacts) -> AclDecision",
     "requires": [],
     "ensures": [
-      "super_user ==> result == AclDecision::AllowSuperuser",
-      "!super_user && saw_deny ==> result == AclDecision::DenyExplicit",
-      "!super_user && !saw_deny && saw_allow ==> result == AclDecision::AllowAcl",
-      "!super_user && !saw_deny && !saw_allow ==> result == AclDecision::DenyDefault"
+      "match result { AclDecision::AllowSuperuser => facts.super_user, AclDecision::DenyExplicit => !facts.super_user && facts.saw_deny, AclDecision::AllowAcl => !facts.super_user && !facts.saw_deny && facts.saw_allow, AclDecision::AllowNoAcl => !facts.super_user && !facts.saw_deny && !facts.saw_allow && facts.default_decision == AclDefault::Allow, AclDecision::DenyDefault => !facts.super_user && !facts.saw_deny && !facts.saw_allow && facts.default_decision == AclDefault::Deny }"
     ],
     "fields": [
       { "name": "super_user", "label": "Principal is a super user", "type": "bool", "default": false },
-      { "name": "saw_allow", "label": "A matching ALLOW ACL was seen", "type": "bool", "default": true },
-      { "name": "saw_deny", "label": "A matching DENY ACL was seen", "type": "bool", "default": false }
+      { "name": "saw_allow", "label": "A matching ALLOW ACL was seen", "type": "bool", "default": true, "help": "Some applicable ALLOW ACL matched the principal, host, and operation." },
+      { "name": "saw_deny", "label": "A matching DENY ACL was seen", "type": "bool", "default": false, "help": "Some applicable DENY ACL matched the principal, host, and operation." },
+      { "name": "default_decision", "label": "Decision when no ACL matched", "type": "enum", "default": "Deny", "options": ["Deny", "Allow"], "help": "Allow when allow.everyone.if.no.acl.found is set and no ACL at all applies to the resource." }
     ],
-    "result_label": "AllowSuperuser, AllowAcl, DenyExplicit or DenyDefault",
+    "result_label": "AllowSuperuser, AllowAcl, AllowNoAcl, DenyExplicit or DenyDefault",
     "presets": [
-      { "label": "A matching ALLOW", "values": { "super_user": false, "saw_allow": true, "saw_deny": false } },
-      { "label": "DENY wins over ALLOW", "values": { "super_user": false, "saw_allow": true, "saw_deny": true } },
-      { "label": "Super user bypasses a DENY", "values": { "super_user": true, "saw_allow": false, "saw_deny": true } },
-      { "label": "No ACL matched: default deny", "values": { "super_user": false, "saw_allow": false, "saw_deny": false } }
+      { "label": "A matching ALLOW", "values": { "super_user": false, "saw_allow": true, "saw_deny": false, "default_decision": "Deny" } },
+      { "label": "DENY wins over ALLOW", "values": { "super_user": false, "saw_allow": true, "saw_deny": true, "default_decision": "Deny" } },
+      { "label": "Super user bypasses a DENY", "values": { "super_user": true, "saw_allow": false, "saw_deny": true, "default_decision": "Deny" } },
+      { "label": "No ACL matched: default deny", "values": { "super_user": false, "saw_allow": false, "saw_deny": false, "default_decision": "Deny" } },
+      { "label": "allow.everyone.if.no.acl.found allows a resource with no ACL", "values": { "super_user": false, "saw_allow": false, "saw_deny": false, "default_decision": "Allow" } }
     ]
   },
   {
@@ -204,30 +203,34 @@
     "area": "Producers",
     "module": "producer",
     "function": "producer_decision",
-    "summary": "Classifies an incoming batch against the last accepted producer batch. A producer with no last batch appends; a lower epoch is fenced and a higher epoch appends; at the same epoch the batch appends when it continues at the last sequence plus one modulo 2^31, is a duplicate of the last batch when its sequence range matches it, and is otherwise out of order.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/producer.rs#L111",
-    "signature": "pub fn producer_decision(last: Option<ProducerBatch>, producer_epoch: i16, base_sequence: i32, last_offset_delta: i32) -> ProducerDecision",
+    "summary": "Classifies an incoming batch against a producer's tracked entry and the sequence ranges of the batches it retains, Kafka's UnifiedLog.analyzeAndValidateProducerState for a client append. At the entry's epoch, a batch whose base sequence and last sequence (base_sequence + last_offset_delta modulo 2^31) equal a retained batch's is a duplicate of the first such batch, and a null slot never matches. Only a batch that repeats no retained batch goes on to the sequence check: a producer with no entry can start at any sequence; a lower epoch is fenced; a higher epoch must start at sequence 0 and is otherwise out of order; the same epoch must continue at the last sequence plus one modulo 2^31 and is otherwise out of order.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/producer.rs#L207",
+    "signature": "pub fn producer_decision(entry: Option<ProducerEntryFacts>, retained: &[Option<RetainedSequenceRange>], producer_epoch: i16, base_sequence: i32, last_offset_delta: i32) -> ProducerDecision",
     "requires": [],
     "ensures": [
-      "last == None ==> result == ProducerDecision::Append",
-      "forall<accepted: ProducerBatch> last == Some(accepted) && producer_epoch@ < accepted.epoch@ ==> result == ProducerDecision::Fenced",
-      "forall<accepted: ProducerBatch> last == Some(accepted) && producer_epoch@ > accepted.epoch@ ==> result == ProducerDecision::Append",
-      "forall<accepted: ProducerBatch> last == Some(accepted) && producer_epoch@ == accepted.epoch@ && base_sequence == increment_sequence_model(accepted.last_sequence, 1i32) ==> result == ProducerDecision::Append",
-      "forall<accepted: ProducerBatch> last == Some(accepted) && producer_epoch@ == accepted.epoch@ && base_sequence != increment_sequence_model(accepted.last_sequence, 1i32) && matches_last_batch_model(accepted, base_sequence, last_offset_delta) ==> result == ProducerDecision::Duplicate { base_offset: accepted.base_offset }",
-      "forall<accepted: ProducerBatch> last == Some(accepted) && producer_epoch@ == accepted.epoch@ && base_sequence != increment_sequence_model(accepted.last_sequence, 1i32) && !matches_last_batch_model(accepted, base_sequence, last_offset_delta) ==> result == ProducerDecision::OutOfOrder"
+      "match result { ProducerDecision::Duplicate { retained: index } => first_retained_duplicate(entry, retained@, producer_epoch, base_sequence, last_offset_delta, index@), _ => !retained_duplicate_exists(entry, retained@, producer_epoch, base_sequence, last_offset_delta) && result == sequence_decision(entry, producer_epoch, base_sequence) }",
+      "retained_matches(slot, base_sequence, last_offset_delta) = match slot { Some(range) => range.base_sequence@ == base_sequence@ && range.last_sequence@ == sequence_modulo_2_31(base_sequence@ + last_offset_delta@), None => false }",
+      "retained_duplicate_exists(entry, retained, producer_epoch, base_sequence, last_offset_delta) = match entry { Some(tracked) => tracked.epoch@ == producer_epoch@ && exists<i: Int> 0 <= i && i < retained.len() && retained_matches(retained[i], base_sequence, last_offset_delta), None => false }",
+      "first_retained_duplicate(entry, retained, producer_epoch, base_sequence, last_offset_delta, index) = match entry { Some(tracked) => tracked.epoch@ == producer_epoch@ && 0 <= index && index < retained.len() && retained_matches(retained[index], base_sequence, last_offset_delta) && forall<j: Int> 0 <= j && j < index ==> !retained_matches(retained[j], base_sequence, last_offset_delta), None => false }",
+      "sequence_decision(entry, producer_epoch, base_sequence) = match entry { None => ProducerDecision::Append, Some(tracked) => if producer_epoch@ < tracked.epoch@ { ProducerDecision::Fenced } else if producer_epoch@ > tracked.epoch@ { if base_sequence@ == 0 { ProducerDecision::Append } else { ProducerDecision::OutOfOrder } } else if base_sequence@ == sequence_modulo_2_31(tracked.last_sequence@ + 1) { ProducerDecision::Append } else { ProducerDecision::OutOfOrder } }",
+      "sequence_modulo_2_31(sequence) = sequence.rem_euclid(2147483648)"
     ],
     "fields": [
-      { "name": "last", "label": "Last accepted batch", "type": "json", "default": { "epoch": 2, "last_sequence": 6, "last_offset_delta": 2, "base_offset": 10 }, "help": "Null for a producer with no accepted batch. epoch is i16, last_sequence i32, last_offset_delta null or i32, base_offset i64." },
+      { "name": "entry", "label": "Producer's tracked entry", "type": "json", "default": { "epoch": 2, "last_sequence": 6 }, "help": "Null for a producer with no entry. epoch is i16 and last_sequence, the last sequence the entry accepted, is i32." },
+      { "name": "retained", "label": "Retained batch sequence ranges", "type": "json", "default": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "help": "The sequence ranges of the batches the entry retains at its epoch, oldest first, as Kafka's BatchMetadata firstSeq and lastSeq; a null slot is unused. Both are i32." },
       { "name": "producer_epoch", "label": "Batch producer epoch", "type": "int", "default": 2, "min": 0 },
       { "name": "base_sequence", "label": "Batch base sequence", "type": "int", "default": 7, "min": 0 },
       { "name": "last_offset_delta", "label": "Batch last offset delta", "type": "int", "default": 0, "min": 0 }
     ],
-    "result_label": "Append, Duplicate { base_offset }, OutOfOrder or Fenced",
+    "result_label": "Append, Duplicate { retained }, OutOfOrder or Fenced",
     "presets": [
-      { "label": "Next sequence appends", "values": { "last": { "epoch": 2, "last_sequence": 6, "last_offset_delta": 2, "base_offset": 10 }, "producer_epoch": 2, "base_sequence": 7, "last_offset_delta": 0 } },
-      { "label": "Retry of the last batch is a duplicate at base offset 10", "values": { "last": { "epoch": 2, "last_sequence": 6, "last_offset_delta": 2, "base_offset": 10 }, "producer_epoch": 2, "base_sequence": 4, "last_offset_delta": 2 } },
-      { "label": "An older epoch is fenced", "values": { "last": { "epoch": 2, "last_sequence": 6, "last_offset_delta": 2, "base_offset": 10 }, "producer_epoch": 1, "base_sequence": 4, "last_offset_delta": 2 } },
-      { "label": "No last batch: any sequence appends", "values": { "last": null, "producer_epoch": 0, "base_sequence": 17, "last_offset_delta": 3 } }
+      { "label": "Next sequence appends", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 2, "base_sequence": 7, "last_offset_delta": 0 } },
+      { "label": "Retry of the last batch is a duplicate of retained slot 4", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 2, "base_sequence": 4, "last_offset_delta": 2 } },
+      { "label": "Retry of an older batch is a duplicate of retained slot 2", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 2, "base_sequence": 1, "last_offset_delta": 1 } },
+      { "label": "A sub-range of a retained batch is out of order, not a duplicate", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 2, "base_sequence": 1, "last_offset_delta": 0 } },
+      { "label": "An older epoch is fenced", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 1, "base_sequence": 4, "last_offset_delta": 2 } },
+      { "label": "A higher epoch must start at sequence 0", "values": { "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [ null, { "base_sequence": 0, "last_sequence": 0 }, { "base_sequence": 1, "last_sequence": 2 }, { "base_sequence": 3, "last_sequence": 3 }, { "base_sequence": 4, "last_sequence": 6 } ], "producer_epoch": 3, "base_sequence": 7, "last_offset_delta": 0 } },
+      { "label": "No entry: any sequence appends", "values": { "entry": null, "retained": [], "producer_epoch": 0, "base_sequence": 17, "last_offset_delta": 3 } }
     ]
   },
   {
@@ -236,17 +239,17 @@
     "area": "Storage",
     "module": "leader_epoch",
     "function": "epoch_and_offset_for_entries",
-    "summary": "Resolves a requested leader epoch to (found_epoch, end_offset), the KIP-101 pair a follower uses to truncate a divergent suffix. The checkpoint entries must be strictly increasing in both epoch and start offset.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/leader_epoch.rs#L46",
+    "summary": "Resolves a requested leader epoch to (found_epoch, end_offset), the KIP-101 pair a follower uses to truncate a divergent suffix, exactly as Kafka's LeaderEpochFileCache.endOffsetFor does: the latest recorded epoch ends at the log end; an exact older epoch or a gap epoch resolves to the floor epoch and ends where the next recorded epoch begins; an epoch below every recorded one keeps its number and ends at the first entry's start; and (-1, -1), Kafka's UNDEFINED_EPOCH and UNDEFINED_EPOCH_OFFSET, answers an undefined request, an empty cache, and a request above the latest epoch. The checkpoint entries must be strictly increasing in both epoch and start offset.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/leader_epoch.rs#L109",
     "signature": "pub fn epoch_and_offset_for_entries(entries: &[EpochEntry], requested_epoch: LeaderEpoch, log_end_offset: Offset) -> (LeaderEpoch, Offset)",
     "requires": [
       "forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len() ==> entries@[i].epoch.0@ < entries@[j].epoch.0@ && entries@[i].start_offset.0@ < entries@[j].start_offset.0@"
     ],
     "ensures": [
-      "requested_epoch.0@ == -1 ==> result.0.0@ == -1 && result.1.0@ == log_end_offset.0@",
-      "entries@.len() > 0 && requested_epoch.0@ == entries@[entries@.len() - 1].epoch.0@ ==> result.0.0@ == requested_epoch.0@ && result.1.0@ == log_end_offset.0@",
-      "requested_epoch.0@ != -1 && (forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].epoch.0@ < requested_epoch.0@) ==> result.0.0@ == -1 && result.1.0@ == log_end_offset.0@",
-      "forall<i: Int> requested_epoch.0@ != -1 && 0 <= i && i < entries@.len() && entries@[i].epoch.0@ > requested_epoch.0@ && (forall<j: Int> 0 <= j && j < i ==> entries@[j].epoch.0@ <= requested_epoch.0@) ==> result.1.0@ == entries@[i].start_offset.0@ && result.0.0@ == if i == 0 { requested_epoch.0@ } else { entries@[i - 1].epoch.0@ }"
+      "kafka_end_offset_for(entries@, requested_epoch.0@, log_end_offset.0@, result.0.0@, result.1.0@)",
+      "kafka_end_offset_for(entries, requested, log_end, found, end) = if requested == -1 { found == -1 && end == -1 } else if entries.len() > 0 && entries[entries.len() - 1].epoch.0@ == requested { found == requested && end == log_end } else if no_higher_entry(entries, requested) { found == -1 && end == -1 } else { exists<h: Int> higher_entry_at(entries, requested, h) && end == entries[h].start_offset.0@ && found == if h == 0 { requested } else { entries[h - 1].epoch.0@ } }",
+      "higher_entry_at(entries, requested, h) = 0 <= h && h < entries.len() && entries[h].epoch.0@ > requested && forall<j: Int> 0 <= j && j < h ==> entries[j].epoch.0@ <= requested",
+      "no_higher_entry(entries, requested) = forall<i: Int> 0 <= i && i < entries.len() ==> entries[i].epoch.0@ <= requested"
     ],
     "fields": [
       { "name": "entries", "label": "Leader epoch checkpoint (epoch@start_offset)", "type": "entry_list", "keys": ["epoch", "start_offset"], "default": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "help": "epoch is i32 and start_offset is i64; both strictly increasing." },
@@ -258,7 +261,9 @@
       { "label": "Epoch with a successor ends where the next begins", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": 2, "log_end_offset": 200 } },
       { "label": "Latest epoch ends at the log end", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": 4, "log_end_offset": 200 } },
       { "label": "Gap epoch 3 resolves to the floor epoch 2", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": 3, "log_end_offset": 200 } },
-      { "label": "Undefined epoch (-1)", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": -1, "log_end_offset": 200 } }
+      { "label": "Below the first recorded epoch: the requested epoch, ending at the first start", "values": { "entries": [ { "epoch": 3, "start_offset": 30 }, { "epoch": 4, "start_offset": 40 } ], "requested_epoch": 1, "log_end_offset": 200 } },
+      { "label": "Above the latest epoch: (-1, -1)", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": 7, "log_end_offset": 200 } },
+      { "label": "Undefined epoch (-1): (-1, -1)", "values": { "entries": [ { "epoch": 1, "start_offset": 0 }, { "epoch": 2, "start_offset": 50 }, { "epoch": 4, "start_offset": 120 } ], "requested_epoch": -1, "log_end_offset": 200 } }
     ]
   },
   {
@@ -268,7 +273,7 @@
     "module": "log_index",
     "function": "offset_index_lookup",
     "summary": "The byte position to start reading at for a target relative offset: the position field of the largest entry with relative_offset <= target, or 0 if no such entry exists. The entries must be strictly sorted by relative offset, which the construction of OffsetIndex guarantees.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/log_index.rs#L26",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/log_index.rs#L26",
     "signature": "pub fn offset_index_lookup(entries: &[(u32, u32)], target: u32) -> u32",
     "requires": [
       "forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len() ==> entries@[i].0@ < entries@[j].0@"
@@ -295,8 +300,8 @@
     "area": "Stretch clusters",
     "module": "stretch",
     "function": "site_loss_survivors + min_insync_is_site_loss_safe",
-    "summary": "site_loss_survivors gives the replica count that survives the loss of any one site when rf replicas are placed one per site in turn: rf minus ceil(rf / sites). min_insync_is_site_loss_safe is true if min.insync.replicas keeps acks=all writes durable and available through that loss: no single site may hold min_insync replicas (else one site alone could acknowledge a write the others never saw), and min_insync must not exceed the survivors.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/stretch.rs#L106",
+    "summary": "site_loss_survivors gives the replica count that survives the loss of any one site under round-robin placement, where replica r of a partition lands on site r % sites: site 0 is a fullest site, so the result is rf minus what it holds, rf - ceil(rf / sites), and the contract proves that no other site's loss leaves fewer. min_insync_is_site_loss_safe is true if min.insync.replicas keeps acks=all writes durable and available through that loss: no single site may hold min_insync replicas (else one site alone could acknowledge a write the others never saw), and the loss of any one site must leave at least min_insync.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/stretch.rs#L237",
     "signature": "pub fn site_loss_survivors(rf: i64, sites: i64) -> i64\npub fn min_insync_is_site_loss_safe(rf: i64, sites: i64, min_insync: i64) -> bool",
     "requires": [
       "site_loss_survivors: rf@ >= 1 && rf@ <= 1024",
@@ -305,18 +310,20 @@
       "min_insync_is_site_loss_safe: sites@ >= 1 && sites@ <= 1024"
     ],
     "ensures": [
-      "site_loss_survivors: result@ == rf@ - (rf@ + sites@ - 1) / sites@",
+      "site_loss_survivors: result@ == rf@ - round_robin_load(rf@, sites@, 0)",
+      "site_loss_survivors: forall<site: Int> 0 <= site && site < sites@ ==> rf@ - round_robin_load(rf@, sites@, site) >= result@",
       "site_loss_survivors: result@ >= 0",
       "site_loss_survivors: result@ < rf@",
       "site_loss_survivors: sites@ == 1 ==> result@ == 0",
-      "min_insync_is_site_loss_safe: result == (min_insync@ > (rf@ + sites@ - 1) / sites@ && min_insync@ <= rf@ - (rf@ + sites@ - 1) / sites@)"
+      "min_insync_is_site_loss_safe: result == ((forall<site: Int> 0 <= site && site < sites@ ==> round_robin_load(rf@, sites@, site) < min_insync@) && (forall<site: Int> 0 <= site && site < sites@ ==> rf@ - round_robin_load(rf@, sites@, site) >= min_insync@))",
+      "round_robin_load(rf, sites, site) = if rf <= 0 { 0 } else { round_robin_load(rf - 1, sites, site) + if (rf - 1) % sites == site { 1 } else { 0 } }"
     ],
     "fields": [
       { "name": "rf", "label": "Replication factor", "type": "int", "default": 3, "min": 1, "max": 1024 },
       { "name": "sites", "label": "Sites", "type": "int", "default": 3, "min": 1, "max": 1024 },
       { "name": "min_insync", "label": "min.insync.replicas", "type": "int", "default": 2 }
     ],
-    "result_label": "(survivors after a site loss, min.insync.replicas is site-loss safe)",
+    "result_label": "(survivors after a site loss, replicas on the fullest site, min.insync.replicas is site-loss safe)",
     "presets": [
       { "label": "Three replicas on three sites: 2 is the one safe value", "values": { "rf": 3, "sites": 3, "min_insync": 2 } },
       { "label": "Four replicas on three sites: no safe value", "values": { "rf": 4, "sites": 3, "min_insync": 2 } },
@@ -331,7 +338,7 @@
     "module": "stretch",
     "function": "quorum_survives_any_single_site_loss",
     "summary": "True if the surviving KRaft voters still form a strict majority after the loss of any one site: for every site k, 2 * (total - voters_per_site[k]) > total. Two sites never pass, which is why a third site must hold at least one voter; an empty slice returns true.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/stretch.rs#L187",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/stretch.rs#L336",
     "signature": "pub fn quorum_survives_any_single_site_loss(voters_per_site: &[i64]) -> bool",
     "requires": [
       "voters_per_site@.len() <= 1024",
@@ -357,37 +364,38 @@
     "area": "Security and quotas",
     "module": "quota",
     "function": "user_client_quota_precedence",
-    "summary": "Selects Kafka's first present user/client quota candidate, with the candidates ordered from most to least specific.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/quota.rs#L102",
+    "summary": "Selects Kafka's first present user/client quota candidate, in the order of DefaultQuotaCallback in Kafka's ClientQuotaManager: every user=U level ranks above every user=<default> level, and both rank above the client-id-only levels.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/quota.rs#L115",
     "signature": "pub fn user_client_quota_precedence(facts: UserClientQuotaFacts) -> UserClientQuotaPrecedence",
     "requires": [],
     "ensures": [
       "(result == UserClientQuotaPrecedence::ExactPair) == (facts.exact_pair == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::ExactClientDefaultUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultClientExactUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultPair) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::ExactUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::ExactClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_client_default_user == QuotaCandidatePresence::Absent && facts.default_client_exact_user == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.default_client == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::None) == !( facts.exact_pair == QuotaCandidatePresence::Present || facts.exact_client_default_user == QuotaCandidatePresence::Present || facts.default_client_exact_user == QuotaCandidatePresence::Present || facts.default_pair == QuotaCandidatePresence::Present || facts.exact_user == QuotaCandidatePresence::Present || facts.exact_client == QuotaCandidatePresence::Present || facts.default_user == QuotaCandidatePresence::Present || facts.default_client == QuotaCandidatePresence::Present)"
+      "(result == UserClientQuotaPrecedence::ExactUserDefaultClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::ExactUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultUserExactClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultPair) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::ExactClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Absent && facts.default_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::None) == !( facts.exact_pair == QuotaCandidatePresence::Present || facts.exact_user_default_client == QuotaCandidatePresence::Present || facts.exact_user == QuotaCandidatePresence::Present || facts.default_user_exact_client == QuotaCandidatePresence::Present || facts.default_pair == QuotaCandidatePresence::Present || facts.default_user == QuotaCandidatePresence::Present || facts.exact_client == QuotaCandidatePresence::Present || facts.default_client == QuotaCandidatePresence::Present)"
     ],
     "fields": [
-      { "name": "exact_pair", "label": "user=U, client-id=C", "type": "bool", "default": false },
-      { "name": "exact_client_default_user", "label": "user=<default>, client-id=C", "type": "bool", "default": false },
-      { "name": "default_client_exact_user", "label": "user=U, client-id=<default>", "type": "bool", "default": false },
-      { "name": "default_pair", "label": "user=<default>, client-id=<default>", "type": "bool", "default": false },
-      { "name": "exact_user", "label": "user=U", "type": "bool", "default": true },
-      { "name": "exact_client", "label": "client-id=C", "type": "bool", "default": false },
-      { "name": "default_user", "label": "user=<default>", "type": "bool", "default": false },
-      { "name": "default_client", "label": "client-id=<default>", "type": "bool", "default": false }
+      { "name": "exact_pair", "label": "1. user=U, client-id=C", "type": "bool", "default": false },
+      { "name": "exact_user_default_client", "label": "2. user=U, client-id=<default>", "type": "bool", "default": false },
+      { "name": "exact_user", "label": "3. user=U", "type": "bool", "default": true },
+      { "name": "default_user_exact_client", "label": "4. user=<default>, client-id=C", "type": "bool", "default": false },
+      { "name": "default_pair", "label": "5. user=<default>, client-id=<default>", "type": "bool", "default": false },
+      { "name": "default_user", "label": "6. user=<default>", "type": "bool", "default": false },
+      { "name": "exact_client", "label": "7. client-id=C", "type": "bool", "default": false },
+      { "name": "default_client", "label": "8. client-id=<default>", "type": "bool", "default": false }
     ],
     "result_label": "Selected quota candidate",
     "presets": [
-      { "label": "Everything configured: the exact pair wins", "values": { "exact_pair": true, "exact_client_default_user": true, "default_client_exact_user": true, "default_pair": true, "exact_user": true, "exact_client": true, "default_user": true, "default_client": true } },
-      { "label": "The default pair outranks a user-only quota", "values": { "exact_pair": false, "exact_client_default_user": false, "default_client_exact_user": false, "default_pair": true, "exact_user": true, "exact_client": false, "default_user": false, "default_client": false } },
-      { "label": "A user quota outranks a client-id quota", "values": { "exact_pair": false, "exact_client_default_user": false, "default_client_exact_user": false, "default_pair": false, "exact_user": true, "exact_client": true, "default_user": false, "default_client": false } },
-      { "label": "No quota configured", "values": { "exact_pair": false, "exact_client_default_user": false, "default_client_exact_user": false, "default_pair": false, "exact_user": false, "exact_client": false, "default_user": false, "default_client": false } }
+      { "label": "Everything configured: the exact pair wins", "values": { "exact_pair": true, "exact_user_default_client": true, "exact_user": true, "default_user_exact_client": true, "default_pair": true, "default_user": true, "exact_client": true, "default_client": true } },
+      { "label": "A user quota outranks the default pair", "values": { "exact_pair": false, "exact_user_default_client": false, "exact_user": true, "default_user_exact_client": false, "default_pair": true, "default_user": false, "exact_client": false, "default_client": false } },
+      { "label": "A user quota outranks a client-id quota", "values": { "exact_pair": false, "exact_user_default_client": false, "exact_user": true, "default_user_exact_client": false, "default_pair": false, "default_user": false, "exact_client": true, "default_client": false } },
+      { "label": "The user default outranks an exact client-id quota", "values": { "exact_pair": false, "exact_user_default_client": false, "exact_user": false, "default_user_exact_client": false, "default_pair": false, "default_user": true, "exact_client": true, "default_client": false } },
+      { "label": "No quota configured", "values": { "exact_pair": false, "exact_user_default_client": false, "exact_user": false, "default_user_exact_client": false, "default_pair": false, "default_user": false, "exact_client": false, "default_client": false } }
     ]
   },
   {
@@ -396,26 +404,67 @@
     "area": "Replication and ISR",
     "module": "isr",
     "function": "isr_maintenance_selected",
-    "summary": "Decides whether one unique assigned replica belongs in an ISR proposal. An assigned replica is selected if it is the leader, or if it fetched recently and is either already in the ISR or caught up recently; an unassigned replica is never selected.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/isr.rs#L55",
-    "signature": "pub fn isr_maintenance_selected(facts: (bool, bool, bool, bool, bool)) -> bool",
+    "summary": "krabka's former ISR scan rule, kept for the leader-failover model's expansion stand-in; the broker's scan runs isr_candidate_selected. The leader always stays and a member that is no longer assigned leaves. An in-sync follower stays exactly while Kafka's ReplicaState.isCaughtUp holds: its log end offset equals the leader's, or it last caught up within replica.lag.time.max.ms. An out-of-sync follower is admitted when it fetched and caught up within the bound, which is not Kafka's Partition.isFollowerInSync.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/isr.rs#L245",
+    "signature": "pub fn isr_maintenance_selected(facts: IsrMemberFacts) -> bool",
     "requires": [],
     "ensures": [
-      "result == (facts.0 && ( facts.1 || (facts.2 && facts.3) || (!facts.2 && facts.3 && facts.4) ))"
+      "match facts.role { IsrMemberRole::Unassigned => !result, IsrMemberRole::Leader => result, IsrMemberRole::InSyncFollower => result == kafka_is_caught_up(facts), IsrMemberRole::OutOfSyncFollower => result == (facts.fetch_within_lag && facts.caught_up_within_lag) }",
+      "kafka_is_caught_up(facts) = facts.log_end_matches_leader || facts.caught_up_within_lag"
     ],
     "fields": [
-      { "name": "assigned", "label": "Replica is assigned to the partition", "type": "bool", "default": true, "help": "facts.0" },
-      { "name": "is_leader", "label": "Replica is the leader", "type": "bool", "default": false, "help": "facts.1" },
-      { "name": "in_isr", "label": "Replica is in the current ISR", "type": "bool", "default": true, "help": "facts.2" },
-      { "name": "fetch_recent", "label": "Replica fetched recently", "type": "bool", "default": true, "help": "facts.3" },
-      { "name": "caught_up_recent", "label": "Replica caught up recently", "type": "bool", "default": false, "help": "facts.4" }
+      { "name": "role", "label": "Where the candidate stands in the partition", "type": "enum", "default": "InSyncFollower", "options": ["Unassigned", "Leader", "InSyncFollower", "OutOfSyncFollower"], "help": "Unassigned: a current ISR member that is no longer assigned. Leader: the assigned leader. InSyncFollower and OutOfSyncFollower: an assigned follower inside or outside the current ISR." },
+      { "name": "log_end_matches_leader", "label": "Follower's log end offset equals the leader's at this scan", "type": "bool", "default": false },
+      { "name": "caught_up_within_lag", "label": "Follower last caught up within replica.lag.time.max.ms", "type": "bool", "default": true },
+      { "name": "fetch_within_lag", "label": "Follower last fetched within replica.lag.time.max.ms", "type": "bool", "default": true }
     ],
-    "result_label": "Replica belongs in the ISR proposal",
+    "result_label": "Member belongs in the ISR proposal",
     "presets": [
-      { "label": "In-sync follower with a recent fetch stays", "values": { "assigned": true, "is_leader": false, "in_isr": true, "fetch_recent": true, "caught_up_recent": false } },
-      { "label": "Out-of-sync follower that caught up recently rejoins", "values": { "assigned": true, "is_leader": false, "in_isr": false, "fetch_recent": true, "caught_up_recent": true } },
-      { "label": "Out-of-sync follower fetching but not caught up is left out", "values": { "assigned": true, "is_leader": false, "in_isr": false, "fetch_recent": true, "caught_up_recent": false } },
-      { "label": "Unassigned replica is never selected, even as leader", "values": { "assigned": false, "is_leader": true, "in_isr": true, "fetch_recent": true, "caught_up_recent": true } }
+      { "label": "In-sync follower that caught up recently stays", "values": { "role": "InSyncFollower", "log_end_matches_leader": false, "caught_up_within_lag": true, "fetch_within_lag": true } },
+      { "label": "Idle in-sync follower at the leader's log end stays", "values": { "role": "InSyncFollower", "log_end_matches_leader": true, "caught_up_within_lag": false, "fetch_within_lag": false } },
+      { "label": "In-sync follower fetching but behind for too long leaves", "values": { "role": "InSyncFollower", "log_end_matches_leader": false, "caught_up_within_lag": false, "fetch_within_lag": true } },
+      { "label": "Out-of-sync follower that fetched and caught up rejoins", "values": { "role": "OutOfSyncFollower", "log_end_matches_leader": false, "caught_up_within_lag": true, "fetch_within_lag": true } },
+      { "label": "Out-of-sync follower that caught up but stopped fetching stays out", "values": { "role": "OutOfSyncFollower", "log_end_matches_leader": false, "caught_up_within_lag": true, "fetch_within_lag": false } },
+      { "label": "Unassigned member is never selected", "values": { "role": "Unassigned", "log_end_matches_leader": true, "caught_up_within_lag": true, "fetch_within_lag": true } }
+    ]
+  },
+  {
+    "id": "isr_candidate_selected",
+    "title": "ISR candidate selection",
+    "area": "Replication and ISR",
+    "module": "isr",
+    "function": "isr_candidate_selected",
+    "summary": "Decides whether one candidate belongs in the next ISR proposal, the rule the broker's ISR maintenance scan runs. The leader always stays, and a member that is no longer assigned leaves. An in-sync follower stays exactly while Kafka's ReplicaState.isCaughtUp holds, which is Partition.getOutOfSyncReplicas: a follower that keeps fetching but never catches up leaves once its last caught-up time is older than replica.lag.time.max.ms. An out-of-sync follower joins exactly when Kafka's Partition.needsExpandIsr would add it: it is ISR-eligible by Partition.isReplicaIsrEligible (KIP-841) and in sync by Partition.isFollowerInSync, so its log end has reached both the leader's high watermark and the start of the leader's current epoch.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/isr.rs#L382",
+    "signature": "pub fn isr_candidate_selected(facts: IsrCandidateFacts) -> bool",
+    "requires": [],
+    "ensures": [
+      "match facts.role { IsrMemberRole::Unassigned => !result, IsrMemberRole::Leader => result, IsrMemberRole::InSyncFollower => result == kafka_replica_is_caught_up(facts.follower_log_end@, facts.leader_log_end@, facts.caught_up_within_lag), IsrMemberRole::OutOfSyncFollower => result == (kafka_is_replica_isr_eligible(facts.eligibility) && kafka_is_follower_in_sync(facts)) }",
+      "kafka_replica_is_caught_up(follower_log_end, leader_log_end, caught_up_within_lag) = follower_log_end == leader_log_end || caught_up_within_lag",
+      "kafka_is_follower_in_sync(facts) = facts.follower_log_end@ >= facts.leader_high_watermark@ && match facts.leader_epoch_start { Some(start) => facts.follower_log_end@ >= start@, None => false }",
+      "kafka_is_replica_isr_eligible(facts) = !facts.fenced && !facts.shutting_down && match facts.fetch_broker_epoch { Some(stored) => match facts.alive_broker_epoch { Some(alive) => stored@ == -1 || stored@ == alive@, None => false }, None => false }"
+    ],
+    "fields": [
+      { "name": "role", "label": "Where the candidate stands in the partition", "type": "enum", "default": "OutOfSyncFollower", "options": ["Unassigned", "Leader", "InSyncFollower", "OutOfSyncFollower"], "help": "Unassigned: a current ISR member that is no longer assigned. Leader: the assigned leader. InSyncFollower and OutOfSyncFollower: an assigned follower inside or outside the current ISR." },
+      { "name": "follower_log_end", "label": "Follower's log end offset", "type": "int", "default": 100, "help": "Kafka's ReplicaState.logEndOffset: the follower's last fetch offset, -1 before it fetched from this leader." },
+      { "name": "leader_log_end", "label": "Leader's log end offset", "type": "int", "default": 120 },
+      { "name": "leader_high_watermark", "label": "Leader's high watermark", "type": "int", "default": 100 },
+      { "name": "leader_epoch_start", "label": "Leader's epoch start offset", "type": "optional_int", "default": 90, "help": "Kafka's Partition.leaderEpochStartOffsetOpt: the log end offset at which this leader's epoch began. Blank while unknown, which admits nobody." },
+      { "name": "caught_up_within_lag", "label": "Follower last caught up within replica.lag.time.max.ms", "type": "bool", "default": false },
+      { "name": "fenced", "label": "Broker is fenced", "type": "bool", "default": false, "help": "eligibility.fenced: Kafka's metadataCache.isBrokerFenced." },
+      { "name": "shutting_down", "label": "Broker is in controlled shutdown", "type": "bool", "default": false, "help": "eligibility.shutting_down: Kafka's metadataCache.isBrokerShuttingDown." },
+      { "name": "fetch_broker_epoch", "label": "Broker epoch the follower's last Fetch carried", "type": "optional_int", "default": 7, "help": "eligibility.fetch_broker_epoch: Kafka's ReplicaState.brokerEpoch, -1 when that Fetch carried none. Blank before this leader received one." },
+      { "name": "alive_broker_epoch", "label": "Broker's registered epoch", "type": "optional_int", "default": 7, "help": "eligibility.alive_broker_epoch: Kafka's metadataCache.getAliveBrokerEpoch, present while the broker is registered and unfenced. Blank otherwise." }
+    ],
+    "result_label": "Candidate belongs in the next ISR proposal",
+    "presets": [
+      { "label": "A follower at the high watermark joins", "values": { "role": "OutOfSyncFollower", "follower_log_end": 100, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": false, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } },
+      { "label": "One short of the high watermark stays out, however recently it caught up", "values": { "role": "OutOfSyncFollower", "follower_log_end": 99, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": true, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } },
+      { "label": "Past the high watermark but before the epoch start stays out", "values": { "role": "OutOfSyncFollower", "follower_log_end": 105, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 110, "caught_up_within_lag": true, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } },
+      { "label": "A fenced follower at the log end stays out", "values": { "role": "OutOfSyncFollower", "follower_log_end": 120, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": true, "fenced": true, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } },
+      { "label": "A Fetch from the broker's previous incarnation stays out", "values": { "role": "OutOfSyncFollower", "follower_log_end": 120, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": true, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 6, "alive_broker_epoch": 7 } },
+      { "label": "An in-sync follower behind for longer than the bound leaves", "values": { "role": "InSyncFollower", "follower_log_end": 119, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": false, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } },
+      { "label": "An in-sync follower that caught up recently stays", "values": { "role": "InSyncFollower", "follower_log_end": 50, "leader_log_end": 120, "leader_high_watermark": 100, "leader_epoch_start": 90, "caught_up_within_lag": true, "fenced": false, "shutting_down": false, "fetch_broker_epoch": 7, "alive_broker_epoch": 7 } }
     ]
   },
   {
@@ -425,7 +474,7 @@
     "module": "compaction",
     "function": "retain_decision",
     "summary": "The single per-record KIP-534 retain decision. Control batches (transaction commit and abort markers) are retained as long as their transaction's data survives and then age out through the delete horizon; data records dedup newest-wins; a tombstone ages out through the delete horizon after it becomes the newest entry for its key.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/compaction.rs#L179",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/compaction.rs#L156",
     "signature": "pub const fn retain_decision(rec: RecordMeta, batch: BatchMeta, is_newest_for_key: bool, txn: TxnDataState, now_ms: i64, delete_retention_ms: i64) -> RetainDecision",
     "requires": [],
     "ensures": [
@@ -463,29 +512,29 @@
     "area": "KRaft consensus",
     "module": "vote",
     "function": "vote_admission_decision",
-    "summary": "Classifies exact recipient and membership admission for a KIP-595 Vote request, shared by binding votes and pre-votes before the epoch and log checks. A Vote addressed to another voter or directory is ignored without a reply; one addressed here is denied unless the cluster matches and both the local node and the candidate are voters.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/v0.5.4/crates/verified/src/vote.rs#L107",
-    "signature": "pub fn vote_admission_decision(voter_id: u64, local_id: u64, target_directory_matches: bool, cluster_matches: bool, local_is_voter: bool, candidate_is_voter: bool) -> VoteAdmissionDecision",
+    "summary": "Classifies exact recipient and membership admission for a KIP-595 Vote request, shared by binding votes and pre-votes before the epoch and log checks. The target alone decides IgnoreWrongTarget: a Vote addressed to another voter or directory is ignored without a reply. For the exact target, the memberships decide between Deny and Consider: the request is denied unless the cluster matches and both the local node and the candidate are voters.",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/53e0ad76cf9afa15b557454bd882b627e7e16bc6/crates/verified/src/vote.rs#L159",
+    "signature": "pub fn vote_admission_decision(target: VoteTarget, membership: VoteMembership) -> VoteAdmissionDecision",
     "requires": [],
     "ensures": [
-      "(result == VoteAdmissionDecision::IgnoreWrongTarget) == (voter_id@ != local_id@ || !target_directory_matches)",
-      "(result == VoteAdmissionDecision::Deny) == ( voter_id@ == local_id@ && target_directory_matches && (!cluster_matches || !local_is_voter || !candidate_is_voter) )",
-      "(result == VoteAdmissionDecision::Consider) == ( voter_id@ == local_id@ && target_directory_matches && cluster_matches && local_is_voter && candidate_is_voter )"
+      "(result == VoteAdmissionDecision::IgnoreWrongTarget) == (target.voter_id@ != target.local_id@ || !target.directory_matches)",
+      "(result == VoteAdmissionDecision::Deny) == ( target.voter_id@ == target.local_id@ && target.directory_matches && (!membership.cluster_matches || !membership.local_is_voter || !membership.candidate_is_voter) )",
+      "(result == VoteAdmissionDecision::Consider) == ( target.voter_id@ == target.local_id@ && target.directory_matches && membership.cluster_matches && membership.local_is_voter && membership.candidate_is_voter )"
     ],
     "fields": [
-      { "name": "voter_id", "label": "VoterId the request is addressed to", "type": "int", "default": 1, "min": 0 },
-      { "name": "local_id", "label": "This node's id", "type": "int", "default": 1, "min": 0 },
-      { "name": "target_directory_matches", "label": "VoterDirectoryId names this node's directory", "type": "bool", "default": true },
-      { "name": "cluster_matches", "label": "Cluster id absent or matches", "type": "bool", "default": true },
-      { "name": "local_is_voter", "label": "This node is a voter", "type": "bool", "default": true },
-      { "name": "candidate_is_voter", "label": "The candidate is a voter", "type": "bool", "default": true }
+      { "name": "voter_id", "label": "VoterId the request is addressed to", "type": "int", "default": 1, "min": 0, "help": "target.voter_id" },
+      { "name": "local_id", "label": "This node's id", "type": "int", "default": 1, "min": 0, "help": "target.local_id" },
+      { "name": "directory_matches", "label": "VoterDirectoryId names this node's directory", "type": "bool", "default": true, "help": "target.directory_matches" },
+      { "name": "cluster_matches", "label": "Cluster id absent or matches", "type": "bool", "default": true, "help": "membership.cluster_matches" },
+      { "name": "local_is_voter", "label": "This node is a voter", "type": "bool", "default": true, "help": "membership.local_is_voter" },
+      { "name": "candidate_is_voter", "label": "The candidate is a voter", "type": "bool", "default": true, "help": "membership.candidate_is_voter" }
     ],
     "result_label": "IgnoreWrongTarget, Deny or Consider",
     "presets": [
-      { "label": "Addressed to this voter with full membership", "values": { "voter_id": 1, "local_id": 1, "target_directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
-      { "label": "Addressed to another voter: ignored without a reply", "values": { "voter_id": 2, "local_id": 1, "target_directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
-      { "label": "Right node id, wrong directory", "values": { "voter_id": 1, "local_id": 1, "target_directory_matches": false, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
-      { "label": "Candidate is not a voter: denied", "values": { "voter_id": 1, "local_id": 1, "target_directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": false } }
+      { "label": "Addressed to this voter with full membership", "values": { "voter_id": 1, "local_id": 1, "directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
+      { "label": "Addressed to another voter: ignored without a reply", "values": { "voter_id": 2, "local_id": 1, "directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
+      { "label": "Right node id, wrong directory", "values": { "voter_id": 1, "local_id": 1, "directory_matches": false, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true } },
+      { "label": "Candidate is not a voter: denied", "values": { "voter_id": 1, "local_id": 1, "directory_matches": true, "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": false } }
     ]
   }
 ]

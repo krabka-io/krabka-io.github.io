@@ -1,20 +1,21 @@
 //! A JSON front door to the Creusot-verified decision kernels of
 //! `krabka-verified`.
 //!
-//! The website page `/docs/verified` lets a reader type inputs into a form and
-//! watch the same pure function the broker runs decide. [`run_kernel`] is the
-//! whole seam: JavaScript names a kernel and hands over its inputs as one JSON
-//! object, and gets one JSON object back. Every field is checked before the
-//! kernel runs. That covers the shape of the input, the integer ranges of the
-//! Rust parameters, and every Creusot `#[requires]` clause of the kernel. A
-//! violated precondition never reaches the kernel body, because outside a
-//! Creusot build a `#[requires]` clause is documentation, not a runtime check.
+//! The website page `/docs/verification-playground` lets a reader type inputs
+//! into a form and watch the same pure function the broker runs decide.
+//! [`run_kernel`] is the whole seam: JavaScript names a kernel and hands over
+//! its inputs as one JSON object, and gets one JSON object back. Every field is
+//! checked before the kernel runs. That covers the shape of the input, the
+//! integer ranges of the Rust parameters, and every Creusot `#[requires]`
+//! clause of the kernel. A violated precondition never reaches the kernel
+//! body, because outside a Creusot build a `#[requires]` clause is
+//! documentation, not a runtime check.
 //!
 //! Reply shape:
 //!
 //! ```json
 //! { "ok": true, "result": 3 }
-//! { "ok": true, "result": "Duplicate", "detail": { "base_offset": 100 } }
+//! { "ok": true, "result": "Duplicate", "detail": { "retained": 4 } }
 //! { "ok": false, "error": "precondition violated: majority must be between 1 and follower_offsets.len() + 1" }
 //! ```
 
@@ -22,28 +23,31 @@ use std::fmt::Debug;
 
 use krabka_ids::{LeaderEpoch, Offset};
 use krabka_verified::{
-    authz::acl_decision,
+    authz::{AclDefault, AclFacts, acl_decision},
     compaction::{BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision},
     consensus::{
         election_has_quorum, election_jitter_ms, log_is_up_to_date, majority_size,
         recompute_high_watermark,
     },
-    isr::isr_maintenance_selected,
+    isr::{
+        IsrCandidateFacts, IsrEligibilityFacts, IsrMemberFacts, IsrMemberRole,
+        isr_candidate_selected, isr_maintenance_selected,
+    },
     leader_epoch::{EpochEntry, epoch_and_offset_for_entries},
     log_index::offset_index_lookup,
-    producer::{ProducerBatch, ProducerDecision, producer_decision},
+    producer::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision},
     quota::{QuotaCandidatePresence, UserClientQuotaFacts, user_client_quota_precedence},
     stretch::{
         min_insync_is_site_loss_safe, quorum_survives_any_single_site_loss, site_loss_survivors,
     },
     throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
-    vote::vote_admission_decision,
+    vote::{VoteMembership, VoteTarget, vote_admission_decision},
 };
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
 
 /// The kernels [`run_kernel`] knows, in the order the page lists them.
-const KERNEL_NAMES: [&str; 16] = [
+const KERNEL_NAMES: [&str; 17] = [
     "majority_size",
     "election_has_quorum",
     "log_is_up_to_date",
@@ -58,6 +62,7 @@ const KERNEL_NAMES: [&str; 16] = [
     "quorum_survives_any_single_site_loss",
     "user_client_quota_precedence",
     "isr_maintenance_selected",
+    "isr_candidate_selected",
     "retain_decision",
     "vote_admission_decision",
 ];
@@ -68,6 +73,28 @@ const PRECONDITION: &str = "precondition violated: ";
 /// The stretch kernels bound their inputs at this value to keep the `i64`
 /// arithmetic away from overflow. See `krabka_verified::stretch`.
 const STRETCH_BOUND: i64 = 1024;
+
+/// The `AclDefault` variants by name: what an ACL evaluation decides when no
+/// ACL matched.
+const ACL_DEFAULTS: [(&str, AclDefault); 2] =
+    [("Deny", AclDefault::Deny), ("Allow", AclDefault::Allow)];
+
+/// The `IsrMemberRole` variants by name: where a candidate stands in the
+/// partition the leader maintains.
+const ISR_MEMBER_ROLES: [(&str, IsrMemberRole); 4] = [
+    ("Unassigned", IsrMemberRole::Unassigned),
+    ("Leader", IsrMemberRole::Leader),
+    ("InSyncFollower", IsrMemberRole::InSyncFollower),
+    ("OutOfSyncFollower", IsrMemberRole::OutOfSyncFollower),
+];
+
+/// The `TxnDataState` variants by name: whether a producer's transactional
+/// data still survives compaction.
+const TXN_DATA_STATES: [(&str, TxnDataState); 3] = [
+    ("NotTransactional", TxnDataState::NotTransactional),
+    ("DataSurvives", TxnDataState::DataSurvives),
+    ("DataFullyGone", TxnDataState::DataFullyGone),
+];
 
 /// What a kernel decided: the value the page shows, and any payload a data
 /// variant carried with it.
@@ -109,11 +136,11 @@ pub fn kernel_names() -> String {
 ///
 /// The reply is a JSON object. On success it is
 /// `{"ok":true,"result":<value>}`, plus a `"detail"` object when the decision
-/// carried a payload, such as the `base_offset` of a duplicate producer batch.
-/// On failure it is `{"ok":false,"error":"<message>"}`. The message names the
-/// offending field for a missing, mistyped, or out-of-range input, and starts
-/// with `precondition violated: ` when the inputs are well-formed but break a
-/// Creusot `#[requires]` clause of the kernel.
+/// carried a payload, such as the retained slot a duplicate producer batch
+/// repeats. On failure it is `{"ok":false,"error":"<message>"}`. The message
+/// names the offending field for a missing, mistyped, or out-of-range input,
+/// and starts with `precondition violated: ` when the inputs are well-formed
+/// but break a Creusot `#[requires]` clause of the kernel.
 #[wasm_bindgen]
 #[must_use]
 pub fn run_kernel(name: &str, input_json: &str) -> String {
@@ -156,6 +183,7 @@ fn evaluate(name: &str, input_json: &str) -> KernelResult {
         "quorum_survives_any_single_site_loss" => quorum_survives_kernel(&input),
         "user_client_quota_precedence" => user_client_quota_precedence_kernel(&input),
         "isr_maintenance_selected" => isr_maintenance_selected_kernel(&input),
+        "isr_candidate_selected" => isr_candidate_selected_kernel(&input),
         "retain_decision" => retain_decision_kernel(&input),
         "vote_admission_decision" => vote_admission_decision_kernel(&input),
         other => Err(format!(
@@ -185,7 +213,7 @@ fn variant<T: Debug>(value: &T) -> String {
 // ---------------------------------------------------------------------------
 
 /// A typed view over one JSON object, with a path prefix so an error inside a
-/// nested object names the full field, for example `last.epoch`.
+/// nested object names the full field, for example `entry.epoch`.
 struct Input<'a> {
     fields: &'a Map<String, Value>,
     path: String,
@@ -236,6 +264,24 @@ impl<'a> Input<'a> {
             .ok_or_else(|| format!("field {} must be a string", self.label(name)))
     }
 
+    /// A string field that names one of `options`, as the value paired with
+    /// that name. The error lists every name.
+    fn choice<T: Copy>(&self, name: &str, options: &[(&str, T)]) -> Result<T, String> {
+        let raw = self.string(name)?;
+        options
+            .iter()
+            .find(|(label, _)| *label == raw)
+            .map(|(_, value)| *value)
+            .ok_or_else(|| {
+                let names: Vec<&str> = options.iter().map(|(label, _)| *label).collect();
+                format!(
+                    "field {} must be one of {}",
+                    self.label(name),
+                    names.join(", ")
+                )
+            })
+    }
+
     /// A signed integer field that must fit `T`.
     fn signed<T: TryFrom<i64>>(&self, name: &str) -> Result<T, String> {
         signed_value(self.raw(name)?, &self.label(name))
@@ -283,6 +329,22 @@ impl<'a> Input<'a> {
             .iter()
             .enumerate()
             .map(|(index, value)| object_value(value, &self.element_label(name, index)))
+            .collect()
+    }
+
+    /// The elements of an array field, each a nested object or `None` for a
+    /// JSON `null` element.
+    fn optional_object_array(&self, name: &str) -> Result<Vec<Option<Input<'a>>>, String> {
+        self.array(name)?
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                if value.is_null() {
+                    Ok(None)
+                } else {
+                    object_value(value, &self.element_label(name, index)).map(Some)
+                }
+            })
             .collect()
     }
 
@@ -348,7 +410,10 @@ fn majority_size_kernel(input: &Input<'_>) -> KernelResult {
 fn election_has_quorum_kernel(input: &Input<'_>) -> KernelResult {
     let voter_count: usize = input.unsigned("voter_count")?;
     let current_grants: usize = input.unsigned("current_grants")?;
-    Ok(Outcome::of(election_has_quorum(voter_count, current_grants)))
+    Ok(Outcome::of(election_has_quorum(
+        voter_count,
+        current_grants,
+    )))
 }
 
 /// `consensus::log_is_up_to_date`: the KIP-595 rule for granting a vote.
@@ -428,42 +493,62 @@ fn plan_consume_kernel(input: &Input<'_>) -> KernelResult {
     })))
 }
 
-/// `authz::acl_decision`: super-user bypass, deny wins, default deny.
+/// `authz::acl_decision`: super-user bypass, deny wins, then the configured
+/// default for a resource no ACL applies to.
 fn acl_decision_kernel(input: &Input<'_>) -> KernelResult {
-    let super_user = input.boolean("super_user")?;
-    let saw_allow = input.boolean("saw_allow")?;
-    let saw_deny = input.boolean("saw_deny")?;
-    Ok(Outcome::of(variant(&acl_decision(
-        super_user, saw_allow, saw_deny,
-    ))))
+    let facts = AclFacts {
+        super_user: input.boolean("super_user")?,
+        saw_allow: input.boolean("saw_allow")?,
+        saw_deny: input.boolean("saw_deny")?,
+        default_decision: input.choice("default_decision", &ACL_DEFAULTS)?,
+    };
+    Ok(Outcome::of(variant(&acl_decision(facts))))
 }
 
 // ---------------------------------------------------------------------------
 // Log
 // ---------------------------------------------------------------------------
 
-/// `producer::producer_decision`: append, duplicate, out of order, or fenced.
+/// `producer::producer_decision`: append, duplicate of a retained batch, out
+/// of order, or fenced.
 fn producer_decision_kernel(input: &Input<'_>) -> KernelResult {
-    let last = input
-        .optional_object("last")?
-        .map(|batch| {
-            Ok::<_, String>(ProducerBatch {
-                epoch: batch.signed("epoch")?,
-                last_sequence: batch.signed("last_sequence")?,
-                last_offset_delta: batch.optional_signed("last_offset_delta")?,
-                base_offset: batch.signed("base_offset")?,
+    let entry = input
+        .optional_object("entry")?
+        .map(|entry| {
+            Ok::<_, String>(ProducerEntryFacts {
+                epoch: entry.signed("epoch")?,
+                last_sequence: entry.signed("last_sequence")?,
             })
         })
         .transpose()?;
+    let retained = input
+        .optional_object_array("retained")?
+        .into_iter()
+        .map(|slot| {
+            slot.map(|range| {
+                Ok::<_, String>(RetainedSequenceRange {
+                    base_sequence: range.signed("base_sequence")?,
+                    last_sequence: range.signed("last_sequence")?,
+                })
+            })
+            .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let producer_epoch: i16 = input.signed("producer_epoch")?;
     let base_sequence: i32 = input.signed("base_sequence")?;
     let last_offset_delta: i32 = input.signed("last_offset_delta")?;
 
     Ok(
-        match producer_decision(last, producer_epoch, base_sequence, last_offset_delta) {
+        match producer_decision(
+            entry,
+            &retained,
+            producer_epoch,
+            base_sequence,
+            last_offset_delta,
+        ) {
             ProducerDecision::Append => Outcome::of("Append"),
-            ProducerDecision::Duplicate { base_offset } => {
-                Outcome::with_detail("Duplicate", json!({ "base_offset": base_offset }))
+            ProducerDecision::Duplicate { retained } => {
+                Outcome::with_detail("Duplicate", json!({ "retained": retained }))
             }
             ProducerDecision::OutOfOrder => Outcome::of("OutOfOrder"),
             ProducerDecision::Fenced => Outcome::of("Fenced"),
@@ -527,9 +612,12 @@ fn offset_index_lookup_kernel(input: &Input<'_>) -> KernelResult {
 
 /// Read one `[relative_offset, position]` pair of an offset index.
 fn index_pair(value: &Value, label: &str) -> Result<(u32, u32), String> {
-    let pair = value.as_array().filter(|pair| pair.len() == 2).ok_or_else(|| {
-        format!("field {label} must be a two-element array [relative_offset, position]")
-    })?;
+    let pair = value
+        .as_array()
+        .filter(|pair| pair.len() == 2)
+        .ok_or_else(|| {
+            format!("field {label} must be a two-element array [relative_offset, position]")
+        })?;
     let inner = label.trim_matches('`');
     Ok((
         unsigned_value(&pair[0], &format!("`{inner}[0]`"))?,
@@ -604,28 +692,48 @@ fn user_client_quota_precedence_kernel(input: &Input<'_>) -> KernelResult {
     };
     let facts = UserClientQuotaFacts {
         exact_pair: presence("exact_pair")?,
-        exact_client_default_user: presence("exact_client_default_user")?,
-        default_client_exact_user: presence("default_client_exact_user")?,
-        default_pair: presence("default_pair")?,
+        exact_user_default_client: presence("exact_user_default_client")?,
         exact_user: presence("exact_user")?,
-        exact_client: presence("exact_client")?,
+        default_user_exact_client: presence("default_user_exact_client")?,
+        default_pair: presence("default_pair")?,
         default_user: presence("default_user")?,
+        exact_client: presence("exact_client")?,
         default_client: presence("default_client")?,
     };
     Ok(Outcome::of(variant(&user_client_quota_precedence(facts))))
 }
 
-/// `isr::isr_maintenance_selected`: whether a replica stays in the ISR after
-/// a maintenance pass.
+/// `isr::isr_maintenance_selected`: whether a member stays in the ISR under
+/// krabka's former scan rule, the one the leader-failover model still drives.
 fn isr_maintenance_selected_kernel(input: &Input<'_>) -> KernelResult {
-    let facts = (
-        input.boolean("assigned")?,
-        input.boolean("is_leader")?,
-        input.boolean("in_isr")?,
-        input.boolean("fetch_recent")?,
-        input.boolean("caught_up_recent")?,
-    );
+    let facts = IsrMemberFacts {
+        role: input.choice("role", &ISR_MEMBER_ROLES)?,
+        log_end_matches_leader: input.boolean("log_end_matches_leader")?,
+        caught_up_within_lag: input.boolean("caught_up_within_lag")?,
+        fetch_within_lag: input.boolean("fetch_within_lag")?,
+    };
     Ok(Outcome::of(isr_maintenance_selected(facts)))
+}
+
+/// `isr::isr_candidate_selected`: whether a candidate belongs in the next ISR
+/// proposal, Kafka's shrink and KIP-841 expand rules. The eligibility facts
+/// arrive flat, next to the candidate's own.
+fn isr_candidate_selected_kernel(input: &Input<'_>) -> KernelResult {
+    let facts = IsrCandidateFacts {
+        role: input.choice("role", &ISR_MEMBER_ROLES)?,
+        follower_log_end: input.signed("follower_log_end")?,
+        leader_log_end: input.signed("leader_log_end")?,
+        leader_high_watermark: input.signed("leader_high_watermark")?,
+        leader_epoch_start: input.optional_signed("leader_epoch_start")?,
+        caught_up_within_lag: input.boolean("caught_up_within_lag")?,
+        eligibility: IsrEligibilityFacts {
+            fenced: input.boolean("fenced")?,
+            shutting_down: input.boolean("shutting_down")?,
+            fetch_broker_epoch: input.optional_signed("fetch_broker_epoch")?,
+            alive_broker_epoch: input.optional_signed("alive_broker_epoch")?,
+        },
+    };
+    Ok(Outcome::of(isr_candidate_selected(facts)))
 }
 
 /// `compaction::retain_decision`: keep, delete, or start the tombstone
@@ -641,22 +749,19 @@ fn retain_decision_kernel(input: &Input<'_>) -> KernelResult {
         existing_horizon: input.optional_signed("existing_horizon")?,
     };
     let is_newest_for_key = input.boolean("is_newest_for_key")?;
-    let txn = match input.string("txn")? {
-        "NotTransactional" => TxnDataState::NotTransactional,
-        "DataSurvives" => TxnDataState::DataSurvives,
-        "DataFullyGone" => TxnDataState::DataFullyGone,
-        _ => {
-            return Err(
-                "field `txn` must be one of NotTransactional, DataSurvives, DataFullyGone"
-                    .to_string(),
-            );
-        }
-    };
+    let txn = input.choice("txn", &TXN_DATA_STATES)?;
     let now_ms: i64 = input.signed("now_ms")?;
     let delete_retention_ms: i64 = input.signed("delete_retention_ms")?;
 
     Ok(
-        match retain_decision(rec, batch, is_newest_for_key, txn, now_ms, delete_retention_ms) {
+        match retain_decision(
+            rec,
+            batch,
+            is_newest_for_key,
+            txn,
+            now_ms,
+            delete_retention_ms,
+        ) {
             RetainDecision::Keep => Outcome::of("Keep"),
             RetainDecision::Delete => Outcome::of("Delete"),
             RetainDecision::SetHorizon(horizon) => {
@@ -667,21 +772,20 @@ fn retain_decision_kernel(input: &Input<'_>) -> KernelResult {
 }
 
 /// `vote::vote_admission_decision`: ignore, deny, or consider an incoming
-/// KIP-595 Vote request.
+/// KIP-595 Vote request. The target and membership facts arrive flat.
 fn vote_admission_decision_kernel(input: &Input<'_>) -> KernelResult {
-    let voter_id: u64 = input.unsigned("voter_id")?;
-    let local_id: u64 = input.unsigned("local_id")?;
-    let target_directory_matches = input.boolean("target_directory_matches")?;
-    let cluster_matches = input.boolean("cluster_matches")?;
-    let local_is_voter = input.boolean("local_is_voter")?;
-    let candidate_is_voter = input.boolean("candidate_is_voter")?;
+    let target = VoteTarget {
+        voter_id: input.unsigned("voter_id")?,
+        local_id: input.unsigned("local_id")?,
+        directory_matches: input.boolean("directory_matches")?,
+    };
+    let membership = VoteMembership {
+        cluster_matches: input.boolean("cluster_matches")?,
+        local_is_voter: input.boolean("local_is_voter")?,
+        candidate_is_voter: input.boolean("candidate_is_voter")?,
+    };
     Ok(Outcome::of(variant(&vote_admission_decision(
-        voter_id,
-        local_id,
-        target_directory_matches,
-        cluster_matches,
-        local_is_voter,
-        candidate_is_voter,
+        target, membership,
     ))))
 }
 
@@ -700,7 +804,10 @@ mod tests {
     fn error_of(name: &str, input: &Value) -> String {
         let reply = run(name, input);
         assert2::assert!(reply["ok"] == false, "reply {reply} should have failed");
-        reply["error"].as_str().expect("error is a string").to_string()
+        reply["error"]
+            .as_str()
+            .expect("error is a string")
+            .to_string()
     }
 
     /// Check every `(kernel, input, expected reply)` row.
@@ -709,6 +816,38 @@ mod tests {
             let reply = run(name, input);
             assert2::assert!(reply == *expected, "kernel {name}");
         }
+    }
+
+    /// Kafka's five retained batches for a producer that sent sequences
+    /// 0..=6 at epoch 2 in batches `[0]`, `[1, 2]`, `[3]`, `[4, 5, 6]`, with
+    /// one slot unused.
+    fn retained_batches() -> Value {
+        json!([
+            null,
+            { "base_sequence": 0, "last_sequence": 0 },
+            { "base_sequence": 1, "last_sequence": 2 },
+            { "base_sequence": 3, "last_sequence": 3 },
+            { "base_sequence": 4, "last_sequence": 6 }
+        ])
+    }
+
+    /// An out-of-sync follower at `follower_log_end` on a leader whose log
+    /// ends at 120, whose high watermark is 100, and whose epoch began at 90,
+    /// as a registered, unfenced broker at epoch 7 whose last Fetch carried
+    /// that epoch.
+    fn isr_candidate(follower_log_end: i64) -> Value {
+        json!({
+            "role": "OutOfSyncFollower",
+            "follower_log_end": follower_log_end,
+            "leader_log_end": 120,
+            "leader_high_watermark": 100,
+            "leader_epoch_start": 90,
+            "caught_up_within_lag": false,
+            "fenced": false,
+            "shutting_down": false,
+            "fetch_broker_epoch": 7,
+            "alive_broker_epoch": 7
+        })
     }
 
     #[test]
@@ -761,25 +900,20 @@ mod tests {
                 json!({ "ok": true, "result": 485 }),
             ),
             (
-                "producer_decision",
-                json!({
-                    "last": { "epoch": 1, "last_sequence": 9, "last_offset_delta": 4, "base_offset": 100 },
-                    "producer_epoch": 1, "base_sequence": 5, "last_offset_delta": 4
-                }),
-                json!({ "ok": true, "result": "Duplicate", "detail": { "base_offset": 100 } }),
-            ),
-            (
-                "producer_decision",
-                json!({ "last": null, "producer_epoch": 1, "base_sequence": 0, "last_offset_delta": 0 }),
-                json!({ "ok": true, "result": "Append" }),
-            ),
-            (
                 "epoch_and_offset_for_entries",
                 json!({
                     "entries": [{ "epoch": 1, "start_offset": 0 }, { "epoch": 3, "start_offset": 10 }],
                     "requested_epoch": 2, "log_end_offset": 20
                 }),
                 json!({ "ok": true, "result": { "found_epoch": 1, "end_offset": 10 } }),
+            ),
+            (
+                "epoch_and_offset_for_entries",
+                json!({
+                    "entries": [{ "epoch": 1, "start_offset": 0 }, { "epoch": 3, "start_offset": 10 }],
+                    "requested_epoch": -1, "log_end_offset": 20
+                }),
+                json!({ "ok": true, "result": { "found_epoch": -1, "end_offset": -1 } }),
             ),
             (
                 "offset_index_lookup",
@@ -789,8 +923,64 @@ mod tests {
         ]);
     }
 
+    /// The duplicate check runs over the retained slots at the entry's epoch,
+    /// and only a batch that repeats none of them reaches the sequence check.
     #[test]
-    fn policy_kernels_happy_paths() {
+    fn producer_decision_classifies_batches() {
+        check_rows(&[
+            (
+                "producer_decision",
+                json!({
+                    "entry": { "epoch": 2, "last_sequence": 6 }, "retained": retained_batches(),
+                    "producer_epoch": 2, "base_sequence": 4, "last_offset_delta": 2
+                }),
+                json!({ "ok": true, "result": "Duplicate", "detail": { "retained": 4 } }),
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": { "epoch": 2, "last_sequence": 6 }, "retained": retained_batches(),
+                    "producer_epoch": 2, "base_sequence": 1, "last_offset_delta": 1
+                }),
+                json!({ "ok": true, "result": "Duplicate", "detail": { "retained": 2 } }),
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": { "epoch": 2, "last_sequence": 6 }, "retained": retained_batches(),
+                    "producer_epoch": 2, "base_sequence": 7, "last_offset_delta": 0
+                }),
+                json!({ "ok": true, "result": "Append" }),
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [],
+                    "producer_epoch": 3, "base_sequence": 7, "last_offset_delta": 0
+                }),
+                json!({ "ok": true, "result": "OutOfOrder" }),
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": { "epoch": 2, "last_sequence": 6 }, "retained": [],
+                    "producer_epoch": 1, "base_sequence": 4, "last_offset_delta": 2
+                }),
+                json!({ "ok": true, "result": "Fenced" }),
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": null, "retained": [],
+                    "producer_epoch": 1, "base_sequence": 17, "last_offset_delta": 0
+                }),
+                json!({ "ok": true, "result": "Append" }),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn security_and_quota_kernels_happy_paths() {
         check_rows(&[
             (
                 "plan_consume",
@@ -799,9 +989,70 @@ mod tests {
             ),
             (
                 "acl_decision",
-                json!({ "super_user": false, "saw_allow": true, "saw_deny": false }),
+                json!({
+                    "super_user": false, "saw_allow": true, "saw_deny": false,
+                    "default_decision": "Deny"
+                }),
                 json!({ "ok": true, "result": "AllowAcl" }),
             ),
+            (
+                "acl_decision",
+                json!({
+                    "super_user": false, "saw_allow": false, "saw_deny": false,
+                    "default_decision": "Allow"
+                }),
+                json!({ "ok": true, "result": "AllowNoAcl" }),
+            ),
+            (
+                "acl_decision",
+                json!({
+                    "super_user": false, "saw_allow": false, "saw_deny": true,
+                    "default_decision": "Allow"
+                }),
+                json!({ "ok": true, "result": "DenyExplicit" }),
+            ),
+            (
+                "user_client_quota_precedence",
+                json!({
+                    "exact_pair": false, "exact_user_default_client": false,
+                    "exact_user": true, "default_user_exact_client": false,
+                    "default_pair": false, "default_user": false,
+                    "exact_client": true, "default_client": false
+                }),
+                json!({ "ok": true, "result": "ExactUser" }),
+            ),
+            (
+                "user_client_quota_precedence",
+                json!({
+                    "exact_pair": false, "exact_user_default_client": false,
+                    "exact_user": false, "default_user_exact_client": false,
+                    "default_pair": false, "default_user": true,
+                    "exact_client": true, "default_client": false
+                }),
+                json!({ "ok": true, "result": "DefaultUser" }),
+            ),
+            (
+                "vote_admission_decision",
+                json!({
+                    "voter_id": 1, "local_id": 1, "directory_matches": true,
+                    "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true
+                }),
+                json!({ "ok": true, "result": "Consider" }),
+            ),
+            (
+                "vote_admission_decision",
+                json!({
+                    "voter_id": 2, "local_id": 1, "directory_matches": true,
+                    "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true
+                }),
+                json!({ "ok": true, "result": "IgnoreWrongTarget" }),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn replication_and_storage_kernels_happy_paths() {
+        check_rows(&[
             (
                 "stretch_durability",
                 json!({ "rf": 6, "sites": 3, "min_insync": 3 }),
@@ -816,22 +1067,30 @@ mod tests {
                 json!({ "ok": true, "result": true }),
             ),
             (
-                "user_client_quota_precedence",
+                "isr_maintenance_selected",
                 json!({
-                    "exact_pair": false, "exact_client_default_user": false,
-                    "default_client_exact_user": false, "default_pair": false,
-                    "exact_user": true, "exact_client": true,
-                    "default_user": false, "default_client": false
+                    "role": "InSyncFollower", "log_end_matches_leader": false,
+                    "caught_up_within_lag": true, "fetch_within_lag": true
                 }),
-                json!({ "ok": true, "result": "ExactUser" }),
+                json!({ "ok": true, "result": true }),
             ),
             (
                 "isr_maintenance_selected",
                 json!({
-                    "assigned": true, "is_leader": false, "in_isr": true,
-                    "fetch_recent": true, "caught_up_recent": false
+                    "role": "OutOfSyncFollower", "log_end_matches_leader": false,
+                    "caught_up_within_lag": true, "fetch_within_lag": false
                 }),
+                json!({ "ok": true, "result": false }),
+            ),
+            (
+                "isr_candidate_selected",
+                isr_candidate(100),
                 json!({ "ok": true, "result": true }),
+            ),
+            (
+                "isr_candidate_selected",
+                isr_candidate(99),
+                json!({ "ok": true, "result": false }),
             ),
             (
                 "retain_decision",
@@ -842,13 +1101,41 @@ mod tests {
                 }),
                 json!({ "ok": true, "result": "SetHorizon", "detail": { "horizon": 1500 } }),
             ),
+        ]);
+    }
+
+    /// The flat eligibility fields reach the nested `IsrEligibilityFacts`,
+    /// and a blank optional reads as `None`.
+    #[test]
+    fn isr_candidate_eligibility_fields_are_read() {
+        let mut fenced = isr_candidate(120);
+        fenced["fenced"] = json!(true);
+        let mut stale_fetch = isr_candidate(120);
+        stale_fetch["fetch_broker_epoch"] = json!(6);
+        let mut unknown_epoch_start = isr_candidate(120);
+        unknown_epoch_start["leader_epoch_start"] = Value::Null;
+        let mut leader = isr_candidate(-1);
+        leader["role"] = json!("Leader");
+        check_rows(&[
             (
-                "vote_admission_decision",
-                json!({
-                    "voter_id": 1, "local_id": 1, "target_directory_matches": true,
-                    "cluster_matches": true, "local_is_voter": true, "candidate_is_voter": true
-                }),
-                json!({ "ok": true, "result": "Consider" }),
+                "isr_candidate_selected",
+                fenced,
+                json!({ "ok": true, "result": false }),
+            ),
+            (
+                "isr_candidate_selected",
+                stale_fetch,
+                json!({ "ok": true, "result": false }),
+            ),
+            (
+                "isr_candidate_selected",
+                unknown_epoch_start,
+                json!({ "ok": true, "result": false }),
+            ),
+            (
+                "isr_candidate_selected",
+                leader,
+                json!({ "ok": true, "result": true }),
             ),
         ]);
     }
@@ -898,7 +1185,10 @@ mod tests {
         ];
         for (name, input, clause) in rows {
             let error = error_of(name, &input);
-            assert2::assert!(error == format!("precondition violated: {clause}"), "kernel {name}");
+            assert2::assert!(
+                error == format!("precondition violated: {clause}"),
+                "kernel {name}"
+            );
         }
     }
 
@@ -924,8 +1214,27 @@ mod tests {
             ),
             (
                 "producer_decision",
-                json!({ "last": { "epoch": 70000 }, "producer_epoch": 1, "base_sequence": 0, "last_offset_delta": 0 }),
-                "field `last.epoch` must be a whole number that fits i16",
+                json!({
+                    "entry": { "epoch": 70000 }, "retained": [],
+                    "producer_epoch": 1, "base_sequence": 0, "last_offset_delta": 0
+                }),
+                "field `entry.epoch` must be a whole number that fits i16",
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": null, "retained": [null, 5],
+                    "producer_epoch": 1, "base_sequence": 0, "last_offset_delta": 0
+                }),
+                "field `retained[1]` must be an object",
+            ),
+            (
+                "producer_decision",
+                json!({
+                    "entry": null, "retained": [{ "base_sequence": 0, "last_sequence": "x" }],
+                    "producer_epoch": 1, "base_sequence": 0, "last_offset_delta": 0
+                }),
+                "field `retained[0].last_sequence` must be a whole number that fits i32",
             ),
             (
                 "recompute_high_watermark",
@@ -940,6 +1249,27 @@ mod tests {
                     "txn": "Sometimes", "now_ms": 1000, "delete_retention_ms": 500
                 }),
                 "field `txn` must be one of NotTransactional, DataSurvives, DataFullyGone",
+            ),
+            (
+                "acl_decision",
+                json!({
+                    "super_user": false, "saw_allow": false, "saw_deny": false,
+                    "default_decision": "Maybe"
+                }),
+                "field `default_decision` must be one of Deny, Allow",
+            ),
+            (
+                "isr_maintenance_selected",
+                json!({
+                    "role": "Bystander", "log_end_matches_leader": false,
+                    "caught_up_within_lag": true, "fetch_within_lag": true
+                }),
+                "field `role` must be one of Unassigned, Leader, InSyncFollower, OutOfSyncFollower",
+            ),
+            (
+                "isr_candidate_selected",
+                json!({ "role": 3 }),
+                "field `role` must be a string",
             ),
         ];
         for (name, input, expected) in rows {
