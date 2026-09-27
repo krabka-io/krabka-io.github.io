@@ -31,11 +31,15 @@ opam switch create default "ocaml-base-compiler.${OCAML_VERSION}"
 eval "$(opam env --switch=default --set-switch)"
 
 echo "==> OCaml libraries"
+# Everything Why3, Alt-Ergo and the two workers link against, in one solve.
+# Alt-Ergo's opam files are not consulted: their upper bounds on cmdliner and
+# ppxlib predate the versions the worker was verified with, and honouring
+# them would downgrade and rebuild half the switch for nothing.
 opam install -y dune dune-site dune-build-info menhir ocamlgraph zarith camlzip re ppxlib yojson \
-  ppx_deriving ppx_blob logs fmt seq stdlib-shims cmdliner \
+  ppx_deriving ppx_blob logs fmt seq result stdlib-shims cmdliner data-encoding lwt_ppx \
   dolmen dolmen_type dolmen_loop ocplib-simplex psmt2-frontend \
   "js_of_ocaml.${JS_OF_OCAML_VERSION}" "js_of_ocaml-compiler.${JS_OF_OCAML_VERSION}" \
-  "js_of_ocaml-ppx.${JS_OF_OCAML_VERSION}" zarith_stubs_js
+  "js_of_ocaml-ppx.${JS_OF_OCAML_VERSION}" "js_of_ocaml-lwt.${JS_OF_OCAML_VERSION}" zarith_stubs_js
 
 fetch() {
   local url="$1" sha="$2" out="$3"
@@ -70,14 +74,13 @@ cp "${src}/alt-ergo/ae_worker.ml" "${src}/alt-ergo/ae_worker_stubs.js" "${alt_er
 cat "${src}/alt-ergo/dune.stanza" >> "${alt_ergo}/src/bin/js/dune"
 (
   cd "${alt_ergo}"
-  opam install -y --deps-only ./alt-ergo-lib.opam ./alt-ergo-parsers.opam ./alt-ergo.opam
   dune build --profile=release src/bin/js/ae_worker.bc.js
 )
 
 echo "==> Creusot prelude (${CREUSOT_TAG})"
 git init -q creusot
 git -C creusot fetch -q --depth 1 https://github.com/creusot-rs/creusot.git "${CREUSOT_COMMIT}"
-git -C creusot checkout -q --detach FETCH_HEAD -- prelude-generator LICENSE
+git -C creusot checkout -q FETCH_HEAD -- prelude-generator LICENSE
 node "${src}/gen-prelude.mjs" "${work}/creusot/prelude-generator" "${work}/prelude/creusot"
 
 echo "==> proof worker"
