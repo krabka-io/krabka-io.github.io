@@ -1004,6 +1004,10 @@ impl World {
         for (id, was) in before {
             let is = self.is_hosted(id);
             if was && !is {
+                // The node's connections reset when it moves: what is in
+                // flight on them is lost, as for a kill, so nothing stale
+                // reaches its new host on a connection it never opened.
+                self.purge_frames(|f| f.src.node == id || f.dst.node == id);
                 self.close_connections_of(id, false);
                 if let Some(slot) = self.nodes.get_mut(&id) {
                     slot.timer = None;
@@ -1039,7 +1043,9 @@ impl World {
     }
 
     /// Frames that arrived from another peer. They deliver at the current
-    /// time, in order; the sender's link model already applied.
+    /// time, in order; the sender's link model already applied. Data and
+    /// closes on a connection this world never saw open are dropped, as a
+    /// TCP stack drops segments for a connection it does not have.
     pub fn push_ingress(&mut self, frames: Vec<Frame>) {
         for frame in frames {
             let key = frame.conn_key();
@@ -1048,9 +1054,16 @@ impl World {
                     self.conns.insert(key, frame.dst);
                 }
                 Payload::Close => {
+                    if !self.conns.contains_key(&key) {
+                        continue;
+                    }
                     self.forget_conn(key);
                 }
-                Payload::Data(_) => {}
+                Payload::Data(_) => {
+                    if !self.conns.contains_key(&key) {
+                        continue;
+                    }
+                }
             }
             let now = self.now;
             self.schedule(now, Item::Deliver(frame));
@@ -1232,6 +1245,37 @@ mod tests {
         w.run_for(10);
         assert!(w.snapshot(NodeId(3))["closes"] == 2);
         assert!(w.snapshot(NodeId(3))["open"] == false);
+    }
+
+    #[test]
+    fn a_node_that_moves_away_takes_no_stale_frames_with_it() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        // The ping sent at 100 is on the wire to the echo until 110.
+        w.run_for(105);
+        let world = w.world_mut();
+        world.set_hosted(&[NodeId(2), NodeId(3)]);
+        world.step_until(150);
+        let egress = world.drain_egress();
+        assert!(egress.is_empty(), "{egress:?}");
+    }
+
+    #[test]
+    fn ingress_on_a_connection_never_opened_is_dropped() {
+        let mut world = World::from_scenario_hosted(&scenario(), &[NodeId(1)]).unwrap();
+        let client = Endpoint::client(NodeId(3));
+        let server = Endpoint::kafka(NodeId(1));
+        world.push_ingress(vec![
+            Frame::data(client, server, ConnId(7), Bytes::from_static(b"stray")),
+            Frame::close(client, server, ConnId(7)),
+        ]);
+        world.step_until(1);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 0);
+        world.push_ingress(vec![
+            Frame::open(client, server, ConnId(8)),
+            Frame::data(client, server, ConnId(8), Bytes::from_static(b"hello")),
+        ]);
+        world.step_until(2);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 2);
     }
 
     #[test]

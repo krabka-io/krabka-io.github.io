@@ -330,7 +330,8 @@ impl Node for PingerNode {
         }
         match &frame.payload {
             Payload::Data(bytes) => {
-                self.echoes += 1;
+                // Only an echo of a ping this pinger sent counts; anything
+                // else on the connection would skew the mean round trip.
                 if let Some(seq) = std::str::from_utf8(bytes)
                     .ok()
                     .and_then(|s| s.strip_prefix("ping "))
@@ -338,6 +339,7 @@ impl Node for PingerNode {
                     && let Some(pos) = self.pending.iter().position(|(s, _)| *s == seq)
                 {
                     let (_, sent) = self.pending.remove(pos);
+                    self.echoes += 1;
                     self.rtt_sum += ctx.now() - sent;
                 }
             }
