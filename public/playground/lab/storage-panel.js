@@ -93,14 +93,19 @@ export class StoragePanel {
       const node = nodes.find((n) => String(n.id) === key);
       const tr = el("tr");
       tr.dataset.storageNode = key;
-      tr.appendChild(el("td", null, node ? node.name : `#${key} (removed)`));
+      const nameCell = el("td", null, node ? node.name : `#${key} (removed)`);
+      if (this.hooks.storage.forgotten.has(Number(key))) {
+        nameCell.appendChild(el("span", "lab-muted lab-small", " · not stored"));
+        nameCell.title = "Forgotten: not stored again until it restarts from nothing (Wipe) or persistence is turned back on";
+      }
+      tr.appendChild(nameCell);
       const bytes = el("td", null, fmtBytes(u.bytes));
       bytes.dataset.field = "bytes";
       tr.appendChild(bytes);
       tr.appendChild(el("td", null, fmtNum(u.logEntries)));
       tr.appendChild(el("td", null, fmtNum(u.kvEntries)));
       const td = el("td");
-      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data", disabled: u.bytes === 0 && u.logEntries === 0 && u.kvEntries === 0 }));
+      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data; the running node is not stored again until it restarts from nothing", disabled: u.bytes === 0 && u.logEntries === 0 && u.kvEntries === 0 }));
       tr.appendChild(td);
       tbody.appendChild(tr);
     }

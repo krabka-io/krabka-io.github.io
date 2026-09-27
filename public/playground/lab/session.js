@@ -16,7 +16,10 @@
 // Messages on the channel are JSON with a `t` tag:
 //   hello     { name }                        both ways on open
 //   scenario  { doc, hosting: {node: peer} } hub → spoke on every change
-//   frames    { frames: [Frame] }             egress, routed by destination
+//   frames    { frames: [Frame] }             egress, routed by destination; the
+//                                             sender's world holds each frame until
+//                                             its clock reaches `deliver_at`, and the
+//                                             receiver delivers it on arrival
 //   snapshot  { node, state }                 a hosted node's state, relayed
 //   fault     { fault }                       applied everywhere
 //   takeover  { node }                        spoke asks to host a node

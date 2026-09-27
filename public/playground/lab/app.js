@@ -65,6 +65,7 @@ class LabApp {
       onEvents: (events) => this.timeline.append(events),
       onEgress: (frames) => this.session.sendEgress(frames),
       onDurable: (ops) => this.storage.queueOps(this.world.id, ops),
+      onLoad: (doc, images) => this.storage.resetMirror(images),
       onChange: (opts) => this.onChange(opts),
       onReset: () => this.onReset(),
       onClock: () => this.renderClock(),
@@ -133,7 +134,7 @@ class LabApp {
       onCommand: (id, command) => this.command(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
       onTakeOver: (id) => this.session.requestTakeover(id),
-      onUpdateNode: (id, spec) => this.world.updateNode(id, spec),
+      onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
       formCtx: () => ({ nodes: this.nodeList() }),
       peerName: (id) => this.session.peerName(id),
       nodeName: (id) => this.nodeName(id),
@@ -146,8 +147,10 @@ class LabApp {
       onForgetNode: (id) => this.forgetNode(id),
       onForgetScenario: () => this.forgetScenario(),
       onPersistChange: (on) => {
-        this.storage.setPersist(on);
-        this.toasts.info(on ? "Persisting durable state to this browser" : "Persistence off: new changes are dropped");
+        // Turning it on stores the live state first, so nothing skipped while
+        // it was off leaves a gap.
+        this.storage.setPersist(on, this.world.id, this.session.myHostedIds());
+        this.toasts.info(on ? "Persisting durable state to this browser" : "Persistence off: new changes are not stored");
       },
     });
     this.buildSessionPanel(right);
@@ -454,6 +457,16 @@ class LabApp {
     }
   }
 
+  // The inspector's Apply. Only the host edits the scenario: an edit in a
+  // spoke would change that tab's world and nobody else's.
+  updateNodeConfig(id, spec) {
+    if (this.session.role === "spoke") {
+      this.toasts.warn("Only the host edits node configuration");
+      return false;
+    }
+    return this.world.updateNode(id, spec);
+  }
+
   fault(f) {
     if (this.world.fault(f)) {
       this.session.broadcastFault(f);
@@ -592,11 +605,18 @@ class LabApp {
     const next = { ...doc };
     if (!keepId || !next.id) next.id = newScenarioId();
     let imgs = images;
-    if (keepId && imgs == null && this.storage.persist) {
-      try {
-        imgs = await this.storage.loadImages(next.id);
-      } catch (err) {
-        this.toasts.error(err, "read durable state");
+    if (keepId && imgs == null) {
+      if (this.world.ready && next.id === this.world.id) {
+        // Restarting the running scenario (a new seed, a reopen): its nodes
+        // restart from their live durable state, stored or not.
+        this.world.drainDurable();
+        imgs = this.storage.mirrorImages();
+      } else if (this.storage.persist) {
+        try {
+          imgs = await this.storage.loadImages(next.id);
+        } catch (err) {
+          this.toasts.error(err, "read durable state");
+        }
       }
     }
     const ok = this.world.load(next, this.session.myHostedIds(), imgs);
@@ -676,7 +696,10 @@ class LabApp {
     const doc = this.world.scenario();
     if (!doc.nodes.length && !doc.name && !doc.topics.length) return;
     if (!doc.id) {
-      this.world.setId(newScenarioId());
+      const id = newScenarioId();
+      this.world.setId(id);
+      // Ops drained before the scenario had an identity were not stored.
+      this.storage.syncFromMirror(id, this.session.myHostedIds());
       return; // setId triggers onChange, which schedules this again
     }
     try {
@@ -703,7 +726,11 @@ class LabApp {
 
   async forgetScenario() {
     try {
-      await this.storage.forgetScenario(this.world.id);
+      // In a session, only the nodes this tab hosts: another tab in this
+      // browser may be storing the rest under the same scenario.
+      const hosted = this.session.myHostedIds();
+      const ids = hosted ?? this.nodeList().map((n) => n.id);
+      await this.storage.forgetScenario(this.world.id, ids, hosted == null);
       this.storagePanel.refresh();
       this.toasts.info("Forgot the stored data of this scenario");
     } catch (err) {

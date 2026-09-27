@@ -152,10 +152,15 @@ function renderBroker(root, s, used, ctx) {
 function renderRegistry(root, s, used, ctx) {
   const rows = [];
   const cfg = take(s, used, "config");
-  addRow(rows, "compatibility", typeof cfg === "object" && cfg ? (cfg.compatibility ?? cfg.compatibilityLevel ?? shortJson(cfg)) : cfg);
+  const compat = take(s, used, "compatibility") ?? (typeof cfg === "object" && cfg ? (cfg.compatibility ?? cfg.compatibilityLevel ?? shortJson(cfg)) : cfg);
+  addRow(rows, "compatibility", compat);
   addRow(rows, "mode", take(s, used, "mode"));
   addRow(rows, "schemas", countValue(take(s, used, "schemas", "schema_count")));
+  addRow(rows, "_schemas records", take(s, used, "records"));
+  addRow(rows, "applied", take(s, used, "applied"));
   addRow(rows, "requests", countValue(take(s, used, "requests", "request_count")));
+  addRow(rows, "errors", take(s, used, "errors"));
+  addRow(rows, "connections", take(s, used, "connections"));
   addRow(rows, "_schemas offset", take(s, used, "offset", "schemas_offset", "next_offset"));
   if (rows.length) root.appendChild(section("Registry", kv(rows)));
 

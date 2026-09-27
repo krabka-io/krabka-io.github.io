@@ -3,8 +3,9 @@
 // The simulation only moves when the page tells it to. Every animation frame
 // the wrapper turns the wall-clock delta into simulated milliseconds (delta ×
 // speed), calls `stepUntil`, hands the frames for nodes hosted elsewhere to
-// the session layer, and, at most every 50 ms of wall time, reads a snapshot
-// and the new events back.
+// the session layer once this world's clock reaches their `deliver_at` (see
+// `EgressScheduler`), hands the durable-state ops to storage, and, at most
+// every 50 ms of wall time, reads a snapshot and the new events back.
 //
 // Every `Lab` call goes through `guard`, so an error inside the module (a
 // rejected config, a bad fault) becomes a toast, never a broken page.
@@ -24,14 +25,117 @@ const NONE_HOSTED = [0];
 
 const u64 = (n) => Math.max(0, Math.floor(Number(n) || 0));
 
+// ---- the egress scheduler -----------------------------------------------------------
+
+// Frames for nodes another tab hosts, held at the sender until this world's
+// clock reaches their `deliver_at`.
+//
+// The world computes `deliver_at` from the link model (latency, the
+// per-connection delivery floor) and the receiving tab delivers a frame the
+// moment it arrives, because tabs share no clock. Holding each frame here
+// until the sending clock gets there is what makes a link's latency real
+// across tabs. Frames leave in `deliver_at` order; the sort is stable, so
+// frames due at the same time keep the order the world queued them in, which
+// keeps every connection's frames in order.
+//
+// A held frame is still on the wire: a fault that drops frames in the world's
+// queues drops it too (`faultPurge`, `nodePurge`). Anything that hosts nodes
+// elsewhere, a peer tab or a Worker, can drive one.
+export class EgressScheduler {
+  constructor() {
+    this.held = [];
+  }
+
+  get size() {
+    return this.held.length;
+  }
+
+  // When the earliest held frame is due; Infinity when nothing is held.
+  nextAt() {
+    return this.held.length ? this.held[0].deliver_at : Infinity;
+  }
+
+  // Hold `timedFrames` (`{ deliver_at, frame }`, in the order the world
+  // queued them). Each goes after every frame due at or before its time.
+  hold(timedFrames) {
+    for (const t of timedFrames) {
+      const at = Number(t.deliver_at) || 0;
+      let lo = 0;
+      let hi = this.held.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (this.held[mid].deliver_at <= at) lo = mid + 1;
+        else hi = mid;
+      }
+      this.held.splice(lo, 0, { deliver_at: at, frame: t.frame });
+    }
+  }
+
+  // Take every frame due at or before `now`, in `deliver_at` order.
+  release(now) {
+    let n = 0;
+    while (n < this.held.length && this.held[n].deliver_at <= now) n += 1;
+    return n ? this.held.splice(0, n) : [];
+  }
+
+  // Drop every held frame `pred(frame)` selects.
+  purge(pred) {
+    if (pred && this.held.length) this.held = this.held.filter((t) => !pred(t.frame));
+  }
+
+  clear() {
+    this.held = [];
+  }
+}
+
+const endNode = (end) => Number(end?.node);
+
+// The frames a node-level change drops: every frame from or to the node, as
+// the world does on a kill, a wipe, a config change and a removal.
+export function nodePurge(id) {
+  const n = Number(id);
+  return (f) => endNode(f.src) === n || endNode(f.dst) === n;
+}
+
+// The frames a fault drops, by the rules `World::fault` applies to its own
+// queues; null when the fault drops nothing (restart, heal, reconnect,
+// latency, loss).
+export function faultPurge(fault) {
+  switch (fault && fault.kind) {
+    case "kill":
+    case "wipe":
+      return nodePurge(fault.node);
+    case "partition": {
+      const a = Number(fault.a);
+      const b = Number(fault.b);
+      return (f) => {
+        const src = endNode(f.src);
+        const dst = endNode(f.dst);
+        return (src === a && dst === b) || (src === b && dst === a);
+      };
+    }
+    case "isolate": {
+      const n = Number(fault.node);
+      return (f) => (endNode(f.src) === n) !== (endNode(f.dst) === n);
+    }
+    default:
+      return null;
+  }
+}
+
+// ---- the world ------------------------------------------------------------------------
+
 export class LabWorld {
   // `Lab` is the wasm-bindgen class; `hooks` are `onError(err, context)`,
-  // `onSnapshot(snapshot)`, `onEvents(events)`, `onEgress(timedFrames)` and
+  // `onSnapshot(snapshot)`, `onEvents(events)`, `onEgress(timedFrames)` (due
+  // frames for nodes hosted elsewhere), `onDurable(ops)`, `onLoad(doc,
+  // images)` (a new world was built, from these durable images) and
   // `onChange()` (the scenario document changed).
   constructor(Lab, hooks) {
     this.Lab = Lab;
     this.hooks = hooks;
     this.lab = null;
+    this.egress = new EgressScheduler();
     this.speed = 1;
     this.paused = false;
     this.target = 0;
@@ -63,12 +167,15 @@ export class LabWorld {
 
   // An empty world. The canvas stays empty until a node is added.
   create(seed = 1) {
+    // The old world's last durable ops belong to its scenario; keep them.
+    this.drainDurable();
     this.dispose();
     this.lab = this.guard("create world", () => new this.Lab(u64(seed)));
     this.topics = [];
     this.name = "";
     this.id = "";
     this.hostedIds = null;
+    this.hooks.onLoad?.(null, {});
     this.afterReset();
     return this.lab != null;
   }
@@ -83,6 +190,8 @@ export class LabWorld {
     if (!this.lab) this.lab = this.guard("create world", () => new this.Lab(u64(doc.seed)));
     if (!this.lab) return false;
     const ids = hostedIds == null ? [] : hostedIds.length ? hostedIds : NONE_HOSTED;
+    // The old world's last durable ops belong to its scenario; keep them.
+    this.drainDurable();
     const ok = this.guard("load scenario", () => {
       if (images && Object.keys(images).length) this.lab.loadScenarioWithState(json, JSON.stringify(ids), JSON.stringify(images));
       else if (hostedIds == null) this.lab.loadScenario(json);
@@ -94,6 +203,9 @@ export class LabWorld {
     this.topics = (doc.topics || []).map((t) => ({ ...t }));
     this.name = doc.name || "";
     this.id = doc.id || "";
+    // Frames held for the old world's peers went with it.
+    this.egress.clear();
+    this.hooks.onLoad?.(doc, images || {});
     this.afterReset();
     return true;
   }
@@ -117,7 +229,10 @@ export class LabWorld {
     const curById = new Map(cur.nodes.map((n) => [n.id, n]));
     const nextById = new Map(next.nodes.map((n) => [n.id, n]));
     for (const id of curById.keys()) {
-      if (!nextById.has(id)) this.guard("remove node", () => this.lab.removeNode(id));
+      if (!nextById.has(id)) {
+        this.guard("remove node", () => this.lab.removeNode(id));
+        this.egress.purge(nodePurge(id));
+      }
     }
     for (const spec of next.nodes) {
       const old = curById.get(spec.id);
@@ -129,6 +244,7 @@ export class LabWorld {
         JSON.stringify(old.config) !== JSON.stringify(spec.config)
       ) {
         this.guard("update node", () => this.lab.updateNode(spec.id, JSON.stringify(spec)));
+        this.egress.purge(nodePurge(spec.id));
       } else if (old.x !== spec.x || old.y !== spec.y) {
         this.guard("move node", () => this.lab.setPosition(spec.id, spec.x, spec.y));
       }
@@ -153,6 +269,7 @@ export class LabWorld {
   }
 
   dispose() {
+    this.egress.clear();
     if (this.lab && typeof this.lab.free === "function") {
       try {
         this.lab.free();
@@ -199,6 +316,7 @@ export class LabWorld {
   removeNode(id) {
     if (!this.lab) return;
     this.guard("remove node", () => this.lab.removeNode(id));
+    this.egress.purge(nodePurge(id));
     this.scenarioCache = null;
     this.hooks.onChange();
   }
@@ -209,6 +327,7 @@ export class LabWorld {
       this.lab.updateNode(id, JSON.stringify({ ...spec, id }));
       return true;
     });
+    if (ok) this.egress.purge(nodePurge(id));
     this.scenarioCache = null;
     this.hooks.onChange();
     return ok === true;
@@ -295,17 +414,20 @@ export class LabWorld {
     this.flush(performance.now(), true);
   }
 
-  // Run until nothing is due any more, or 5 s of simulated time passed.
+  // Run until nothing is due any more, or 5 s of simulated time passed. A
+  // frame held for another tab is due work too: it leaves when the clock
+  // reaches it.
   settle() {
     if (!this.lab) return;
     const start = this.now();
     const limit = start + SETTLE_WINDOW_MS;
     let t = start;
     while (t < limit) {
-      const busy = this.guard("settle", () => this.lab.hasWorkBy(u64(limit)));
+      const busy = this.guard("settle", () => this.lab.hasWorkBy(u64(limit))) || this.egress.nextAt() <= limit;
       if (!busy) break;
       t = Math.min(limit, t + SETTLE_STEP_MS);
       this.stepUntil(t);
+      this.pumpEgress();
     }
     this.target = this.now();
     this.flush(performance.now(), true);
@@ -324,20 +446,36 @@ export class LabWorld {
 
   // ---- observation ------------------------------------------------------------------
 
-  // Hand egress to the session layer and, when due, read a snapshot and the
-  // new events.
-  flush(wallNow, force = false) {
+  // Move the world's new egress into the hold, then hand every frame the
+  // clock has reached to the session layer.
+  pumpEgress() {
     if (!this.lab) return;
-    const egress = this.guard("drain egress", () => this.lab.drainEgress());
-    if (egress && egress.length > 2) {
-      const frames = this.guard("parse egress", () => JSON.parse(egress));
-      if (frames && frames.length) this.hooks.onEgress(frames);
+    const raw = this.guard("drain egress", () => this.lab.drainEgress());
+    if (raw && raw.length > 2) {
+      const frames = this.guard("parse egress", () => JSON.parse(raw));
+      if (frames && frames.length) this.egress.hold(frames);
     }
-    const durable = this.guard("drain durable", () => this.lab.drainDurable());
-    if (durable && durable.length > 2) {
-      const ops = this.guard("parse durable", () => JSON.parse(durable));
+    if (!this.egress.size) return;
+    const due = this.egress.release(this.now());
+    if (due.length) this.hooks.onEgress(due);
+  }
+
+  // Hand the durable-state ops recorded since the last drain to storage.
+  drainDurable() {
+    if (!this.lab) return;
+    const raw = this.guard("drain durable", () => this.lab.drainDurable());
+    if (raw && raw.length > 2) {
+      const ops = this.guard("parse durable", () => JSON.parse(raw));
       if (ops && ops.length) this.hooks.onDurable(ops);
     }
+  }
+
+  // Release due egress, drain durable ops and, when due, read a snapshot and
+  // the new events.
+  flush(wallNow, force = false) {
+    if (!this.lab) return;
+    this.pumpEgress();
+    this.drainDurable();
     if (!force && wallNow - this.lastSnapshotWall < SNAPSHOT_INTERVAL_MS) return;
     this.lastSnapshotWall = wallNow;
     const snap = this.guard("snapshot", () => JSON.parse(this.lab.snapshot()));
@@ -369,6 +507,7 @@ export class LabWorld {
       this.lab.fault(JSON.stringify(fault));
       return true;
     });
+    if (ok) this.egress.purge(faultPurge(fault));
     this.scenarioCache = null;
     this.hooks.onChange();
     return ok === true;

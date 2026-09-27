@@ -73,10 +73,14 @@ export const KINDS = {
     label: "Schema registry",
     glyph: "◈",
     color: "#5aa0e0",
-    description: "A Confluent-compatible schema registry over the _schemas topic.",
+    description: "A Confluent-compatible schema registry: the REST API over the _schemas log, kept in this browser.",
     listens: HTTP_PORT,
-    probe: { bootstrap: [1] },
-    fields: [BOOTSTRAP],
+    probe: {},
+    fields: [
+      { ...BOOTSTRAP, required: false, help: "The brokers the Kafka-backed store will use; optional until that store lands." },
+      { key: "compatibility", label: "Default compatibility", type: "select", default: "BACKWARD", emitDefault: false, options: ["BACKWARD", "BACKWARD_TRANSITIVE", "FORWARD", "FORWARD_TRANSITIVE", "FULL", "FULL_TRANSITIVE", "NONE"] },
+      { key: "mode", label: "Mode", type: "select", default: "READWRITE", emitDefault: false, options: ["READWRITE", "READONLY", "IMPORT"] },
+    ],
     edges: (spec) => (spec.config?.bootstrap || []).map((b) => edge(spec.id, node(b), "bootstrap")),
     status: (s) => {
       const subjects = countOf(s.subjects);

@@ -142,7 +142,7 @@ export class Inspector {
     this.renderHeader(n);
     if (this.tab === "state") this.renderState(n, force);
     else if (this.tab === "raw") this.renderRaw(n, force);
-    else if (this.tab === "config" && this.formFor !== n.id) this.renderConfig(true);
+    else if (this.tab === "config" && this.formFor !== this.configKey(n)) this.renderConfig(true);
   }
 
   renderHeader(n) {
@@ -194,7 +194,9 @@ export class Inspector {
     fault(FAULT.wipe(n.id), "Wipe", "Boot again from nothing");
     if (n.isolated) fault(FAULT.reconnect(n.id), "Reconnect", "Restore every link");
     else fault(FAULT.isolate(n.id), "Isolate", "Cut every link");
-    if (!k.hidden) {
+    if (!k.hidden && session?.role === "spoke") {
+      this.actions.appendChild(el("span", "lab-muted lab-small", "The host edits and removes nodes."));
+    } else if (!k.hidden) {
       this.actions.appendChild(button("Edit", "lab-btn-sm", () => this.showTab("config"), { title: "Change the configuration" }));
       this.actions.appendChild(button("Remove", "lab-btn-sm lab-danger", () => this.hooks.onCommand(n.id, "remove"), { title: "Remove the node from the scenario" }));
     }
@@ -240,12 +242,18 @@ export class Inspector {
     panel.appendChild(pre);
   }
 
+  // The config panel depends on the node and on whether this tab may edit.
+  configKey(n) {
+    return `${n.id}:${this.data?.session?.role ?? "solo"}`;
+  }
+
   renderConfig(force) {
     const n = this.node();
     const panel = this.panels.config;
     if (!n) return;
-    if (!force && this.formFor === n.id) return;
-    this.formFor = n.id;
+    const key = this.configKey(n);
+    if (!force && this.formFor === key) return;
+    this.formFor = key;
     panel.innerHTML = "";
     const k = kindOf(n.kind);
     if (k.hidden) {
@@ -255,6 +263,13 @@ export class Inspector {
     const spec = this.data?.scenario?.nodes?.find((s) => s.id === n.id);
     if (!spec) {
       panel.appendChild(el("p", "lab-muted", "No configuration for this node."));
+      return;
+    }
+    if (this.data?.session?.role === "spoke") {
+      // A spoke runs the host's scenario; an edit here would diverge from it.
+      const note = el("p", "lab-muted lab-small", "Read-only: the host owns the scenario, so node configuration is edited in the host's tab. This tab picks up every change the host makes.");
+      note.dataset.field = "config-readonly";
+      panel.append(note, el("pre", "lab-raw", JSON.stringify({ name: spec.name, config: spec.config }, null, 2)));
       return;
     }
     const nameInput = el("input", "lab-input");

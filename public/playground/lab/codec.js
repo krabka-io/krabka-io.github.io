@@ -3,7 +3,11 @@
 //
 // The code is one tag character followed by URL-safe base64. Tag `d` means the
 // JSON was compressed with `deflate-raw` through `CompressionStream`; tag `p`
-// means plain UTF-8, for browsers without the streams API.
+// means plain UTF-8, for browsers without the streams API. A `d` code opens
+// everywhere: without `DecompressionStream` the bytes go through the
+// JavaScript decoder in `inflate.js`.
+
+import { inflateRaw } from "./inflate.js";
 
 function toBase64Url(bytes) {
   let binary = "";
@@ -49,10 +53,7 @@ export async function decodeShare(code) {
   const bytes = fromBase64Url(text.slice(1));
   let json;
   if (tag === "d") {
-    if (typeof DecompressionStream !== "function") {
-      throw new Error("this browser cannot decompress the code");
-    }
-    json = await pipe(bytes, new DecompressionStream("deflate-raw"));
+    json = typeof DecompressionStream === "function" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : inflateRaw(bytes);
   } else if (tag === "p") {
     json = bytes;
   } else {
