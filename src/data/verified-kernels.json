@@ -200,7 +200,7 @@
   {
     "id": "producer_decision",
     "title": "Idempotent producer decision",
-    "area": "Producers",
+    "area": "Producers and transactions",
     "module": "producer",
     "function": "producer_decision",
     "summary": "Classifies an incoming batch against a producer's tracked entry and the sequence ranges of the batches it retains, Kafka's UnifiedLog.analyzeAndValidateProducerState for a client append. At the entry's epoch, a batch whose base sequence and last sequence (base_sequence + last_offset_delta modulo 2^31) equal a retained batch's is a duplicate of the first such batch, and a null slot never matches. Only a batch that repeats no retained batch goes on to the sequence check: a producer with no entry can start at any sequence; a lower epoch is fenced; a higher epoch must start at sequence 0 and is otherwise out of order; the same epoch must continue at the last sequence plus one modulo 2^31 and is otherwise out of order.",
@@ -236,7 +236,7 @@
   {
     "id": "epoch_and_offset_for_entries",
     "title": "Leader epoch lookup",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "leader_epoch",
     "function": "epoch_and_offset_for_entries",
     "summary": "Resolves a requested leader epoch to (found_epoch, end_offset), the KIP-101 pair a follower uses to truncate a divergent suffix, exactly as Kafka's LeaderEpochFileCache.endOffsetFor does: the latest recorded epoch ends at the log end; an exact older epoch or a gap epoch resolves to the floor epoch and ends where the next recorded epoch begins; an epoch below every recorded one keeps its number and ends at the first entry's start; and (-1, -1), Kafka's UNDEFINED_EPOCH and UNDEFINED_EPOCH_OFFSET, answers an undefined request, an empty cache, and a request above the latest epoch. The checkpoint entries must be strictly increasing in both epoch and start offset.",
@@ -269,7 +269,7 @@
   {
     "id": "offset_index_lookup",
     "title": "Offset index lookup",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "log_index",
     "function": "offset_index_lookup",
     "summary": "The byte position to start reading at for a target relative offset: the position field of the largest entry with relative_offset <= target, or 0 if no such entry exists. The entries must be strictly sorted by relative offset, which the construction of OffsetIndex guarantees.",
@@ -297,7 +297,7 @@
   {
     "id": "stretch_durability",
     "title": "Stretch-cluster durability",
-    "area": "Stretch clusters",
+    "area": "Replication and failover",
     "module": "stretch",
     "function": "site_loss_survivors + min_insync_is_site_loss_safe",
     "summary": "site_loss_survivors gives the replica count that survives the loss of any one site under round-robin placement, where replica r of a partition lands on site r % sites: site 0 is a fullest site, so the result is rf minus what it holds, rf - ceil(rf / sites), and the contract proves that no other site's loss leaves fewer. min_insync_is_site_loss_safe is true if min.insync.replicas keeps acks=all writes durable and available through that loss: no single site may hold min_insync replicas (else one site alone could acknowledge a write the others never saw), and the loss of any one site must leave at least min_insync.",
@@ -334,7 +334,7 @@
   {
     "id": "quorum_survives_any_single_site_loss",
     "title": "Quorum survives a site loss",
-    "area": "Stretch clusters",
+    "area": "Replication and failover",
     "module": "stretch",
     "function": "quorum_survives_any_single_site_loss",
     "summary": "True if the surviving KRaft voters still form a strict majority after the loss of any one site: for every site k, 2 * (total - voters_per_site[k]) > total. Two sites never pass, which is why a third site must hold at least one voter; an empty slice returns true.",
@@ -401,7 +401,7 @@
   {
     "id": "isr_maintenance_selected",
     "title": "ISR maintenance selection",
-    "area": "Replication and ISR",
+    "area": "Replication and failover",
     "module": "isr",
     "function": "isr_maintenance_selected",
     "summary": "krabka's former ISR scan rule, kept for the leader-failover model's expansion stand-in; the broker's scan runs isr_candidate_selected. The leader always stays and a member that is no longer assigned leaves. An in-sync follower stays exactly while Kafka's ReplicaState.isCaughtUp holds: its log end offset equals the leader's, or it last caught up within replica.lag.time.max.ms. An out-of-sync follower is admitted when it fetched and caught up within the bound, which is not Kafka's Partition.isFollowerInSync.",
@@ -470,7 +470,7 @@
   {
     "id": "retain_decision",
     "title": "Compaction retain decision",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "compaction",
     "function": "retain_decision",
     "summary": "The single per-record KIP-534 retain decision. Control batches (transaction commit and abort markers) are retained as long as their transaction's data survives and then age out through the delete horizon; data records dedup newest-wins; a tombstone ages out through the delete horizon after it becomes the newest entry for its key.",

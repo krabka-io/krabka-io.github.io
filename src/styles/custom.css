@@ -138,18 +138,56 @@ summary {
   text-decoration: underline;
 }
 
-.markdown-body table {
-  display: block;
+/* Tables. The markdown pipeline wraps each table in .table-wrap
+ * (src/utils/rehype-wrap-tables.mjs), which scrolls sideways on its own when
+ * the table is wider than the page. Cells wrap: a long contract or an
+ * identifier breaks rather than pushing the column off screen. A table with
+ * several columns keeps a minimum width, so on a phone it scrolls inside its
+ * wrapper with readable columns instead of squeezing them to a few characters. */
+.markdown-body .table-wrap {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin: 1.5rem 0;
-  border-collapse: separate;
-  border-spacing: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.75rem;
   background: rgba(15, 23, 42, 0.4);
+}
+
+.markdown-body table {
+  width: 100%;
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+}
+
+/* Cells may break anywhere, so the layout algorithm sees a tiny minimum per
+ * column and hands the width to the long columns; this floor keeps a short
+ * column, such as the proof-session links, wide enough for whole words. */
+.markdown-body th,
+.markdown-body td {
+  min-width: 5.5rem;
+}
+
+.markdown-body .table-wrap[data-cols="3"] table {
+  min-width: 34rem;
+}
+
+.markdown-body .table-wrap[data-cols="4"] table {
+  min-width: 46rem;
+}
+
+.markdown-body .table-wrap[data-cols="5"] table,
+.markdown-body .table-wrap[data-cols="6"] table {
+  min-width: 56rem;
+}
+
+.markdown-body .table-wrap[data-cols="7"] table,
+.markdown-body .table-wrap[data-cols="8"] table,
+.markdown-body .table-wrap[data-cols="9"] table {
+  min-width: 64rem;
 }
 
 .markdown-body thead {
@@ -165,7 +203,8 @@ summary {
   letter-spacing: 0.05em;
   color: #9ca3af;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  white-space: nowrap;
+  vertical-align: bottom;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body td {
@@ -175,10 +214,10 @@ summary {
   font-size: 0.8125rem;
   vertical-align: top;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body td:first-child {
-  white-space: nowrap;
   font-weight: 500;
   color: #f3f4f6;
 }
@@ -187,16 +226,20 @@ summary {
   min-width: 140px;
 }
 
-.markdown-body table::-webkit-scrollbar {
+.markdown-body tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-body .table-wrap::-webkit-scrollbar {
   height: 6px;
 }
 
-.markdown-body table::-webkit-scrollbar-thumb {
+.markdown-body .table-wrap::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }
 
-.markdown-body table::-webkit-scrollbar-thumb:hover {
+.markdown-body .table-wrap::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
 
@@ -240,6 +283,7 @@ summary {
   border-radius: 0.35rem;
   font-size: 0.85em;
   border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-wrap: anywhere;
 }
 
 .markdown-body pre {

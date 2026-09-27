@@ -56,6 +56,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # The verification pages render the broker's synced docs/verification.md
+      # as expandable rows. This fails when the catalog's layout has drifted so
+      # far that rows or model notes would silently disappear from the site.
+      - name: Check the verification catalog still parses
+        run: npm run check-catalog
+
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.
       - name: Upload GitHub Pages artifact

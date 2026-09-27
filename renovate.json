@@ -4,7 +4,9 @@
     "config:recommended"
   ],
   "dependencyDashboard": true,
-  "vulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
   "npm": {
     "rangeStrategy": "auto"
   },
@@ -27,14 +29,20 @@
     },
     {
       "description": "Group all Astro-related dependencies together",
-      "matchPackagePatterns": ["astro", "@astrojs/.+"],
       "groupName": "Astro dependencies",
-      "schedule": ["after 9am on Monday"]
+      "schedule": ["after 9am on Monday"],
+      "matchPackageNames": [
+        "/astro/",
+        "/@astrojs/.+/"
+      ]
     },
     {
       "description": "Group all Tailwind-related dependencies together",
-      "matchPackagePatterns": ["tailwind", "@tailwindcss/.+"],
-      "groupName": "Tailwind dependencies"
+      "groupName": "Tailwind dependencies",
+      "matchPackageNames": [
+        "/tailwind/",
+        "/@tailwindcss/.+/"
+      ]
     }
   ],
   "schedule": [
