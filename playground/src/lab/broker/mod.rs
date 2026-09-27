@@ -124,8 +124,9 @@
 //! `broker_unfenced`, `broker_fenced`, `broker_fence_changed` (the active
 //! controller fenced or unfenced a broker on its heartbeat),
 //! `broker_session_expired`, `producer_ids_failed`, `topic_creation_failed`,
-//! `coordinator_loaded`, `coordinator_unloaded`, and the controller core's
-//! `quorum` and `raft`, each with a `level`.
+//! `coordinator_loaded` and `coordinator_unloaded`, each with a `level`; and
+//! the controller core's `quorum` and `elect` (a role change, `elect` when
+//! the node becomes the quorum leader), `truncate` and `raft`.
 //!
 //! # Durable state
 //!
