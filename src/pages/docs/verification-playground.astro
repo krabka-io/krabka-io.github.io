@@ -16,7 +16,6 @@ const specs = data.explorerSpecs.map((spec) =>
   spec.ledger ? { ...spec, ledger: { ...spec.ledger, page_url: getPath(spec.ledger.page_url) } } : spec,
 );
 const kernelAreas = [...new Set(specs.map((s) => s.area))];
-const staterightNotes = data.catalog.sections.find((s) => s.slug === 'stateright-model-check-tier')?.html ?? [];
 
 // The catalog renderer escapes everything it does not emit itself, so the
 // embedded HTML cannot hold a closing script tag; `<` is escaped anyway so no
@@ -114,7 +113,7 @@ if (stats.catalogAvailable) {
 
     <EvidenceLedger
       models={data.models}
-      modelNotes={staterightNotes}
+      modelNotes={data.catalog.modelNotes}
       initialTab="models"
       id="model-ledger"
       catalogPath={getPath('/docs/broker/verification')}

@@ -13,10 +13,6 @@ const { stats, catalog, kernels, models } = loadVerificationData();
 const hasCatalog = stats.catalogAvailable;
 const n = (value: number) => value.toLocaleString('en-US');
 const section = (slug: string) => catalog.sections.find((s) => s.slug === slug);
-const staterightSection = section('stateright-model-check-tier');
-// The catalog introduces its model table with one line. The table is rendered
-// as ledger rows here, so that line would dangle.
-const modelNotes = staterightSection?.html.filter((block) => !block.includes('The current model entry points are'));
 
 const brokerRepo = 'https://github.com/krabka-io/krabka-broker';
 const verifiedCrateUrl = `${brokerRepo}/tree/main/crates/verified`;
@@ -60,6 +56,7 @@ const localEvidence: EvidenceItem[] = [
     id: 'mutation-testing',
     title: 'Mutation testing with cargo-mutants',
     kind: 'Mutation testing',
+    area: 'Independent failure signals',
     claim: 'cargo-mutants inserts faults into production code and the suite must detect each one; sweeps run weekly per crate.',
     body_html: [
       `<p><code>cargo-mutants</code> inserts faults into production code and the suite must detect each one. Sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.</p>`,
@@ -76,6 +73,7 @@ const localEvidence: EvidenceItem[] = [
     id: 'differential-suites',
     title: 'Differential and JVM acceptance suites',
     kind: 'Differential testing',
+    area: 'Independent failure signals',
     claim: 'Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka, real kafka-clients drive both, and responses are compared byte for byte.',
     body_html: [
       `<p>Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka. Real <code>kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.</p>`,
@@ -90,6 +88,7 @@ const localEvidence: EvidenceItem[] = [
     id: 'crash-recovery-tests',
     title: 'Crash-recovery and property tests',
     kind: 'Property and crash testing',
+    area: 'Independent failure signals',
     claim: 'Unit, property-based, integration and crash-recovery tests cover the boundaries that neither formal tier reaches.',
     body_html: [
       `<p>Unit, property-based, integration, and crash-recovery tests cover the boundaries that neither formal tier reaches, including protocol codecs, I/O, and async orchestration.</p>`,
@@ -144,6 +143,7 @@ const catalogEvidence: EvidenceItem[] = catalogEvidenceSpecs.flatMap((spec) => {
       id: spec.slug,
       title: spec.title,
       kind: spec.kind,
+      area: 'From the catalog',
       claim: spec.claim,
       body_html: found.html.join(''),
       links: [{ label: 'Read in the catalog', url: `${catalogPath}#${spec.slug}` }, ...(spec.links ?? [])],
@@ -308,7 +308,7 @@ const articleSchema = {
           models={models}
           evidence={evidence}
           kernelNotes={catalog.ledgerNotes}
-          modelNotes={modelNotes}
+          modelNotes={catalog.modelNotes}
           initialTab="kernels"
           playgroundPath={playgroundPath}
           catalogPath={catalogPath}

@@ -15,7 +15,10 @@ import { kernelRowAnchor, modelRowAnchor } from '../utils/verification-data';
 export interface EvidenceItem {
   id: string;
   title: string;
+  /** Short badge on the row, e.g. "Mutation testing". */
   kind: string;
+  /** Group heading and filter chip; defaults to `kind`. */
+  area?: string;
   claim: string;
   body_html: string;
   links?: { label: string; url: string }[];
@@ -97,7 +100,7 @@ function fileStem(path: string): string {
 
 const evidenceRows = (evidence ?? []).map((item) => ({
   ...item,
-  area: item.kind,
+  area: item.area ?? item.kind,
   search: [item.title, item.kind, item.claim, textOf(item.body_html), ...(item.links ?? []).map((l) => l.label)].join(' ').toLowerCase(),
 }));
 
@@ -444,7 +447,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
 
   function setupPanel(panel: HTMLElement) {
     const rows = Array.from(panel.querySelectorAll<HTMLDetailsElement>('.el-row'));
-    const groups = Array.from(panel.querySelectorAll<HTMLElement>(".el-group"));
+    const groups = Array.from(panel.querySelectorAll<HTMLElement>('.el-group'));
     const groupRows = new Map<HTMLElement, HTMLDetailsElement[]>(groups.map((g) => [g, Array.from(g.querySelectorAll<HTMLDetailsElement>('.el-row'))]));
     const input = panel.querySelector<HTMLInputElement>('.el-filter');
     const chips = Array.from(panel.querySelectorAll<HTMLButtonElement>('.el-chip[data-area]'));
@@ -581,7 +584,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
     function applyHash(instant: boolean): boolean {
       const raw = location.hash.slice(1);
       if (raw === '') return false;
-      let hash = raw;
+      let hash: string;
       try {
         hash = decodeURIComponent(raw);
       } catch {

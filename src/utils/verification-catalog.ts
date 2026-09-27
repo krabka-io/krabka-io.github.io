@@ -86,6 +86,12 @@ export interface VerificationCatalog {
   ledger: LedgerRow[];
   /** The section's prose around the ledger table, rendered. */
   ledgerNotes: string[];
+  /**
+   * The Stateright section's prose about bounds and pinned state counts,
+   * rendered, without the sentences that introduce the inventory table and
+   * the per-model paragraphs (the site renders both as rows).
+   */
+  modelNotes: string[];
   inventory: InventoryArea[];
   models: ModelNote[];
   /** Model paragraphs that matched no inventory entry; the check script reports these. */
@@ -613,10 +619,12 @@ export function parseVerificationCatalog(markdown: string): VerificationCatalog 
 
   const { rows, notes } = parseLedger(lines, ledgerSection);
   const { inventory, models, unmatched } = parseStateright(lines, staterightSection);
+  const modelNotes = staterightSection ? sectionProse(lines, staterightSection).filter((block) => !isLeadIn(block)) : [];
 
   return {
     ledger: rows,
     ledgerNotes: notes,
+    modelNotes,
     inventory,
     models,
     unmatchedParagraphs: unmatched,
@@ -624,6 +632,12 @@ export function parseVerificationCatalog(markdown: string): VerificationCatalog 
   };
 }
 
+/** A block that only introduces the table or the paragraphs that follow it. */
+function isLeadIn(html: string): boolean {
+  const text = html.replace(/<[^>]*>/g, '').trim();
+  return text.endsWith(':') || /^The paragraphs below take the entry points/.test(text);
+}
+
 export function emptyCatalog(): VerificationCatalog {
-  return { ledger: [], ledgerNotes: [], inventory: [], models: [], unmatchedParagraphs: [], sections: [] };
+  return { ledger: [], ledgerNotes: [], modelNotes: [], inventory: [], models: [], unmatchedParagraphs: [], sections: [] };
 }
