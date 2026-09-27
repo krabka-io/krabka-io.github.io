@@ -810,6 +810,79 @@ fn a_fetch_that_meets_a_new_leader_follows_it() {
     );
 }
 
+/// What a test does to the partitions of `orders`.
+#[derive(Clone, Copy, Debug)]
+enum Change {
+    /// The topic is created with three partitions.
+    Create,
+    /// The topic grows from one partition to three.
+    Grow,
+}
+
+#[test]
+fn a_classic_leader_joins_again_when_the_partitions_of_its_topics_change() {
+    // The leader assigns the partitions the metadata knows and keeps their
+    // counts, Kafka's `assignmentSnapshot`. Once `orders` is created, or
+    // gains partitions, the metadata no longer matches, and the leader
+    // joins again (`ConsumerCoordinator.rejoinNeededOrPending`). The client
+    // keeps asking for a topic it was told is unknown
+    // (`Metadata.handleMetadataResponse`), so a created topic shows within
+    // the metadata backoff; new partitions of a known topic show at the
+    // next refresh, `metadata.max.age.ms` (5 min) later. Rows: the change,
+    // the partitions held before it, and the time it may take to be
+    // assigned.
+    let rows = [
+        (Change::Create, vec![], 5_000),
+        (Change::Grow, vec![0], 310_000),
+    ];
+    for (change, before, within) in rows {
+        let state = cluster(&[]);
+        if let Change::Grow = change {
+            state.borrow_mut().add_topic("orders", 1, 3);
+        }
+        let config = ConsumerConfig {
+            enable_auto_commit: false,
+            ..config(GroupProtocol::Classic, AutoOffsetReset::Earliest)
+        };
+        let mut h = Harness::new(consumer(config), Rc::clone(&state));
+        h.with_client(|c, _| c.subscribe(&["orders"]));
+        assert!(
+            h.run_until(|h| h.client.state() == MemberState::Stable, 2_000),
+            "{change:?}"
+        );
+        assert!(
+            h.client.assignment() == partitions("orders", &before),
+            "{change:?}"
+        );
+        let member_id = h.client.member_id().to_string();
+        h.take_events();
+        match change {
+            Change::Create => state.borrow_mut().add_topic("orders", 3, 3),
+            Change::Grow => state.borrow_mut().add_partitions("orders", 3),
+        }
+        assert!(
+            h.run_until(|h| h.client.assignment().len() == 3, within),
+            "{change:?}"
+        );
+        let revoked = (!before.is_empty()).then(|| ConsumerEvent::Revoked {
+            partitions: partitions("orders", &before),
+        });
+        let expected: Vec<ConsumerEvent> = revoked
+            .into_iter()
+            .chain([
+                ConsumerEvent::Joined {
+                    member_id,
+                    generation: 2,
+                },
+                ConsumerEvent::Assigned {
+                    partitions: partitions("orders", &[0, 1, 2]),
+                },
+            ])
+            .collect();
+        assert!(h.take_events() == expected, "{change:?}");
+    }
+}
+
 /// A consumer of the fake cluster without a group, Kafka's unset
 /// `group.id`, with the reset policy `reset`.
 fn groupless(reset: AutoOffsetReset) -> Consumer {

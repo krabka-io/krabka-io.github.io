@@ -343,19 +343,10 @@ impl ClusterState {
     /// Create a topic with `partitions` partitions, leaders round-robin over
     /// the brokers.
     pub fn add_topic(&mut self, name: &str, partitions: i32, replication_factor: i16) {
-        let brokers: Vec<i32> = self.brokers.keys().copied().collect();
-        let rf = usize::try_from(replication_factor)
-            .unwrap_or(1)
-            .clamp(1, brokers.len().max(1));
-        let mut map = BTreeMap::new();
-        for p in 0..partitions.max(0) {
-            let start = usize::try_from(p).unwrap_or(0) % brokers.len().max(1);
-            let replicas: Vec<i32> = (0..rf)
-                .map(|i| brokers[(start + i) % brokers.len()])
-                .collect();
-            let leader = replicas.first().copied().unwrap_or(-1);
-            map.insert(p, FakePartition::new(leader, replicas));
-        }
+        let rf = usize::try_from(replication_factor).unwrap_or(1);
+        let map = (0..partitions.max(0))
+            .map(|p| (p, self.placed(p, rf)))
+            .collect();
         let mut id = [0_u8; 16];
         id[15] = self.next_topic_id;
         self.next_topic_id += 1;
@@ -366,6 +357,39 @@ impl ClusterState {
                 partitions: map,
             },
         );
+    }
+
+    /// Grow `topic` to `partitions` partitions, as `CreatePartitions` does:
+    /// the topic keeps its id and its partitions, and the new ones are
+    /// placed as `add_topic` places them.
+    pub fn add_partitions(&mut self, topic: &str, partitions: i32) {
+        let Some(rf) = self
+            .topics
+            .get(topic)
+            .map(|t| t.partitions.values().next().map_or(1, |p| p.replicas.len()))
+        else {
+            return;
+        };
+        let placed: Vec<(i32, FakePartition)> = (0..partitions.max(0))
+            .filter(|p| !self.topics[topic].partitions.contains_key(p))
+            .map(|p| (p, self.placed(p, rf)))
+            .collect();
+        if let Some(t) = self.topics.get_mut(topic) {
+            t.partitions.extend(placed);
+        }
+    }
+
+    /// Partition `p` of a new topic with `rf` replicas: the replicas start
+    /// at broker `p` of the brokers in turn, and the first leads.
+    fn placed(&self, p: i32, rf: usize) -> FakePartition {
+        let brokers: Vec<i32> = self.brokers.keys().copied().collect();
+        let rf = rf.clamp(1, brokers.len().max(1));
+        let start = usize::try_from(p).unwrap_or(0) % brokers.len().max(1);
+        let replicas: Vec<i32> = (0..rf)
+            .map(|i| brokers[(start + i) % brokers.len()])
+            .collect();
+        let leader = replicas.first().copied().unwrap_or(-1);
+        FakePartition::new(leader, replicas)
     }
 
     /// Move the leadership of a partition to `leader`, bumping the epoch.

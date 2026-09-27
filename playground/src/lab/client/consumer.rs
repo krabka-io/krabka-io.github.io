@@ -7,7 +7,14 @@
 //! Kafka's `RangeAssignor` over every member's subscription and hands the
 //! assignments to `SyncGroup`; a `Heartbeat` loop keeps the session, and
 //! `REBALANCE_IN_PROGRESS`, `ILLEGAL_GENERATION` or `UNKNOWN_MEMBER_ID` make
-//! the member join again. With KIP-848 the member sends
+//! the member join again. The leader assigns once the metadata answered for
+//! every topic of the group, and a topic it reports unknown gets no
+//! partitions, as the assignors skip a topic without metadata. The leader
+//! keeps the partition counts it assigned from, Kafka's
+//! `assignmentSnapshot`, and joins again when the metadata no longer
+//! matches them (`ConsumerCoordinator.rejoinNeededOrPending`), so a topic
+//! created after the members subscribed, or one that gains partitions, is
+//! assigned. With KIP-848 the member sends
 //! `ConsumerGroupHeartbeat` with epoch 0 and a member id of its own to join,
 //! reconciles each assignment the coordinator returns (it stops fetching the
 //! partitions it gives up, commits its positions when auto-commit is on,
@@ -450,11 +457,22 @@ struct Reconciling {
     commit_sent: bool,
 }
 
-/// The leader of a classic group waits for the partition counts of every
-/// subscribed topic before it assigns.
+/// The leader of a classic group waits until the metadata answered for
+/// every topic a member subscribes to before it assigns.
 struct PendingLeader {
     generation: i32,
     members: Vec<(String, Vec<String>)>,
+}
+
+/// What the leader of a classic group assigned from: Kafka's
+/// `assignmentSnapshot`, a `MetadataSnapshot` of the group's topics.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct AssignmentSnapshot {
+    /// Every topic a member of the group subscribes to.
+    topics: BTreeSet<String>,
+    /// The partition count of each of them the metadata knows; a topic the
+    /// metadata does not know has no entry.
+    counts: BTreeMap<String, i32>,
 }
 
 /// The fields the last KIP-848 heartbeat carried; a field goes out again
@@ -537,6 +555,8 @@ pub struct Consumer {
     /// when the consumer first sees the clock.
     next_commit_at: Option<Millis>,
     pending_leader: Option<PendingLeader>,
+    /// Classic: what this member assigned from while it leads the group.
+    assignment_snapshot: Option<AssignmentSnapshot>,
     /// The partitions came from [`Consumer::assign`], outside any group:
     /// Kafka's `USER_ASSIGNED` subscription.
     manual: bool,
@@ -579,6 +599,7 @@ impl Consumer {
             next_heartbeat_at: 0,
             next_commit_at: None,
             pending_leader: None,
+            assignment_snapshot: None,
             manual: false,
             assigned: BTreeMap::new(),
             sent_fields: SentFields::default(),
@@ -700,6 +721,7 @@ impl Consumer {
         self.subscription = topics;
         self.manual = false;
         self.assigned.clear();
+        self.assignment_snapshot = None;
         self.sent_fields = SentFields::default();
         self.state = MemberState::Joining;
         self.generation = match self.config.group_protocol {
@@ -1139,6 +1161,7 @@ impl Consumer {
         if !self.manual {
             match self.config.group_protocol {
                 GroupProtocol::Classic => {
+                    self.maybe_rejoin_for_metadata(ctx, events);
                     self.maybe_join(ctx);
                     self.maybe_heartbeat(ctx);
                 }
@@ -1147,7 +1170,6 @@ impl Consumer {
         }
         self.init_positions(ctx);
         self.maybe_fetch(ctx);
-        let _ = events;
     }
 
     fn handle_client_events(
@@ -1230,6 +1252,7 @@ impl Consumer {
         self.assigned.clear();
         self.fetch_brokers.clear();
         self.pending_leader = None;
+        self.assignment_snapshot = None;
         self.state = MemberState::Joining;
         self.rejoin_at = ctx.now();
         self.metrics.rebalances += 1;
@@ -1309,13 +1332,18 @@ impl Consumer {
                     if response.skip_assignment {
                         // KIP-814: a static leader that came back keeps the
                         // assignment the group has; it follows the group's
-                        // topics and syncs with no assignment, as Kafka's
+                        // topics, takes the snapshot of their metadata, and
+                        // syncs with no assignment, as Kafka's
                         // `onLeaderElected` does.
-                        self.client.add_topics(
-                            members
-                                .iter()
-                                .flat_map(|(_, topics)| topics.iter().map(String::as_str)),
-                        );
+                        let topics: BTreeSet<String> = members
+                            .iter()
+                            .flat_map(|(_, topics)| topics.iter().cloned())
+                            .collect();
+                        self.client.add_topics(topics.iter().map(String::as_str));
+                        self.assignment_snapshot = Some(AssignmentSnapshot {
+                            counts: self.partition_counts(&topics),
+                            topics,
+                        });
                         self.send_sync(ctx, Vec::new());
                         return;
                     }
@@ -1325,6 +1353,8 @@ impl Consumer {
                     });
                     self.try_leader_assignment(ctx);
                 } else {
+                    // Only the leader watches the metadata for changes.
+                    self.assignment_snapshot = None;
                     self.send_sync(ctx, Vec::new());
                 }
             }
@@ -1355,8 +1385,10 @@ impl Consumer {
         }
     }
 
-    /// The leader assigns once metadata has the partition count of every
-    /// topic any member subscribes to.
+    /// The leader assigns once the metadata answered for every topic any
+    /// member subscribes to, as Kafka's `onLeaderElected` waits for fresh
+    /// metadata; a topic the metadata reports unknown gets no partitions.
+    /// It keeps the partition counts it assigned from.
     fn try_leader_assignment(&mut self, ctx: &mut Ctx<'_>) {
         let Some(pending) = &self.pending_leader else {
             return;
@@ -1391,6 +1423,11 @@ impl Consumer {
         let Some(pending) = self.pending_leader.take() else {
             return;
         };
+        let topics: BTreeSet<String> = counts.keys().cloned().collect();
+        self.assignment_snapshot = Some(AssignmentSnapshot {
+            counts: self.partition_counts(&topics),
+            topics,
+        });
         let assignment = range_assign(&pending.members, &counts);
         let assignments = assignment
             .into_iter()
@@ -1401,6 +1438,38 @@ impl Consumer {
             })
             .collect();
         self.send_sync(ctx, assignments);
+    }
+
+    /// The partition count of each of `topics` the metadata knows: Kafka's
+    /// `MetadataSnapshot`, which leaves out a topic without partitions.
+    fn partition_counts(&self, topics: &BTreeSet<String>) -> BTreeMap<String, i32> {
+        topics
+            .iter()
+            .filter_map(|topic| {
+                self.client
+                    .metadata()
+                    .partition_count(topic)
+                    .filter(|count| *count > 0)
+                    .map(|count| (topic.clone(), count))
+            })
+            .collect()
+    }
+
+    /// Kafka's `ConsumerCoordinator.rejoinNeededOrPending`: the leader of a
+    /// stable classic group joins again when the metadata of the group's
+    /// topics no longer matches what it assigned from, such as a topic that
+    /// appeared or gained partitions.
+    fn maybe_rejoin_for_metadata(&mut self, ctx: &mut Ctx<'_>, events: &mut Vec<ConsumerEvent>) {
+        if self.state != MemberState::Stable {
+            return;
+        }
+        let Some(snapshot) = &self.assignment_snapshot else {
+            return;
+        };
+        if self.partition_counts(&snapshot.topics) == snapshot.counts {
+            return;
+        }
+        self.request_rejoin(ctx, events, true);
     }
 
     fn send_sync(&mut self, ctx: &mut Ctx<'_>, assignments: Vec<SyncGroupRequestAssignment>) {
