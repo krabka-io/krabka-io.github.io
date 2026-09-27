@@ -1,8 +1,8 @@
 //! The client against the fake broker: negotiation, framing, routing,
-//! coordinator lookups, timeouts and reconnection, and the metadata refresh
-//! and its backoff.
+//! coordinator lookups, timeouts and reconnection, the metadata refresh and
+//! its backoff, and connection-id ranges.
 
-use std::rc::Rc;
+use std::{collections::BTreeSet, rc::Rc};
 
 use assert2::assert;
 use krabka_protocol::{
@@ -23,15 +23,15 @@ use krabka_protocol::{
 };
 
 use super::{
-    ApiSpec, ClientError, ClientEvent, CoordinatorType, KafkaClient, RequestId, Response, Target,
-    VersionTable,
-    fake_broker::ClusterState,
+    ApiSpec, CONN_ID_RANGE, ClientError, ClientEvent, ClientOptions, CoordinatorType, KafkaClient,
+    RequestId, Response, Target, VersionTable, conn_base, draw_conn_id,
+    fake_broker::{ClusterState, Seen},
     request::{frame_request, response_header_version},
     test_support::{Driven, Harness, client, cluster},
 };
 use crate::lab::{
     codes,
-    net::{Endpoint, Millis, NodeId},
+    net::{ConnId, Ctx, Endpoint, Frame, Millis, NodeId},
 };
 
 fn responses(events: Vec<ClientEvent>) -> Vec<(RequestId, Result<Response, ClientError>)> {
@@ -715,4 +715,169 @@ fn metadata_refreshes_back_off_while_a_tracked_topic_stays_unknown() {
     let seen = h.seen(MetadataRequest::API_KEY).len();
     h.run_for(60_000);
     assert!(h.seen(MetadataRequest::API_KEY).len() == seen);
+}
+
+/// A draw of a connection id: its name, the base, the draws made before,
+/// the ids open connections hold, then the id drawn and the draws made
+/// after it.
+type Draw = (&'static str, u32, u32, &'static [u32], (u32, u32));
+
+#[test]
+fn connection_ids_are_drawn_in_turn_within_the_range_and_skip_held_ones() {
+    const LANE: u32 = conn_base(3);
+    let r = CONN_ID_RANGE;
+    let rows: [Draw; 6] = [
+        ("the first id", 0, 0, &[], (1, 1)),
+        ("in turn", 0, 5, &[], (6, 6)),
+        ("the last id of the range", 0, r - 2, &[], (r - 1, r - 1)),
+        ("back to the first", 0, r - 1, &[], (1, r)),
+        ("past the held ids", 0, 0, &[1, 2], (3, 3)),
+        (
+            "a lane, back to its first id and past it",
+            LANE,
+            r - 1,
+            &[LANE + 1],
+            (LANE + 2, r + 1),
+        ),
+    ];
+    for (name, base, drawn, held, (id, after)) in rows {
+        let held: BTreeSet<ConnId> = held.iter().map(|id| ConnId(*id)).collect();
+        assert!(
+            draw_conn_id(base, drawn, &held) == (ConnId(id), after),
+            "{name}"
+        );
+    }
+    // Lanes wrap, and every id of every lane stays below `1 << 30`.
+    let bases = [(0, 0), (1, r), (1_023, 1_023 * r), (1_024, 0), (1_025, r)];
+    for (lane, base) in bases {
+        assert!(conn_base(lane) == base, "lane {lane}");
+    }
+    assert!(conn_base(1_023) + r - 1 < 1 << 30);
+}
+
+#[test]
+fn a_client_owns_the_connection_ids_of_its_range() {
+    let r = CONN_ID_RANGE;
+    let with_base = |conn_base: u32| {
+        KafkaClient::new(
+            vec![Endpoint::kafka(NodeId(1))],
+            "test",
+            ClientOptions {
+                conn_base,
+                ..ClientOptions::default()
+            },
+        )
+    };
+    // Rows: the base, and the ids with whether the client owns each.
+    let rows = [
+        (0, vec![(0, false), (1, true), (r - 1, true), (r, false)]),
+        (
+            conn_base(2),
+            vec![
+                (2 * r, false),
+                (2 * r + 1, true),
+                (3 * r - 1, true),
+                (3 * r, false),
+                (1, false),
+            ],
+        ),
+    ];
+    for (base, ids) in rows {
+        let c = with_base(base);
+        let owned: Vec<(u32, bool)> = ids
+            .iter()
+            .map(|(id, _)| (*id, c.owns_conn(ConnId(*id))))
+            .collect();
+        assert!(owned == ids, "base {base}");
+    }
+}
+
+/// Two clients of one node on different lanes, routing each frame to the
+/// client whose range holds its connection id.
+struct TwoClients {
+    clients: [KafkaClient; 2],
+}
+
+impl TwoClients {
+    fn deadline(&self, now: Millis) -> Option<Millis> {
+        self.clients
+            .iter()
+            .filter_map(|c| c.next_deadline(now))
+            .min()
+    }
+}
+
+impl Driven for TwoClients {
+    type Event = (usize, ClientEvent);
+
+    fn frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) -> (Vec<Self::Event>, Option<Millis>) {
+        let i = usize::from(!self.clients[0].owns_conn(frame.conn));
+        let events = self.clients[i].on_frame(ctx, frame);
+        let deadline = self.deadline(ctx.now());
+        (events.into_iter().map(|e| (i, e)).collect(), deadline)
+    }
+
+    fn tick(&mut self, ctx: &mut Ctx<'_>) -> (Vec<Self::Event>, Option<Millis>) {
+        let mut events = Vec::new();
+        for (i, c) in self.clients.iter_mut().enumerate() {
+            let (ticked, _) = c.on_tick(ctx);
+            events.extend(ticked.into_iter().map(|e| (i, e)));
+        }
+        (events, self.deadline(ctx.now()))
+    }
+}
+
+#[test]
+fn two_clients_of_one_node_draw_disjoint_connection_ids() {
+    let r = CONN_ID_RANGE;
+    let on_lane = |lane: u32| {
+        KafkaClient::new(
+            vec![Endpoint::kafka(NodeId(1))],
+            &format!("lane-{lane}"),
+            ClientOptions {
+                conn_base: conn_base(lane),
+                ..ClientOptions::default()
+            },
+        )
+    };
+    let pair = TwoClients {
+        clients: [on_lane(1), on_lane(2)],
+    };
+    let mut h = Harness::new(pair, cluster(&[("orders", 1)]));
+    // Both bootstrap against the same broker at once, each on its own
+    // connection.
+    assert!(h.run_until(
+        |h| {
+            h.client
+                .clients
+                .iter()
+                .all(|c| c.metadata().updated_at.is_some())
+        },
+        1_000
+    ));
+    let conns: Vec<(u64, String)> = h
+        .client
+        .clients
+        .iter()
+        .map(|c| {
+            let conn = &c.snapshot()["connections"][0];
+            (
+                conn["conn"].as_u64().unwrap_or_default(),
+                conn["state"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    assert!(
+        conns
+            == vec![
+                (u64::from(r + 1), "ready".to_string()),
+                (u64::from(2 * r + 1), "ready".to_string()),
+            ]
+    );
+    let client_ids: Vec<Option<String>> = h
+        .seen(MetadataRequest::API_KEY)
+        .iter()
+        .map(|s: &Seen| s.client_id.clone())
+        .collect();
+    assert!(client_ids == vec![Some("lane-1".to_string()), Some("lane-2".to_string())]);
 }

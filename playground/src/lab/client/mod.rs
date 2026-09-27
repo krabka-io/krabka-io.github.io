@@ -34,6 +34,15 @@
 //! jitter for each answer in a row that moved no partition's leader epoch
 //! (Kafka's equivalent responses) and for each request in a row that failed.
 //!
+//! # Connection ids
+//!
+//! Every client of a node sends from the node's one client endpoint, and a
+//! broker tells connections apart by `(client endpoint, connection id)`, so
+//! the clients that share a node must draw disjoint ids. A client draws from
+//! the range [`ClientOptions::conn_base`] names; give each client of a node
+//! its own lane with [`conn_base`], and route a frame to the client whose
+//! range holds its id ([`KafkaClient::owns_conn`]).
+//!
 //! A node arms the deadline `on_tick` returns, or
 //! [`KafkaClient::next_deadline`] after it handed the client work. The
 //! deadline names only what a tick can act on, so a node never spins at one
@@ -120,6 +129,26 @@ pub use self::{
     request::{ApiSpec, VersionTable, api_name},
     retry::{ErrorClass, class as error_class, exponential_backoff},
 };
+
+/// How many connection ids one client's range spans; see
+/// [`ClientOptions::conn_base`]. The client draws the ids strictly between
+/// its base and its base plus this span.
+pub const CONN_ID_RANGE: u32 = 1 << 20;
+
+/// How many clients one node can run on disjoint connection-id ranges below
+/// `1 << 30`; see [`conn_base`].
+pub const CONN_ID_LANES: u32 = 1 << 10;
+
+/// The [`ClientOptions::conn_base`] of the client on `lane` of a node:
+/// `lane * CONN_ID_RANGE`, with `lane` taken modulo [`CONN_ID_LANES`]. The
+/// clients of one node on different lanes draw disjoint connection ids, all
+/// below `1 << 30`, clear of the ids the node's other connections use: a
+/// broker's quorum links number from `1 << 30`, and the schema registry
+/// clients of an application node from `1 << 31`.
+#[must_use]
+pub const fn conn_base(lane: u32) -> u32 {
+    (lane % CONN_ID_LANES) * CONN_ID_RANGE
+}
 
 /// The id of a request the client accepted. Unique per client.
 #[derive(
@@ -307,6 +336,18 @@ pub struct ClientOptions {
     pub software_name: String,
     /// The `client_software_version` of `ApiVersions`.
     pub software_version: String,
+    /// The base of the connection ids the client draws. It numbers its
+    /// connections `conn_base + 1` to `conn_base + CONN_ID_RANGE - 1` in
+    /// turn, then starts over at `conn_base + 1`, skipping an id one of its
+    /// open connections holds; [`KafkaClient::owns_conn`] tells whether an
+    /// id is in the range.
+    ///
+    /// The clients of one node must use bases whose ranges do not overlap,
+    /// since they all send from the node's client endpoint: take each from
+    /// [`conn_base`] with a lane of its own, or use another multiple of
+    /// [`CONN_ID_RANGE`] below `1 << 30`. The ids from `1 << 30` up belong
+    /// to a node's other connections. Default: 0, so the ids start at 1.
+    pub conn_base: u32,
 }
 
 impl Default for ClientOptions {
@@ -323,6 +364,7 @@ impl Default for ClientOptions {
             reconnect_backoff_max_ms: 1_000,
             software_name: "krabka-lab".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
+            conn_base: 0,
         }
     }
 }
@@ -465,6 +507,16 @@ impl KafkaClient {
             .is_some_and(|c| c.conn_id() == conn && !c.is_closed())
     }
 
+    /// Whether `conn` is in the range of ids this client draws from (see
+    /// [`ClientOptions::conn_base`]). Unlike [`KafkaClient::owns`] it also
+    /// holds for a connection the client has closed, so a node with several
+    /// clients routes every frame, a late one included, to the client that
+    /// opened its connection.
+    #[must_use]
+    pub fn owns_conn(&self, conn: ConnId) -> bool {
+        conn.0.wrapping_sub(self.opts.conn_base).wrapping_sub(1) < CONN_ID_RANGE - 1
+    }
+
     /// Ask for the metadata of `topics` from now on, in addition to what the
     /// client already tracks. A topic the cache does not hold yet triggers a
     /// refresh.
@@ -591,9 +643,18 @@ impl KafkaClient {
         RequestId(self.next_request)
     }
 
+    /// The next connection id of the client's range, skipping the ids its
+    /// open connections hold.
     fn next_conn_id(&mut self) -> ConnId {
-        self.next_conn += 1;
-        ConnId(self.next_conn)
+        let held: BTreeSet<ConnId> = self
+            .conns
+            .values()
+            .filter(|c| !c.is_closed())
+            .map(Connection::conn_id)
+            .collect();
+        let (id, next) = draw_conn_id(self.opts.conn_base, self.next_conn, &held);
+        self.next_conn = next;
+        id
     }
 
     /// A frame arrived for this client.
@@ -1236,6 +1297,26 @@ impl KafkaClient {
             "disconnects": self.disconnects,
         })
     }
+}
+
+/// The connection id a client with `conn_base` draws after `drawn` earlier
+/// draws, and the count of draws after it: ids run from `conn_base + 1` to
+/// `conn_base + CONN_ID_RANGE - 1` in turn, start over after the last, and
+/// skip the ids in `held`. A client holds one connection per broker, so a
+/// free id turns up within a few draws.
+#[must_use]
+fn draw_conn_id(conn_base: u32, drawn: u32, held: &BTreeSet<ConnId>) -> (ConnId, u32) {
+    let span = CONN_ID_RANGE - 1;
+    let mut drawn = drawn;
+    let mut id = ConnId(conn_base.wrapping_add(1 + drawn % span));
+    for _ in 0..span {
+        id = ConnId(conn_base.wrapping_add(1 + drawn % span));
+        drawn = drawn.wrapping_add(1);
+        if !held.contains(&id) {
+            break;
+        }
+    }
+    (id, drawn)
 }
 
 /// The coordinator a `FindCoordinator` response names for `key`: the row of
