@@ -291,6 +291,14 @@ export const KINDS = {
           num("auto_commit_interval_ms", "auto.commit.interval.ms", 5000, null),
           num("session_timeout_ms", "session.timeout.ms", 45000, "Classic protocol only; a KIP-848 member takes it from the broker.", { min: 1 }),
           num("heartbeat_interval_ms", "heartbeat.interval.ms", 3000, "Classic protocol only; a KIP-848 member takes it from the broker.", { min: 1 }),
+          {
+            key: "instance_id",
+            label: "group.instance.id",
+            type: "text",
+            placeholder: "billing-1",
+            validate: (v) => (/^[A-Za-z0-9._-]{1,249}$/.test(v) ? null : "1 to 249 ASCII letters, digits, '.', '_' or '-'"),
+            help: "A static member (KIP-345) gets its partitions back after a restart within the session timeout, without a rebalance. A KIP-848 static member must Close before it restarts; a crashed one keeps its instance id until its session expires.",
+          },
         ],
       },
     ],
@@ -300,6 +308,17 @@ export const KINDS = {
       { cmd: "resume", label: "Resume", title: "Take records again", enabled: (s) => Boolean(s.paused) },
       { cmd: "process_ms", label: "Set processing", title: "The logical time one record takes", params: [{ key: "ms", label: "ms per record", type: "number", default: 2, min: 0, step: 1, fromState: (s) => s.process_ms }] },
       { cmd: "commit", label: "Commit now", title: "Commit the positions of what was processed" },
+      {
+        cmd: "seek",
+        label: "Seek",
+        title: "The next poll reads the partition from this offset (Kafka's seek)",
+        params: [
+          { key: "topic", label: "topic", type: "select", options: (s) => [...new Set((s.assignment || []).map((a) => a.topic))] },
+          { key: "partition", label: "partition", type: "number", default: 0, min: 0, step: 1 },
+          { key: "offset", label: "offset", type: "number", default: 0, min: 0, step: 1 },
+        ],
+      },
+      { cmd: "close", label: "Close", title: "Commit, then leave the group as a JVM application's shutdown does; the node takes no records until it starts again", enabled: (s) => !s.closed },
     ],
     edges: (spec) => {
       const c = spec.config || {};
@@ -310,7 +329,8 @@ export const KINDS = {
     },
     status: (s) => {
       const parts = [];
-      if (s.paused) parts.push("paused");
+      if (s.closed) parts.push("closed");
+      else if (s.paused) parts.push("paused");
       else if (s.state && s.state !== "stable") parts.push(String(s.state).toLowerCase());
       if (s.processed != null) parts.push(`${s.processed} read`);
       const lag = totalLag(s);

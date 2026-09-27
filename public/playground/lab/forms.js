@@ -130,6 +130,8 @@ function makeControl(spec, value, ctx) {
       read = () => {
         const v = input.value.trim();
         if (!v) return spec.required ? { error: "required" } : { value: undefined };
+        const invalid = spec.validate ? spec.validate(v) : null;
+        if (invalid) return { error: invalid };
         if (spec.emitDefault === false && v === spec.default) return { value: undefined };
         return { value: v };
       };

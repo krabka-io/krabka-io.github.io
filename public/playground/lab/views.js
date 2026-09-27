@@ -575,6 +575,7 @@ function renderConsumer(root, s, used, ctx) {
   const sub = take(s, used, "subscription");
   addRow(rows, "subscription", Array.isArray(sub) ? sub.join(", ") : sub, "subscription");
   addRow(rows, "paused", take(s, used, "paused"), "paused");
+  addRow(rows, "closed", take(s, used, "closed"), "closed");
   addRow(rows, "processing per record", withUnit(take(s, used, "process_ms"), " ms"), "process_ms");
   addRow(rows, "processed", take(s, used, "processed"), "processed");
   addRow(rows, "polled, not processed", take(s, used, "processing_backlog"), "processing_backlog");
@@ -778,14 +779,35 @@ function renderStreams(root, s, used, ctx) {
     );
   }
 
+  // The client producer a stream thread writes its sink, repartition and
+  // changelog records through.
   const producer = take(s, used, "producer");
   if (producer && typeof producer === "object") {
     const pr = [];
+    addRow(pr, "sent", producer.sent, "producer_sent");
     addRow(pr, "acked", producer.acked, "producer_acked");
     addRow(pr, "failed", producer.failed, "producer_failed");
-    addRow(pr, "waiting to send", producer.pending, "producer_pending");
-    addRow(pr, "requests in flight", producer.in_flight_requests, "producer_in_flight");
-    root.appendChild(section("Record collector", kv(pr), { open: false }));
+    addRow(pr, "retried", producer.retried, "producer_retried");
+    addRow(pr, "waiting to send", producer.pending_records, "producer_pending");
+    addRow(pr, "batches in flight", producer.in_flight_batches, "producer_in_flight");
+    addRow(pr, "producer id", producer.producer_id ?? "none yet", "producer_id");
+    const body = el("div");
+    body.appendChild(kv(pr));
+    if (Array.isArray(producer.partitions) && producer.partitions.length) {
+      body.appendChild(
+        table(
+          [
+            { key: "topic", label: "topic" },
+            { key: "partition", label: "p" },
+            { key: "last_offset", label: "last offset", render: (v) => (v == null ? "–" : fmtNum(v)) },
+            { key: "records", label: "queued" },
+          ],
+          producer.partitions,
+          { rowKey: (p) => `${p.topic}-${p.partition}` },
+        ),
+      );
+    }
+    root.appendChild(section("Producer", body, { open: false }));
   }
   const ser = take(s, used, "serialize");
   if (ser && typeof ser === "object") root.appendChild(serializationSection(ser, ctx));

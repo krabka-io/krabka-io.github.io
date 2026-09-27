@@ -16,7 +16,7 @@
 // brokers form one KRaft quorum, create the topic and serve two consumers
 // that share its partitions; the inspector shows the quorum and the
 // partitions; the command bars pause, resume, send, set rates and
-// processing times, commit and query; killing the leader of a partition
+// processing times, commit, seek, close and query; killing the leader of a partition
 // moves the leadership in the inspector while the group keeps consuming,
 // and the restarted broker rejoins the ISR; a page reload brings the brokers
 // back from IndexedDB and the group resumes from its committed offsets; a
@@ -445,6 +445,19 @@ async function checkThreeBrokers(page, preset) {
   const commit = await command(page, 'commit');
   await until(page, 'the commit', `(n) => n[5].state.commits > ${commits}`);
   check('Commit now commits', commit.ok, commit.text);
+  // Seek, with the producer held so what the consumer reads next is the
+  // records it read before.
+  await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'pause' }));
+  await until(page, 'billing-1 to catch up', `(n) => n[4].state.paused && n[5].state.lag === 0 && n[5].state.processing_backlog === 0`);
+  const [row] = (await nodeStateOf(page, 5)).assignment.filter((a) => a.position >= 3);
+  const back = row.position - 3;
+  const seek = await command(page, 'seek', { topic: row.topic, partition: row.partition, offset: back });
+  const reread = await until(page, 'the consumer to read again from the offset', `(n) => {
+    const r = n[5].state.last_records.filter((x) => x.topic === '${row.topic}' && x.partition === ${row.partition}).map((x) => x.offset);
+    return r.includes(${back}) && r.includes(${row.position - 1}) && r.slice(-3);
+  }`);
+  check(`Seek reads ${row.topic}-${row.partition} again from offset ${back}`, seek.ok && JSON.stringify(reread) === JSON.stringify([back, back + 1, back + 2]), `${seek.text} ${JSON.stringify(reread)}`);
+  await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'resume' }));
 
   // Kill the leader of orders-0: another broker's inspector shows the
   // leadership move, and the group keeps consuming.
@@ -487,6 +500,12 @@ async function checkThreeBrokers(page, preset) {
   const why = await page.evaluate(() => document.querySelector('#krabka-lab .lab-inspector [data-field="observer-note"]')?.textContent || '');
   const observed = await page.evaluate((id) => window.krabkaLab.timeline.events.some((e) => e.node === id && e.kind === 'quorum_observer'), added);
   check('a broker added to the running scenario observes the static quorum, and the inspector says why', /joined a running scenario/.test(why) && /1, 2, 3/.test(why) && observed, why);
+
+  // Close: billing-2 commits and leaves, and billing-1 takes its partitions.
+  await inspect(page, 6, 'billing-2');
+  const closed = await command(page, 'close');
+  const alone = await until(page, 'billing-1 to take every partition', `(n) => n[6].state.closed === true && n[6].state.assignment.length === 0 && n[5].state.assignment.length === 3 && n[5].state.assignment.map((a) => a.partition)`);
+  check('Close commits and leaves the group, and the other member takes its partitions over', closed.ok && alone.length === 3, closed.text);
 }
 
 // The cluster survives a page reload through IndexedDB, and the consumers
