@@ -696,7 +696,7 @@ impl PartitionLog {
     /// Kafka's `UnifiedLog.appendAsLeader` in its order of checks, the base
     /// offset, the size, the checksum, then `LogValidator` on the batch and
     /// its records, then the producer state. `records` is one whole batch, as
-    /// [`single_batch`] leaves it; `partition` names the partition in the
+    /// `single_batch` leaves it; `partition` names the partition in the
     /// refusal messages, Kafka's `topic-partition`.
     ///
     /// # Errors

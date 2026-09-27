@@ -6,7 +6,7 @@
 //! version; `FORWARD` whether every earlier version can read the candidate;
 //! `FULL` both. The plain levels check the latest live version only; the
 //! `_TRANSITIVE` levels check every live version. The per-format check is
-//! [`format::check`](super::format::check).
+//! [`format::check`].
 
 use std::fmt;
 

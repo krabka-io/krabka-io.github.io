@@ -116,7 +116,7 @@ impl StoreState {
     /// subject already holds returns the existing pair.
     ///
     /// `schema` must be in storage form, see
-    /// [`format::parse`](super::format::parse).
+    /// [`format::parse`].
     ///
     /// # Errors
     /// Returns [`RegistryError::InvalidSchema`] or

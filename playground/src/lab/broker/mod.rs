@@ -93,6 +93,7 @@ use uuid::Uuid;
 
 mod cluster;
 mod conn;
+pub mod coordinator;
 mod dispatch;
 mod handlers;
 mod log;
