@@ -149,11 +149,23 @@ let ping () =
         ("why3", `String Config.version);
         ("prover", `String (Printf.sprintf "%s %s" p.Whyconf.prover_name p.Whyconf.prover_version)) ])
 
+(* Why3 reports some failures on stderr before raising; in a worker that
+ * stream goes nowhere, so it is collected and appended to the error reply. *)
+let stderr_buffer = Buffer.create 256
+let () = Sys_js.set_channel_flusher stderr (Buffer.add_string stderr_buffer)
+
 let describe_exn e =
-  match e with
-  | Loc.Located (loc, e') ->
-      Pp.sprintf "%a: %a" Loc.pp_position loc Exn_printer.exn_printer e'
-  | e -> Pp.sprintf "%a" Exn_printer.exn_printer e
+  Format.pp_print_flush Format.err_formatter ();
+  flush stderr;
+  let detail = Buffer.contents stderr_buffer in
+  Buffer.clear stderr_buffer;
+  let main =
+    match e with
+    | Loc.Located (loc, e') ->
+        Pp.sprintf "%a: %a" Loc.pp_position loc Exn_printer.exn_printer e'
+    | e -> Pp.sprintf "%a" Exn_printer.exn_printer e
+  in
+  if detail = "" then main else main ^ "\n" ^ detail
 
 let handle (json : Yojson.Safe.t) =
   let cmd = string_member "cmd" json in

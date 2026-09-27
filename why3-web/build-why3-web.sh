@@ -31,10 +31,11 @@ opam switch create default ocaml-system
 eval "$(opam env --switch=default --set-switch)"
 
 echo "==> OCaml libraries"
-opam install -y dune dune-site menhir ocamlgraph zarith camlzip re ppxlib yojson ppx_deriving logs fmt \
+opam install -y dune dune-site dune-build-info menhir ocamlgraph zarith camlzip re ppxlib yojson \
+  ppx_deriving ppx_blob logs fmt seq stdlib-shims cmdliner \
+  dolmen dolmen_type dolmen_loop ocplib-simplex psmt2-frontend \
   "js_of_ocaml.${JS_OF_OCAML_VERSION}" "js_of_ocaml-compiler.${JS_OF_OCAML_VERSION}" \
-  "js_of_ocaml-ppx.${JS_OF_OCAML_VERSION}" "js_of_ocaml-lwt.${JS_OF_OCAML_VERSION}" \
-  zarith_stubs_js data-encoding lwt_ppx
+  "js_of_ocaml-ppx.${JS_OF_OCAML_VERSION}" zarith_stubs_js
 
 fetch() {
   local url="$1" sha="$2" out="$3"
@@ -47,23 +48,27 @@ why3="${work}/why3"
 git init -q "${why3}"
 git -C "${why3}" fetch -q --depth 1 "${WHY3_GIT}" "${WHY3_COMMIT}"
 git -C "${why3}" checkout -q --detach FETCH_HEAD
+mkdir -p "${why3}/src/proof_worker"
+cp "${src}/worker/proof_worker.ml" "${src}/worker/dune" "${why3}/src/proof_worker/"
 (
   cd "${why3}"
   ./autogen.sh
   ./configure --enable-local --disable-ide --disable-web-ide --disable-hypothesis-selection \
     --disable-doc --disable-emacs-compilation --disable-coq-libs --disable-pvs-libs \
     --disable-isabelle-libs --disable-java --disable-mpfr --disable-infer --disable-bddinfer --disable-sexp
-  make -j"$(nproc)" byte plugins.byte
+  dune build src/proof_worker/proof_worker.bc
 )
 
 echo "==> Alt-Ergo ${ALT_ERGO_VERSION}"
 fetch "${ALT_ERGO_URL}" "${ALT_ERGO_SHA256}" alt-ergo.tbz
 tar -xjf alt-ergo.tbz
 alt_ergo="${work}/alt-ergo-${ALT_ERGO_VERSION}"
+cp "${src}/alt-ergo/ae_worker.ml" "${src}/alt-ergo/ae_worker_stubs.js" "${alt_ergo}/src/bin/js/"
+cat "${src}/alt-ergo/dune.stanza" >> "${alt_ergo}/src/bin/js/dune"
 (
   cd "${alt_ergo}"
   opam install -y --deps-only ./alt-ergo-lib.opam ./alt-ergo-parsers.opam ./alt-ergo.opam
-  dune build --profile=release src/bin/js/worker_js.bc.js
+  dune build --profile=release src/bin/js/ae_worker.bc.js
 )
 
 echo "==> Creusot prelude (${CREUSOT_TAG})"
@@ -73,37 +78,29 @@ git -C creusot checkout -q --detach FETCH_HEAD -- prelude-generator LICENSE
 node "${src}/gen-prelude.mjs" "${work}/creusot/prelude-generator" "${work}/prelude/creusot"
 
 echo "==> proof worker"
+# CPS mode: Why3's reduction engine recurses deeply on a large verification
+# condition, and only js_of_ocaml's CPS translation keeps that off the
+# JavaScript stack.
+files=()
+while IFS= read -r f; do
+  files+=("--file=${f}:/share/stdlib/${f#"${why3}/stdlib/"}")
+done < <(find "${why3}/stdlib" -name "*.mlw" -o -name "*.coma" | sort)
+for f in "${work}"/prelude/creusot/*.coma; do
+  files+=("--file=${f}:/packages/creusot/$(basename "${f}")")
+done
 mkdir -p worker
-cp "${src}/worker/proof_worker.ml" worker/
-(
-  cd worker
-  coma="${why3}/plugins/coma"
-  ocamlfind ocamlc -g -I "${why3}/lib/why3" -I "${coma}" \
-    -package menhirLib,re,unix,zarith,dynlink,zip,js_of_ocaml,yojson -linkpkg \
-    "${why3}/lib/why3/why3.cma" \
-    "${coma}/coma_logic.cmo" "${coma}/coma_syntax.cmo" "${coma}/coma_parser.cmo" \
-    "${coma}/coma_lexer.cmo" "${coma}/coma_typing.cmo" "${coma}/coma_main.cmo" \
-    proof_worker.ml -o proof_worker.byte
-  files=()
-  while IFS= read -r f; do
-    files+=("--file=${f}:/share/stdlib/${f#"${why3}/stdlib/"}")
-  done < <(find "${why3}/stdlib" -name "*.mlw" | sort)
-  for f in "${work}"/prelude/creusot/*.coma; do
-    files+=("--file=${f}:/packages/creusot/$(basename "${f}")")
-  done
-  js_of_ocaml --extern-fs \
-    --file="${src}/why3.conf:/why3.conf" --file="${src}/try_alt_ergo.drv:/try_alt_ergo.drv" \
-    "${files[@]}" \
-    +dynlink.js +toplevel.js +zarith_stubs_js/runtime.js \
-    proof_worker.byte -o proof_worker.js
-)
+js_of_ocaml --effects=cps --extern-fs \
+  --file="${src}/why3.conf:/why3.conf" --file="${src}/try_alt_ergo.drv:/try_alt_ergo.drv" \
+  "${files[@]}" \
+  +dynlink.js +toplevel.js +zarith_stubs_js/runtime.js \
+  "${why3}/_build/default/src/proof_worker/proof_worker.bc" -o worker/proof_worker.js
 
 echo "==> bundle"
 bundle="${work}/bundle"
 rm -rf "${bundle}"
 mkdir -p "${bundle}/LICENSES"
 cp worker/proof_worker.js "${bundle}/proof_worker.js"
-cp "${alt_ergo}/_build/default/src/bin/js/worker_js.bc.js" "${bundle}/alt-ergo-worker.js"
+cp "${alt_ergo}/_build/default/src/bin/js/ae_worker.bc.js" "${bundle}/alt-ergo-worker.js"
 cp "${why3}/LICENSE" "${bundle}/LICENSES/why3.LICENSE"
 cp "${alt_ergo}/LICENSE.md" "${bundle}/LICENSES/alt-ergo.LICENSE.md"
 cp -r "${alt_ergo}/licenses" "${bundle}/LICENSES/alt-ergo-licenses"
