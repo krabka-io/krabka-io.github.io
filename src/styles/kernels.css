@@ -1,0 +1,747 @@
+/* Verified kernel explorer styles.
+ *
+ * Self-contained: every rule is scoped under #krabka-kernels, so nothing bleeds
+ * into the rest of the site. The site renders dark only, so this is the dark
+ * palette and it matches the consensus playground (playground.css) and the
+ * krab / ocean Tailwind colours in tailwind.config.mjs. */
+
+#krabka-kernels {
+  --kx-accent: #ff4d2e;
+  --kx-accent-deep: #c82408;
+  --kx-bg: #0c1322;
+  --kx-panel: #0f172a;
+  --kx-panel-raised: #141e33;
+  --kx-border: rgba(255, 255, 255, 0.1);
+  --kx-border-strong: rgba(255, 255, 255, 0.2);
+  --kx-text: #f3f4f6;
+  --kx-muted: #9ca3af;
+  --kx-ok: #45c178;
+  --kx-amber: #f7b73a;
+  --kx-error: #ff8466;
+  --kx-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 12px;
+  background: var(--kx-bg);
+  color: var(--kx-text);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+/* Before the script upgrades it, show nothing jarring. */
+#krabka-kernels:not(.kx-ready) .kx-fallback {
+  color: var(--kx-muted);
+  margin: 0;
+}
+
+#krabka-kernels .kx-error {
+  color: var(--kx-error);
+  font-size: 0.88rem;
+  margin: 0.6rem 0 0;
+}
+
+/* ---- layout ---------------------------------------------------------------- */
+
+#krabka-kernels .kx-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  #krabka-kernels .kx-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- sidebar --------------------------------------------------------------- */
+
+#krabka-kernels .kx-sidebar {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: calc(100vh - 2rem);
+}
+
+@media (max-width: 860px) {
+  #krabka-kernels .kx-sidebar {
+    position: static;
+    max-height: none;
+  }
+}
+
+#krabka-kernels .kx-list {
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+@media (max-width: 860px) {
+  #krabka-kernels .kx-list {
+    max-height: 260px;
+    border: 1px solid var(--kx-border);
+    border-radius: 10px;
+    padding: 0.4rem;
+    background: var(--kx-panel);
+  }
+}
+
+#krabka-kernels .kx-group {
+  margin-bottom: 0.8rem;
+}
+
+#krabka-kernels .kx-group-title {
+  margin: 0 0 0.3rem;
+  padding: 0 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  margin: 0 0 0.15rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--kx-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+#krabka-kernels .kx-item:hover {
+  background: var(--kx-panel);
+  border-color: var(--kx-border);
+}
+
+#krabka-kernels .kx-item.kx-active {
+  background: var(--kx-panel);
+  border-color: var(--kx-accent);
+  box-shadow: inset 3px 0 0 var(--kx-accent);
+}
+
+#krabka-kernels .kx-item-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+#krabka-kernels .kx-item-fn {
+  font-family: var(--kx-mono);
+  font-size: 0.7rem;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-empty {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--kx-muted);
+}
+
+/* ---- inputs and buttons ---------------------------------------------------- */
+
+#krabka-kernels .kx-input,
+#krabka-kernels .kx-btn {
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.38rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid var(--kx-border);
+  background: var(--kx-panel);
+  color: var(--kx-text);
+  transition: background 0.12s ease, border-color 0.12s ease,
+    transform 0.05s ease;
+}
+
+#krabka-kernels .kx-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--kx-mono);
+  font-size: 0.82rem;
+}
+
+#krabka-kernels .kx-input::placeholder {
+  color: rgba(156, 163, 175, 0.55);
+}
+
+#krabka-kernels .kx-input:focus,
+#krabka-kernels .kx-btn:focus-visible,
+#krabka-kernels .kx-item:focus-visible {
+  outline: none;
+  border-color: var(--kx-accent);
+  box-shadow: 0 0 0 2px rgba(255, 77, 46, 0.25);
+}
+
+#krabka-kernels .kx-filter {
+  font-family: inherit;
+  font-size: 0.86rem;
+}
+
+#krabka-kernels .kx-textarea {
+  resize: vertical;
+  min-height: 5.5rem;
+  line-height: 1.4;
+}
+
+#krabka-kernels .kx-select {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+#krabka-kernels .kx-check {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--kx-accent);
+  cursor: pointer;
+}
+
+#krabka-kernels .kx-btn {
+  cursor: pointer;
+}
+
+#krabka-kernels .kx-btn:hover {
+  border-color: var(--kx-accent);
+  color: var(--kx-accent);
+}
+
+#krabka-kernels .kx-btn:active {
+  transform: translateY(1px);
+}
+
+#krabka-kernels .kx-btn.kx-primary {
+  background: var(--kx-accent);
+  border-color: var(--kx-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#krabka-kernels .kx-btn.kx-primary:hover {
+  background: var(--kx-accent-deep);
+  border-color: var(--kx-accent-deep);
+  color: #fff;
+}
+
+#krabka-kernels .kx-label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kx-muted);
+  font-weight: 700;
+}
+
+/* ---- detail pane: header --------------------------------------------------- */
+
+#krabka-kernels .kx-detail {
+  min-width: 0;
+}
+
+#krabka-kernels .kx-head {
+  padding-bottom: 0.8rem;
+  margin-bottom: 0.9rem;
+  border-bottom: 1px solid var(--kx-border);
+}
+
+#krabka-kernels .kx-title {
+  margin: 0 0 0.3rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--kx-text);
+}
+
+#krabka-kernels .kx-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+#krabka-kernels .kx-fn {
+  font-family: var(--kx-mono);
+  font-size: 0.82rem;
+  color: var(--kx-accent);
+  word-break: break-all;
+}
+
+#krabka-kernels .kx-source {
+  font-size: 0.8rem;
+  color: var(--kx-muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--kx-border-strong);
+}
+
+#krabka-kernels .kx-source:hover {
+  color: var(--kx-text);
+  border-bottom-color: var(--kx-accent);
+}
+
+#krabka-kernels .kx-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #d1d5db;
+  max-width: 62ch;
+}
+
+#krabka-kernels .kx-kafka {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-kafka-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+#krabka-kernels .kx-kafka-ref {
+  font-family: var(--kx-mono);
+  font-size: 0.78rem;
+  color: #d1d5db;
+  word-break: break-all;
+}
+
+/* ---- detail pane: body ----------------------------------------------------- */
+
+#krabka-kernels .kx-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  #krabka-kernels .kx-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+#krabka-kernels .kx-form,
+#krabka-kernels .kx-result,
+#krabka-kernels .kx-contract {
+  background: var(--kx-panel);
+  border: 1px solid var(--kx-border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+#krabka-kernels .kx-output {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+/* Presets. */
+#krabka-kernels .kx-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px dashed var(--kx-border);
+}
+
+#krabka-kernels .kx-presets .kx-label {
+  display: inline;
+  margin-right: 0.15rem;
+}
+
+#krabka-kernels .kx-presets .kx-btn {
+  font-size: 0.8rem;
+  padding: 0.28rem 0.6rem;
+}
+
+/* Fields. */
+#krabka-kernels .kx-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+#krabka-kernels .kx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+#krabka-kernels .kx-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--kx-text);
+}
+
+#krabka-kernels .kx-field-name {
+  font-family: var(--kx-mono);
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#krabka-kernels .kx-check-row .kx-field-label {
+  cursor: pointer;
+}
+
+#krabka-kernels .kx-help {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-field-error {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--kx-error);
+  min-height: 0;
+}
+
+#krabka-kernels .kx-field-error:empty {
+  display: none;
+}
+
+#krabka-kernels .kx-field.kx-invalid .kx-input {
+  border-color: var(--kx-accent-deep);
+  box-shadow: 0 0 0 2px rgba(200, 36, 8, 0.25);
+}
+
+/* Actions. */
+#krabka-kernels .kx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--kx-border);
+}
+
+#krabka-kernels .kx-status {
+  font-size: 0.76rem;
+  color: var(--kx-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- result panel ---------------------------------------------------------- */
+
+#krabka-kernels .kx-result {
+  border-left-width: 4px;
+  transition: border-color 0.15s ease;
+}
+
+#krabka-kernels .kx-result.kx-ok {
+  border-left-color: var(--kx-ok);
+}
+
+#krabka-kernels .kx-result.kx-precondition {
+  border-left-color: var(--kx-amber);
+  background: rgba(247, 183, 58, 0.06);
+}
+
+#krabka-kernels .kx-result.kx-precondition .kx-label {
+  color: var(--kx-amber);
+}
+
+#krabka-kernels .kx-result.kx-error {
+  border-left-color: var(--kx-accent-deep);
+  background: rgba(200, 36, 8, 0.08);
+}
+
+#krabka-kernels .kx-result.kx-error .kx-label {
+  color: var(--kx-error);
+}
+
+#krabka-kernels .kx-result.kx-invalid {
+  border-left-color: var(--kx-border-strong);
+}
+
+#krabka-kernels .kx-result-value {
+  margin-top: 0.35rem;
+  overflow-x: auto;
+}
+
+#krabka-kernels .kx-result-message {
+  margin: 0.35rem 0 0;
+  font-family: var(--kx-mono);
+  font-size: 0.84rem;
+  color: var(--kx-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#krabka-kernels .kx-result.kx-precondition .kx-result-message {
+  color: var(--kx-amber);
+}
+
+#krabka-kernels .kx-result.kx-error .kx-result-message {
+  color: var(--kx-error);
+}
+
+#krabka-kernels .kx-result-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-detail-box {
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--kx-border);
+}
+
+#krabka-kernels .kx-detail-box .kx-label {
+  margin-bottom: 0.3rem;
+}
+
+/* Values. */
+#krabka-kernels .kx-number {
+  font-family: var(--kx-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--kx-text);
+}
+
+#krabka-kernels .kx-number-big {
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+#krabka-kernels .kx-array {
+  font-family: var(--kx-mono);
+  font-size: 0.82rem;
+  color: var(--kx-text);
+  word-break: break-word;
+}
+
+#krabka-kernels .kx-array-big {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+#krabka-kernels .kx-badge {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--kx-border-strong);
+  font-family: var(--kx-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--kx-text);
+  background: var(--kx-panel-raised);
+  word-break: break-word;
+}
+
+#krabka-kernels .kx-result-value > .kx-badge {
+  font-size: 1.05rem;
+  padding: 0.3rem 0.85rem;
+}
+
+#krabka-kernels .kx-badge-true {
+  color: var(--kx-ok);
+  border-color: rgba(69, 193, 120, 0.55);
+  background: rgba(69, 193, 120, 0.1);
+}
+
+#krabka-kernels .kx-badge-false {
+  color: var(--kx-error);
+  border-color: rgba(255, 77, 46, 0.5);
+  background: rgba(255, 77, 46, 0.1);
+}
+
+#krabka-kernels .kx-badge-null {
+  color: var(--kx-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+#krabka-kernels .kx-badge-string {
+  color: var(--kx-text);
+  border-color: rgba(255, 77, 46, 0.45);
+}
+
+#krabka-kernels .kx-json {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 7px;
+  background: var(--kx-bg);
+  font-family: var(--kx-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--kx-text);
+  overflow-x: auto;
+}
+
+/* Key/value and row tables. */
+#krabka-kernels .kx-kv,
+#krabka-kernels .kx-rows {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+#krabka-kernels .kx-kv th,
+#krabka-kernels .kx-kv td,
+#krabka-kernels .kx-rows th,
+#krabka-kernels .kx-rows td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--kx-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+#krabka-kernels .kx-kv tr:last-child th,
+#krabka-kernels .kx-kv tr:last-child td,
+#krabka-kernels .kx-rows tbody tr:last-child td {
+  border-bottom: none;
+}
+
+#krabka-kernels .kx-kv th {
+  width: 38%;
+  font-family: var(--kx-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-rows th {
+  font-family: var(--kx-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kx-muted);
+  background: var(--kx-bg);
+}
+
+#krabka-kernels .kx-kv td .kx-badge,
+#krabka-kernels .kx-rows td .kx-badge {
+  font-size: 0.76rem;
+  padding: 0.1rem 0.5rem;
+}
+
+/* ---- contract panel -------------------------------------------------------- */
+
+#krabka-kernels .kx-contract {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#krabka-kernels .kx-signature {
+  margin: 0.3rem 0 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 7px;
+  background: var(--kx-bg);
+  font-family: var(--kx-mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#krabka-kernels .kx-clauses {
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--kx-border);
+  border-left-width: 3px;
+  border-radius: 7px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+#krabka-kernels .kx-requires {
+  border-left-color: var(--kx-muted);
+}
+
+#krabka-kernels .kx-ensures {
+  border-left-color: var(--kx-ok);
+}
+
+#krabka-kernels .kx-requires.kx-violated {
+  border-color: rgba(247, 183, 58, 0.55);
+  border-left-color: var(--kx-amber);
+  background: rgba(247, 183, 58, 0.07);
+}
+
+#krabka-kernels .kx-requires.kx-violated .kx-label {
+  color: var(--kx-amber);
+}
+
+#krabka-kernels .kx-clause-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+}
+
+#krabka-kernels .kx-clause {
+  padding: 0.18rem 0;
+  font-family: var(--kx-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--kx-text);
+  word-break: break-word;
+}
+
+#krabka-kernels .kx-clause + .kx-clause {
+  border-top: 1px solid var(--kx-border);
+}
+
+#krabka-kernels .kx-clause code {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  padding: 0;
+}
+
+#krabka-kernels .kx-clause-none {
+  color: var(--kx-muted);
+  font-style: italic;
+}
+
+/* ---- footer ---------------------------------------------------------------- */
+
+#krabka-kernels .kx-footer {
+  margin: 0.9rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--kx-border);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--kx-muted);
+}

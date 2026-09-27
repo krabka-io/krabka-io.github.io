@@ -66,12 +66,16 @@ npm run preview
 - `/docs/playground` runs Krabka's real KRaft consensus quorum directly in the browser.
 - `playground/` holds the Rust crate binding `krabka-kraft-core` to WebAssembly via `wasm-bindgen`, compiled during the site build via `playground/build.sh`.
 
-### 4. Correctness & Verification (`/verification`)
+### 4. Verification Playground (`/docs/verification-playground`)
+- The same `playground/` crate also binds `krabka-verified`, the broker's Creusot-proved decision kernels, through one `run_kernel(name, json)` dispatcher. The page evaluates a curated set of kernels in the browser with each function's `requires` and `ensures` contract beside the result; inputs outside a precondition are reported, not evaluated.
+- A static Stateright model gallery, generated from `src/data/stateright-models.json`, lists every model entry point with what it drives, its bounds, its properties, and its pinned unique-state counts. The models themselves cannot run in a browser (they are test modules of I/O-bearing crates), so the gallery is an inventory, not a checker.
+
+### 5. Correctness & Verification (`/verification`)
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka.
 - **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`.
 - The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
 
-### 5. Aggregated Helm Chart Repository
+### 6. Aggregated Helm Chart Repository
 
 Users add one repository URL:
 
