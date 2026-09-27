@@ -68,7 +68,7 @@ cp "${src}/worker/proof_worker.ml" "${src}/worker/dune" "${why3}/src/proof_worke
 
 echo "==> Alt-Ergo ${ALT_ERGO_VERSION}"
 fetch "${ALT_ERGO_URL}" "${ALT_ERGO_SHA256}" alt-ergo.tbz
-tar -xjf alt-ergo.tbz
+bzip2 -dc alt-ergo.tbz | tar -xf -
 alt_ergo="${work}/alt-ergo-${ALT_ERGO_VERSION}"
 cp "${src}/alt-ergo/ae_worker.ml" "${src}/alt-ergo/ae_worker_stubs.js" "${alt_ergo}/src/bin/js/"
 cat "${src}/alt-ergo/dune.stanza" >> "${alt_ergo}/src/bin/js/dune"
