@@ -1318,7 +1318,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_and_combinator_rules_are_pinned() {
+    fn bound_rules_are_pinned() {
         for (name, reader, writer, expected) in [
             (
                 "enum extended",
@@ -1387,6 +1387,14 @@ mod tests {
                 r#"{"type":"array"}"#,
                 false,
             ),
+        ] {
+            assert!(compatible(reader, writer) == expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn object_and_combinator_rules_are_pinned() {
+        for (name, reader, writer, expected) in [
             (
                 "additionalProperties closed",
                 r#"{"type":"object","additionalProperties":false}"#,
