@@ -43,7 +43,8 @@
     Consolas, monospace;
 
   margin: 1rem 0;
-  padding: 0.75rem;
+  padding: 1rem;
+  container-type: inline-size;
   border: 1px solid var(--px-border);
   border-radius: 12px;
   background: var(--px-bg);
@@ -99,12 +100,20 @@
 
 #krabka-proofs .px-layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 0.9rem;
+  grid-template-columns: minmax(16rem, 0.3fr) minmax(0, 1fr);
+  gap: 1.5rem;
   align-items: start;
 }
 
-@media (max-width: 860px) {
+#krabka-proofs .px-layout:has(> .px-sidebar:not([open])) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#krabka-proofs .px-sidebar:not([open]) {
+  position: static;
+}
+
+@container (max-width: 48rem) {
   #krabka-proofs .px-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -114,17 +123,45 @@
 
 #krabka-proofs .px-sidebar {
   position: sticky;
-  top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-height: calc(100vh - 2rem);
+  top: 6rem;
   min-width: 0;
 }
 
-@media (max-width: 860px) {
+#krabka-proofs .px-sidebar-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: calc(100dvh - 10rem);
+  margin-top: 0.75rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-sidebar-toggle,
+#krabka-proofs .px-ob-source > summary {
+  cursor: pointer;
+  color: var(--px-text-soft);
+  font-size: 0.8rem;
+  padding: 0.35rem 0;
+}
+
+#krabka-proofs .px-sidebar-toggle::before,
+#krabka-proofs .px-group-title::before,
+#krabka-proofs .px-ob-source > summary::before {
+  content: '+';
+  margin-right: 0.5rem;
+}
+
+#krabka-proofs details[open] > .px-sidebar-toggle::before,
+#krabka-proofs details[open] > .px-group-title::before,
+#krabka-proofs .px-ob-source[open] > summary::before {
+  content: '−';
+}
+
+@container (max-width: 48rem) {
   #krabka-proofs .px-sidebar {
     position: static;
+  }
+  #krabka-proofs .px-sidebar-controls {
     max-height: none;
   }
 }
@@ -254,7 +291,7 @@
   min-height: 0;
 }
 
-@media (max-width: 860px) {
+@container (max-width: 48rem) {
   #krabka-proofs .px-list {
     max-height: 280px;
     border: 1px solid var(--px-border);
@@ -280,6 +317,11 @@
   letter-spacing: 0.06em;
   color: var(--px-muted);
   overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+#krabka-proofs .px-group-title > span:first-of-type {
+  flex: 1;
 }
 
 #krabka-proofs .px-group-title .px-group-n {
@@ -296,8 +338,9 @@
   column-gap: 0.5rem;
   width: 100%;
   min-width: 0;
-  padding: 0.28rem 0.5rem;
-  margin: 0 0 0.1rem;
+  padding: 0.15rem 0.4rem;
+  min-height: 1.5rem;
+  margin: 0;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -323,21 +366,16 @@
   min-width: 0;
   font-family: var(--px-mono);
   font-size: 0.76rem;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-
-#krabka-proofs .px-item-impl {
-  display: block;
-  font-size: 0.64rem;
-  color: var(--px-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #krabka-proofs .px-item-meta {
   font-family: var(--px-mono);
   font-size: 0.66rem;
   color: var(--px-muted);
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -355,7 +393,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 #krabka-proofs .px-detail > * {
@@ -487,7 +525,7 @@
   background: var(--px-panel);
   border: 1px solid var(--px-border);
   border-radius: 10px;
-  padding: 0.6rem;
+  padding: 1rem;
   min-width: 0;
 }
 
@@ -654,6 +692,8 @@
 }
 
 #krabka-proofs .px-prover {
+  position: relative;
+  cursor: help;
   flex: none;
   display: inline-block;
   padding: 0.02rem 0.45rem;
@@ -786,8 +826,8 @@
 #krabka-proofs .px-ob {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.1rem;
-  padding: 0.35rem 0.25rem;
+  gap: 0.35rem;
+  padding: 0.75rem 0.25rem;
   border-top: 1px solid var(--px-border);
   min-width: 0;
 }
@@ -836,14 +876,88 @@
 }
 
 #krabka-proofs .px-ob-formula {
-  margin: 0;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 18rem;
+  overflow: auto;
+  border: 1px solid var(--px-border);
+  border-radius: 6px;
   font-family: var(--px-mono);
-  font-size: 0.72rem;
-  line-height: 1.45;
+  font-size: 0.78rem;
+  line-height: 1.6;
   color: var(--px-text-soft);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: normal;
+}
+
+#krabka-proofs .px-prover-help {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  bottom: 100%;
+  left: 0;
+  width: min(18rem, 55vw);
+  padding: 0.65rem;
+  border: 1px solid var(--px-border-strong);
+  border-radius: 7px;
+  background: var(--px-panel-raised);
+  color: var(--px-text);
+  font: normal 0.8rem/1.5 'Inter', sans-serif;
+  white-space: normal;
+}
+
+#krabka-proofs .px-prover:hover .px-prover-help,
+#krabka-proofs .px-prover:focus .px-prover-help {
+  display: block;
+}
+
+#krabka-proofs .px-ob-summary {
+  margin: 0;
+  color: var(--px-text-soft);
+  font-size: 0.86rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-ob-source {
+  min-width: 0;
+}
+
+#krabka-proofs .px-formula-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--px-muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+  cursor: pointer;
+}
+
+#krabka-proofs .px-token-operator { color: var(--px-blue); font-weight: 700; }
+#krabka-proofs .px-token-literal { color: var(--px-amber); }
+#krabka-proofs .px-token-annotation { color: var(--px-muted); }
+
+#krabka-proofs .px-type-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.75rem;
+}
+
+#krabka-proofs .px-type-integer { color: var(--px-amber); }
+#krabka-proofs .px-type-boolean { color: var(--px-purple); }
+#krabka-proofs .px-type-unsigned { color: var(--px-ok); }
+#krabka-proofs .px-token-some,
+#krabka-proofs .px-token-none { border: 1px solid currentColor; border-radius: 4px; padding: 0 3px; margin-inline: 2px; }
+#krabka-proofs .px-token-some { color: var(--px-ok); background: color-mix(in srgb, var(--px-ok) 12%, transparent); }
+#krabka-proofs .px-token-none { color: var(--px-muted); border-style: dashed; }
+
+#krabka-proofs .px-formula-line {
+  display: block;
 }
 
 /* ---- Coma ------------------------------------------------------------------ */

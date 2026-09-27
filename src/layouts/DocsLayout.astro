@@ -6,6 +6,7 @@ interface Props {
   title?: string;
   description?: string;
   currentSlug?: string;
+  wide?: boolean;
   headings?: { depth: number; slug: string; text: string }[];
   // A markdown page under src/pages sets `layout` to this file and passes the
   // three props in its frontmatter instead.
@@ -172,11 +173,11 @@ const breadcrumbData = {
 >
   <script type="application/ld+json" set:html={JSON.stringify(breadcrumbData)} slot="head" />
 
-  <div class="mx-auto max-w-[90rem] px-4 sm:px-6 lg:px-8 py-10 font-sans">
-    <div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
+  <div class:list={['mx-auto px-4 sm:px-6 lg:px-8 py-10 font-sans', Astro.props.wide ? 'max-w-[112rem]' : 'max-w-[90rem]']}>
+    <div class:list={['grid grid-cols-1 gap-8', Astro.props.wide ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : 'lg:grid-cols-12']}>
       
       <!-- Sticky Left Sidebar -->
-      <aside class="lg:col-span-3">
+      <aside class:list={[!Astro.props.wide && 'lg:col-span-3']}>
         <div class="sticky top-24 space-y-4 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3">
           <div class="pb-2 border-b border-white/10 flex items-center justify-between">
             <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">
@@ -282,7 +283,7 @@ const breadcrumbData = {
       </aside>
 
       <!-- Main Docs Content (Takes full remaining 9 columns) -->
-      <main class="lg:col-span-9 space-y-4">
+      <main class:list={['min-w-0 space-y-4', !Astro.props.wide && 'lg:col-span-9']}>
         <!-- Breadcrumbs UI -->
         <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-gray-400 pb-2">
           <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
@@ -294,7 +295,7 @@ const breadcrumbData = {
           <span class="text-gray-200 font-medium">{title}</span>
         </nav>
 
-        <div class="frosted-card rounded-2xl p-8 lg:p-10 border border-white/10 space-y-6">
+        <div class:list={['frosted-card rounded-2xl border border-white/10 space-y-6', Astro.props.wide ? 'p-4 sm:p-6' : 'p-8 lg:p-10']}>
           <!-- Active Development Notice -->
           <div class="rounded-lg border border-krab-500/20 bg-krab-500/5 px-4 py-3 text-xs text-gray-400 flex items-start gap-3">
             <svg class="h-4 w-4 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
