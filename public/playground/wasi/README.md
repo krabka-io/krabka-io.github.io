@@ -81,6 +81,10 @@ Compiles the module and caches it by URL. Takes the volume's lock and loads
 the volume's image from IndexedDB. Then it starts the worker. The promise
 resolves once the module is instantiated and `_start` is about to run.
 
+`compileModule(module)` is the compile step on its own. When the module URL
+cannot be fetched, it rejects with an error whose `status` is the HTTP
+status, so a missing module (404) can be told apart from a broken one.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `module` | (required) | A URL, `ArrayBuffer`, `Uint8Array` or `WebAssembly.Module` of a WASI command (it must export `_start`). |
@@ -138,6 +142,21 @@ The file methods:
   guest's memory while it runs. Otherwise it reads what the volume stores.
 - `listFiles(path) -> Promise<[{ name, type, size }] | null>` lists a
   directory live.
+
+Waiting for the guest:
+
+- `quiesce() -> Promise<{ hostMs, deadlineMs } | null>` resolves once the
+  guest has taken in every record the host sent it before the call (and any
+  sent while it waits), its output has reached the host, and it is blocked
+  in `poll_oneoff` or a blocking call with nothing ready. Bytes that wait
+  behind a full window do not hold it up: the guest has a window of unread
+  bytes on that connection, and not reading them is its own backpressure. `hostMs` is the
+  clock's host time then; `deadlineMs` is the host time of the earliest
+  clock the guest waits on, or null when it waits on none. It resolves null
+  when the process stops first, and never while the guest keeps running, so
+  race it with a timeout. With a host-driven clock this is how a host keeps a
+  guest in lockstep: advance the clock or hand over input, wait for
+  `quiesce()`, and the guest's answers carry the instant the input arrived.
 
 The observability methods:
 

@@ -11,10 +11,10 @@
 //    worker path), plus a cross-origin server for a CORP-less image.
 // 3. Drives headless Chromium through Playwright: echo on two listeners, an
 //    8 MiB transfer under backpressure, accepted, refused, piped and blocking
-//    dials, the host-driven clock, the guest's file-system suite, persistence
-//    across a page reload and a restart(), export and import, kill(), exits,
-//    traps and unknown imports; then the service-worker path and a browser
-//    without service workers. Prints timings.
+//    dials, the host-driven clock, `quiesce()`, the guest's file-system suite,
+//    persistence across a page reload and a restart(), export and import,
+//    kill(), exits, traps and unknown imports; then the service-worker path
+//    and a browser without service workers. Prints timings.
 //
 // Usage: node scripts/check-wasi.mjs [--headed] [--only=headers,sw,none]
 // Needs cargo with the wasm32-wasip1 target. Installs playwright-core (and
@@ -890,6 +890,44 @@ async function hostClock() {
   };
 }
 
+/**
+ * `quiesce()` on a guest with a host-driven clock, the way the lab drives
+ * one: at rest the guest waits on a timer no later than its first 100 ms
+ * heartbeat; `quiesce()` answers only after the guest echoed what it was
+ * sent; moving the clock from one reported deadline to the next up to 1 s
+ * stops at every heartbeat (tokio's timer wheel also wakes at slot
+ * boundaries in between) and fires all ten; bytes the guest leaves unread
+ * behind a full window (on a listener it never accepts on) do not hold it up;
+ * a killed process answers null.
+ */
+async function quiesceBarrier() {
+  const { T, wasi } = window;
+  const clock = new wasi.WasiClock({ mode: "host", timeMs: 0 });
+  const proc = await wasi.spawn({ module: "/wasi-test/guest.wasm", name: "guest-quiesce", listeners: [9092, 9093, 7070, 9999], clock });
+  const first = await proc.quiesce();
+  const conn = proc.connect(9093);
+  const reader = new T.Reader(conn);
+  conn.send(T.enc.encode("barrier\n"));
+  await proc.quiesce();
+  const echoed = T.dec.decode(reader.flat());
+  const stops = [];
+  while (clock.now() < 1000 && stops.length < 200) {
+    const next = await proc.quiesce();
+    const to = Math.min(1000, next.deadlineMs ?? 1000);
+    stops.push(to);
+    clock.set(to);
+  }
+  const ticks = Number((await new T.Control(proc).cmd("TICKS")).line.split(" ")[1]);
+  const unread = proc.connect(9999);
+  unread.send(new Uint8Array(512 * 1024));
+  const backpressured = await Promise.race([proc.quiesce(), T.sleep(3000).then(() => "no answer in 3 s")]);
+  unread.close();
+  conn.close();
+  await proc.kill();
+  const afterKill = await proc.quiesce();
+  return { first, echoed, stops, ticks, backpressured, unreadBuffered: unread.bufferedAmount, afterKill };
+}
+
 async function killAndTraps() {
   const { T, wasi } = window;
   const spawnGuest = (name) => wasi.spawn({ module: "/wasi-test/guest.wasm", name, listeners: [9092, 9093, 7070] });
@@ -1119,6 +1157,17 @@ async function scenarioHeaders(browser, site) {
     check("host clock: REALTIME = base + host time", clockResult.realtimeMs === clockResult.expectedRealtimeMs, `${clockResult.realtimeMs}`);
     check("a dial piped to another guest process", clockResult.crossProcess === "DIALED across-processes", clockResult.crossProcess);
     check("switching the clock to real time resumes the ticks", clockResult.realModeTicks >= 3 && clockResult.realModeTicks <= 7, String(clockResult.realModeTicks));
+  }
+
+  const barrier = await step(page, "quiesce", quiesceBarrier);
+  if (barrier) {
+    const beats = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
+    const rising = barrier.stops.every((t, i) => i === 0 || t > barrier.stops[i - 1]);
+    check("quiesce(): a guest at rest reports a timer no later than its first heartbeat", barrier.first && barrier.first.hostMs === 0 && barrier.first.deadlineMs > 0 && barrier.first.deadlineMs <= 100, JSON.stringify(barrier.first));
+    check("quiesce() answers only after the guest answered its input", barrier.echoed === "BARRIER\n", JSON.stringify(barrier.echoed));
+    check("stepping the clock from deadline to deadline fires every heartbeat on time", barrier.ticks === 10 && rising && beats.every((t) => barrier.stops.includes(t)), `${barrier.ticks} ticks, stops ${barrier.stops.join(" ")}`);
+    check("quiesce() does not wait for bytes the guest leaves unread behind a full window", typeof barrier.backpressured === "object" && barrier.backpressured.deadlineMs > 1000, JSON.stringify(barrier.backpressured));
+    check("quiesce() on a killed process resolves null", barrier.afterKill === null);
   }
 
   const stats = await step(page, "stats", finalStats);

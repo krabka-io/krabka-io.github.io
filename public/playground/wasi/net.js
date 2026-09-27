@@ -575,6 +575,17 @@ export class VirtualNet {
     sock.outBytes = 0;
   }
 
+  /**
+   * Whether a socket waits for the host to acknowledge its output: its last
+   * write met a full window. An acknowledgement wakes only such a guest.
+   */
+  writeBlocked() {
+    for (const sock of this.sockets.values()) {
+      if (sock.state === "open" && sock.writeArmed && sock.txRoom <= 0 && !sock.writeShut && !sock.peerClosed) return true;
+    }
+    return false;
+  }
+
   /** Moves all pending output and consumption reports into the outbox. */
   flushAll() {
     for (const sock of this.dirtyOut) this.flushSocket(sock);

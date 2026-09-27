@@ -34,6 +34,7 @@ const WORKER_URL = new URL("./worker.js", import.meta.url).href;
 const encoder = new TextEncoder();
 const EMPTY = new Uint8Array(0);
 const LOG_TAIL = 200;
+const IDLE_REQUEST = encoder.encode(JSON.stringify({ op: "idle" }));
 
 function u32(value) {
   const out = new Uint8Array(4);
@@ -230,7 +231,11 @@ export function pipe(a, b) {
 
 const moduleCache = new Map();
 
-/** Compiles (and caches, by URL) a module given as a URL, bytes or a WebAssembly.Module. */
+/**
+ * Compiles (and caches, by URL) a module given as a URL, bytes or a
+ * WebAssembly.Module. A failed fetch rejects with an error whose `status` is
+ * the HTTP status, so a caller can tell a missing module (404) apart.
+ */
 export async function compileModule(source) {
   if (source instanceof WebAssembly.Module) return source;
   if (typeof source === "string" || source instanceof URL) {
@@ -238,7 +243,11 @@ export async function compileModule(source) {
     if (!moduleCache.has(url)) {
       const compiling = (async () => {
         const response = await fetch(url);
-        if (!response.ok) throw new Error(`cannot fetch ${url}: HTTP ${response.status}`);
+        if (!response.ok) {
+          const err = new Error(`cannot fetch ${url}: HTTP ${response.status}`);
+          err.status = response.status;
+          throw err;
+        }
         try {
           return await WebAssembly.compileStreaming(response.clone());
         } catch {
@@ -307,6 +316,9 @@ export class WasiProcess extends Emitter {
     this.acks = new Map(); // id -> guest bytes consumed, not yet acknowledged
     this.inboxDirty = new Set(); // connections with undelivered data or events
     this.requests = new Map();
+    this.ringSeq = 0; // records written into the ring so far
+    this.inputSeq = 0; // of those, the ones that can wake the guest (not acknowledgements or requests)
+    this.barriers = []; // idle requests, written after every record queued before them
     this.nextConnId = 1;
     this.nextRequest = 1;
     this.pumpQueued = false;
@@ -448,6 +460,7 @@ export class WasiProcess extends Emitter {
     this.conns.clear();
     this.active.clear();
     this.ctrl = [];
+    this.barriers = [];
     this.acks.clear();
     for (const conn of conns) this.#remoteClose(conn, { reason: info.reason === "exit" || info.reason === "return" ? "exit" : info.reason, reset: true });
     this.state = state;
@@ -490,7 +503,10 @@ export class WasiProcess extends Emitter {
       case "reply": {
         const request = this.requests.get(message.id);
         this.requests.delete(message.id);
-        if (request) (message.ok ? request.resolve : request.reject)(message.ok ? message.value : new Error(message.value));
+        if (!request) break;
+        if (!message.ok) request.reject(new Error(message.value));
+        else if (request.op === "idle") request.resolve({ value: message.value, fresh: this.#covers(request, message.value) });
+        else request.resolve(message.value);
         break;
       }
       case "exit":
@@ -730,7 +746,11 @@ export class WasiProcess extends Emitter {
     this.#schedulePump();
   }
 
-  /** Moves queued records into the ring: control first, then one record per connection per round. */
+  /**
+   * Moves queued records into the ring: control first, then one record per
+   * connection per round, then the idle requests once no connection holds
+   * records back.
+   */
   #pump() {
     this.pumpQueued = false;
     const writer = this.writer;
@@ -746,6 +766,7 @@ export class WasiProcess extends Emitter {
         break;
       }
       this.ctrl.shift();
+      this.ringSeq++;
       wrote = true;
     }
     const window = this.options.window;
@@ -772,6 +793,8 @@ export class WasiProcess extends Emitter {
           }
           const n = Math.min(item.bytes.length - item.offset, chunk, room, space);
           writer.tryWrite(REC.DATA, conn.id, item.bytes.subarray(item.offset, item.offset + n));
+          this.ringSeq++;
+          this.inputSeq++;
           item.offset += n;
           conn.inflight += n;
           conn.buffered -= n;
@@ -782,6 +805,8 @@ export class WasiProcess extends Emitter {
             full = true;
             break;
           }
+          this.ringSeq++;
+          this.inputSeq++;
           conn.queueHead++;
         }
         wrote = true;
@@ -801,6 +826,25 @@ export class WasiProcess extends Emitter {
         }
       }
       if (!progress) break;
+    }
+    // An idle request covers what was written before it, so it waits until
+    // the connections' records are in.
+    while (!full && this.barriers.length > 0 && !this.#inputPending()) {
+      const id = this.barriers[0];
+      const request = this.requests.get(id);
+      if (!request) {
+        this.barriers.shift();
+        continue;
+      }
+      if (!writer.tryWrite(REC.REQUEST, id, IDLE_REQUEST)) {
+        full = true;
+        break;
+      }
+      this.barriers.shift();
+      this.ringSeq++;
+      request.seq = this.ringSeq;
+      request.inputSeq = this.inputSeq;
+      wrote = true;
     }
     if (wrote) writer.notify();
   }
@@ -863,10 +907,64 @@ export class WasiProcess extends Emitter {
     if (this.state !== "running") return Promise.reject(new Error(`${this.name} is ${this.state}`));
     const id = this.nextRequest++;
     return new Promise((resolve, reject) => {
-      this.requests.set(id, { resolve, reject });
-      this.ctrl.push([REC.REQUEST, id, encoder.encode(JSON.stringify({ op, ...args }))]);
+      this.requests.set(id, { resolve, reject, op, seq: -1, inputSeq: -1 });
+      if (op === "idle") this.barriers.push(id);
+      else this.ctrl.push([REC.REQUEST, id, encoder.encode(JSON.stringify({ op, ...args }))]);
       this.#schedulePump();
     });
+  }
+
+  /**
+   * Whether a connection holds records for the guest that it could take now.
+   * Bytes held back by a full window are not: the guest has a window of
+   * unread bytes on that connection, and whether it reads them is its call.
+   */
+  #inputPending() {
+    const window = this.options.window;
+    const pending = (conn) => {
+      const item = conn.queue[conn.queueHead];
+      return item !== undefined && !(item.kind === REC.DATA && conn.inflight >= window);
+    };
+    for (const conn of this.active) if (pending(conn)) return true;
+    for (const conn of this.conns.values()) if (pending(conn)) return true;
+    return false;
+  }
+
+  /**
+   * Whether an idle answer still holds: no input reached the ring after the
+   * request or waits to, and no acknowledgement did either while the guest
+   * waited for one (anything else in the ring cannot wake it).
+   */
+  #covers(request, answer) {
+    if (request.inputSeq !== this.inputSeq || this.#inputPending()) return false;
+    if (!answer.writeBlocked) return true;
+    return request.seq === this.ringSeq && this.acks.size === 0 && !this.ctrl.some(([kind]) => kind === REC.ACK);
+  }
+
+  /**
+   * Resolves once the guest has taken in everything the host sent it (up to
+   * a full window per connection, which it may leave unread), its output has
+   * reached the host, and it is blocked waiting for input or a timer:
+   * `{ hostMs, deadlineMs }`, the clock's host time then and the host
+   * time of the guest's next timer (null when it waits on none). Resolves
+   * null when the process stops first. A host that drives the clock waits for
+   * this before it lets time move on, so the guest answers at the instant its
+   * input arrived. A guest that never blocks never resolves it: race it with
+   * a timeout.
+   */
+  async quiesce() {
+    for (;;) {
+      if (this.state !== "running") return null;
+      let answer;
+      try {
+        answer = await this.#request("idle");
+      } catch {
+        return null;
+      }
+      // Anything written after the request (more input, acknowledgements
+      // that let the guest write on) is not covered by the answer: ask again.
+      if (answer.fresh) return answer.value;
+    }
   }
 
   /**

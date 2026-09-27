@@ -37,7 +37,7 @@ import {
   SUBSCRIPTION_SIZE,
   WHENCE,
 } from "./abi.js";
-import { ClockView } from "./clock.js";
+import { ClockView, nsToMs } from "./clock.js";
 import { MemFs } from "./fs.js";
 import { Dialer, LogFd, StdinFd, VirtualNet } from "./net.js";
 import { MONOTONIC_OFFSET_NS, OUT, REC } from "./protocol.js";
@@ -231,6 +231,13 @@ function seededBytes(seed) {
   };
 }
 
+/** The earliest deadline among `poll_oneoff` clock subscriptions (host ns), or null. */
+function earliestDeadline(subs) {
+  let earliest = null;
+  for (const sub of subs) if (sub.deadline !== undefined && (earliest === null || sub.deadline < earliest)) earliest = sub.deadline;
+  return earliest;
+}
+
 function encodeStrings(strings) {
   const encoded = strings.map((s) => encoder.encode(`${s}\0`));
   return { encoded, bytes: encoded.reduce((sum, e) => sum + e.length, 0) };
@@ -255,6 +262,7 @@ export class Wasi {
     this.lastResume = this.started;
     this.lastOutFlush = this.started;
     this.requests = [];
+    this.idleWaiters = []; // ids of `idle` requests, answered when the guest next blocks
     this.serving = false;
     this.memory = null;
     this.buffer = null;
@@ -464,6 +472,10 @@ export class Wasi {
     try {
       while (this.requests.length > 0) {
         const [id, request] = this.requests.shift();
+        if (request.op === "idle") {
+          this.idleWaiters.push(id);
+          continue;
+        }
         let ok = true;
         let value = null;
         let transfer = [];
@@ -509,6 +521,24 @@ export class Wasi {
     if (path === mount || path === `${mount}/`) return this.fs.root;
     if (path.startsWith(`${mount}/`)) return this.fs.lookup(path.slice(mount.length + 1));
     return path.startsWith("/") ? null : this.fs.lookup(path);
+  }
+
+  /**
+   * Answers every waiting `idle` request. The guest drained every record the
+   * host wrote before them, found nothing ready and is about to block, and
+   * its output is posted: call this right after `flushOutput()`. The answer
+   * carries the host time, the deadline of the earliest clock the guest waits
+   * on (host ms, or null when it waits on none), and whether a socket waits
+   * for the host to acknowledge its output.
+   */
+  #replyIdle(deadlineNs) {
+    if (this.idleWaiters.length === 0) return;
+    const value = {
+      hostMs: nsToMs(this.clock.hostNs()),
+      deadlineMs: deadlineNs === null ? null : nsToMs(deadlineNs),
+      writeBlocked: this.net.writeBlocked(),
+    };
+    for (const id of this.idleWaiters.splice(0)) this.post({ t: "reply", id, ok: true, value });
   }
 
   /** Posts every pending item: socket output, consumption reports, events and log lines. */
@@ -574,6 +604,7 @@ export class Wasi {
     const seen = this.ring.epoch();
     if (this.drain() > 0) return;
     this.flushOutput();
+    this.#replyIdle(null);
     this.#maybeFlushJournal();
     this.#sleep(seen, this.#journalWaitMs());
     this.drain();
@@ -1248,6 +1279,9 @@ export class Wasi {
         return E.SUCCESS;
       }
       this.flushOutput();
+      // Before the journal: its backpressure wait can drain records the host
+      // wrote after the idle request, which that request does not cover.
+      if (this.idleWaiters.length > 0) this.#replyIdle(earliestDeadline(subs));
       this.#maybeFlushJournal();
       let waitMs = this.#journalWaitMs();
       if (hasClock) for (const sub of subs) if (sub.deadline !== undefined) waitMs = Math.min(waitMs, this.clock.msUntil(sub.deadline));
