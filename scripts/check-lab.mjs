@@ -491,7 +491,7 @@ async function checkThreeBrokers(page, preset) {
 
 // The cluster survives a page reload through IndexedDB, and the consumers
 // resume from their committed offsets. The producer is set to rate 0 in its
-// config first, so after the reload nothing new arrives unless asked for:
+// config first, so after the reload nothing new arrives until it is set back:
 // a consumer that started over would read the old records again.
 async function checkReload(page) {
   await inspect(page, 4, 'orders-producer');
@@ -532,11 +532,14 @@ async function checkReload(page) {
   const idle = [(await nodeStateOf(page, 5)).processed, (await nodeStateOf(page, 6)).processed];
   const sorted = (o) => JSON.stringify(Object.entries(o).sort());
   check('after the reload the group fetches its committed offsets and reads nothing again', sorted(rejoined.rows) === sorted(committed) && idle[0] === 0 && idle[1] === 0, JSON.stringify({ committed, rejoined: rejoined.rows, processed: idle }));
+  // New records: the producer back at its rate (Apply restarts it).
   await inspect(page, 4, 'orders-producer');
-  await command(page, 'send', { count: 9 });
-  const fresh = await until(page, 'the nine new records', `(n) => {
+  await page.locator('#krabka-lab .lab-tab#lab-tab-config').click();
+  await page.getByLabel('Records per second').fill('5');
+  await page.locator('#krabka-lab .lab-tabpanel[data-tab="config"] button', { hasText: 'Apply' }).click();
+  const fresh = await until(page, 'new records to arrive', `(n) => {
     const c = [5, 6].map((i) => n[i].state);
-    return c[0].processed + c[1].processed === 9 && c.flatMap((s) => s.last_records.map((r) => ({ p: r.topic + '-' + r.partition, offset: r.offset })));
+    return c[0].processed + c[1].processed >= 5 && c.flatMap((s) => s.last_records.map((r) => ({ p: r.topic + '-' + r.partition, offset: r.offset })));
   }`, 60_000);
   check('and consumes the new records from where it left off', fresh.every((r) => r.offset >= committed[r.p]), JSON.stringify(fresh));
 }
