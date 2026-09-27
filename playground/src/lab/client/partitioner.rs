@@ -16,8 +16,9 @@ pub fn murmur2(data: &[u8]) -> i32 {
     const M: u32 = 0x5bd1_e995;
     const R: u32 = 24;
 
-    // The reference implementation mixes the length as a 32-bit value.
-    let length = u32::try_from(data.len() & 0xffff_ffff).unwrap_or(u32::MAX);
+    // Kafka mixes the length in as a 32-bit value; a Java array's length is
+    // an `int`, so no real input exceeds `u32`.
+    let length = u32::try_from(data.len()).unwrap_or(u32::MAX);
     let mut h: u32 = SEED ^ length;
     let (chunks, remainder) = data.as_chunks::<4>();
     for chunk in chunks {
