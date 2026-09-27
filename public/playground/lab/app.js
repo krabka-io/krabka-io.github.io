@@ -640,7 +640,10 @@ class LabApp {
     // A real broker may need the one isolation reload first; say so up front.
     const reloads = kind === REAL_BROKER_KIND && !globalThis.crossOriginIsolated && this.session.role !== "spoke" && (await this.external.moduleAvailable());
     const scenario = this.world.scenario();
-    const nextId = scenario.nodes.reduce((m, n) => Math.max(m, n.id), 0) + 1;
+    // The id the node gets, given explicitly: a broker's id must equal it,
+    // and the world's own nodes (the hidden admin) take ids too.
+    const taken = [...scenario.nodes, ...(this.world.snapshot()?.nodes || [])];
+    const nextId = taken.reduce((m, n) => Math.max(m, n.id), 0) + 1;
     const nameInput = el("input", "lab-input");
     nameInput.type = "text";
     nameInput.value = defaultName(kind, nextId);
@@ -669,7 +672,7 @@ class LabApp {
         if (r.errors.length) return false;
         const existing = scenario.nodes.map((n) => ({ x: n.x, y: n.y }));
         const pos = freePosition(existing);
-        const spec = { id: 0, kind, name: nameInput.value.trim() || defaultName(kind, nextId), x: pos.x, y: pos.y, config: r.value };
+        const spec = { id: nextId, kind, name: nameInput.value.trim() || defaultName(kind, nextId), x: pos.x, y: pos.y, config: r.value };
         const id = this.world.addNode(spec);
         if (id == null) {
           err.textContent = "The module rejected this node; see the message above.";
