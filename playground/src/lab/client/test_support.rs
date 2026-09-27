@@ -420,10 +420,9 @@ impl<C: Driven> Harness<C> {
                     let client = &mut self.client;
                     let (events, deadline) = self.bufs.with(now, |ctx| client.frame(ctx, frame));
                     self.events.extend(events);
-                    self.client_deadline = match (self.client_deadline, deadline) {
-                        (Some(a), Some(b)) => Some(a.min(b)),
-                        (a, b) => a.or(b),
-                    };
+                    // A node arms the deadline the client returns, and
+                    // arming replaces the one before.
+                    self.client_deadline = deadline;
                     self.after_client_call();
                 }
             }
