@@ -186,6 +186,8 @@ A real `krabka-broker`, compiled for `wasm32-wasip1`, runs in a Web Worker behin
 - A killed external node refuses new connections at once, like a local one, and the page kills or restarts its process when it applies the fault. The page reports the process's state with `applyRemoteSnapshot`; until it does, the snapshot is `{"external": true}`.
 - Addresses: a process sees the lab network as IPv4, node `n` at `10.0.(n >> 8).(n & 255)` (`net::node_ip`, `net::node_for_ip`): Kafka on 9092, the KRaft controller on 9093, a registry on 8081. A broker advertises its virtual address, and the lab client maps it back to the node.
 
+The page side (the bridge between the world and the processes, the lab clock the processes run on, faults, volumes and cross-origin isolation), the process contract, and what the broker's entry crate must do are in [`lab-real-broker.md`](lab-real-broker.md).
+
 ## Durable state (`lab::net::DurableOp`, `lab::net::DurableImage`)
 
 A node's durable state (a broker's partition logs and metadata, the controller's log, a registry's schemas) must survive a page reload, so the page keeps it in the browser's IndexedDB. The crate never touches storage itself: a node records every change through `Ctx::persist(DurableOp)`, the world collects the ops per node, and the page drains them with `drainDurable()` after every step and writes them to IndexedDB in order. When the page loads a scenario it read from storage, it folds the stored ops into one `DurableImage` per node (`DurableImage::apply` is the reference fold; the JavaScript store applies the same rules) and calls `loadScenarioWithState(scenario, hosted, images)`, which hands each image to `Node::load` before the node starts.
