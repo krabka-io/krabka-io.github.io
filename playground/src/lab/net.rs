@@ -47,6 +47,26 @@ pub const HTTP_PORT: u16 = 8081;
 /// The port a client sends from. A client never listens.
 pub const CLIENT_PORT: u16 = 0;
 
+/// The virtual IPv4 address of a node, as a process that runs outside the
+/// world (a real broker in a Worker) sees the lab network: node `n` is
+/// `10.0.(n >> 8).(n & 255)`, so node 3 is `10.0.0.3`.
+#[must_use]
+pub fn node_ip(node: NodeId) -> std::net::Ipv4Addr {
+    let [_, _, high, low] = node.0.to_be_bytes();
+    std::net::Ipv4Addr::new(10, 0, high, low)
+}
+
+/// The node a virtual address names: the inverse of [`node_ip`]. `None` for
+/// an address outside `10.0.0.0/16` and for `10.0.0.0`.
+#[must_use]
+pub fn node_for_ip(ip: std::net::Ipv4Addr) -> Option<NodeId> {
+    match ip.octets() {
+        [10, 0, 0, 0] => None,
+        [10, 0, high, low] => Some(NodeId(u32::from(high) << 8 | u32::from(low))),
+        _ => None,
+    }
+}
+
 /// A listener or a client socket on a node.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -534,6 +554,18 @@ pub trait Node {
     /// The node kind, as it appears in the scenario: `"broker"`,
     /// `"schema-registry"`, `"producer"`, `"consumer"`, `"streams"`, ...
     fn kind(&self) -> &'static str;
+
+    /// Whether this node runs outside the world, in a process the page hosts
+    /// (a real broker in a Worker). The world hands the frames such a node
+    /// receives to the page through [`World::drain_external`] and routes the
+    /// frames it sends through [`World::route_external`]; its trait methods
+    /// are never called with traffic.
+    ///
+    /// [`World::drain_external`]: crate::lab::world::World::drain_external
+    /// [`World::route_external`]: crate::lab::world::World::route_external
+    fn external(&self) -> bool {
+        false
+    }
 
     /// Restore durable state the host kept from an earlier run. The world
     /// calls this once, before the first [`Node::start`], and only when the

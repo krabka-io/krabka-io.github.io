@@ -53,6 +53,11 @@ krabka-voters = "0.4.0"
 # pure-Rust compression codecs: `lz4` and `zstd` bind C libraries.
 krabka-protocol = { version = "0.4.0", default-features = false, features = ["gzip", "snappy"] }
 krabka-metadata = "0.4.0"
+# The streams application node runs its tasks through `EmbeddedTask`, builds
+# its topology with the crate's `Topology`, and joins its group with the
+# byte-exact KIP-1071 wire topology the crate derives. `main` with the
+# embedder API.
+krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "a86d61bcaa92ae62f05b5f092dd94c1767c4e47d" }
 
 # ---- Schema engines. The schema registry node parses and checks schemas with
 # the same crates `krabka-schema-registry` uses.
@@ -73,6 +78,10 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
+# Already in the graph through `krabka-metadata`; the broker names the listener protocol of its registration with it.
+krabka-security = "0.4.0"
+# Already in the graph through `jsonschema` and `krabka-security`; the group coordinator matches KIP-848 and KIP-1071 topic patterns with it.
+regex = "1"
 
 [dev-dependencies]
 assert2 = "0.4"
@@ -101,3 +110,10 @@ krabka-protocol = { git = "https://github.com/krabka-io/krabka-protocol", rev = 
 krabka-security = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
 krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
 krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
+# `krabka-client-streams` links the Kafka network clients and the schema serdes
+# in a native build (the host tests), never on wasm. They come from their
+# repositories too, at revisions built against the protocol revision above.
+krabka-client-consumer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
+krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
+krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
+krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "ee9c3933fb1d71735846e7e5e33ea6ab3a694dc5" }

@@ -248,6 +248,29 @@ impl Lab {
         serde_json::to_string(&frames).map_err(js)
     }
 
+    /// Frames that reached external nodes this world hosts (real brokers the
+    /// page runs in Workers), due now: a JSON array of `{deliver_at, frame}`.
+    ///
+    /// # Errors
+    /// Returns an error when the frames cannot be serialized.
+    #[wasm_bindgen(js_name = drainExternal)]
+    pub fn drain_external(&mut self) -> Result<String, JsError> {
+        let frames: Vec<TimedFrame> = self.world.drain_external();
+        serde_json::to_string(&frames).map_err(js)
+    }
+
+    /// Route frames an external process sent, as its node, through the link
+    /// model: a JSON array of `Frame`.
+    ///
+    /// # Errors
+    /// Returns a parse error as a JavaScript error.
+    #[wasm_bindgen(js_name = routeExternal)]
+    pub fn route_external(&mut self, json: &str) -> Result<(), JsError> {
+        let frames: Vec<Frame> = serde_json::from_str(json).map_err(js)?;
+        self.world.route_external(frames);
+        Ok(())
+    }
+
     /// Deliver frames that arrived from another peer: a JSON array of `Frame`.
     ///
     /// # Errors

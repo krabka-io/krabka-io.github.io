@@ -93,8 +93,11 @@ struct Slot {
     timer: Option<Millis>,
     timer_gen: u64,
     rng: Rng,
-    /// The last snapshot a remote host sent for a node this world does not run.
+    /// The last snapshot a remote host sent for a node this world does not
+    /// run, or the page reported for an external node it runs.
     remote_snapshot: Option<serde_json::Value>,
+    /// The node runs outside the world, in a process the page hosts.
+    external: bool,
 }
 
 enum Item {
@@ -197,9 +200,15 @@ pub struct World {
     admin: Option<(NodeId, NodeId)>,
     egress: Vec<TimedFrame>,
     durable: Vec<(NodeId, DurableOp)>,
+    /// Frames due at external nodes this world hosts, for the page to hand
+    /// to their processes.
+    external_out: Vec<TimedFrame>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     topics: Vec<TopicSpec>,
+    /// The ids of the controller quorum's voters: fixed when the scenario
+    /// loads, as a static `KRaft` quorum is fixed when its cluster starts.
+    quorum_voters: Vec<u32>,
     rng: Rng,
 }
 
@@ -223,9 +232,11 @@ impl World {
             admin: None,
             egress: Vec::new(),
             durable: Vec::new(),
+            external_out: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
             topics: Vec::new(),
+            quorum_voters: Vec::new(),
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
         }
     }
@@ -286,6 +297,13 @@ impl World {
         for o in &scenario.link_overrides {
             world.apply_link_override(o);
         }
+        world.quorum_voters = scenario
+            .nodes
+            .iter()
+            .filter(|spec| wants_quorum_vote(spec))
+            .map(|spec| spec.id.0)
+            .collect();
+        world.quorum_voters.sort_unstable();
         for spec in &scenario.nodes {
             let image = images.remove(&spec.id).filter(|image| !image.is_empty());
             world.add_node_with_state(spec.clone(), image)?;
@@ -364,11 +382,14 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let mut node = build_node(&spec)?;
+        let quorum = self.quorum_role(&spec)?;
+        let mut node = build_node(&quorum.spec)?;
         if let Some(image) = image {
             node.load(image);
         }
         let id = spec.id;
+        self.join_quorum(id, &quorum);
+        let external = node.external();
         let rng = Rng::new(self.seed ^ (u64::from(id.0) << 32) ^ u64::from(id.0));
         self.nodes.insert(
             id,
@@ -381,6 +402,7 @@ impl World {
                 timer_gen: 0,
                 rng,
                 remote_snapshot: None,
+                external,
             },
         );
         self.record(Some(id), "node_added", serde_json::json!({}));
@@ -388,6 +410,69 @@ impl World {
             self.call(id, |node, ctx| node.start(ctx));
         }
         Ok(id)
+    }
+
+    /// The spec a node is built from, with its place in the controller quorum.
+    ///
+    /// A broker that names no `controller_quorum_voters` gets the scenario's
+    /// quorum and votes only when it is one of its voters. A broker added
+    /// after the scenario loaded therefore joins as an observer until the
+    /// scenario loads again, except the first voter of a world with no
+    /// quorum yet, which starts one. A voter of the loaded quorum stays one.
+    fn quorum_role(&self, spec: &NodeSpec) -> Result<QuorumRole, LabError> {
+        let mut built = spec.clone();
+        let names_voters = spec.config.get("controller_quorum_voters").is_some();
+        if spec.kind != "broker" || names_voters {
+            return Ok(QuorumRole {
+                spec: built,
+                starts_quorum: false,
+                observes: false,
+            });
+        }
+        let id = spec.id.0;
+        let wants = wants_quorum_vote(spec);
+        let in_quorum = self.quorum_voters.contains(&id);
+        if in_quorum && !wants {
+            return Err(LabError::config(
+                spec,
+                "the controller quorum is static: this broker stays a voter until the scenario loads again",
+            ));
+        }
+        let starts_quorum = wants && self.quorum_voters.is_empty();
+        let mut voters = self.quorum_voters.clone();
+        if starts_quorum {
+            voters.push(id);
+        }
+        let is_voter = in_quorum || starts_quorum;
+        if built.config.is_null() {
+            built.config = serde_json::json!({});
+        }
+        if let Some(config) = built.config.as_object_mut() {
+            config.insert(
+                "controller_quorum_voters".to_string(),
+                serde_json::json!(voters),
+            );
+            config.insert("voter".to_string(), serde_json::json!(is_voter));
+        }
+        Ok(QuorumRole {
+            spec: built,
+            starts_quorum,
+            observes: wants && !is_voter,
+        })
+    }
+
+    /// Record a built node's place in the controller quorum.
+    fn join_quorum(&mut self, id: NodeId, role: &QuorumRole) {
+        if role.starts_quorum {
+            self.quorum_voters.push(id.0);
+        }
+        if role.observes {
+            self.record(
+                Some(id),
+                "quorum_observer",
+                serde_json::json!({ "level": "info", "voters": self.quorum_voters }),
+            );
+        }
     }
 
     /// Remove a node. Its connections close and its queued frames are dropped.
@@ -415,7 +500,12 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let node = build_node(&spec)?;
+        if !self.nodes.contains_key(&id) {
+            return Err(LabError::NoSuchNode(id));
+        }
+        let quorum = self.quorum_role(&spec)?;
+        let node = build_node(&quorum.spec)?;
+        self.join_quorum(id, &quorum);
         let slot = self.nodes.get_mut(&id).ok_or(LabError::NoSuchNode(id))?;
         slot.spec = spec;
         slot.node = node;
@@ -553,11 +643,26 @@ impl World {
             return;
         };
         if !slot.alive {
+            // A killed process on a live host: its TCP stack refuses a new
+            // connection at once (a reset), so the client sees "connection
+            // refused" instead of waiting out a setup timeout. Anything else
+            // sent to it is lost.
+            if frame.payload == Payload::Open {
+                self.route(dst, Frame::close(frame.dst, frame.src, frame.conn));
+            }
             return;
         }
+        let external = slot.external;
         *self.delivered.entry((frame.src.node, dst)).or_insert(0) += 1;
         if matches!(frame.payload, Payload::Close) {
             self.forget_conn(frame.conn_key());
+        }
+        if external {
+            self.external_out.push(TimedFrame {
+                deliver_at: self.now,
+                frame,
+            });
+            return;
         }
         self.call(dst, |node, ctx| node.on_frame(ctx, frame));
     }
@@ -713,8 +818,10 @@ impl World {
             })
             .collect();
         self.queue = kept.into_iter().collect();
-        // Frames waiting for another host are on the same wire.
+        // Frames waiting for another host, or for an external process, are
+        // on the same wire.
         self.egress.retain(|t| !pred(&t.frame));
+        self.external_out.retain(|t| !pred(&t.frame));
     }
 
     /// Forget a connection and the delivery floors that kept its frames in
@@ -891,8 +998,12 @@ impl World {
     #[must_use]
     pub fn node_snapshot(&self, id: NodeId) -> Option<serde_json::Value> {
         let slot = self.nodes.get(&id)?;
-        Some(if self.is_hosted(id) {
+        Some(if self.is_hosted(id) && !slot.external {
             slot.node.snapshot()
+        } else if slot.external {
+            slot.remote_snapshot
+                .clone()
+                .unwrap_or_else(|| slot.node.snapshot())
         } else {
             slot.remote_snapshot
                 .clone()
@@ -997,6 +1108,10 @@ impl World {
         for (id, was) in before {
             let is = self.is_hosted(id);
             if was && !is {
+                // The node's connections reset when it moves: what is in
+                // flight on them is lost, as for a kill, so nothing stale
+                // reaches its new host on a connection it never opened.
+                self.purge_frames(|f| f.src.node == id || f.dst.node == id);
                 self.close_connections_of(id, false);
                 if let Some(slot) = self.nodes.get_mut(&id) {
                     slot.timer = None;
@@ -1031,8 +1146,34 @@ impl World {
         std::mem::take(&mut self.durable)
     }
 
+    /// Frames that reached external nodes this world hosts since the last
+    /// drain, in delivery order. Each is due now: the world held it for its
+    /// link latency, so the page hands it to the process at once.
+    pub fn drain_external(&mut self) -> Vec<TimedFrame> {
+        std::mem::take(&mut self.external_out)
+    }
+
+    /// Route frames an external process sent, as its node, through the link
+    /// model at the current time. Frames from a node that is not an external
+    /// node this world hosts, or that is down, are dropped.
+    pub fn route_external(&mut self, frames: Vec<Frame>) {
+        for frame in frames {
+            let src = frame.src.node;
+            let sends = self.is_hosted(src)
+                && self
+                    .nodes
+                    .get(&src)
+                    .is_some_and(|slot| slot.external && slot.alive);
+            if sends {
+                self.route(src, frame);
+            }
+        }
+    }
+
     /// Frames that arrived from another peer. They deliver at the current
-    /// time, in order; the sender's link model already applied.
+    /// time, in order; the sender's link model already applied. Data and
+    /// closes on a connection this world never saw open are dropped, as a
+    /// TCP stack drops segments for a connection it does not have.
     pub fn push_ingress(&mut self, frames: Vec<Frame>) {
         for frame in frames {
             let key = frame.conn_key();
@@ -1041,9 +1182,16 @@ impl World {
                     self.conns.insert(key, frame.dst);
                 }
                 Payload::Close => {
+                    if !self.conns.contains_key(&key) {
+                        continue;
+                    }
                     self.forget_conn(key);
                 }
-                Payload::Data(_) => {}
+                Payload::Data(_) => {
+                    if !self.conns.contains_key(&key) {
+                        continue;
+                    }
+                }
             }
             let now = self.now;
             self.schedule(now, Item::Deliver(frame));
@@ -1056,6 +1204,27 @@ impl World {
             slot.remote_snapshot = Some(snapshot);
         }
     }
+}
+
+/// Whether `spec` is a broker that asks to vote in the controller quorum:
+/// its `voter` key, true unless set to false.
+fn wants_quorum_vote(spec: &NodeSpec) -> bool {
+    spec.kind == "broker"
+        && spec
+            .config
+            .get("voter")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+}
+
+/// A node's spec as it is built, with its place in the controller quorum.
+struct QuorumRole {
+    /// The spec with the quorum filled in.
+    spec: NodeSpec,
+    /// The node is the first voter of a world with no quorum yet.
+    starts_quorum: bool,
+    /// The node asked to vote but joins an existing quorum as an observer.
+    observes: bool,
 }
 
 /// The unordered pair key of a link.
@@ -1108,6 +1277,107 @@ mod tests {
 
     use super::*;
     use crate::lab::testing::TestWorld;
+
+    /// A broker's config for the quorum tests: its id and nothing else.
+    fn broker(id: u32) -> NodeSpec {
+        NodeSpec::new(id, "broker", "", serde_json::json!({ "broker_id": id }))
+    }
+
+    /// Each broker's `(voters, voter)` as its snapshot reports them.
+    fn quorum_roles(world: &World, ids: &[u32]) -> Vec<(serde_json::Value, serde_json::Value)> {
+        ids.iter()
+            .map(|&id| {
+                let quorum = &world.node_snapshot(NodeId(id)).unwrap()["quorum"];
+                (quorum["voters"].clone(), quorum["voter"].clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_quorum_is_the_scenarios_brokers_and_a_later_broker_observes() {
+        let mut scenario = Scenario::empty(7);
+        scenario.nodes = vec![broker(1), broker(2), broker(3)];
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.add_node(broker(4)).unwrap();
+
+        let voters = serde_json::json!([1, 2, 3]);
+        assert!(
+            quorum_roles(&world, &[1, 2, 3, 4])
+                == vec![
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(false)),
+                ]
+        );
+        let observed: Vec<(Option<NodeId>, serde_json::Value)> = world
+            .events()
+            .filter(|e| e.kind == "quorum_observer")
+            .map(|e| (e.node, e.detail.clone()))
+            .collect();
+        assert!(
+            observed
+                == vec![(
+                    Some(NodeId(4)),
+                    serde_json::json!({ "level": "info", "voters": [1, 2, 3] })
+                )]
+        );
+        // The scenario keeps what its author wrote.
+        let written: Vec<serde_json::Value> = world
+            .scenario()
+            .nodes
+            .iter()
+            .map(|n| n.config.clone())
+            .collect();
+        assert!(written == (1..=4).map(|id| broker(id).config).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_first_broker_of_an_empty_world_starts_the_quorum() {
+        let mut world = World::from_scenario(&Scenario::empty(7)).unwrap();
+        world.add_node(broker(5)).unwrap();
+        world.add_node(broker(6)).unwrap();
+
+        let voters = serde_json::json!([5]);
+        assert!(
+            quorum_roles(&world, &[5, 6])
+                == vec![
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters, serde_json::json!(false)),
+                ]
+        );
+    }
+
+    #[test]
+    fn a_voter_of_the_loaded_quorum_stays_one() {
+        let mut scenario = Scenario::empty(7);
+        scenario.nodes = vec![broker(1), broker(2), broker(3)];
+        let mut world = World::from_scenario(&scenario).unwrap();
+
+        let observer = NodeSpec::new(
+            2,
+            "broker",
+            "",
+            serde_json::json!({ "broker_id": 2, "voter": false }),
+        );
+        let refused = world.update_node(NodeId(2), observer);
+        assert!(let Err(LabError::Config { .. }) = refused);
+        assert!(
+            quorum_roles(&world, &[2])
+                == vec![(serde_json::json!([1, 2, 3]), serde_json::json!(true))]
+        );
+        // A broker that names its own quorum keeps it.
+        let named = NodeSpec::new(
+            7,
+            "broker",
+            "",
+            serde_json::json!({ "broker_id": 7, "controller_quorum_voters": [7] }),
+        );
+        world.add_node(named).unwrap();
+        assert!(
+            quorum_roles(&world, &[7]) == vec![(serde_json::json!([7]), serde_json::json!(true))]
+        );
+    }
 
     /// Two echo nodes and one ticker; the ticker pings the echo every 100 ms.
     fn scenario() -> Scenario {
@@ -1207,6 +1477,159 @@ mod tests {
         w.run_for(100);
         assert!(w.snapshot(NodeId(3))["echoes"] == 0);
         assert!(w.snapshot(NodeId(3))["closes"] == 1);
+    }
+
+    #[test]
+    fn a_killed_node_refuses_new_connections_at_once() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(50);
+        // The kill resets the open connection: its close reaches the pinger
+        // at 60.
+        w.world_mut().fault(Fault::Kill { node: NodeId(1) });
+        w.run_for(15);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+        // At 100 the pinger opens a new connection; it reaches the dead node
+        // at 110 and the refusal travels back over the same 10 ms link.
+        w.run_for(50);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+        w.run_for(10);
+        assert!(w.snapshot(NodeId(3))["closes"] == 2);
+        assert!(w.snapshot(NodeId(3))["open"] == false);
+    }
+
+    #[test]
+    fn a_node_that_moves_away_takes_no_stale_frames_with_it() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        // The ping sent at 100 is on the wire to the echo until 110.
+        w.run_for(105);
+        let world = w.world_mut();
+        world.set_hosted(&[NodeId(2), NodeId(3)]);
+        world.step_until(150);
+        let egress = world.drain_egress();
+        assert!(egress.is_empty(), "{egress:?}");
+    }
+
+    #[test]
+    fn ingress_on_a_connection_never_opened_is_dropped() {
+        let mut world = World::from_scenario_hosted(&scenario(), &[NodeId(1)]).unwrap();
+        let client = Endpoint::client(NodeId(3));
+        let server = Endpoint::kafka(NodeId(1));
+        world.push_ingress(vec![
+            Frame::data(client, server, ConnId(7), Bytes::from_static(b"stray")),
+            Frame::close(client, server, ConnId(7)),
+        ]);
+        world.step_until(1);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 0);
+        world.push_ingress(vec![
+            Frame::open(client, server, ConnId(8)),
+            Frame::data(client, server, ConnId(8), Bytes::from_static(b"hello")),
+        ]);
+        world.step_until(2);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 2);
+    }
+
+    /// A scenario with an external node 1 (a real broker the page runs) and a
+    /// pinger that pings it.
+    fn external_scenario() -> Scenario {
+        serde_json::from_value(serde_json::json!({
+            "version": 1, "seed": 7, "links": { "default_latency_ms": 10 },
+            "nodes": [
+                { "id": 1, "kind": "krabka-broker" },
+                { "id": 3, "kind": "pinger", "config": { "target": 1, "period_ms": 100 } }
+            ]
+        }))
+        .unwrap()
+    }
+
+    /// Play the page's part for external node 1: take what is due for it and
+    /// echo every data frame back through the link model, as the real process
+    /// behind it would answer on the same connection.
+    fn echo_externally(world: &mut World) -> Vec<TimedFrame> {
+        let due = world.drain_external();
+        let replies = due
+            .iter()
+            .filter_map(|t| {
+                let bytes = t.frame.payload.data()?;
+                Some(Frame::data(
+                    t.frame.dst,
+                    t.frame.src,
+                    t.frame.conn,
+                    bytes.clone(),
+                ))
+            })
+            .collect();
+        world.route_external(replies);
+        due
+    }
+
+    #[test]
+    fn an_external_node_gets_its_frames_when_due_and_answers_through_the_links() {
+        let mut world = World::from_scenario(&external_scenario()).unwrap();
+        let mut seen = Vec::new();
+        for until in (5..=320).step_by(5) {
+            world.step_until(until);
+            for timed in echo_externally(&mut world) {
+                assert!(timed.deliver_at == until, "{timed:?}");
+                seen.push((timed.deliver_at, timed.frame.payload.clone()));
+            }
+        }
+        // The open and each ping arrive after the 10 ms link latency.
+        assert!(seen[0] == (10, Payload::Open));
+        assert!(seen[1].0 == 110);
+        let pinger = world.node_snapshot(NodeId(3)).unwrap();
+        assert!(pinger["echoes"] == 3);
+        assert!(pinger["mean_rtt_ms"] == 20);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["external"] == true);
+    }
+
+    #[test]
+    fn a_killed_external_node_refuses_and_sends_nothing() {
+        let mut world = World::from_scenario(&external_scenario()).unwrap();
+        world.step_until(50);
+        echo_externally(&mut world);
+        world.fault(Fault::Kill { node: NodeId(1) });
+        world.step_until(400);
+        assert!(echo_externally(&mut world).is_empty());
+        // Its process's late words are dropped too.
+        world.route_external(vec![Frame::data(
+            Endpoint::kafka(NodeId(1)),
+            Endpoint::client(NodeId(3)),
+            ConnId(1),
+            Bytes::from_static(b"late"),
+        )]);
+        world.step_until(500);
+        let pinger = world.node_snapshot(NodeId(3)).unwrap();
+        assert!(pinger["echoes"] == 0);
+        assert!(pinger["closes"].as_u64().unwrap() >= 2);
+    }
+
+    #[test]
+    fn only_external_nodes_route_external_frames() {
+        let mut world = World::from_scenario(&scenario()).unwrap();
+        world.step_until(5);
+        // Node 3 is an ordinary pinger: the page cannot speak for it.
+        world.route_external(vec![Frame::open(
+            Endpoint::client(NodeId(3)),
+            Endpoint::kafka(NodeId(2)),
+            ConnId(99),
+        )]);
+        world.step_until(50);
+        assert!(world.node_snapshot(NodeId(2)).unwrap()["frames"] == 0);
+    }
+
+    #[test]
+    fn virtual_addresses_name_nodes_both_ways() {
+        for (node, ip) in [(1, "10.0.0.1"), (254, "10.0.0.254"), (258, "10.0.1.2")] {
+            let ip: std::net::Ipv4Addr = ip.parse().unwrap();
+            assert!(crate::lab::net::node_ip(NodeId(node)) == ip);
+            assert!(crate::lab::net::node_for_ip(ip) == Some(NodeId(node)));
+        }
+        for ip in ["10.0.0.0", "10.1.0.1", "192.168.0.1"] {
+            assert!(
+                crate::lab::net::node_for_ip(ip.parse().unwrap()).is_none(),
+                "{ip}"
+            );
+        }
     }
 
     #[test]

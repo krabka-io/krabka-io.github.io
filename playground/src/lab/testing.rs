@@ -6,6 +6,8 @@
 //! same bytes; `pinger` opens a connection to a target and pings it on a
 //! period. They also serve the page as a latency probe.
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use serde_json::{Value, json};
 
@@ -32,6 +34,25 @@ impl TestWorld {
     pub fn from_scenario(scenario: &Scenario) -> Self {
         Self {
             world: Some(World::from_scenario(scenario).expect("test scenario builds")),
+        }
+    }
+
+    /// Build a world from a scenario and the durable images a page keeps
+    /// across a reload, hosting `hosted` (empty = all), and start it.
+    ///
+    /// # Panics
+    /// Panics when the scenario is invalid; a test scenario is a literal.
+    #[must_use]
+    pub fn from_scenario_with_state(
+        scenario: &Scenario,
+        hosted: &[NodeId],
+        images: BTreeMap<NodeId, DurableImage>,
+    ) -> Self {
+        Self {
+            world: Some(
+                World::from_scenario_with_state(scenario, hosted, images)
+                    .expect("test scenario builds"),
+            ),
         }
     }
 
@@ -330,7 +351,8 @@ impl Node for PingerNode {
         }
         match &frame.payload {
             Payload::Data(bytes) => {
-                self.echoes += 1;
+                // Only an echo of a ping this pinger sent counts; anything
+                // else on the connection would skew the mean round trip.
                 if let Some(seq) = std::str::from_utf8(bytes)
                     .ok()
                     .and_then(|s| s.strip_prefix("ping "))
@@ -338,6 +360,7 @@ impl Node for PingerNode {
                     && let Some(pos) = self.pending.iter().position(|(s, _)| *s == seq)
                 {
                     let (_, sent) = self.pending.remove(pos);
+                    self.echoes += 1;
                     self.rtt_sum += ctx.now() - sent;
                 }
             }
