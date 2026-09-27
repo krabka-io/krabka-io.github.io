@@ -12,7 +12,21 @@
 // scenario edited only by the host. Before the browser starts, the
 // raw-DEFLATE fallback round-trips `CompressionStream` output in Node.
 //
-// Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--headed]
+// The cluster presets run at 20× in a browser context of their own. Three
+// brokers form one KRaft quorum, create the topic and serve two consumers
+// that share its partitions; the inspector shows the quorum and the
+// partitions; the command bars pause, resume, send, set rates and
+// processing times, commit and query; killing the leader of a partition
+// moves the leadership in the inspector while the group keeps consuming,
+// and the restarted broker rejoins the ISR; a page reload brings the brokers
+// back from IndexedDB and the group resumes from its committed offsets; a
+// broker added to the running scenario observes the quorum and says why. The
+// registry preset's producer registers its schema, the registry answers
+// `GET /subjects` and the consumer decodes every value; the streams preset
+// counts words into its store, with the changelog topic the group created,
+// and answers a store query.
+//
+// Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--no-cluster] [--headed]
 // Needs `playwright` or `playwright-core`, project-local or global (found
 // through `npm root -g`), and a Chromium: the one that Playwright finds by
 // itself (its own download, `npx playwright install chromium`, or the build
@@ -34,6 +48,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
 const args = new Set(process.argv.slice(2));
 const WEBRTC = !args.has('--no-webrtc');
+const CLUSTER = !args.has('--no-cluster');
 const HEADLESS = !args.has('--headed');
 const STEP_TIMEOUT = 30_000;
 
@@ -278,6 +293,299 @@ const storedState = (page, scenarioId, registryId) =>
     [scenarioId, registryId],
   );
 
+// ---- the KRaft cluster presets ---------------------------------------------------------------
+
+// The presets as the site ships them, for their names and node ids.
+async function loadPresets() {
+  return (await import(pathToFileURL(path.join(DIST_DIR, 'playground', 'lab', 'presets.js')).href)).PRESETS;
+}
+
+// Load a preset the way a reader does, from its button, and run it at 20×.
+async function openPreset(page, preset) {
+  await page.locator(`#krabka-lab .lab-preset-btn[data-preset="${preset.id}"]`).click();
+  await waitFor(page, `window.krabkaLab.world.scenario().name === ${JSON.stringify(preset.name)}`, `the ${preset.id} preset`);
+  await fastest(page);
+}
+
+async function fastest(page) {
+  await page.locator('#krabka-lab select[aria-label="Simulation speed"]').selectOption('20');
+}
+
+// Wait until `fn`, the source of a function of the snapshot's nodes by id,
+// returns something truthy, and return it. It runs in the page, so it can
+// only use what it is given.
+function until(page, label, fn, timeout = 60_000) {
+  const expr = `(() => { const s = window.krabkaLab.world.snapshot(); if (!s) return null; const n = {}; for (const x of s.nodes) n[x.id] = x; try { const r = (${fn})(n); return r ? JSON.stringify(r) : null; } catch { return null; } })()`;
+  return waitFor(page, expr, label, timeout).then((r) => JSON.parse(r));
+}
+
+const nodeStateOf = (page, id) => page.evaluate((id) => window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id)?.state ?? null, id);
+
+// Select a node on the canvas and wait for the inspector to show it.
+async function inspect(page, id, name) {
+  await page.locator(`#krabka-lab .lab-node[data-node-id="${id}"]`).click();
+  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector .lab-insp-name')?.textContent === ${JSON.stringify(name)}`, `the inspector on ${name}`);
+}
+
+// Run a command from the inspector's command bar, after filling its inputs,
+// and return what the bar says.
+async function command(page, cmd, params = {}) {
+  const row = page.locator(`#krabka-lab .lab-insp-commands .lab-cmd[data-command="${cmd}"]`);
+  for (const [key, value] of Object.entries(params)) {
+    const input = row.locator(`[data-param="${key}"]`);
+    if ((await input.evaluate((e) => e.tagName)) === 'SELECT') await input.selectOption(String(value));
+    else await input.fill(String(value));
+  }
+  await page.evaluate(() => {
+    const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]');
+    if (r) r.dataset.command = '';
+  });
+  await row.locator(`button[data-command="${cmd}"]`).click();
+  const text = await waitFor(page, `(() => { const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]'); return r && r.dataset.command === ${JSON.stringify(cmd)} ? JSON.stringify({ ok: r.dataset.ok === 'true', text: r.textContent }) : null; })()`, `the answer to ${cmd}`);
+  return JSON.parse(text);
+}
+
+// The text of one cell of an inspector table.
+const cell = (page, row, col) =>
+  page.evaluate(([row, col]) => document.querySelector(`#krabka-lab .lab-inspector tr[data-row="${row}"] td[data-col="${col}"]`)?.textContent ?? null, [row, col]);
+
+// The text of one key/value row of the inspector.
+const field = (page, name) => page.evaluate((name) => document.querySelector(`#krabka-lab .lab-inspector dd[data-field="${name}"]`)?.textContent ?? null, name);
+
+async function checkClusters(browser, base, errors) {
+  const presets = await loadPresets();
+  const byId = (id) => presets.find((p) => p.id === id);
+  // A context of its own: its IndexedDB and last scenario are the cluster's.
+  const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const page = await context.newPage();
+  const pageErrors = watchErrors(page, 'cluster page', base);
+  await openLab(page, base);
+  // Each flow on its own: one that fails does not hide the others.
+  for (const [flow, preset] of [
+    [checkThreeBrokers, 'three-brokers'],
+    [checkRegistryPreset, 'schema-registry'],
+    [checkWordCount, 'streams-word-count'],
+  ]) {
+    try {
+      await flow(page, byId(preset));
+    } catch (err) {
+      failures.push(`${preset}: ${err.message}`);
+      console.error(`  FAIL ${preset}: ${err.stack || err.message}`);
+    }
+  }
+  errors.push(...pageErrors);
+  await context.close();
+}
+
+async function checkThreeBrokers(page, preset) {
+  console.log(`Cluster Lab: ${preset.name}`);
+  await openPreset(page, preset);
+  // Brokers 1 to 3, the producer 4, the consumers 5 and 6.
+  const quorum = await until(page, 'the quorum and the topic', `(n) => {
+    const b = [1, 2, 3].map((i) => n[i] && n[i].state);
+    if (!b.every((s) => s && s.state === 'RUNNING')) return null;
+    const orders = b[0].topics.find((t) => t.name === 'orders');
+    const leaders = b.filter((s) => s.quorum.role === 'Leader');
+    if (!orders || leaders.length !== 1) return null;
+    return { voters: b.map((s) => s.quorum.voters.join(',')), votes: b.map((s) => s.quorum.voter), controllers: b.map((s) => s.controller_id), leader: leaders[0].broker_id, replicas: orders.partitions.map((p) => p.replicas.length) };
+  }`);
+  check('three brokers run one KRaft quorum, voters 1, 2 and 3, with one active controller', quorum.voters.every((v) => v === '1,2,3') && quorum.votes.every(Boolean) && quorum.controllers.every((c) => c === quorum.leader), JSON.stringify(quorum));
+  check('the controller creates orders with three partitions of three replicas', JSON.stringify(quorum.replicas) === '[3,3,3]', JSON.stringify(quorum));
+
+  const group = await until(page, 'both consumers to consume', `(n) => {
+    const c = [5, 6].map((i) => n[i].state);
+    if (!c.every((s) => s && s.state === 'stable' && s.processed > 0 && s.assignment.length)) return null;
+    return c.map((s) => ({ parts: s.assignment.map((a) => a.topic + '-' + a.partition), processed: s.processed }));
+  }`, 90_000);
+  const shared = [...group[0].parts, ...group[1].parts].sort();
+  check('the two consumers of the group share the three partitions', JSON.stringify(shared) === '["orders-0","orders-1","orders-2"]', JSON.stringify(group));
+  check('and both of them consume', group.every((c) => c.processed > 0), JSON.stringify(group));
+
+  // The broker inspector: the quorum, and the partitions it hosts.
+  await inspect(page, 2, 'broker-2');
+  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_voters"]')?.textContent === '1, 2, 3'`, 'the quorum in the inspector');
+  const insp = { votes: await field(page, 'quorum_votes'), state: await field(page, 'state'), leader: await cell(page, 'orders-0', 'leader'), isr: await cell(page, 'orders-0', 'isr') };
+  check('the broker inspector shows the quorum and the partitions', insp.votes === 'yes: a voter' && insp.state === 'RUNNING' && /^[123]$/.test(insp.leader) && insp.isr.split(' ').length === 3, JSON.stringify(insp));
+
+  // The producer's command bar.
+  await inspect(page, 4, 'orders-producer');
+  const paused = await command(page, 'pause');
+  const atPause = await until(page, 'the producer to pause', `(n) => n[4].state.paused === true && { generated: n[4].state.generated, now: window.krabkaLab.world.now() }`);
+  await waitFor(page, `window.krabkaLab.world.now() > ${atPause.now} + 3000`, 'three seconds to pass');
+  const stillPaused = (await nodeStateOf(page, 4)).generated;
+  check('Pause stops the producer', paused.ok && stillPaused === atPause.generated, `${JSON.stringify(paused)}; ${atPause.generated} -> ${stillPaused}`);
+  const sent = await command(page, 'send', { count: 7 });
+  const afterSend = await until(page, 'Send to generate seven records', `(n) => n[4].state.generated === ${atPause.generated + 7} && n[4].state`);
+  check('Send generates records at once, paused or not', sent.ok && /"generated":7/.test(sent.text) && afterSend.paused === true, sent.text);
+  await command(page, 'resume');
+  const rate = await command(page, 'rate', { rate_per_sec: 10 });
+  const resumed = await until(page, 'the producer to resume at ten a second', `(n) => n[4].state.paused === false && n[4].state.rate === 10 && n[4].state`);
+  check('Resume and Set rate take effect', rate.ok && resumed.rate === 10, rate.text);
+  await command(page, 'rate', { rate_per_sec: 5 });
+
+  // The consumer's command bar.
+  await inspect(page, 5, 'billing-1');
+  // Paused, the consumer takes no records; like Kafka's fetcher, its client
+  // does not fetch a partition while records wait in its buffer.
+  await command(page, 'pause');
+  const held = await until(page, 'the consumer to pause', `(n) => n[5].state.paused === true && { processed: n[5].state.processed, now: window.krabkaLab.world.now() }`);
+  await waitFor(page, `window.krabkaLab.world.now() > ${held.now} + 3000`, 'three seconds to pass');
+  const stillHeld = (await nodeStateOf(page, 5)).processed;
+  check('Pause stops the consumer taking records', stillHeld === held.processed, `${held.processed} -> ${stillHeld}`);
+  await command(page, 'resume');
+  const caught = await until(page, 'the resumed consumer to catch up', `(n) => n[5].state.paused === false && n[5].state.lag === 0 && n[5].state.processed > ${stillHeld} && n[5].state`);
+  check('Resume lets it catch up', caught.lag === 0, `processed ${stillHeld} -> ${caught.processed}`);
+  const slow = await command(page, 'process_ms', { ms: 5 });
+  await until(page, 'the new processing time', `(n) => n[5].state.process_ms === 5`);
+  check('Set processing changes the time per record', slow.ok, slow.text);
+  await command(page, 'process_ms', { ms: 2 });
+  const commits = (await nodeStateOf(page, 5)).commits;
+  const commit = await command(page, 'commit');
+  await until(page, 'the commit', `(n) => n[5].state.commits > ${commits}`);
+  check('Commit now commits', commit.ok, commit.text);
+
+  // Kill the leader of orders-0: another broker's inspector shows the
+  // leadership move, and the group keeps consuming.
+  await inspect(page, 1, 'broker-1');
+  await waitFor(page, `/^[123]$/.test(document.querySelector('#krabka-lab .lab-inspector tr[data-row="orders-0"] td[data-col="leader"]')?.textContent || '')`, 'the leader of orders-0');
+  const leader = Number(await cell(page, 'orders-0', 'leader'));
+  const before = await until(page, 'the log end of orders-0', `(n) => { const p = n[${leader}].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === 0); return { hwm: p.hwm, processed: n[5].state.processed + n[6].state.processed }; }`);
+  await inspect(page, leader, `broker-${leader}`);
+  await page.locator('#krabka-lab .lab-faults button', { hasText: 'Kill' }).click();
+  await waitFor(page, `(() => { const r = ${nodeState(leader)}; return r && JSON.parse(r).alive === false; })()`, `broker ${leader} to be down`);
+  const other = [1, 2, 3].find((b) => b !== leader);
+  await inspect(page, other, `broker-${other}`);
+  const moved = await waitFor(page, `(() => { const v = document.querySelector('#krabka-lab .lab-inspector tr[data-row="orders-0"] td[data-col="leader"]')?.textContent; return v && v !== '${leader}' && v !== 'none' ? v : null; })()`, 'the leadership of orders-0 to move', 60_000);
+  check(`killing broker ${leader}, the leader of orders-0, moves the leadership to broker ${moved} in the inspector`, Number(moved) !== leader);
+  const kept = await until(page, 'the group to consume past the kill', `(n) => {
+    const c = [5, 6].map((i) => n[i].state);
+    const past = c.some((s) => s.last_records.some((r) => r.partition === 0 && r.offset >= ${before.hwm}));
+    return c[0].processed + c[1].processed >= ${before.processed} + 15 && past && { processed: c[0].processed + c[1].processed };
+  }`, 90_000);
+  check('the consumers keep consuming, orders-0 from its new leader', kept.processed >= before.processed + 15, JSON.stringify({ before, kept }));
+  await inspect(page, leader, `broker-${leader}`);
+  await page.locator('#krabka-lab .lab-faults button', { hasText: 'Restart' }).click();
+  const rejoined = await until(page, `broker ${leader} to rejoin the ISR`, `(n) => {
+    const s = n[${leader}].state;
+    if (!n[${leader}].alive || s.state !== 'RUNNING') return null;
+    const p = n[${moved}].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === 0);
+    return p.isr.includes(${leader}) && { isr: p.isr };
+  }`, 90_000);
+  check(`restarted, broker ${leader} catches up and rejoins the ISR of orders-0`, rejoined.isr.length === 3, JSON.stringify(rejoined));
+
+  await checkReload(page);
+
+  // A broker added to the running scenario observes the quorum, and says why.
+  await page.locator('#krabka-lab .lab-kind-btn[data-kind="broker"]').click();
+  await page.waitForSelector('#krabka-lab dialog[open]');
+  await page.locator('#krabka-lab dialog button[type="submit"]').click();
+  const added = await waitFor(page, `(() => { const n = window.krabkaLab.world.scenario().nodes.find((x) => x.kind === 'broker' && x.id > 3); return n ? n.id : null; })()`, 'the added broker');
+  await inspect(page, added, `broker-${added}`);
+  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_votes"]')?.textContent === 'no: an observer'`, 'the added broker to observe', 60_000);
+  const why = await page.evaluate(() => document.querySelector('#krabka-lab .lab-inspector [data-field="observer-note"]')?.textContent || '');
+  const observed = await page.evaluate((id) => window.krabkaLab.timeline.events.some((e) => e.node === id && e.kind === 'quorum_observer'), added);
+  check('a broker added to the running scenario observes the static quorum, and the inspector says why', /joined a running scenario/.test(why) && /1, 2, 3/.test(why) && observed, why);
+}
+
+// The cluster survives a page reload through IndexedDB, and the consumers
+// resume from their committed offsets. The producer is set to rate 0 in its
+// config first, so after the reload nothing new arrives unless asked for:
+// a consumer that started over would read the old records again.
+async function checkReload(page) {
+  await inspect(page, 4, 'orders-producer');
+  await page.locator('#krabka-lab .lab-tab#lab-tab-config').click();
+  await page.getByLabel('Records per second').fill('0');
+  await page.locator('#krabka-lab .lab-tabpanel[data-tab="config"] button', { hasText: 'Apply' }).click();
+  await waitFor(page, `window.krabkaLab.world.spec(4).config.rate_per_sec === 0`, 'the producer to stop');
+  for (const [id, name] of [[5, 'billing-1'], [6, 'billing-2']]) {
+    await until(page, `${name} to catch up`, `(n) => n[${id}].state.lag === 0 && n[${id}].state.processing_backlog === 0`, 60_000);
+    await inspect(page, id, name);
+    await command(page, 'commit');
+  }
+  const committed = await until(page, 'the commits to cover every record', `(n) => {
+    const rows = [5, 6].flatMap((i) => n[i].state.assignment);
+    if (rows.length !== 3 || !rows.every((a) => a.committed != null && a.committed === a.hwm && a.hwm > 0)) return null;
+    return Object.fromEntries(rows.map((a) => [a.topic + '-' + a.partition, a.committed]));
+  }`, 60_000);
+  const scenarioId = await page.evaluate(() => window.krabkaLab.world.id);
+  await page.evaluate(() => window.krabkaLab.saveNow());
+  await page.evaluate(() => window.krabkaLab.storage.flush());
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
+  const reopened = await page.evaluate(() => ({ id: window.krabkaLab.world.id, nodes: window.krabkaLab.world.scenario().nodes.length }));
+  check('a reload reopens the cluster', reopened.id === scenarioId && reopened.nodes >= 6, JSON.stringify(reopened));
+  await fastest(page);
+  const logs = await until(page, 'the brokers to serve again', `(n) => {
+    if (![1, 2, 3].every((i) => n[i].state.state === 'RUNNING')) return null;
+    const orders = n[1].state.topics.find((t) => t.name === 'orders');
+    return orders && Object.fromEntries(orders.partitions.map((p) => ['orders-' + p.index, n[p.leader] ? n[p.leader].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === p.index).hwm : null]));
+  }`, 90_000);
+  check('the brokers restore their logs from IndexedDB and serve again', Object.entries(committed).every(([p, c]) => logs[p] >= c), JSON.stringify({ committed, logs }));
+  const rejoined = await until(page, 'the consumers to rejoin with their commits', `(n) => {
+    const rows = [5, 6].flatMap((i) => n[i].state.state === 'stable' ? n[i].state.assignment : []);
+    if (rows.length !== 3 || !rows.every((a) => a.committed != null)) return null;
+    return { rows: Object.fromEntries(rows.map((a) => [a.topic + '-' + a.partition, a.committed])), now: window.krabkaLab.world.now() };
+  }`, 120_000);
+  await waitFor(page, `window.krabkaLab.world.now() > ${rejoined.now} + 5000`, 'five seconds after the rejoin');
+  const idle = [(await nodeStateOf(page, 5)).processed, (await nodeStateOf(page, 6)).processed];
+  const sorted = (o) => JSON.stringify(Object.entries(o).sort());
+  check('after the reload the group fetches its committed offsets and reads nothing again', sorted(rejoined.rows) === sorted(committed) && idle[0] === 0 && idle[1] === 0, JSON.stringify({ committed, rejoined: rejoined.rows, processed: idle }));
+  await inspect(page, 4, 'orders-producer');
+  await command(page, 'send', { count: 9 });
+  const fresh = await until(page, 'the nine new records', `(n) => {
+    const c = [5, 6].map((i) => n[i].state);
+    return c[0].processed + c[1].processed === 9 && c.flatMap((s) => s.last_records.map((r) => ({ p: r.topic + '-' + r.partition, offset: r.offset })));
+  }`, 60_000);
+  check('and consumes the new records from where it left off', fresh.every((r) => r.offset >= committed[r.p]), JSON.stringify(fresh));
+}
+
+async function checkRegistryPreset(page, preset) {
+  console.log(`Cluster Lab: ${preset.name}`);
+  await openPreset(page, preset);
+  // Brokers 1 to 3, the registry 4, the producer 5, the consumer 6.
+  const registered = await until(page, 'the producer to register its schema', `(n) => n[5].state.serialization && n[5].state.serialization.state === 'ready' && n[5].state.serialization`, 90_000);
+  const subjects = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects' }));
+  check('the registry answers GET /subjects with the subject the producer registered', subjects.ok && subjects.answer.status === 200 && JSON.stringify(subjects.answer.body) === '["orders-value"]', JSON.stringify(subjects));
+  const decoded = await until(page, 'the consumer to decode', `(n) => {
+    const r = n[6].state.last_records;
+    return n[5].state.acked > 0 && r.length && r.every((x) => x.schema_id === ${registered.schema_id} && x.value_preview && typeof x.value_preview.customer === 'string') && r;
+  }`, 90_000);
+  check('the consumer decodes every value with the schema it fetched by id', decoded.length > 0, JSON.stringify(decoded[0]));
+  await inspect(page, 6, 'billing');
+  const shown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector td[data-col="schema_id"]')?.textContent || null`, 'the schema column');
+  check('the consumer inspector shows the schema id of each record', shown === `id ${registered.schema_id}`, shown);
+}
+
+async function checkWordCount(page, preset) {
+  console.log(`Cluster Lab: ${preset.name}`);
+  await openPreset(page, preset);
+  // Brokers 1 to 3, the producer 4, the streams app 5, the consumer 6.
+  const counting = await until(page, 'the streams app to count', `(n) => {
+    const s = n[5].state;
+    if (s.state !== 'running' || s.tasks.length !== 3 || !s.tasks.every((t) => t.phase === 'running')) return null;
+    const entries = s.stores.flatMap((st) => st.entries);
+    return entries.length && n[6].state.processed > 0 && { entries, tasks: s.tasks.map((t) => t.id), sink: n[6].state.processed };
+  }`, 90_000);
+  check('the streams app runs three tasks and counts the words in its store', counting.tasks.length === 3 && counting.entries.every(([, count]) => count > 0), JSON.stringify(counting.entries.slice(0, 4)));
+  check('a consumer reads the counts from word-counts', counting.sink > 0, `${counting.sink} records`);
+  const changelog = await until(page, 'the changelog topic', `(n) => { const t = n[1].state.topics.find((x) => x.name === 'word-count-counts-changelog'); return t && { partitions: t.partitions.length }; }`);
+  const pill = await page.locator('#krabka-lab .lab-topic[data-topic="word-count-counts-changelog"]').count();
+  check('the group creates the store\'s changelog topic, and the canvas draws it', changelog.partitions === 3 && pill === 1, `${JSON.stringify(changelog)}, ${pill} pill`);
+
+  await inspect(page, 5, 'word-count');
+  const [word] = counting.entries[0];
+  const query = await command(page, 'query', { store: 'counts', key: word });
+  const answer = JSON.parse(query.text.slice(query.text.indexOf('{')));
+  check(`the query box reads ${word} from the counts store`, query.ok && answer.key === word && answer.value >= counting.entries[0][1], query.text);
+  await command(page, 'pause');
+  const held = await until(page, 'the streams app to pause', `(n) => n[5].state.paused === true && { in: n[5].state.records_in, now: window.krabkaLab.world.now() }`);
+  await waitFor(page, `window.krabkaLab.world.now() > ${held.now} + 3000`, 'three seconds to pass');
+  const stillIn = (await nodeStateOf(page, 5)).records_in;
+  await command(page, 'resume');
+  const moving = await until(page, 'the streams app to resume', `(n) => n[5].state.paused === false && n[5].state.records_in > ${stillIn} && n[5].state.records_in`);
+  check('Pause holds the streams app and Resume starts it again', stillIn === held.in && moving > stillIn, `${held.in} -> ${stillIn} -> ${moving}`);
+}
+
 async function main() {
   if (!fs.existsSync(path.join(DIST_DIR, 'docs', 'lab', 'index.html'))) {
     console.error('dist/docs/lab/index.html is missing: run `npm run build` first.');
@@ -519,6 +827,8 @@ async function main() {
     check('and it runs', true);
 
     errors.push(...pageErrors, ...page2Errors, ...page3Errors);
+
+    if (CLUSTER) await checkClusters(browser, base, errors);
 
     if (WEBRTC) {
       console.log('Cluster Lab: two tabs over WebRTC');
