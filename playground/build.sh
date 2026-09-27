@@ -69,7 +69,10 @@ fi
 echo "==> Building krabka-playground (release)"
 (cd "${crate_dir}" && cargo build --target wasm32-unknown-unknown --release)
 
-wasm_in="${crate_dir}/target/wasm32-unknown-unknown/release/krabka_playground.wasm"
+# Cargo writes to CARGO_TARGET_DIR when it is set, and to the crate's own
+# target directory otherwise.
+target_dir="${CARGO_TARGET_DIR:-${crate_dir}/target}"
+wasm_in="${target_dir}/wasm32-unknown-unknown/release/krabka_playground.wasm"
 
 echo "==> Running wasm-bindgen --target web"
 mkdir -p "${out_dir}"
