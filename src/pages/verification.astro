@@ -170,6 +170,9 @@ const articleSchema = {
           <p>
             Krabka extracts each safety-critical decision into a small, total, synchronous kernel in the <code class="font-mono text-sm text-krab-300">krabka-verified</code> crate. A host crate maps its state into the kernel's inputs, calls it, and applies the result. There is no second copy of any decision, so the proved body is the body that runs in production.
           </p>
+          <p>
+            The kernels do no I/O, so they also compile to WebAssembly. The <a href={getPath('/docs/verification-playground')} class="text-krab-400 hover:text-krab-300 font-semibold">verification playground</a> lets you evaluate a selection of them in your browser, with each function's contract beside the result.
+          </p>
         </div>
       </div>
 
@@ -245,6 +248,10 @@ const articleSchema = {
         ))}
       </div>
 
+      <p class="mt-6 text-sm text-gray-400 max-w-4xl">
+        The <a href={getPath('/docs/verification-playground#models')} class="text-krab-400 hover:text-krab-300 font-semibold">model gallery</a> lists every entry point with what it drives, its bounds, its properties, and its pinned state counts.
+      </p>
+
       <div class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 text-sm">
         <div class="rounded-xl border border-white/10 bg-slate-900/60 p-5">
           <div class="font-semibold text-white">Pinned state counts</div>
@@ -312,6 +319,12 @@ const articleSchema = {
             class="inline-flex items-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
           >
             Browse krabka-verified on GitHub
+          </a>
+          <a
+            href={getPath('/docs/verification-playground')}
+            class="inline-flex items-center rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+          >
+            Evaluate the verified kernels in your browser
           </a>
           <a
             href={getPath('/docs/playground')}
