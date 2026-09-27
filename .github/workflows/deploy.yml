@@ -50,6 +50,20 @@ jobs:
         with:
           workspaces: playground
 
+      # The proof explorer's browser re-check needs Why3 and Alt-Ergo compiled
+      # to JavaScript. Bazel builds that bundle inside a Docker container
+      # (see why3-web/); the runner supplies Docker and bazelisk. Its inputs
+      # rarely change, so the Bazel disk cache usually answers from the
+      # Actions cache instead of rebuilding OCaml.
+      - name: Cache the Why3 web bundle
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel-disk
+          key: why3-web-${{ hashFiles('why3-web/**', 'MODULE.bazel', '.bazelversion', '.bazelrc') }}
+
+      - name: Build the Why3 web bundle
+        run: npm run build:why3-web
+
       - name: Build static website
         run: npm run build
         env:

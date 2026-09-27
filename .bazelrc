@@ -1,0 +1,17 @@
+# The website's Bazel module builds one thing: the Why3 web bundle under
+# //why3-web, whose only host requirement is Docker. Everything else about the
+# site is npm.
+build --incompatible_strict_action_env
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+test --test_output=errors
+
+# The toolchain genrule under //why3-web shells out to Docker; without this,
+# a failure there reports only the target name.
+build --verbose_failures
+
+try-import %workspace%/user.bazelrc
+
+# The Why3 web bundle takes half an hour to build; keep its outputs across
+# runs. CI restores this directory from the Actions cache.
+build --disk_cache=~/.cache/bazel-disk

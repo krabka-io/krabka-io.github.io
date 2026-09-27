@@ -1,0 +1,16 @@
+
+; krabka: Alt-Ergo as a web worker through the full solving loop (Dolmen
+; front end, SMT-LIB input), for the proof explorer's browser re-check.
+; Appended to src/bin/js/dune of the Alt-Ergo release by build-why3-web.sh.
+(executable
+ (name ae_worker)
+ (libraries
+   alt_ergo_common
+   zarith_stubs_js
+   js_of_ocaml
+   str
+ )
+ (modules ae_worker)
+ (modes byte js)
+ (js_of_ocaml (flags +toplevel.js +dynlink.js) (javascript_files ae_worker_stubs.js))
+)

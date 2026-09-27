@@ -1,0 +1,985 @@
+/* Why3 proof explorer styles.
+ *
+ * Self-contained: every rule is scoped under #krabka-proofs, so nothing bleeds
+ * into the rest of the site. The palette mirrors the verified kernel explorer
+ * (kernels.css, --kx-*) and the krab / ocean Tailwind colours in
+ * tailwind.config.mjs, so the two explorers read as one family. The site
+ * renders dark only.
+ *
+ * Long identifiers and formulas are the norm here (Why3 terms, Coma source,
+ * session ids), so wrapping is `overflow-wrap: anywhere` with `word-break:
+ * normal` and every grid cell has `min-width: 0`; nothing in the explorer may
+ * scroll the page sideways at 390px.
+ *
+ * Structure the rules address:
+ *   #krabka-proofs      root; .px-ready once the script has run
+ *   .px-layout          sidebar + detail grid
+ *   .px-sidebar         filter, kind chips, session list grouped by module
+ *   .px-detail          head, stats, tree, obligations, Coma, re-check
+ *   .px-tree            goal outlines; .px-node a tactic, .px-leaf a prover row
+ *   .px-oblist          obligation rows
+ *   .px-check           browser re-check panel */
+
+#krabka-proofs {
+  --px-accent: #ff4d2e;
+  --px-accent-deep: #c82408;
+  --px-accent-soft: rgba(255, 77, 46, 0.12);
+  --px-accent-text: #ff8466;
+  --px-bg: #0c1322;
+  --px-panel: #0f172a;
+  --px-panel-raised: #141e33;
+  --px-border: rgba(255, 255, 255, 0.1);
+  --px-border-strong: rgba(255, 255, 255, 0.2);
+  --px-text: #f3f4f6;
+  --px-text-soft: #d1d5db;
+  --px-muted: #9ca3af;
+  --px-ok: #45c178;
+  --px-amber: #f7b73a;
+  --px-error: #ff8466;
+  --px-blue: #5fb3f5;
+  --px-purple: #c084fc;
+  --px-pink: #f472b6;
+  --px-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--px-border);
+  border-radius: 12px;
+  background: var(--px-bg);
+  color: var(--px-text);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#krabka-proofs *,
+#krabka-proofs *::before,
+#krabka-proofs *::after {
+  box-sizing: border-box;
+}
+
+#krabka-proofs [hidden] {
+  display: none !important;
+}
+
+#krabka-proofs:not(.px-ready) .px-fallback {
+  color: var(--px-muted);
+  margin: 0;
+}
+
+#krabka-proofs .px-error {
+  color: var(--px-error);
+  font-size: 0.86rem;
+  margin: 0.6rem 0 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-mono {
+  font-family: var(--px-mono);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- layout ---------------------------------------------------------------- */
+
+#krabka-proofs .px-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  #krabka-proofs .px-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- sidebar --------------------------------------------------------------- */
+
+#krabka-proofs .px-sidebar {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: calc(100vh - 2rem);
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  #krabka-proofs .px-sidebar {
+    position: static;
+    max-height: none;
+  }
+}
+
+#krabka-proofs .px-input,
+#krabka-proofs .px-btn {
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.36rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid var(--px-border);
+  background: var(--px-panel);
+  color: var(--px-text);
+  transition: background 0.12s ease, border-color 0.12s ease,
+    transform 0.05s ease;
+}
+
+#krabka-proofs .px-input {
+  width: 100%;
+  max-width: 100%;
+}
+
+#krabka-proofs .px-input::placeholder {
+  color: rgba(156, 163, 175, 0.55);
+}
+
+#krabka-proofs .px-input:focus,
+#krabka-proofs .px-btn:focus-visible,
+#krabka-proofs .px-chip:focus-visible,
+#krabka-proofs .px-item:focus-visible,
+#krabka-proofs summary:focus-visible {
+  outline: none;
+  border-color: var(--px-accent);
+  box-shadow: 0 0 0 2px rgba(255, 77, 46, 0.25);
+}
+
+#krabka-proofs .px-btn {
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-btn:hover {
+  border-color: var(--px-accent);
+  color: var(--px-accent);
+}
+
+#krabka-proofs .px-btn:active {
+  transform: translateY(1px);
+}
+
+#krabka-proofs .px-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+  border-color: var(--px-border);
+  color: var(--px-text);
+}
+
+#krabka-proofs .px-btn.px-primary {
+  background: var(--px-accent);
+  border-color: var(--px-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#krabka-proofs .px-btn.px-primary:hover:not(:disabled) {
+  background: var(--px-accent-deep);
+  border-color: var(--px-accent-deep);
+  color: #fff;
+}
+
+/* Kind chips. */
+#krabka-proofs .px-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+#krabka-proofs .px-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.55rem;
+  border: 1px solid var(--px-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--px-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+#krabka-proofs .px-chip:hover {
+  border-color: var(--px-border-strong);
+  color: var(--px-text);
+}
+
+#krabka-proofs .px-chip[aria-pressed='true'] {
+  border-color: rgba(255, 77, 46, 0.5);
+  background: var(--px-accent-soft);
+  color: var(--px-accent-text);
+}
+
+#krabka-proofs .px-chip-n {
+  font-family: var(--px-mono);
+  font-weight: 400;
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+#krabka-proofs .px-count {
+  margin: 0;
+  padding: 0 0.2rem;
+  font-size: 0.72rem;
+  color: var(--px-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Session list. */
+#krabka-proofs .px-list {
+  overflow-y: auto;
+  padding-right: 0.2rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 860px) {
+  #krabka-proofs .px-list {
+    max-height: 280px;
+    border: 1px solid var(--px-border);
+    border-radius: 10px;
+    padding: 0.4rem;
+    background: var(--px-panel);
+  }
+}
+
+#krabka-proofs .px-group {
+  margin-bottom: 0.6rem;
+}
+
+#krabka-proofs .px-group-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.2rem;
+  padding: 0 0.5rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--px-muted);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-group-title .px-group-n {
+  font-family: var(--px-mono);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+#krabka-proofs .px-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.28rem 0.5rem;
+  margin: 0 0 0.1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--px-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+#krabka-proofs .px-item:hover {
+  background: var(--px-panel);
+  border-color: var(--px-border);
+}
+
+#krabka-proofs .px-item.px-active {
+  background: var(--px-panel);
+  border-color: var(--px-accent);
+  box-shadow: inset 3px 0 0 var(--px-accent);
+}
+
+#krabka-proofs .px-item-name {
+  min-width: 0;
+  font-family: var(--px-mono);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-item-impl {
+  display: block;
+  font-size: 0.64rem;
+  color: var(--px-muted);
+}
+
+#krabka-proofs .px-item-meta {
+  font-family: var(--px-mono);
+  font-size: 0.66rem;
+  color: var(--px-muted);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#krabka-proofs .px-empty {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--px-muted);
+}
+
+/* ---- detail: head ---------------------------------------------------------- */
+
+#krabka-proofs .px-detail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#krabka-proofs .px-detail > * {
+  min-width: 0;
+}
+
+#krabka-proofs .px-head {
+  min-width: 0;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--px-border);
+}
+
+#krabka-proofs .px-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-title {
+  margin: 0;
+  font-family: var(--px-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--px-text);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+}
+
+#krabka-proofs .px-title .px-title-impl {
+  color: var(--px-muted);
+  font-weight: 500;
+}
+
+#krabka-proofs .px-module {
+  font-family: var(--px-mono);
+  font-size: 0.78rem;
+  color: var(--px-accent);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-kind {
+  display: inline-block;
+  padding: 0.06rem 0.5rem;
+  border: 1px solid var(--px-border-strong);
+  border-radius: 999px;
+  background: var(--px-panel-raised);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--px-text-soft);
+  line-height: 1.5;
+}
+
+#krabka-proofs .px-kind-kernel {
+  border-color: rgba(255, 77, 46, 0.45);
+  color: var(--px-accent-text);
+  background: var(--px-accent-soft);
+}
+
+#krabka-proofs .px-kind-lemma {
+  border-color: rgba(95, 179, 245, 0.45);
+  color: var(--px-blue);
+}
+
+#krabka-proofs .px-kind-helper {
+  border-color: rgba(69, 193, 120, 0.45);
+  color: var(--px-ok);
+}
+
+#krabka-proofs .px-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.8rem;
+  margin: 0.45rem 0 0;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+#krabka-proofs .px-link {
+  color: var(--px-muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--px-border-strong);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-link:hover {
+  color: var(--px-text);
+  border-bottom-color: var(--px-accent);
+}
+
+#krabka-proofs .px-link-primary {
+  color: var(--px-accent-text);
+  border-bottom-color: rgba(255, 77, 46, 0.45);
+}
+
+#krabka-proofs .px-ledger-kernels {
+  font-family: var(--px-mono);
+  font-size: 0.72rem;
+  color: var(--px-text-soft);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.7rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.76rem;
+  color: var(--px-muted);
+  min-width: 0;
+}
+
+#krabka-proofs .px-stats b {
+  color: var(--px-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- detail: sections ------------------------------------------------------ */
+
+#krabka-proofs .px-section {
+  background: var(--px-panel);
+  border: 1px solid var(--px-border);
+  border-radius: 10px;
+  padding: 0.6rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+#krabka-proofs .px-section-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--px-muted);
+}
+
+#krabka-proofs .px-section-hint {
+  font-size: 0.74rem;
+  color: var(--px-muted);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--px-text-soft);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-note + .px-note {
+  margin-top: 0.4rem;
+}
+
+#krabka-proofs .px-note code {
+  font-family: var(--px-mono);
+  font-size: 0.74rem;
+  color: var(--px-accent-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---- proof tree ------------------------------------------------------------ */
+
+#krabka-proofs .px-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-goal,
+#krabka-proofs .px-node {
+  min-width: 0;
+  border-left: 2px solid var(--px-border);
+  padding-left: 0.45rem;
+}
+
+#krabka-proofs .px-goal {
+  border-left-color: rgba(255, 77, 46, 0.45);
+}
+
+#krabka-proofs .px-goal > summary,
+#krabka-proofs .px-node > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+  padding: 0.18rem 0.25rem;
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+#krabka-proofs .px-goal > summary::-webkit-details-marker,
+#krabka-proofs .px-node > summary::-webkit-details-marker {
+  display: none;
+}
+
+#krabka-proofs .px-goal > summary:hover,
+#krabka-proofs .px-node > summary:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+#krabka-proofs .px-goal > summary::before,
+#krabka-proofs .px-node > summary::before {
+  content: '';
+  flex: none;
+  align-self: center;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.6px solid var(--px-muted);
+  border-bottom: 1.6px solid var(--px-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+}
+
+#krabka-proofs .px-goal[open] > summary::before,
+#krabka-proofs .px-node[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+#krabka-proofs .px-goal-name {
+  font-family: var(--px-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--px-text);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+}
+
+#krabka-proofs .px-node-name {
+  font-family: var(--px-mono);
+  font-size: 0.76rem;
+  color: var(--px-amber);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-node-meta,
+#krabka-proofs .px-goal-meta {
+  font-size: 0.7rem;
+  color: var(--px-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#krabka-proofs .px-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.15rem 0 0.2rem 0.5rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-leaf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  padding: 0.14rem 0.25rem;
+  border-radius: 6px;
+  min-width: 0;
+  font-size: 0.74rem;
+}
+
+#krabka-proofs .px-leaf:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+#krabka-proofs .px-leaf-idx {
+  flex: none;
+  min-width: 1.4rem;
+  font-family: var(--px-mono);
+  font-size: 0.66rem;
+  color: var(--px-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#krabka-proofs .px-prover {
+  flex: none;
+  display: inline-block;
+  padding: 0.02rem 0.45rem;
+  border: 1px solid var(--px-border-strong);
+  border-radius: 999px;
+  font-family: var(--px-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--px-text-soft);
+  background: var(--px-panel-raised);
+}
+
+#krabka-proofs .px-prover-alt-ergo {
+  color: var(--px-blue);
+  border-color: rgba(95, 179, 245, 0.5);
+  background: rgba(95, 179, 245, 0.1);
+}
+
+#krabka-proofs .px-prover-z3 {
+  color: var(--px-amber);
+  border-color: rgba(247, 183, 58, 0.5);
+  background: rgba(247, 183, 58, 0.1);
+}
+
+#krabka-proofs .px-prover-cvc5 {
+  color: var(--px-purple);
+  border-color: rgba(192, 132, 252, 0.5);
+  background: rgba(192, 132, 252, 0.1);
+}
+
+#krabka-proofs .px-prover-cvc4 {
+  color: var(--px-pink);
+  border-color: rgba(244, 114, 182, 0.5);
+  background: rgba(244, 114, 182, 0.1);
+}
+
+#krabka-proofs .px-leaf-time {
+  flex: none;
+  min-width: 3.6rem;
+  font-family: var(--px-mono);
+  font-size: 0.7rem;
+  color: var(--px-text-soft);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#krabka-proofs .px-bar {
+  flex: 1 1 60px;
+  min-width: 40px;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+#krabka-proofs .px-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--px-blue);
+  opacity: 0.8;
+}
+
+#krabka-proofs .px-leaf-z3 .px-bar > span {
+  background: var(--px-amber);
+}
+
+#krabka-proofs .px-leaf-cvc5 .px-bar > span {
+  background: var(--px-purple);
+}
+
+#krabka-proofs .px-leaf-cvc4 .px-bar > span {
+  background: var(--px-pink);
+}
+
+/* Live status cell, filled by the browser re-check. */
+#krabka-proofs .px-live {
+  flex: none;
+  min-width: 5.5rem;
+  font-family: var(--px-mono);
+  font-size: 0.66rem;
+  color: var(--px-muted);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-live:empty::before {
+  content: '';
+}
+
+#krabka-proofs .px-live-proved {
+  color: var(--px-ok);
+}
+
+#krabka-proofs .px-live-unproved,
+#krabka-proofs .px-live-error {
+  color: var(--px-error);
+}
+
+#krabka-proofs .px-live-timeout,
+#krabka-proofs .px-live-diverged {
+  color: var(--px-amber);
+}
+
+#krabka-proofs .px-live-running {
+  color: var(--px-text-soft);
+}
+
+#krabka-proofs .px-live-skipped {
+  color: var(--px-muted);
+  font-style: italic;
+}
+
+/* ---- obligations ----------------------------------------------------------- */
+
+#krabka-proofs .px-obfilter {
+  flex: 1 1 12rem;
+  max-width: 100%;
+  font-size: 0.78rem;
+  padding: 0.26rem 0.5rem;
+}
+
+#krabka-proofs .px-oblist {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#krabka-proofs .px-ob {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  padding: 0.35rem 0.25rem;
+  border-top: 1px solid var(--px-border);
+  min-width: 0;
+}
+
+#krabka-proofs .px-ob:first-child {
+  border-top: none;
+}
+
+#krabka-proofs .px-ob-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-ob-expl {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--px-text);
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-ob-count {
+  font-family: var(--px-mono);
+  font-size: 0.66rem;
+  color: var(--px-amber);
+}
+
+#krabka-proofs .px-ob-span {
+  font-family: var(--px-mono);
+  font-size: 0.68rem;
+  color: var(--px-muted);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  text-decoration: none;
+}
+
+#krabka-proofs a.px-ob-span {
+  border-bottom: 1px dotted var(--px-border-strong);
+}
+
+#krabka-proofs a.px-ob-span:hover {
+  color: var(--px-text);
+  border-bottom-color: var(--px-accent);
+}
+
+#krabka-proofs .px-ob-formula {
+  margin: 0;
+  font-family: var(--px-mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--px-text-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* ---- Coma ------------------------------------------------------------------ */
+
+#krabka-proofs .px-coma > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.8rem;
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+#krabka-proofs .px-coma > summary::-webkit-details-marker {
+  display: none;
+}
+
+#krabka-proofs .px-coma > summary .px-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.45rem;
+  border-right: 1.6px solid var(--px-muted);
+  border-bottom: 1.6px solid var(--px-muted);
+  transform: rotate(-45deg) translateY(-1px);
+  transition: transform 0.12s ease;
+}
+
+#krabka-proofs .px-coma[open] > summary .px-section-title::before {
+  transform: rotate(45deg) translateY(-2px);
+}
+
+#krabka-proofs .px-coma-body {
+  margin-top: 0.5rem;
+  min-width: 0;
+}
+
+#krabka-proofs .px-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.55rem;
+  max-height: 32rem;
+  overflow-y: auto;
+  border: 1px solid var(--px-border);
+  border-radius: 7px;
+  background: var(--px-bg);
+  font-family: var(--px-mono);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--px-text-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  tab-size: 2;
+}
+
+/* ---- re-check panel -------------------------------------------------------- */
+
+#krabka-proofs .px-check {
+  border-left-width: 4px;
+  border-left-color: var(--px-border-strong);
+}
+
+#krabka-proofs .px-check.px-check-ok {
+  border-left-color: var(--px-ok);
+}
+
+#krabka-proofs .px-check.px-check-partial {
+  border-left-color: var(--px-amber);
+}
+
+#krabka-proofs .px-check.px-check-failed {
+  border-left-color: var(--px-accent-deep);
+}
+
+#krabka-proofs .px-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.8rem;
+  margin-top: 0.5rem;
+}
+
+#krabka-proofs .px-check-status {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--px-text-soft);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+#krabka-proofs .px-check-log {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  font-family: var(--px-mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--px-muted);
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+#krabka-proofs .px-check-log li {
+  padding: 0.05rem 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+#krabka-proofs .px-check-log .px-log-error {
+  color: var(--px-error);
+}
+
+/* ---- footer note ----------------------------------------------------------- */
+
+#krabka-proofs .px-foot {
+  margin-top: 0.9rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--px-border);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--px-muted);
+}
+
+#krabka-proofs .px-foot p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#krabka-proofs .px-foot p + p {
+  margin-top: 0.35rem;
+}
+
+#krabka-proofs .px-foot code {
+  font-family: var(--px-mono);
+  font-size: 0.72rem;
+  color: var(--px-text-soft);
+}

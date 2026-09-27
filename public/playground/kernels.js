@@ -24,6 +24,7 @@ const SPECS_ID = "krabka-kernel-specs";
 const DEBOUNCE_MS = 120;
 const PRECONDITION_PREFIX = "precondition violated: ";
 const HASH_PREFIX = "#kernel=";
+const PROOF_EXPLORER_PATH = "/docs/proof-explorer";
 const FOOTER_TEXT =
   "Every evaluation calls the Creusot-verified kernel compiled to " +
   "WebAssembly; nothing here is reimplemented in JavaScript.";
@@ -752,8 +753,23 @@ function proofLinks(proofs) {
     link.title = proof.url;
     link.textContent = `${proof.label || "proof"} ↗`;
     holder.appendChild(link);
+    // The proof explorer shows the same session's tree; its id is the path
+    // between `krabka_verified_rlib/` and `/proof.json` in the GitHub URL.
+    const sessionId = proofSessionId(proof.url);
+    if (sessionId !== undefined) {
+      const explore = el("a", "kx-proof-link");
+      explore.href = `${PROOF_EXPLORER_PATH}#session=${encodeURIComponent(sessionId)}`;
+      explore.title = `Open ${proof.label || sessionId} in the proof explorer`;
+      explore.textContent = "explore";
+      holder.appendChild(explore);
+    }
   }
   return holder;
+}
+
+function proofSessionId(url) {
+  const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json(?:[#?].*)?$/.exec(String(url || ""));
+  return m ? m[1] : undefined;
 }
 
 function mutedNote(text) {

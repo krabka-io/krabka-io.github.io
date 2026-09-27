@@ -33,10 +33,24 @@ interface Props {
   initialTab?: 'kernels' | 'models' | 'evidence';
   playgroundPath?: string;
   catalogPath?: string;
+  /** When set, each proof-session chip in a kernel row gets an "explore" chip linking to `${explorerPath}#session=<id>`. */
+  explorerPath?: string;
   id?: string;
 }
 
-const { kernels, models, evidence, kernelNotes = [], modelNotes = [], initialTab, playgroundPath, catalogPath, id = 'evidence-ledger' } = Astro.props;
+const { kernels, models, evidence, kernelNotes = [], modelNotes = [], initialTab, playgroundPath, catalogPath, explorerPath, id = 'evidence-ledger' } = Astro.props;
+
+/** Session id of a proof URL, `.../verif/krabka_verified_rlib/<id>/proof.json`, or undefined. */
+function proofSessionId(url: string): string | undefined {
+  const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json(?:[#?].*)?$/.exec(url);
+  return m?.[1];
+}
+
+function explorerLink(url: string): string | undefined {
+  if (!explorerPath) return undefined;
+  const sessionId = proofSessionId(url);
+  return sessionId === undefined ? undefined : `${explorerPath}#session=${encodeURIComponent(sessionId)}`;
+}
 
 type GroupKey = 'kernels' | 'models' | 'evidence';
 
@@ -261,9 +275,15 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                           <dd class="el-html" set:html={row.host_html} />
                           <dt>Proof sessions</dt>
                           <dd class="el-links">
-                            {row.proofs.map((p) => (
-                              <a class="el-link-chip" href={p.url} target="_blank" rel="noopener noreferrer">{p.label}<span class="el-ext" aria-hidden="true">↗</span></a>
-                            ))}
+                            {row.proofs.map((p) => {
+                              const explore = explorerLink(p.url);
+                              return (
+                                <>
+                                  <a class="el-link-chip" href={p.url} target="_blank" rel="noopener noreferrer">{p.label}<span class="el-ext" aria-hidden="true">↗</span></a>
+                                  {explore && <a class="el-link-chip" href={explore} title={`Open ${p.label} in the proof explorer`}>explore</a>}
+                                </>
+                              );
+                            })}
                           </dd>
                           <dt>Caller preconditions</dt>
                           {row.preconditions_html === '' ? (
