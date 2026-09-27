@@ -179,7 +179,14 @@ fn join_is_refused_for_bad_inputs() {
         (
             "unknown member id",
             join_req("ghost", None, b"x"),
-            join_error(codes::UNKNOWN_MEMBER_ID, "ghost"),
+            // Kafka nulls the protocol name of a member that fails
+            // `validateMember`.
+            Pending::Ready(JoinGroupResponse {
+                error_code: codes::UNKNOWN_MEMBER_ID,
+                member_id: "ghost".to_string(),
+                protocol_name: None,
+                ..Default::default()
+            }),
         ),
         (
             "empty group id",
@@ -335,7 +342,6 @@ fn a_new_member_waiting_in_join_group_expires_after_five_minutes() {
                 2,
                 JoinGroupResponse {
                     error_code: codes::UNKNOWN_MEMBER_ID,
-                    protocol_name: None,
                     ..Default::default()
                 }
             )]

@@ -385,7 +385,6 @@ impl Coordinator {
             Pending::Ready(JoinGroupResponse {
                 error_code,
                 member_id: member_id.to_string(),
-                protocol_name: None,
                 ..Default::default()
             })
         };

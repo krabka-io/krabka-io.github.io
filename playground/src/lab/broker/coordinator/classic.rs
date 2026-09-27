@@ -679,12 +679,24 @@ fn persist(g: &ClassicGroup, sh: &mut Shared) {
     );
 }
 
+/// A `JoinGroup` error as Kafka's coordinator builds it,
+/// `new JoinGroupResponseData().setMemberId(..).setErrorCode(..)`: the
+/// protocol name keeps the schema's default, the empty string.
 fn error_response(error_code: i16, member_id: &str) -> JoinGroupResponse {
     JoinGroupResponse {
         error_code,
         member_id: member_id.to_string(),
-        protocol_name: None,
         ..Default::default()
+    }
+}
+
+/// A `JoinGroup` error whose protocol name Kafka sets to null: the answer
+/// to a member that fails `validateMember`, and to the member a static
+/// member replaced.
+fn null_protocol_error(error_code: i16, member_id: &str) -> JoinGroupResponse {
+    JoinGroupResponse {
+        protocol_name: None,
+        ..error_response(error_code, member_id)
     }
 }
 
@@ -847,16 +859,17 @@ fn join_existing_member(
         ));
     }
     if g.pending_members.contains_key(&member_id) {
-        // A pending member is never static; Kafka's `IllegalStateException`
-        // is answered as `UNKNOWN_SERVER_ERROR`.
+        // A pending member is never static. Kafka's runtime answers the
+        // `IllegalStateException` with `UNKNOWN_SERVER_ERROR` and no member
+        // id.
         if req.group_instance_id.is_some() {
-            return Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, &req.member_id));
+            return Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, ""));
         }
         g.cancel_pending(sh, &member_id);
         return add_member_then_rebalance(g, sh, ctx, &member_id);
     }
     if let Err(code) = g.validate_member(&req.member_id, req.group_instance_id.as_deref()) {
-        return Pending::Ready(error_response(code, &req.member_id));
+        return Pending::Ready(null_protocol_error(code, &req.member_id));
     }
     let unchanged = g
         .members
@@ -951,13 +964,13 @@ fn update_static_member(
     let (instance_id, old_id, new_id) = ids;
     let current_leader = g.leader.clone();
     let Some(mut member) = g.members.remove(&old_id) else {
-        return Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, new_id.as_str()));
+        return Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, ""));
     };
     g.cancel_session(sh, &member);
     complete_join_holds(
         sh,
         &mut member,
-        &error_response(codes::FENCED_INSTANCE_ID, old_id.as_str()),
+        &null_protocol_error(codes::FENCED_INSTANCE_ID, old_id.as_str()),
     );
     complete_sync_holds(sh, &mut member, &sync_error(codes::FENCED_INSTANCE_ID));
     g.joined_this_round.remove(&old_id);
@@ -999,9 +1012,9 @@ fn update_static_member(
             maybe_complete_join_phase(g, sh, ctx.now);
             Pending::Held(token)
         }
-        ClassicState::Empty => {
-            Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, new_id.as_str()))
-        }
+        // Kafka throws `IllegalStateException` here, which its runtime
+        // answers with `UNKNOWN_SERVER_ERROR` and no member id.
+        ClassicState::Empty => Pending::Ready(error_response(codes::UNKNOWN_SERVER_ERROR, "")),
     }
 }
 

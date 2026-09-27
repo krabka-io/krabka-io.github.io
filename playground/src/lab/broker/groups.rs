@@ -213,14 +213,13 @@ fn record_batch(records: &[(Bytes, Option<Bytes>)], now: Millis) -> Option<Bytes
     Some(buf.freeze())
 }
 
-/// The answer to a held request whose writes were lost or timed out: its
-/// shape with `error_code`, as Kafka's runtime fails the response future.
+/// The answer to a held request whose writes were lost or timed out, as
+/// Kafka's runtime fails the response future: `error_code` on an
+/// otherwise default response.
 fn failed_answer(response: &AnyResponse, error_code: i16) -> AnyResponse {
     match response {
-        AnyResponse::JoinGroup(join) => AnyResponse::JoinGroup(JoinGroupResponse {
+        AnyResponse::JoinGroup(_) => AnyResponse::JoinGroup(JoinGroupResponse {
             error_code,
-            member_id: join.member_id.clone(),
-            protocol_name: None,
             ..JoinGroupResponse::default()
         }),
         AnyResponse::SyncGroup(_) => AnyResponse::SyncGroup(SyncGroupResponse {

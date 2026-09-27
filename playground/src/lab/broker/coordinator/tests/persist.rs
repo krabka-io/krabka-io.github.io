@@ -256,7 +256,6 @@ fn a_partition_moves_to_another_coordinator() {
                 JoinGroupResponse {
                     error_code: codes::NOT_COORDINATOR,
                     member_id: M1.to_string(),
-                    protocol_name: None,
                     ..Default::default()
                 }
             )]

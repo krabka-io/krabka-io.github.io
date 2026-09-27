@@ -173,7 +173,6 @@ fn join_error(error_code: i16, member_id: &str) -> Pending<JoinGroupResponse> {
     Pending::Ready(JoinGroupResponse {
         error_code,
         member_id: member_id.to_string(),
-        protocol_name: None,
         ..Default::default()
     })
 }
