@@ -66,9 +66,10 @@ npm run preview
 - `/docs/playground` runs Krabka's real KRaft consensus quorum directly in the browser.
 - `playground/` holds the Rust crate binding `krabka-kraft-core` to WebAssembly via `wasm-bindgen`, compiled during the site build via `playground/build.sh`.
 
-### 4. Interactive Performance Benchmarks (`/benchmarks` and `/docs/benchmarks`)
-- **Dashboard (`/benchmarks`):** Dynamic latency percentiles (p50, p99, p99.9) and throughput graphs comparing Krabka against Apache Kafka across hardware profiles.
-- **Methodology Guide (`/docs/benchmarks`):** In-depth technical documentation covering test topology, memory working set (RSS), and reproducible benchmark runbooks.
+### 4. Correctness & Verification (`/verification`)
+- **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka.
+- **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`.
+- The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
 
 ### 5. Aggregated Helm Chart Repository
 
@@ -129,7 +130,7 @@ krabka-website/
 │   ├── verify-code-stubs.mjs # Markdown and Astro code snippet syntax checker
 │   └── build-helm-index.sh   # Rebuilds public/charts from component repositories
 ├── src/
-│   ├── components/           # Reusable UI components (Navbar, Footer, BenchmarkBar, etc.)
+│   ├── components/           # Reusable UI components (Navbar, Footer, VerificationBar, etc.)
 │   ├── content.config.ts     # Astro 5 Content Collections glob loader schema
 │   ├── content/docs/         # Ingested markdown guides (gitignored, populated by sync-docs)
 │   ├── data/
@@ -138,17 +139,16 @@ krabka-website/
 │   ├── layouts/
 │   │   ├── BaseLayout.astro  # HTML shell, OpenGraph tags, JSON-LD Schema.org metadata
 │   │   ├── DocsLayout.astro  # Documentation shell with collapsible sidebar & sticky TOC
-│   │   └── ProseLayout.astro # Article layout for long-form whitepapers
+│   │   └── ProseLayout.astro # Article layout for long-form prose pages
 │   ├── pages/
 │   │   ├── 404.astro         # Custom branded 404 error page
 │   │   ├── api/index.astro   # Searchable API Reference Directory table
 │   │   ├── docs/             # Hub landing, module home templates, and [...slug].astro
 │   │   ├── features/         # Technical architecture pages (KRaft, Tiered Storage, etc.)
-│   │   ├── whitepapers/      # Architectural deep dives and scaling whitepapers
 │   │   ├── brand.astro       # Brand guidelines and vector assets
-│   │   ├── benchmarks.astro  # Interactive performance benchmark dashboard
 │   │   ├── get-started.astro # Interactive quickstart with Docker Compose and Helm
 │   │   ├── index.astro       # Primary ecosystem homepage
+│   │   ├── verification.astro # Correctness, Creusot, and Stateright overview
 │   │   └── versions.astro    # Release tracks and SLSA artifact provenance
 │   ├── styles/
 │   │   ├── custom.css        # Ocean dark theme, custom scrollbars, markdown typography

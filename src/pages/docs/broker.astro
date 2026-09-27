@@ -45,7 +45,7 @@ const brokerCrates = [
   { name: 'krabka-telemetry', desc: 'OTLP pipeline, Prometheus metrics, and pprof debug endpoints' },
   { name: 'krabka-barrier', desc: 'Distributed barrier alignment CLI utility' },
   { name: 'krabka-guard', desc: 'Mutants and invariant verification test harness CLI' },
-  { name: 'krabka-parse-benches', desc: 'Microbenchmarking parse harnesses and latency profiles' },
+  { name: 'krabka-verified', desc: 'Formally verified pure kernels (Creusot) shared by consensus, log, and security' },
 ];
 ---
 
@@ -77,7 +77,7 @@ const brokerCrates = [
 
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <code>krabka-broker</code> is a native Rust, byte-exact drop-in replacement for Apache Kafka. It runs without the JVM, using asynchronous I/O and direct kernel memory management for zero-copy record batching.
+        <code>krabka-broker</code> is a native Rust, byte-exact drop-in replacement for Apache Kafka. It runs without the JVM, using asynchronous I/O in safe Rust. Its safety-critical decisions are Creusot-proved kernels and its failure orderings are Stateright models.
       </p>
 
       <!-- Architecture & Engineering Guides -->
@@ -188,9 +188,9 @@ const brokerCrates = [
 
       <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
-        <a href={getPath('/docs/benchmarks')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
-          <div class="text-sm font-bold text-white">Benchmark Methodology →</div>
-          <p class="text-xs text-gray-400 mt-1">Direct I/O NVMe throughput, memory RSS, and latency profiles vs Strimzi Kafka.</p>
+        <a href={getPath('/docs/broker/verification')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Verification Catalog →</div>
+          <p class="text-xs text-gray-400 mt-1">Every Creusot-proved kernel, every Stateright model, and the preconditions each caller has to establish.</p>
         </a>
         <a href={getPath('/docs/runtime-architecture')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
           <div class="text-sm font-bold text-white">Runtime Architecture →</div>

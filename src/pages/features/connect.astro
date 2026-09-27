@@ -33,7 +33,7 @@ tombstones_on_delete = true`;
         Krabka Connect & Postgres CDC
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Stream real-time PostgreSQL database mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation without running a heavy external JVM Kafka Connect cluster.
+        Stream real-time PostgreSQL database mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation without running a separate Kafka Connect cluster.
       </p>
     </div>
 
@@ -75,14 +75,16 @@ tombstones_on_delete = true`;
 
         <div class="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans">
           <div>
-            <strong class="text-white">Looking for the Postgres compute substrate architecture?</strong>
-            <p class="text-gray-400 mt-0.5">Read our engineering whitepaper on how Krabka Gres scales Postgres-compatible writes across tenants and ranges.</p>
+            <strong class="text-white">Looking for Postgres-compatible compute on Krabka?</strong>
+            <p class="text-gray-400 mt-0.5">gres is part of the broader Krabka ecosystem and is documented in its own repository.</p>
           </div>
           <a
-            href={getPath('/whitepapers/gres-scaling')}
+            href="https://github.com/krabka-io/gres"
+            target="_blank"
+            rel="noopener noreferrer"
             class="shrink-0 inline-flex items-center gap-1 font-semibold text-krab-400 hover:text-krab-300 transition-colors"
           >
-            <span>Read Whitepaper</span>
+            <span>Visit gres</span>
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
@@ -106,7 +108,7 @@ tombstones_on_delete = true`;
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Active-Active Replicator (<code class="text-krab-400 font-mono text-xl">krabka-replicator</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          A native, high-throughput replication service wire-compatible with MirrorMaker 2. It synchronizes topic partitions across distinct geographic clusters, handles consumer offset translation, and prevents circular record replication for active-passive or active-active multi-region failover.
+          A native replication service wire-compatible with MirrorMaker 2. It synchronizes topic partitions across distinct geographic clusters, handles consumer offset translation, and prevents circular record replication for active-passive or active-active multi-region failover.
         </p>
       </div>
 

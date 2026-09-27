@@ -33,7 +33,7 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
         Native KRaft Consensus Quorum
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Krabka implements the Apache Kafka KRaft consensus protocol directly in memory-safe Rust (<code class="text-krab-300 font-mono text-sm">krabka-raft</code> and <code class="text-krab-300 font-mono text-sm">krabka-kraft-core</code>), delivering instantaneous leader elections, metadata compaction, and zero ZooKeeper baggage.
+        Krabka implements the Apache Kafka KRaft consensus protocol directly in memory-safe Rust (<code class="text-krab-300 font-mono text-sm">krabka-raft</code> and <code class="text-krab-300 font-mono text-sm">krabka-kraft-core</code>), with leader elections, metadata compaction, and no ZooKeeper dependency. The election and quorum decisions are Creusot-proved kernels, and the consensus engine has a Stateright model.
       </p>
     </div>
 
@@ -56,8 +56,8 @@ const formatCmd = `krabka-broker format --log-dir /var/lib/krabka --cluster-id k
             <p class="text-gray-400 leading-relaxed">Add or decommission controller voters on live clusters through <code class="font-mono text-krab-300">krabka-voters</code> without restarting the metadata quorum.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
-            <strong class="text-white font-bold">Sub-Second Failover</strong>
-            <p class="text-gray-400 leading-relaxed">Randomized election timers and async heartbeats trigger leader elections in under 800ms upon node partitions.</p>
+            <strong class="text-white font-bold">Verified Elections</strong>
+            <p class="text-gray-400 leading-relaxed">Randomized election timers and async heartbeats trigger a new election on partition. Quorum size and vote admission are Creusot-proved kernels, and the consensus engine has a Stateright model.</p>
           </div>
         </div>
       </div>

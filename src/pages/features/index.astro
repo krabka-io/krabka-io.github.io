@@ -3,10 +3,10 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 
 const comparisons = [
-  { feature: 'Runtime', krabka: 'Native Rust Binary (tokio async)', kafka: 'JVM (OpenJDK 21) + GC' },
-  { feature: 'Broker Memory Working Set', krabka: '114–622 MiB RSS', kafka: '2.5–5.5 GiB Heap + Off-Heap' },
-  { feature: 'Cold Start to Ready', krabka: '1.2 seconds', kafka: '8–9 seconds' },
-  { feature: 'Memory Safety', krabka: 'Safe Rust (unsafe forbidden)', kafka: 'JVM-managed / manual tuning' },
+  { feature: 'Runtime', krabka: 'Native Rust binary (tokio async)', kafka: 'JVM (OpenJDK 21)' },
+  { feature: 'Memory Safety', krabka: 'Safe Rust, unsafe_code forbidden by lint', kafka: 'JVM-managed' },
+  { feature: 'Formal Verification', krabka: 'Creusot-proved decision kernels (krabka-verified)', kafka: 'None' },
+  { feature: 'Model Checking', krabka: 'Stateright models rerun on every pull request', kafka: 'None' },
   { feature: 'Metadata Consensus', krabka: 'Native KRaft quorum (KIP-595 wire)', kafka: 'KRaft' },
   { feature: 'Kafka Wire Protocol', krabka: 'Apache Kafka 4.3 (byte-exact codecs)', kafka: 'Apache Kafka 4.3' },
   { feature: 'Admin Tooling', krabka: 'Standard kafka-*.sh CLI tools', kafka: 'Standard kafka-*.sh CLI tools' },
@@ -23,7 +23,7 @@ const modules = [
     points: [
       'Byte-exact KRaft metadata records & in-memory image',
       'Dynamic voter addition and decommission without cluster restart',
-      'Fast leader elections with sub-second failover',
+      'Election and quorum decisions proved with Creusot, consensus model-checked with Stateright',
     ],
   },
   {
@@ -32,9 +32,9 @@ const modules = [
     slug: getPath('/features/tiered-storage'),
     desc: 'Decouple compute from storage (krabka-remote-storage & krabka-object-store). Stream older partition segments automatically into cloud object storage (Amazon S3, Google Cloud Storage, or MinIO) backed by the __remote_log_metadata topic.',
     points: [
-      'Infinite partition retention at cloud object-storage costs',
+      'Long partition retention at cloud object-storage costs',
       'Local write-ahead log with async cloud offloading',
-      'Zero impact on real-time produce throughput',
+      'Retention and remote-read decisions are Creusot-proved kernels',
     ],
   },
   {
@@ -44,7 +44,7 @@ const modules = [
     desc: 'Built-in change data capture (CDC) and connector runtime. Stream PostgreSQL WAL mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation.',
     points: [
       'PostgreSQL logical replication worker over pgoutput',
-      'High-throughput distributed replicator (MirrorMaker 2 compatible)',
+      'Distributed replicator (MirrorMaker 2 compatible)',
       'Schema-aware record transformations and checkpoints',
     ],
   },
@@ -71,14 +71,14 @@ const modules = [
     ],
   },
   {
-    title: 'Full-Signal Observability',
-    tag: 'krabka-o11y',
-    slug: getPath('/features/observability'),
-    desc: 'Telemetry is a first-class citizen (krabka-telemetry). Emits OpenTelemetry traces, PromQL metrics, continuous CPU/memory profiles, and structured JSON/logfmt logs with zero external sidecars required.',
+    title: 'Correctness & Verification',
+    tag: 'krabka-verified',
+    slug: getPath('/verification'),
+    desc: 'Safe Rust rules out memory corruption. Creusot proves the contracts of the decision kernels that admit, fence, retain, and elect, and Stateright enumerates the crash and retry orderings around them. Every pull request reruns every proof and every model.',
     points: [
-      'Native PromQL metrics endpoints on /metrics',
-      'Distributed request tracing with OpenTelemetry & W3C trace-context',
-      'Pre-built Grafana 11 dashboards in krabka-o11y-demo',
+      'unsafe_code forbidden under Cargo and Bazel',
+      'Creusot proof sessions committed beside the code',
+      'Stateright models with pinned unique-state counts',
     ],
   },
 ];
@@ -86,7 +86,7 @@ const modules = [
 
 <BaseLayout
   title="Features & Architecture Overview | Krabka"
-  description="Explore the modular architectural superpowers of Krabka: Native KRaft consensus, Tiered Storage, Postgres CDC, Polyglot Arrow Streams, Kubernetes Operator, and Observability."
+  description="Explore the architecture of Krabka: native KRaft consensus, tiered storage, Kafka Connect and CDC, polyglot Arrow streams, the Kubernetes operator, and formal verification."
 >
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
     <div class="text-left border-b border-white/10 pb-8 mb-12 max-w-3xl">
@@ -94,7 +94,7 @@ const modules = [
         Architectural Superpowers
       </h1>
       <p class="mt-4 text-lg text-gray-300">
-        Every layer of Krabka is written in memory-safe Rust to maximize CPU efficiency, minimize latency jitter, and simplify cloud-native operations.
+        Every layer of Krabka is written in safe Rust, and the decisions that matter most are proved with Creusot or model-checked with Stateright.
       </p>
     </div>
 
@@ -103,7 +103,7 @@ const modules = [
       <div class="mb-6">
         <h2 class="text-2xl font-bold text-white">Krabka vs JVM Apache Kafka</h2>
         <p class="mt-1 text-gray-400 text-sm">
-          A side-by-side comparison of runtime characteristics and operational footprint.
+          A side-by-side comparison of runtime, verification, and compatibility characteristics.
         </p>
       </div>
 

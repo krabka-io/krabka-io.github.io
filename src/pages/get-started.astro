@@ -1,6 +1,5 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import GrafanaPreview from '../components/GrafanaPreview.astro';
 import { getPath } from '../utils/paths';
 
 const deploySnippets = {
@@ -69,6 +68,12 @@ public class App {
   cli: `kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning`
 };
+
+const inspectSnippet = `# The standard Apache Kafka admin tools work unmodified against Krabka.
+kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic quickstart-events
+kafka-metadata-quorum.sh --bootstrap-server localhost:9092 describe --status
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
 ---
 
 <BaseLayout
@@ -199,20 +204,34 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-e
       </div>
     </div>
 
-    <!-- Step 3: Inspect & Monitor (Interactive Mock Grafana Dashboard) -->
+    <!-- Step 3: Inspect the cluster with the standard Kafka admin tools -->
     <div class="mb-8">
       <div class="flex items-center gap-3 mb-6">
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">3</span>
-        <h2 class="text-2xl font-bold text-white">Inspect Telemetry & Dashboards</h2>
+        <h2 class="text-2xl font-bold text-white">Inspect the Cluster with the Kafka Admin Tools</h2>
       </div>
 
       <div class="space-y-4">
         <p class="text-gray-300 leading-relaxed font-sans">
-          The quickstart stack includes <strong class="text-white">krabka-o11y</strong> and a pre-configured Grafana instance tracking real-time produce throughput, memory working set, latency histograms, and KRaft quorum state.
+          Krabka speaks the Apache Kafka wire protocol byte for byte, so the <code class="font-mono text-krab-300 text-sm">kafka-*.sh</code> tools from any Kafka distribution describe topics, the KRaft quorum, consumer groups, and the negotiated API versions without changes.
         </p>
 
-        <!-- Live Visual Grafana Dashboard Mockup -->
-        <GrafanaPreview />
+        <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
+          <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
+            <div class="flex justify-between items-center text-xs text-gray-400 mb-2 font-sans">
+              <span>Describe topics, quorum, groups, and API versions</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={inspectSnippet}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <pre class="overflow-x-auto text-krab-300 bg-black/40 p-4 rounded-xl border border-white/5"><code>{inspectSnippet}</code></pre>
+          </div>
+        </div>
+
+        <p class="text-sm text-gray-400 leading-relaxed font-sans">
+          The broker also serves Prometheus metrics on port <code class="font-mono text-gray-300">9404</code>. To collect and query them alongside traces, logs, and profiles, see <a href="https://github.com/krabka-io/krabka-o11y" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold">krabka-o11y</a> in the broader Krabka ecosystem.
+        </p>
       </div>
     </div>
   </div>
