@@ -46,9 +46,11 @@ const controls = [
         deliberate act, not an accident of timing.
       </p>
       <p>
-        The brokers speak the real Kafka wire protocol to the real clients, and the durable state of every node (partition logs,
-        the controller log, the registry's schemas) is kept in this browser's IndexedDB, so a reload reopens the cluster where you
-        left it. Several tabs, on one machine or across the internet, can each host a share of the nodes over WebRTC data channels.
+        The brokers speak the real Kafka wire protocol to the real clients, and their durable state (partition logs and their
+        copy of the KRaft metadata log) is kept in this browser's IndexedDB, so a reload reopens the cluster where you left it. The
+        schema registry keeps its schemas where Confluent's does, in the <code class="font-mono text-krab-300">_schemas</code>
+        topic on the brokers, and replays it on every start. Several tabs, on one machine or across the internet, can each host a
+        share of the nodes over WebRTC data channels.
       </p>
     </div>
 
@@ -72,8 +74,10 @@ const controls = [
         cluster: a KRaft quorum without KIP-853 is static, so the new broker observes it, and its inspector says why.
       </p>
       <p>
-        <strong class="text-white">Schema registry with an Avro producer and a decoding consumer</strong> registers a schema
-        before the first record and decodes every value by its schema id. <strong class="text-white">Kafka Streams word
+        <strong class="text-white">Schema registry with an Avro producer and a decoding consumer</strong> starts a registry that
+        creates its <code class="font-mono text-krab-300">_schemas</code> topic on the brokers; the producer registers a schema
+        before the first record, and the consumer decodes every value by its schema id. Add a second registry: the two elect a
+        primary through their group, and the secondary forwards the writes it takes to the primary. <strong class="text-white">Kafka Streams word
         count</strong> joins a KIP-1071 streams group, counts words in a state store backed by the changelog topic the group
         creates, and answers a store query from the command bar. <strong class="text-white">Network probe</strong> runs on two
         diagnostic node kinds, an echo and a pinger, and needs nothing but the virtual network: set a latency or a loss on the
