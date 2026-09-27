@@ -229,7 +229,7 @@ Store names are conventions per node kind, documented on the node type. The brok
 }
 ```
 
-`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `id` is the identity the page assigns when it first saves a scenario; the durable state in IndexedDB is keyed by it. `topics` are created exactly as `kafka-topics --create` would: an admin connection the world owns sends a real `CreateTopics` to the broker the metadata names as controller once that broker serves, and the broker forwards it to the active controller in an `Envelope`.
+`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `id` is the identity the page assigns when it first saves a scenario; the durable state in IndexedDB is keyed by it. `topics` are created exactly as `kafka-topics --create` would: an admin connection the world owns, bootstrapped at the scenario's brokers, simulated or real, sends a real `CreateTopics` to the broker the metadata names as controller once that broker serves, and the broker forwards it to the active controller in an `Envelope`.
 
 Node config keys are owned by the node kind's module and documented in that module's rustdoc. Unknown keys are an error at load time, not ignored.
 

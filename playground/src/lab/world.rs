@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     LabError, build_node,
     events::{Event, EventLog},
+    external::REAL_BROKER_KIND,
     net::{
         ConnId, Ctx, DurableImage, DurableOp, Endpoint, Frame, KAFKA_PORT, Millis, Node, NodeId,
         Payload, Rng, TimedFrame,
@@ -315,13 +316,13 @@ impl World {
     }
 
     /// The admin client that creates the scenario's topics. It is a real node
-    /// of kind `admin`, hidden from the builder, bootstrapped at the first
-    /// broker of the scenario.
+    /// of kind `admin`, hidden from the builder, bootstrapped at the brokers
+    /// of the scenario, simulated or real.
     fn add_admin_for_topics(&mut self) -> Result<(), LabError> {
         let bootstrap: Vec<NodeId> = self
             .nodes
             .values()
-            .filter(|s| s.spec.kind == "broker")
+            .filter(|s| s.spec.kind == "broker" || s.spec.kind == REAL_BROKER_KIND)
             .map(|s| s.spec.id)
             .collect();
         if bootstrap.is_empty() {
@@ -1601,6 +1602,36 @@ mod tests {
         let pinger = world.node_snapshot(NodeId(3)).unwrap();
         assert!(pinger["echoes"] == 0);
         assert!(pinger["closes"].as_u64().unwrap() >= 2);
+    }
+
+    #[test]
+    fn scenario_topics_on_real_brokers_go_through_an_admin_bootstrapped_at_them() {
+        // Every broker of this scenario is a real one the page runs. Its
+        // topics still get the world's admin node, the next free id, which
+        // opens its first connection to one of those brokers.
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1, "seed": 7, "links": { "default_latency_ms": 10 },
+            "nodes": [
+                { "id": 1, "kind": "krabka-broker" },
+                { "id": 2, "kind": "krabka-broker" }
+            ],
+            "topics": [{ "name": "orders", "partitions": 3, "replication_factor": 2 }]
+        }))
+        .unwrap();
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.step_until(50);
+        let opened: Vec<(Endpoint, Endpoint)> = world
+            .drain_external()
+            .into_iter()
+            .filter(|timed| timed.frame.payload == Payload::Open)
+            .map(|timed| (timed.frame.src, timed.frame.dst))
+            .collect();
+        let admin = Endpoint::client(NodeId(3));
+        assert!(
+            opened == [(admin, Endpoint::kafka(NodeId(1)))]
+                || opened == [(admin, Endpoint::kafka(NodeId(2)))],
+            "{opened:?}"
+        );
     }
 
     #[test]
