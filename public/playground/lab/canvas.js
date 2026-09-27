@@ -230,12 +230,14 @@ export class Canvas {
     g.classList.toggle("lab-offline", offline);
     g.classList.toggle("lab-selected", sel === 0);
     g.classList.toggle("lab-pick-b", sel === 1);
+    g.classList.toggle("lab-real", Boolean(k.real));
     g.dataset.kind = n.kind;
     g.dataset.hosted = String(Boolean(n.hosted));
     g.dataset.alive = String(Boolean(n.alive));
     g.dataset.isolated = String(Boolean(n.isolated));
     g.dataset.status = st;
     const bits = [n.name, k.label, n.alive ? "up" : "down"];
+    if (k.real) bits.push("runs the real code");
     if (n.isolated) bits.push("isolated");
     if (remote) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
     if (st) bits.push(st);
@@ -243,6 +245,8 @@ export class Canvas {
     // Badges, right-aligned from the card's top-right corner.
     entry.badges.innerHTML = "";
     const badges = [];
+    // A node that runs the real code, not the lab's model of it.
+    if (k.real) badges.push(["real", "lab-badge-real"]);
     if (!n.alive) badges.push(["down", "lab-badge-down"]);
     if (n.isolated) badges.push(["isolated", "lab-badge-isolated"]);
     if (offline) badges.push(["host offline", "lab-badge-offline"]);

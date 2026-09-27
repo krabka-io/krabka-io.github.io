@@ -8,6 +8,10 @@
 // assigned it, ships every frame for a node it does not host to the hub, and
 // draws the rest of the cluster from the snapshots the hub relays.
 //
+// A node of a pinned kind (a real broker: its process and its volume live in
+// the hub's browser) stays on the hub. The session never moves it, whoever
+// asks.
+//
 // The site is static, so there is no signalling server. The hub makes an
 // invite (its SDP offer, compressed into a `?join=` link); the spoke opens
 // it, shows an answer code, and the person pastes that code back into the
@@ -26,6 +30,7 @@
 //   bye       {}
 
 import { encodeShare, decodeShare } from "./codec.js";
+import { kindOf } from "./kinds.js";
 
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const GATHER_TIMEOUT_MS = 4000;
@@ -212,12 +217,24 @@ export class Session {
     this.hooks.onPeers();
   }
 
-  // The hub moves a node to another peer. The node restarts in the new tab.
+  // Whether a node must stay in the tab that hosts it now: its kind is pinned.
+  pinned(nodeId) {
+    const node = (this.hooks.scenario().nodes || []).find((n) => n.id === Number(nodeId));
+    return Boolean(node && kindOf(node.kind).pinned);
+  }
+
+  // The hub moves a node to another peer. The node restarts in the new tab. A
+  // pinned node stays on the hub.
   setHost(nodeId, peerId) {
-    if (this.role !== "hub") return;
+    if (this.role !== "hub") return false;
+    if (peerId !== this.me && this.pinned(nodeId)) {
+      this.hooks.onLog("A real broker stays in this tab: its process and its volume live in this browser");
+      return false;
+    }
     this.hosting.set(nodeId, peerId);
     this.broadcastScenario();
     this.hooks.onPeers();
+    return true;
   }
 
   // Every node the hub does not know yet is hosted by the hub; nodes that
@@ -226,7 +243,9 @@ export class Session {
     if (this.role !== "hub") return;
     const doc = this.hooks.scenario();
     const ids = new Set((doc.nodes || []).map((n) => n.id));
-    for (const id of ids) if (!this.hosting.has(id)) this.hosting.set(id, this.me);
+    for (const n of doc.nodes || []) {
+      if (!this.hosting.has(n.id) || kindOf(n.kind).pinned) this.hosting.set(n.id, this.me);
+    }
     for (const id of [...this.hosting.keys()]) if (!ids.has(id)) this.hosting.delete(id);
   }
 
@@ -268,7 +287,7 @@ export class Session {
   }
 
   requestTakeover(nodeId) {
-    if (this.role === "spoke" && this.hub) this.hub.send({ t: "takeover", node: nodeId });
+    if (this.role === "spoke" && this.hub && !this.pinned(nodeId)) this.hub.send({ t: "takeover", node: nodeId });
   }
 
   // ---- the channel --------------------------------------------------------------------------------

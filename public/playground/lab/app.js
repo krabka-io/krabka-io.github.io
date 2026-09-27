@@ -5,7 +5,10 @@
 // snapshot back. Scenarios autosave to IndexedDB with their durable node
 // state, and several tabs can share one cluster over WebRTC (`session.js`).
 //
-// Everything on screen came out of the module: no node logic lives here.
+// Everything on screen came out of the module: no node logic lives here. A
+// real broker is the exception that proves it: `external.js` runs its
+// process in a Worker, and the page reloads once, cross-origin isolated, the
+// first time a scenario with one runs here.
 
 import init, { Lab } from "../krabka_playground.js";
 import { el, button, select, labelled, fmtMs, fmtNum, copyToClipboard, debounce, Toasts } from "./dom.js";
@@ -22,11 +25,15 @@ import { KINDS, kindOf, defaultName, probeAvailability } from "./kinds.js";
 import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
+import { ExternalHost, REAL_BROKER_KIND, hasRealBroker } from "./external.js";
 
 const ROOT_ID = "krabka-lab";
 const AUTOSAVE_MS = 800;
 const BROADCAST_MS = 150;
 const DEFAULT_PRESET = "network-probe";
+const COI_URL = new URL("../../docs/lab/coi.js", import.meta.url).href;
+// Set just before the isolation reload, so the reloaded page can say why.
+const RELOADED_KEY = "krabka-lab.isolation-reload";
 
 function newScenarioId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -41,6 +48,7 @@ class LabApp {
     this.availability = {};
     this.saveState = "";
     this.remoteStates = new Map();
+    this.pageEvents = 0;
     this.toasts = new Toasts(root);
 
     this.storage = new LabStorage({ onError: (err, ctx) => this.toasts.error(err, ctx) });
@@ -59,6 +67,16 @@ class LabApp {
       hostedSnapshots: () => (this.world.snapshot()?.nodes || []).filter((n) => n.hosted).map((n) => ({ id: n.id, state: n.state })),
       scenario: () => this.world.scenario(),
     });
+    // The processes behind this tab's real brokers.
+    this.external = new ExternalHost({
+      route: (frames) => this.world.routeExternal(frames),
+      publish: (id, state) => this.world.applyRemoteSnapshot(id, state),
+      world: () => this.world.liveSnapshot(),
+      now: () => this.world.now(),
+      scenario: () => this.world.scenario(),
+      event: (id, kind, detail) => this.processEvent(id, kind, detail),
+      exited: (id, exit) => this.processExited(id, exit),
+    });
     this.world = new LabWorld(Lab, {
       onError: (err, ctx) => this.toasts.error(err, ctx),
       onSnapshot: (snap) => this.onSnapshot(snap),
@@ -70,6 +88,7 @@ class LabApp {
       onReset: () => this.onReset(),
       onClock: () => this.renderClock(),
     });
+    this.world.attachExternal(this.external);
     this.availability = probeAvailability(Lab);
 
     this.buildLayout();
@@ -144,6 +163,8 @@ class LabApp {
       storage: this.storage,
       scenarioId: () => this.world.id,
       nodes: () => this.nodeList(),
+      volumes: () => (hasRealBroker(this.world.scenario()) ? this.external.volumes(this.world.id) : Promise.resolve([])),
+      onForgetVolume: (volume) => this.forgetVolume(volume),
       onForgetNode: (id) => this.forgetNode(id),
       onForgetScenario: () => this.forgetScenario(),
       onPersistChange: (on) => {
@@ -422,7 +443,7 @@ class LabApp {
     const editable = this.session.role !== "spoke" && !k.hidden;
     return [
       { label: "Edit…", command: "edit", disabled: !editable },
-      { label: "Send command…", command: "control" },
+      { label: "Send command…", command: "control", disabled: Boolean(k.real) },
       { separator: true },
       { label: snap?.alive ? "Kill" : "Restart", command: snap?.alive ? "kill" : "restart" },
       { label: "Wipe (restart from nothing)", command: "wipe" },
@@ -467,10 +488,88 @@ class LabApp {
     return this.world.updateNode(id, spec);
   }
 
-  fault(f) {
+  fault(f, { quiet = false } = {}) {
     if (this.world.fault(f)) {
       this.session.broadcastFault(f);
-      this.toasts.info(describeFault(f, (id) => this.nodeName(id)));
+      if (!quiet) this.toasts.info(describeFault(f, (id) => this.nodeName(id)));
+    }
+  }
+
+  // ---- real brokers ------------------------------------------------------------------------------------------
+
+  // A timeline entry about a real broker's process. The world does not run
+  // the process, so the page records these itself.
+  processEvent(id, kind, detail) {
+    this.pageEvents += 1;
+    this.timeline.append([{ index: `page-${this.pageEvents}`, at: this.world.now(), node: id, kind, detail }]);
+  }
+
+  // A real broker's process ended by itself: the node goes down in the world.
+  processExited(id, exit) {
+    this.toasts.warn(`${this.nodeName(id)}: the process ${exit.message}; the node is down`);
+    this.fault(FAULT.kill(id), { quiet: true });
+  }
+
+  // Whether this tab runs the scenario's real brokers: alone or as the hub
+  // (they never move to a spoke).
+  hostsRealBroker(doc) {
+    return this.session.role !== "spoke" && hasRealBroker(doc);
+  }
+
+  // A real broker runs in a Worker that needs a cross-origin isolated page.
+  // When this tab would run one and the page is not isolated, the scenario is
+  // saved and the page reloads once, isolated, and reopens it. Nothing
+  // happens when the broker build is not on the site: the nodes say so.
+  // Resolves true when the page is about to reload.
+  async ensureIsolation(doc = this.world.scenario()) {
+    if (!this.hostsRealBroker(doc)) return false;
+    const { ensureCrossOriginIsolation } = await import(COI_URL);
+    if (globalThis.crossOriginIsolated) {
+      this.external.setIsolation(await ensureCrossOriginIsolation());
+      if (sessionFlag(RELOADED_KEY, false)) this.toasts.info("The page reloaded once to turn on cross-origin isolation: the real broker runs in this tab.");
+      return false;
+    }
+    if (!(await this.external.moduleAvailable())) return false;
+    this.toasts.warn("This scenario runs a real Krabka broker, which needs cross-origin isolation: the page reloads once to turn it on. The scenario is kept.");
+    await this.keepScenarioForReload();
+    sessionFlag(RELOADED_KEY, true);
+    const coi = await ensureCrossOriginIsolation();
+    if (!coi.isolated && !coi.reloading) {
+      this.external.setIsolation(coi);
+      this.toasts.warn(`Real brokers cannot run in this browser: ${coi.reason}`);
+    }
+    return coi.reloading;
+  }
+
+  // Saves the scenario, with an identity, as the last one, so the reload
+  // reopens it with its stored state.
+  async keepScenarioForReload() {
+    this.autosave.cancel();
+    if (!this.world.id) {
+      const id = newScenarioId();
+      this.world.setId(id);
+      this.storage.syncFromMirror(id, this.session.myHostedIds());
+    }
+    this.world.drainDurable();
+    const doc = this.world.scenario();
+    saveLocal(doc);
+    try {
+      await this.storage.saveScenario(doc);
+      await this.storage.flush();
+    } catch (err) {
+      this.toasts.error(err, "save before the reload");
+    }
+    // A shared link would open as a new scenario after the reload.
+    if (/[#&]s=/.test(window.location.hash)) history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }
+
+  async forgetVolume(volume) {
+    try {
+      await this.external.forgetVolume(volume);
+      this.storagePanel.refresh();
+      this.toasts.info(`Forgot the volume ${volume}`);
+    } catch (err) {
+      this.toasts.error(err, "forget volume");
     }
   }
 
@@ -508,6 +607,8 @@ class LabApp {
     const k = KINDS[kind];
     if (!k) return;
     if (this.availability[kind] === false) this.toasts.warn(`${k.label}: not in the loaded module yet; the crate will reject it`);
+    // A real broker may need the one isolation reload first; say so up front.
+    const reloads = kind === REAL_BROKER_KIND && !globalThis.crossOriginIsolated && this.session.role !== "spoke" && (await this.external.moduleAvailable());
     const scenario = this.world.scenario();
     const nextId = scenario.nodes.reduce((m, n) => Math.max(m, n.id), 0) + 1;
     const nameInput = el("input", "lab-input");
@@ -519,12 +620,21 @@ class LabApp {
     const body = el("div");
     body.append(labelled("Name", nameInput), form.root);
     if (!k.fields.length) body.appendChild(el("p", "lab-muted lab-small", "This kind has no configuration."));
+    if (reloads) {
+      const note = el(
+        "p",
+        "lab-small lab-reload-note",
+        "A real broker runs in a Web Worker on the browser WASI runtime, which needs a cross-origin isolated page. Adding it reloads this page once to turn isolation on; the scenario and every node's stored state are kept.",
+      );
+      note.dataset.field = "isolation-reload";
+      body.appendChild(note);
+    }
     const err = el("p", "lab-field-error");
     body.appendChild(err);
     await openDialog(this.root, {
       title: `Add ${k.label.toLowerCase()}`,
       body,
-      submitLabel: "Add",
+      submitLabel: reloads ? "Add and reload" : "Add",
       onSubmit: () => {
         const r = form.read();
         if (r.errors.length) return false;
@@ -537,6 +647,7 @@ class LabApp {
           return false;
         }
         this.select(id);
+        if (kind === REAL_BROKER_KIND) this.ensureIsolation();
         return true;
       },
     });
@@ -627,6 +738,7 @@ class LabApp {
       this.storagePanel.refresh();
       const restored = imgs ? Object.keys(imgs).length : 0;
       if (restored) this.toasts.info(`Restored durable state for ${restored} node${restored === 1 ? "" : "s"}`);
+      await this.ensureIsolation(this.world.scenario());
     }
     return ok;
   }
@@ -660,6 +772,7 @@ class LabApp {
   async deleteSaved(id) {
     try {
       await this.storage.deleteScenario(id);
+      await this.external.forgetScenarioVolumes(id);
       if (this.world.id === id) this.world.setId("");
       this.palette.refreshSaved();
       this.toasts.info("Deleted");
@@ -731,8 +844,9 @@ class LabApp {
       const hosted = this.session.myHostedIds();
       const ids = hosted ?? this.nodeList().map((n) => n.id);
       await this.storage.forgetScenario(this.world.id, ids, hosted == null);
+      const running = await this.external.forgetScenarioVolumes(this.world.id);
       this.storagePanel.refresh();
-      this.toasts.info("Forgot the stored data of this scenario");
+      this.toasts.info(running ? `Forgot the stored data of this scenario, except the volumes of ${running} running real broker${running === 1 ? "" : "s"}` : "Forgot the stored data of this scenario");
     } catch (err) {
       this.toasts.error(err, "forget");
     }
@@ -779,6 +893,20 @@ class LabApp {
     }
     this.world.start();
     this.pushPanels();
+  }
+}
+
+// Sets (`value` true) or takes and clears (`value` false) a flag in
+// sessionStorage; returns whether it was set. Without sessionStorage there is
+// no flag.
+function sessionFlag(key, value) {
+  try {
+    const was = sessionStorage.getItem(key) === "1";
+    if (value) sessionStorage.setItem(key, "1");
+    else sessionStorage.removeItem(key);
+    return was;
+  } catch {
+    return false;
   }
 }
 

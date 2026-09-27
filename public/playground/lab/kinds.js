@@ -4,7 +4,9 @@
 // the form fields the palette turns into a `config` object (keys follow
 // `playground/docs/lab-design.md`), the edges the canvas derives from a
 // config, the one-line status the card shows, and a probe config the boot
-// sequence uses to find out which kinds the loaded module accepts.
+// sequence uses to find out which kinds the loaded module accepts. A kind
+// marked `real` runs the real code in a process of this tab (`external.js`);
+// one marked `pinned` never moves to another tab of a session.
 //
 // Field spec keys:
 //   key        the config key (nested through `group` fields)
@@ -21,6 +23,7 @@
 //   stringify  for json: store the document as a JSON string, not an object
 
 import { renderView } from "./views.js";
+import { MISSING_BUILD, REAL_BROKER_KIND } from "./external.js";
 
 export const KAFKA_PORT = 9092;
 export const HTTP_PORT = 8081;
@@ -29,7 +32,7 @@ const BOOTSTRAP = {
   key: "bootstrap",
   label: "Bootstrap brokers",
   type: "noderefs",
-  of: ["broker"],
+  of: ["broker", REAL_BROKER_KIND],
   required: true,
   help: "The brokers the client connects to first. Metadata leads it to the rest.",
 };
@@ -67,6 +70,30 @@ export const KINDS = {
       if (topics != null) parts.push(`${topics} topics`);
       return parts.join(" · ");
     },
+  },
+  [REAL_BROKER_KIND]: {
+    kind: REAL_BROKER_KIND,
+    label: "Krabka broker (real)",
+    glyph: "▣",
+    color: "#f7b73a",
+    real: true,
+    pinned: true,
+    description: "The real krabka-broker, compiled to wasm32-wasip1, in a Web Worker on the browser WASI runtime. Its disk is a volume in this browser, so it runs in this tab.",
+    listens: KAFKA_PORT,
+    probe: {},
+    // Every key but `voter` lands in KRABKA_CONFIG, the JSON form of the
+    // broker's `broker.toml` (see CONFIG_KEYS in external.js); empty keeps the
+    // broker's default.
+    fields: [
+      { key: "voter", label: "KRaft voter", type: "boolean", default: true, emitDefault: false, help: "Listed in KRABKA_VOTERS: a controller and a broker. Unchecked, it runs the broker role only." },
+      { key: "rack", label: "Rack", type: "text", placeholder: "a", help: "The broker's rack (KIP-392). Sent as rack." },
+      { key: "num_partitions", label: "Default partitions", type: "number", min: 1, max: 2147483647, step: 1, help: "Kafka's num.partitions. Sent as runtime.num_partitions." },
+      { key: "default_replication_factor", label: "Default replication factor", type: "number", min: 1, max: 32767, step: 1, help: "Kafka's default.replication.factor. Sent as runtime.default_replication_factor." },
+      { key: "min_insync_replicas", label: "min.insync.replicas", type: "number", min: 1, max: 2147483647, step: 1, help: "The broker's default min.insync.replicas. Sent as runtime.default_min_insync_replicas." },
+      { key: "replica_lag_time_max_ms", label: "Replica lag time max (ms)", type: "number", min: 1, max: 2147483647, step: 1, help: "Kafka's replica.lag.time.max.ms. Sent as replica_lag_time_max." },
+    ],
+    edges: () => [],
+    status: (s) => realBrokerStatus(s),
   },
   "schema-registry": {
     kind: "schema-registry",
@@ -219,7 +246,7 @@ export const KINDS = {
     description: "Opens a connection to a target and pings it on a period; reports the mean round trip.",
     probe: { target: 1 },
     fields: [
-      { key: "target", label: "Target", type: "noderef", of: ["echo", "broker", "schema-registry", "pinger"], required: true },
+      { key: "target", label: "Target", type: "noderef", of: ["echo", "broker", REAL_BROKER_KIND, "schema-registry", "pinger"], required: true },
       { key: "period_ms", label: "Period (ms)", type: "number", default: 100, min: 1, step: 1 },
       { key: "port", label: "Port", type: "number", default: KAFKA_PORT, emitDefault: false, min: 0, max: 65535, step: 1, help: "9092 for a broker or echo, 8081 for a registry." },
     ],
@@ -245,7 +272,7 @@ export const KINDS = {
 };
 
 // The kinds the palette offers, in order.
-export const KIND_ORDER = ["broker", "schema-registry", "producer", "consumer", "streams", "echo", "pinger"];
+export const KIND_ORDER = ["broker", REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "echo", "pinger"];
 
 const UNKNOWN = {
   kind: "?",
@@ -350,6 +377,24 @@ export function probeAvailability(Lab) {
     // Nothing to release.
   }
   return available;
+}
+
+// The card's line for a real broker: what its process is doing.
+function realBrokerStatus(s) {
+  const p = s.process;
+  if (!p) return "";
+  switch (p.state) {
+    case "running": {
+      const c = s.connections || {};
+      return `real · ${(c.inbound ?? 0) + (c.outbound ?? 0)} conns${p.lagging ? " · lagging" : ""}`;
+    }
+    case "unavailable":
+      return p.reason === MISSING_BUILD ? "no build on this site" : "unavailable";
+    case "exited":
+      return p.exit && p.exit.code != null ? `exited ${p.exit.code}` : "exited";
+    default:
+      return String(p.state);
+  }
 }
 
 // ---- helpers over loosely-shaped snapshots ------------------------------------------

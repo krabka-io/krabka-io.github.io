@@ -11,6 +11,13 @@
 // rejected config, a bad fault) becomes a toast, never a broken page.
 //
 // Seeds and times cross the boundary as plain numbers (milliseconds).
+//
+// Real brokers. While this tab hosts an external node (`external.js`), the
+// world advances event by event instead: at every instant something reaches
+// an external node, or a process's timer falls due, the processes' clock moves
+// there, they get their frames, and the world waits until they have answered
+// and blocked again before time moves on. That keeps a real process on the
+// lab's logical clock, like the nodes the module runs.
 
 export const SPEEDS = [0.1, 0.5, 1, 2, 5, 20];
 const SNAPSHOT_INTERVAL_MS = 50;
@@ -19,11 +26,16 @@ const SNAPSHOT_INTERVAL_MS = 50;
 const MAX_WALL_DELTA_MS = 250;
 const SETTLE_WINDOW_MS = 5000;
 const SETTLE_STEP_MS = 10;
+// How long the world waits for a real broker at one instant before it lets
+// that process run free, and how long it steps before it yields to the page.
+const QUIESCE_BUDGET_MS = 200;
+const SLICE_MS = 12;
 // Node ids start at 1, so a hosted list of `[0]` runs nothing. The crate reads
 // an empty list as "run everything".
 const NONE_HOSTED = [0];
 
 const u64 = (n) => Math.max(0, Math.floor(Number(n) || 0));
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ---- the egress scheduler -----------------------------------------------------------
 
@@ -151,6 +163,21 @@ export class LabWorld {
     this.name = "";
     this.hostedIds = null; // null: every node runs here
     this.id = "";
+    // The real brokers this tab runs (`ExternalHost`), the lockstep run in
+    // flight, and a counter that tells a run its world was replaced.
+    this.external = null;
+    this.run = null;
+    this.generation = 0;
+  }
+
+  // Hosts the processes behind the world's external nodes.
+  attachExternal(host) {
+    this.external = host;
+  }
+
+  // Whether the world steps in lockstep with real processes.
+  get lockstep() {
+    return this.lab != null && this.external != null && this.external.active;
   }
 
   // Run `fn` against the module and report, not throw, when it fails.
@@ -175,6 +202,7 @@ export class LabWorld {
     this.name = "";
     this.id = "";
     this.hostedIds = null;
+    this.external?.reset();
     this.hooks.onLoad?.(null, {});
     this.afterReset();
     return this.lab != null;
@@ -203,10 +231,14 @@ export class LabWorld {
     this.topics = (doc.topics || []).map((t) => ({ ...t }));
     this.name = doc.name || "";
     this.id = doc.id || "";
-    // Frames held for the old world's peers went with it.
+    // Frames held for the old world's peers went with it, and so did the
+    // processes of its real brokers; their volumes stay.
     this.egress.clear();
+    this.generation += 1;
+    this.external?.reset();
     this.hooks.onLoad?.(doc, images || {});
     this.afterReset();
+    this.external?.sync();
     return true;
   }
 
@@ -232,6 +264,7 @@ export class LabWorld {
       if (!nextById.has(id)) {
         this.guard("remove node", () => this.lab.removeNode(id));
         this.egress.purge(nodePurge(id));
+        this.external?.nodeRemoved(id);
       }
     }
     for (const spec of next.nodes) {
@@ -245,6 +278,7 @@ export class LabWorld {
       ) {
         this.guard("update node", () => this.lab.updateNode(spec.id, JSON.stringify(spec)));
         this.egress.purge(nodePurge(spec.id));
+        this.external?.nodeRemoved(spec.id);
       } else if (old.x !== spec.x || old.y !== spec.y) {
         this.guard("move node", () => this.lab.setPosition(spec.id, spec.x, spec.y));
       }
@@ -252,6 +286,7 @@ export class LabWorld {
     this.name = next.name || "";
     this.scenarioCache = null;
     if (hostedIds !== undefined) this.setHosted(hostedIds);
+    else this.external?.sync();
     this.hooks.onChange();
     return true;
   }
@@ -270,6 +305,7 @@ export class LabWorld {
 
   dispose() {
     this.egress.clear();
+    this.generation += 1;
     if (this.lab && typeof this.lab.free === "function") {
       try {
         this.lab.free();
@@ -309,6 +345,7 @@ export class LabWorld {
     const id = this.guard("add node", () => this.lab.addNode(JSON.stringify(spec)));
     if (id == null) return null;
     this.scenarioCache = null;
+    this.external?.sync();
     this.hooks.onChange();
     return id;
   }
@@ -318,6 +355,7 @@ export class LabWorld {
     this.guard("remove node", () => this.lab.removeNode(id));
     this.egress.purge(nodePurge(id));
     this.scenarioCache = null;
+    this.external?.nodeRemoved(id);
     this.hooks.onChange();
   }
 
@@ -329,6 +367,7 @@ export class LabWorld {
     });
     if (ok) this.egress.purge(nodePurge(id));
     this.scenarioCache = null;
+    if (ok) this.external?.nodeRebuilt(id);
     this.hooks.onChange();
     return ok === true;
   }
@@ -363,6 +402,7 @@ export class LabWorld {
   setId(id) {
     this.id = id || "";
     this.scenarioCache = null;
+    this.external?.sync();
     this.hooks.onChange();
   }
 
@@ -394,7 +434,13 @@ export class LabWorld {
     this.wall = t;
     if (this.lab && !this.paused) {
       this.target = Math.max(this.target, this.now()) + delta * this.speed;
-      this.stepUntil(this.target);
+      if (this.lockstep) {
+        // The processes set the pace: never run more than a frame ahead.
+        this.target = Math.min(this.target, this.now() + MAX_WALL_DELTA_MS * this.speed);
+        this.runTo(this.target);
+      } else {
+        this.stepUntil(this.target);
+      }
     }
     this.flush(t);
   }
@@ -409,8 +455,12 @@ export class LabWorld {
   step(ms) {
     if (!this.lab) return;
     const target = this.now() + ms;
-    this.stepUntil(target);
     this.target = target;
+    if (this.lockstep) {
+      this.runTo(target);
+      return;
+    }
+    this.stepUntil(target);
     this.flush(performance.now(), true);
   }
 
@@ -419,6 +469,10 @@ export class LabWorld {
   // reaches it.
   settle() {
     if (!this.lab) return;
+    if (this.lockstep) {
+      this.runTo(this.now() + SETTLE_WINDOW_MS, { settle: true });
+      return;
+    }
     const start = this.now();
     const limit = start + SETTLE_WINDOW_MS;
     let t = start;
@@ -431,6 +485,89 @@ export class LabWorld {
     }
     this.target = this.now();
     this.flush(performance.now(), true);
+  }
+
+  // ---- lockstep with real processes -------------------------------------------------------
+
+  // Runs the world and the processes it hosts to `target` together; a run in
+  // flight takes the new target over. With `settle`, it stops early once
+  // nothing is due before the target.
+  runTo(target, { settle = false } = {}) {
+    const run = this.run;
+    if (run) {
+      run.target = Math.max(run.target, target);
+      run.settle ||= settle;
+      return run.done;
+    }
+    const next = { target, settle, done: null };
+    this.run = next;
+    next.done = this.advance(next).finally(() => {
+      if (this.run === next) this.run = null;
+    });
+    return next.done;
+  }
+
+  async advance(run) {
+    const generation = this.generation;
+    const ext = this.external;
+    let slice = performance.now();
+    while (generation === this.generation && this.lockstep) {
+      const now = this.now();
+      if (this.hasWorkBy(now)) this.stepUntil(now);
+      this.handOver(now);
+      this.pumpEgress();
+      if (performance.now() - slice > SLICE_MS) {
+        await nextTask();
+        slice = performance.now();
+        continue;
+      }
+      if (ext.busy) {
+        await ext.quiesce(QUIESCE_BUDGET_MS);
+        slice = performance.now();
+        continue;
+      }
+      const target = Math.floor(run.target);
+      if (now >= target) break;
+      if (run.settle && this.idleBy(target)) break;
+      const limit = Math.max(now + 1, Math.min(target, ext.nextDeadline(), this.egress.nextAt()));
+      this.stepUntil(this.nextEventAt(now, limit) ?? limit);
+    }
+    if (generation !== this.generation || !this.lab) return;
+    ext.setClock(this.now());
+    if (run.settle) {
+      this.target = this.now();
+      this.flush(performance.now(), true);
+    }
+  }
+
+  // Hand what reached the external nodes at `now` to their processes.
+  handOver(now) {
+    const raw = this.guard("drain external", () => this.lab.drainExternal());
+    const frames = raw && raw.length > 2 ? this.guard("parse external", () => JSON.parse(raw)) || [] : [];
+    this.external.at(now, frames);
+  }
+
+  hasWorkBy(ms) {
+    return Boolean(this.lab && this.guard("peek", () => this.lab.hasWorkBy(u64(ms))));
+  }
+
+  // The first instant in (now, limit] with something due, or null.
+  nextEventAt(now, limit) {
+    if (!this.hasWorkBy(limit)) return null;
+    let lo = now + 1;
+    let hi = limit;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (this.hasWorkBy(mid)) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
+  }
+
+  // Whether nothing is due by `limit`: no frame or timer, no held egress, no
+  // process timer, no process at work.
+  idleBy(limit) {
+    return !this.hasWorkBy(limit) && this.egress.nextAt() > limit && this.external.nextDeadline() > limit && !this.external.busy;
   }
 
   setSpeed(speed) {
@@ -507,7 +644,10 @@ export class LabWorld {
       this.lab.fault(JSON.stringify(fault));
       return true;
     });
-    if (ok) this.egress.purge(faultPurge(fault));
+    if (ok) {
+      this.egress.purge(faultPurge(fault));
+      this.external?.fault(fault);
+    }
     this.scenarioCache = null;
     this.hooks.onChange();
     return ok === true;
@@ -532,6 +672,7 @@ export class LabWorld {
     this.hostedIds = ids;
     const list = ids == null ? [] : ids.length ? ids : NONE_HOSTED;
     this.guard("set hosted", () => this.lab.setHosted(JSON.stringify(list)));
+    this.external?.sync();
   }
 
   pushIngress(frames) {
@@ -542,6 +683,18 @@ export class LabWorld {
   applyRemoteSnapshot(id, state) {
     if (!this.lab) return;
     this.guard("remote snapshot", () => this.lab.applyRemoteSnapshot(id, JSON.stringify(state ?? null)));
+  }
+
+  // Frames a real broker's process sent, routed as its node at the current time.
+  routeExternal(frames) {
+    if (!this.lab || !frames.length) return;
+    this.guard("route external", () => this.lab.routeExternal(JSON.stringify(frames)));
+  }
+
+  // The world as it is right now (the cached snapshot can be 50 ms old).
+  liveSnapshot() {
+    if (!this.lab) return null;
+    return this.guard("snapshot", () => JSON.parse(this.lab.snapshot())) ?? null;
   }
 }
 

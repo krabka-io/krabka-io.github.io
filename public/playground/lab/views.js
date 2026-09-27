@@ -36,6 +36,7 @@ export function renderView(kind, state, ctx) {
 
 const VIEWS = {
   broker: renderBroker,
+  "krabka-broker": renderRealBroker,
   "schema-registry": renderRegistry,
   producer: renderProducer,
   consumer: renderConsumer,
@@ -145,6 +146,75 @@ function renderBroker(root, s, used, ctx) {
   if (requests && typeof requests === "object") {
     root.appendChild(section("Requests", bars(Object.entries(requests).map(([label, value]) => ({ label, value: Number(value) || 0 })))));
   }
+}
+
+// ---- real broker ------------------------------------------------------------------
+
+// What `external.js` reports for a real broker: its process, connections,
+// the tails of its stdout and stderr, the runtime's counters and the
+// environment it was started with.
+function renderRealBroker(root, s, used, ctx) {
+  take(s, used, "external");
+  const p = pickObj(s, used, "process");
+  if (!p) {
+    root.appendChild(el("p", "lab-muted", "This tab does not run the process: no report from it yet."));
+    return;
+  }
+  const rows = [];
+  addRow(rows, "state", p.state, "process_state");
+  addRow(rows, "why", p.reason, "process_reason");
+  if (p.lagging) addRow(rows, "lagging", "it missed one instant of the lab's clock and runs free until it waits again", "process_lagging");
+  if (p.exit) addRow(rows, "exit", p.exit.message ?? p.exit.reason, "process_exit");
+  addRow(rows, "address", p.address, "process_address");
+  addRow(rows, "volume", p.volume, "process_volume");
+  addRow(rows, "module", p.module, "process_module");
+  addRow(rows, "incarnation", p.incarnation, "process_incarnation");
+  addRow(rows, "started at", p.started_at_ms == null ? null : `${p.started_at_ms} ms`, "process_started");
+  root.appendChild(section("Process", kv(rows)));
+  if (Array.isArray(p.notes) && p.notes.length) {
+    root.appendChild(section("Runtime notes", logBlock(p.notes.map((n) => `${n.level}: ${n.text}`), "process_notes"), { open: false }));
+  }
+
+  const c = take(s, used, "connections");
+  if (c && typeof c === "object") {
+    const conns = [];
+    addRow(conns, "accepted", c.inbound, "conns_inbound");
+    addRow(conns, "dialed", c.outbound, "conns_outbound");
+    addRow(conns, "dials waiting for a link", c.waiting_dials, "conns_waiting");
+    addRow(conns, "bytes held for the process", c.held_bytes, "conns_held");
+    root.appendChild(section("Connections", kv(conns)));
+  }
+  for (const stream of ["stdout", "stderr"]) {
+    const lines = take(s, used, stream);
+    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${lines.length} lines)`, logBlock(lines, stream)));
+  }
+  const runtime = take(s, used, "runtime");
+  if (runtime && typeof runtime === "object") {
+    const r = [];
+    addRow(r, "guest clock", withUnit(runtime.clock_ms, " ms"), "runtime_clock_ms");
+    addRow(r, "uptime (wall)", withUnit(runtime.uptime_ms, " ms"), "runtime_uptime_ms");
+    addRow(r, "busy / blocked (wall)", runtime.busy_ms == null ? null : `${runtime.busy_ms} / ${runtime.blocked_ms} ms`, "runtime_busy");
+    addRow(r, "polls", runtime.polls, "runtime_polls");
+    addRow(r, "bytes in / out", runtime.bytes_in == null ? null : `${fmtBytes(runtime.bytes_in)} / ${fmtBytes(runtime.bytes_out)}`, "runtime_bytes");
+    addRow(r, "sockets", runtime.sockets, "runtime_sockets");
+    addRow(r, "accepted / dialed", runtime.accepted == null ? null : `${runtime.accepted} / ${runtime.dials}`, "runtime_conns");
+    addRow(r, "files", runtime.files == null ? null : `${runtime.files} · ${fmtBytes(runtime.file_bytes)}`, "runtime_files");
+    addRow(r, "fsyncs", runtime.syncs, "runtime_syncs");
+    addRow(r, "journal", runtime.journal_flushes == null ? null : `${runtime.journal_flushes} flushes · ${fmtBytes(runtime.journal_bytes)}`, "runtime_journal");
+    root.appendChild(section("Runtime", kv(r), { open: false }));
+  }
+  const env = take(s, used, "env");
+  if (env && typeof env === "object") {
+    const e = [];
+    for (const [key, value] of Object.entries(env)) addRow(e, key, value, key);
+    root.appendChild(section("Environment", kv(e), { open: false }));
+  }
+}
+
+function logBlock(lines, field) {
+  const pre = el("pre", "lab-raw lab-log", lines.length ? lines.join("\n") : "(nothing yet)");
+  pre.dataset.field = field;
+  return pre;
 }
 
 // ---- schema registry --------------------------------------------------------------

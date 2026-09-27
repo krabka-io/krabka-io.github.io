@@ -3,7 +3,9 @@
 // Per node the bytes and entries stored, the total, a "forget" button per
 // node and for the whole scenario, and the "Persist to this browser" toggle.
 // The numbers come from a cursor walk over IndexedDB every few seconds while
-// the panel is open.
+// the panel is open. Below them, the volumes of the scenario's real brokers:
+// each is the disk of one process, kept by the WASI runtime in its own
+// database whatever the toggle says.
 
 import { el, button, fmtBytes, fmtNum } from "./dom.js";
 
@@ -11,7 +13,9 @@ const REFRESH_MS = 2500;
 
 export class StoragePanel {
   // hooks: storage (LabStorage), scenarioId() → string, nodes() → [{ id, name }],
-  // onForgetNode(id), onForgetScenario(), onPersistChange(on), onToast(msg)
+  // volumes() → Promise<[{ node, volume, bytes, files, inUse }]>,
+  // onForgetVolume(volume), onForgetNode(id), onForgetScenario(),
+  // onPersistChange(on), onToast(msg)
   constructor(container, hooks) {
     this.hooks = hooks;
     this.root = el("details", "lab-storage lab-side-section");
@@ -45,6 +49,8 @@ export class StoragePanel {
     body.appendChild(this.summaryLine);
     this.table = el("table", "lab-table lab-storage-table");
     body.appendChild(this.table);
+    this.volumeBox = el("div", "lab-storage-volumes");
+    body.appendChild(this.volumeBox);
     this.actions = el("div", "lab-form-actions");
     this.actions.appendChild(
       button("Forget stored data", "lab-btn-sm lab-danger", () => hooks.onForgetScenario(), { title: "Drop every stored log and key of this scenario" }),
@@ -117,5 +123,52 @@ export class StoragePanel {
       tbody.appendChild(tr);
     }
     this.table.append(thead, tbody);
+    await this.refreshVolumes(nodes);
+  }
+
+  // The real brokers' volumes: the disk each process runs on.
+  async refreshVolumes(nodes) {
+    let volumes = [];
+    try {
+      volumes = this.hooks.volumes ? await this.hooks.volumes() : [];
+    } catch (err) {
+      this.volumeBox.innerHTML = "";
+      this.volumeBox.appendChild(el("p", "lab-muted lab-small", `Volumes unavailable: ${err.message}`));
+      return;
+    }
+    this.volumeBox.innerHTML = "";
+    if (!volumes.length) return;
+    this.volumeBox.appendChild(
+      el("p", "lab-storage-total", "Real broker volumes: each process's disk, kept by the WASI runtime in this browser whatever the toggle says. A wipe or removing the node forgets it."),
+    );
+    const table = el("table", "lab-table lab-storage-table");
+    const head = el("tr");
+    for (const h of ["node", "bytes", "files", ""]) head.appendChild(el("th", null, h));
+    const thead = el("thead");
+    thead.appendChild(head);
+    const tbody = el("tbody");
+    for (const v of volumes.sort((a, b) => a.node - b.node)) {
+      const node = nodes.find((n) => n.id === v.node);
+      const tr = el("tr");
+      tr.dataset.storageVolume = v.volume;
+      const name = el("td", null, node ? node.name : `#${v.node} (removed)`);
+      name.title = v.volume;
+      tr.appendChild(name);
+      const bytes = el("td", null, fmtBytes(v.bytes));
+      bytes.dataset.field = "volume-bytes";
+      tr.appendChild(bytes);
+      tr.appendChild(el("td", null, fmtNum(v.files)));
+      const td = el("td");
+      td.appendChild(
+        button("Forget", "lab-btn-sm", () => this.hooks.onForgetVolume(v.volume), {
+          title: v.inUse ? "Its process runs on it: kill or wipe the node first" : "Delete this volume",
+          disabled: v.inUse,
+        }),
+      );
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+    table.append(thead, tbody);
+    this.volumeBox.appendChild(table);
   }
 }

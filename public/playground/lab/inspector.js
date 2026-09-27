@@ -166,9 +166,21 @@ export class Inspector {
     this.subEl.dataset.hosted = String(Boolean(n.hosted));
 
     // Hosting controls: the hub picks a host per node; a spoke can ask for it.
+    // A pinned node (a real broker) stays where its process and volume are.
     this.hostRow.innerHTML = "";
     this.hostRow.hidden = true;
-    if (session && session.role === "hub" && !k.hidden) {
+    if (session && session.role !== "solo" && k.pinned) {
+      this.hostRow.hidden = false;
+      const note = el(
+        "span",
+        "lab-muted lab-small",
+        session.role === "hub"
+          ? "Runs in this tab: a real broker's process and its volume live in this browser, so it cannot move to another tab."
+          : "Runs in the host's tab: a real broker's process and its volume live in that browser, so it cannot move to this tab.",
+      );
+      note.dataset.field = "pinned-note";
+      this.hostRow.appendChild(note);
+    } else if (session && session.role === "hub" && !k.hidden) {
       this.hostRow.hidden = false;
       const options = session.peers
         .filter((p) => p.state === "connected" || p.id === session.me)
