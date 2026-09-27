@@ -1,0 +1,893 @@
+/* Evidence ledger styles.
+ *
+ * Self-contained: every rule is scoped under .el, the root of the
+ * EvidenceLedger component, so nothing bleeds into the rest of the site. The
+ * palette mirrors the verified kernel explorer (kernels.css, --kx-*) and the
+ * krab / ocean Tailwind colours in tailwind.config.mjs, so the two explorers
+ * read as one family. The site renders dark only.
+ *
+ * Structure the rules address:
+ *   .el                 root; .el-ready once the script has run
+ *   .el-tabs .el-tab    tab bar (two or more groups only)
+ *   .el-panel           one group; #creusot, #stateright, #evidence
+ *   .el-notes           collapsed catalog prose above the rows
+ *   .el-toolbar         filter input, area chips, expand/collapse, count
+ *   .el-group           rows of one area, .el-group-title above them
+ *   .el-row             one <details>; .el-summary is its header grid,
+ *                       .el-body the expanded content, .el-more a nested
+ *                       drilldown, .el-foot the link row at the bottom */
+
+.el {
+  --el-accent: #ff4d2e;
+  --el-accent-deep: #c82408;
+  --el-accent-soft: rgba(255, 77, 46, 0.12);
+  --el-accent-text: #ff8466;
+  --el-accent-light: #ffb39e;
+  --el-bg: #0c1322;
+  --el-panel: #0f172a;
+  --el-panel-raised: #141e33;
+  --el-border: rgba(255, 255, 255, 0.08);
+  --el-border-strong: rgba(255, 255, 255, 0.2);
+  --el-text: #f3f4f6;
+  --el-text-soft: #d1d5db;
+  --el-muted: #9ca3af;
+  --el-ok: #45c178;
+  --el-amber: #f7b73a;
+  --el-hover: rgba(255, 255, 255, 0.03);
+  --el-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --el-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, sans-serif;
+
+  min-width: 0;
+  max-width: 100%;
+  color: var(--el-text);
+  font-family: var(--el-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.el *,
+.el *::before,
+.el *::after {
+  box-sizing: border-box;
+}
+
+.el [hidden] {
+  display: none !important;
+}
+
+.el p {
+  margin: 0;
+}
+
+.el a {
+  color: var(--el-accent-text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.el a:hover {
+  color: var(--el-accent-light);
+  text-decoration: underline;
+}
+
+.el code {
+  font-family: var(--el-mono);
+  font-size: 11.5px;
+  color: var(--el-accent-light);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0 0.25em;
+  overflow-wrap: anywhere;
+}
+
+.el a code {
+  color: inherit;
+}
+
+.el strong {
+  color: var(--el-text);
+  font-weight: 600;
+}
+
+.el a:focus-visible,
+.el button:focus-visible,
+.el summary:focus-visible {
+  outline: 2px solid var(--el-accent);
+  outline-offset: 1px;
+}
+
+.el summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.el summary::-webkit-details-marker {
+  display: none;
+}
+
+.el-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.el-ext {
+  font-size: 0.85em;
+  opacity: 0.7;
+  margin-left: 0.15em;
+}
+
+/* ---- progressive layer -------------------------------------------------- */
+
+/* Without the script every panel is stacked under its own heading; the tab
+ * bar and the toolbar do nothing without it, so they wait for .el-ready. */
+.el:not(.el-ready) .el-tabs,
+.el:not(.el-ready) .el-toolbar {
+  display: none;
+}
+
+.el.el-ready .el-panel-title {
+  display: none;
+}
+
+.el:not(.el-ready) .el-panel + .el-panel {
+  margin-top: 1.5rem;
+}
+
+.el-panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--el-muted);
+}
+
+.el-panel-count {
+  font-family: var(--el-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* ---- tabs --------------------------------------------------------------- */
+
+.el-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.25rem;
+  margin: 0 0 0.7rem;
+  border-bottom: 1px solid var(--el-border);
+}
+
+.el-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  margin-bottom: -1px;
+  padding: 0.42rem 0.7rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--el-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.el-tab:hover {
+  color: var(--el-text);
+}
+
+.el-tab[aria-selected='true'] {
+  color: var(--el-text);
+  border-bottom-color: var(--el-accent);
+}
+
+.el-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.el-tab-count {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--el-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--el-muted);
+}
+
+.el-tab[aria-selected='true'] .el-tab-count {
+  background: var(--el-accent-soft);
+  color: var(--el-accent-light);
+}
+
+.el-panel {
+  min-width: 0;
+}
+
+/* ---- catalog notes drilldown ------------------------------------------- */
+
+.el-notes {
+  margin: 0 0 0.6rem;
+  border: 1px solid var(--el-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.el-notes > summary,
+.el-more > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-soft);
+  transition: background 0.12s ease;
+}
+
+.el-notes > summary:hover,
+.el-more > summary:hover {
+  background: var(--el-hover);
+  color: var(--el-text);
+}
+
+.el-notes[open] > summary,
+.el-more[open] > summary {
+  border-bottom: 1px dashed var(--el-border);
+}
+
+.el-notes-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--el-muted);
+}
+
+.el-prose {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.5rem 0.6rem 0.6rem;
+  font-size: 12.5px;
+  color: var(--el-text-soft);
+}
+
+.el-prose ul,
+.el-html-block ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.el-prose li + li,
+.el-html-block li + li {
+  margin-top: 0.15rem;
+}
+
+.el-prose pre,
+.el-html-block pre {
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--el-border);
+  border-radius: 6px;
+  background: var(--el-bg);
+  font-family: var(--el-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+.el-prose pre code,
+.el-html-block pre code {
+  background: none;
+  padding: 0;
+  color: var(--el-text-soft);
+}
+
+/* ---- toolbar ------------------------------------------------------------ */
+
+.el-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  margin: 0 0 0.6rem;
+}
+
+.el-search {
+  display: flex;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.el-filter {
+  width: 100%;
+  min-width: 0;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--el-border);
+  border-radius: 6px;
+  background: var(--el-panel);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--el-text);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.el-filter::placeholder {
+  color: rgba(156, 163, 175, 0.6);
+}
+
+.el-filter:focus {
+  outline: none;
+  border-color: var(--el-accent);
+  box-shadow: 0 0 0 2px rgba(255, 77, 46, 0.25);
+}
+
+.el-filter::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.el-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.45rem;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.el-count {
+  font-size: 11.5px;
+  color: var(--el-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.el-count b {
+  color: var(--el-text);
+  font-weight: 600;
+}
+
+.el-btn {
+  padding: 0.24rem 0.5rem;
+  border: 1px solid var(--el-border);
+  border-radius: 6px;
+  background: var(--el-panel);
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--el-text-soft);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.el-btn:hover {
+  border-color: var(--el-accent);
+  color: var(--el-accent);
+}
+
+.el-chips {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.el-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid var(--el-border);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--el-muted);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.el-chip:hover {
+  color: var(--el-text);
+  border-color: var(--el-border-strong);
+}
+
+.el-chip[aria-pressed='true'] {
+  color: var(--el-text);
+  border-color: rgba(255, 77, 46, 0.55);
+  background: var(--el-accent-soft);
+}
+
+.el-chip-n {
+  font-family: var(--el-mono);
+  font-size: 10px;
+  color: var(--el-muted);
+}
+
+.el-empty,
+.el-none {
+  margin: 0.2rem 0 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed var(--el-border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--el-muted);
+}
+
+/* ---- area groups -------------------------------------------------------- */
+
+.el-group {
+  min-width: 0;
+  margin: 0 0 0.55rem;
+  border: 1px solid var(--el-border);
+  border-radius: 8px;
+  background: var(--el-panel);
+  overflow: hidden;
+}
+
+.el-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--el-muted);
+}
+
+.el-group-count {
+  font-family: var(--el-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---- rows: summary ------------------------------------------------------ */
+
+.el-row {
+  min-width: 0;
+  border-top: 1px solid var(--el-border);
+  scroll-margin-top: 6rem;
+}
+
+.el-row[open] {
+  box-shadow: inset 2px 0 0 var(--el-accent);
+}
+
+.el-summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 0.6rem;
+  row-gap: 0.2rem;
+  min-width: 0;
+  padding: 0.45rem 1.7rem 0.45rem 0.6rem;
+  transition: background 0.12s ease;
+}
+
+.el-summary:hover {
+  background: var(--el-hover);
+}
+
+.el-row[open] > .el-summary {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.el-summary:focus-visible {
+  outline-offset: -2px;
+}
+
+.el-names {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.22rem 0.3rem;
+  min-width: 0;
+}
+
+.el-fn,
+.el-tag {
+  display: inline-block;
+  min-width: 0;
+  padding: 0.04rem 0.35rem;
+  border: 1px solid var(--el-border);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  font-family: var(--el-mono);
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--el-text);
+  overflow-wrap: anywhere;
+}
+
+.el-tag-prop {
+  color: var(--el-accent-light);
+  border-color: rgba(255, 77, 46, 0.35);
+  background: var(--el-accent-soft);
+}
+
+/* Tiny badges: the only place nowrap is allowed. */
+.el-module,
+.el-badge {
+  display: inline-block;
+  padding: 0.02rem 0.35rem;
+  border: 1px dashed var(--el-border-strong);
+  border-radius: 5px;
+  font-family: var(--el-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--el-muted);
+  white-space: nowrap;
+}
+
+.el-badge {
+  border-style: solid;
+  border-color: var(--el-border);
+  font-family: var(--el-sans);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.el-badge-repo {
+  font-family: var(--el-mono);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.el-badge-kind {
+  color: var(--el-accent-light);
+  border-color: rgba(255, 77, 46, 0.35);
+}
+
+.el-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text);
+  overflow-wrap: anywhere;
+}
+
+.el-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.15rem 0.55rem;
+  min-width: 0;
+  padding-top: 0.05rem;
+  font-size: 11.5px;
+  color: var(--el-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.el-meta:empty {
+  display: none;
+}
+
+.el-meta-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.el-meta-play {
+  color: var(--el-ok);
+}
+
+.el-meta-play::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: var(--el-ok);
+  vertical-align: 1px;
+}
+
+.el-chevron {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.55rem;
+  width: 14px;
+  height: 14px;
+  color: var(--el-muted);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.el-row[open] > .el-summary .el-chevron {
+  transform: rotate(90deg);
+  color: var(--el-accent);
+}
+
+.el-chevron-inline {
+  position: static;
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.el-notes[open] > summary .el-chevron-inline,
+.el-more[open] > summary .el-chevron-inline {
+  transform: rotate(90deg);
+  color: var(--el-accent);
+}
+
+/* The claim shows two lines while the row is closed. The expanded body
+ * repeats it in full, so it disappears while the row is open. */
+.el-claim {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  color: var(--el-text-soft);
+}
+
+.el-row[open] > .el-summary > .el-claim {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .el-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .el-meta {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+/* ---- rows: expanded body ------------------------------------------------ */
+
+.el-body {
+  min-width: 0;
+  padding: 0.3rem 0.6rem 0.65rem;
+  border-top: 1px dashed var(--el-border);
+}
+
+.el-grid {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.4rem 0.8rem;
+  margin: 0.35rem 0 0;
+}
+
+.el-grid dt {
+  min-width: 0;
+  padding-top: 0.12rem;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--el-muted);
+}
+
+.el-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--el-text-soft);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .el-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.12rem 0;
+  }
+
+  .el-grid dd {
+    margin-bottom: 0.4rem;
+  }
+}
+
+.el-lead {
+  margin: 0.35rem 0 0.45rem;
+  color: var(--el-text);
+  overflow-wrap: anywhere;
+}
+
+.el-html-block {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--el-text-soft);
+  overflow-wrap: anywhere;
+}
+
+.el-none-text {
+  color: var(--el-muted);
+  font-style: italic;
+}
+
+.el-links,
+.el-taglist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.el-body > .el-links {
+  margin-top: 0.45rem;
+}
+
+.el-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.06rem 0.45rem;
+  border: 1px solid var(--el-border);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--el-mono);
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--el-text-soft);
+  overflow-wrap: anywhere;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.el-link-chip:hover {
+  border-color: var(--el-accent);
+  color: var(--el-text);
+  text-decoration: none;
+}
+
+.el-table {
+  width: 100%;
+  max-width: 34rem;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.el-table th,
+.el-table td {
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--el-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.el-table th {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--el-muted);
+}
+
+.el-table td code {
+  padding: 0;
+  background: none;
+  color: var(--el-text-soft);
+}
+
+.el-table .el-num {
+  width: 1%;
+  text-align: right;
+  font-family: var(--el-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.el-table .el-total td {
+  border-bottom: 0;
+  font-weight: 600;
+  color: var(--el-text);
+}
+
+.el-more {
+  margin: 0.55rem 0 0;
+  border: 1px solid var(--el-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.el-more > summary {
+  padding: 0.35rem 0.55rem;
+}
+
+.el-more-body {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.45rem 0.55rem 0.55rem;
+  font-size: 12.5px;
+  color: var(--el-text-soft);
+}
+
+.el-hint {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--el-muted);
+}
+
+.el-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--el-border);
+  font-size: 11.5px;
+}
+
+.el-foot a {
+  color: var(--el-muted);
+}
+
+.el-foot a:hover {
+  color: var(--el-accent);
+}
+
+.el-foot a.el-foot-primary {
+  color: var(--el-accent-text);
+  font-weight: 600;
+}
+
+/* ---- deep-link highlight ------------------------------------------------ */
+
+@keyframes el-flash {
+  from {
+    background-color: rgba(255, 77, 46, 0.22);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+.el-row.el-flash {
+  animation: el-flash 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .el *,
+  .el *::before,
+  .el *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .el-row.el-flash {
+    box-shadow: inset 2px 0 0 var(--el-accent), inset 0 0 0 1px rgba(255, 77, 46, 0.6);
+  }
+}
