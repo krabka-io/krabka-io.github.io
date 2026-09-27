@@ -4,7 +4,7 @@ const repos = [
     name: 'krabka-broker',
     category: 'Core',
     language: 'Rust',
-    desc: 'Apache Kafka-compatible broker with KRaft consensus and S3/GCS tiered storage.',
+    desc: 'Apache Kafka-compatible broker with KRaft consensus, S3/GCS tiered storage, and the krabka-verified proof kernels.',
     github: 'https://github.com/krabka-io/krabka-broker',
   },
   {
@@ -18,7 +18,7 @@ const repos = [
     name: 'krabka-client-rs',
     category: 'Clients',
     language: 'Rust',
-    desc: 'High-performance native Rust Kafka client: FutureProducer, StreamConsumer, and Admin API.',
+    desc: 'Native Rust Kafka client: FutureProducer, StreamConsumer, and Admin API, with Stateright-checked failover and lock-order models.',
     github: 'https://github.com/krabka-io/krabka-client-rs',
   },
   {
@@ -32,7 +32,7 @@ const repos = [
     name: 'krabka-streams-go',
     category: 'Streaming',
     language: 'Go',
-    desc: 'Go stream processing library with built-in Apache Arrow zero-copy record batching.',
+    desc: 'Go stream processing library with Apache Arrow record batching and barrier cuts.',
     github: 'https://github.com/krabka-io/krabka-streams-go',
   },
   {
@@ -41,6 +41,13 @@ const repos = [
     language: 'Java',
     desc: 'Java stream processing library with Kafka Streams, schema registry serdes, and Apache Arrow.',
     github: 'https://github.com/krabka-io/krabka-streams-java',
+  },
+  {
+    name: 'krabka-schema-registry',
+    category: 'Core',
+    language: 'Rust',
+    desc: 'Confluent-compatible schema registry backed by the compacted _schemas topic.',
+    github: 'https://github.com/krabka-io/krabka-schema-registry',
   },
   {
     name: 'krabka-operator',
@@ -53,22 +60,15 @@ const repos = [
     name: 'krabka-connect',
     category: 'Integration',
     language: 'Rust',
-    desc: 'Connector framework, PostgreSQL CDC source, distributed worker runtime, and replicator.',
+    desc: 'Connector framework, PostgreSQL CDC source, distributed worker runtime, and MirrorMaker 2-compatible replicator.',
     github: 'https://github.com/krabka-io/krabka-connect',
   },
   {
-    name: 'krabka-o11y',
-    category: 'Observability',
+    name: 'krabka-rebalancer',
+    category: 'Operations',
     language: 'Rust',
-    desc: 'Full-signal telemetry engine: metrics, traces, profiles, logs and PromQL / TraceQL queriers.',
-    github: 'https://github.com/krabka-io/krabka-o11y',
-  },
-  {
-    name: 'krabka-o11y-demo',
-    category: 'Observability',
-    language: 'Demo',
-    desc: 'Runnable Grafana observability stack with pre-built dashboards for streaming telemetry.',
-    github: 'https://github.com/krabka-io/krabka-o11y-demo',
+    desc: 'Partition assignment and cluster balancing daemon in the style of Cruise Control.',
+    github: 'https://github.com/krabka-io/krabka-rebalancer',
   },
   {
     name: 'krabka-cli',
@@ -78,6 +78,24 @@ const repos = [
     github: 'https://github.com/krabka-io/krabka-cli',
   },
 ];
+
+const broader = [
+  {
+    name: 'krabka-o11y',
+    desc: 'Observability stack for metrics, traces, profiles, and logs, served through PromQL, TraceQL, pprof, and LogQL.',
+    github: 'https://github.com/krabka-io/krabka-o11y',
+  },
+  {
+    name: 'krabka-o11y-demo',
+    desc: 'Runnable Grafana stack with dashboards for a Krabka cluster and an instrumented orders pipeline.',
+    github: 'https://github.com/krabka-io/krabka-o11y-demo',
+  },
+  {
+    name: 'gres',
+    desc: 'Postgres-compatible compute tier that stores all durable state on Krabka topics and object storage.',
+    github: 'https://github.com/krabka-io/gres',
+  },
+];
 ---
 
 <section class="py-16">
@@ -85,10 +103,10 @@ const repos = [
     <div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
       <div>
         <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-          The Krabka Ecosystem
+          The Broker and the Kafka Ecosystem
         </h2>
         <p class="mt-2 text-lg text-gray-400">
-          Eleven purpose-built, modular repositories working in unison.
+          Purpose-built repositories that speak the Kafka wire protocol or operate a Kafka cluster.
         </p>
       </div>
 
@@ -140,6 +158,36 @@ const repos = [
           </div>
         </a>
       ))}
+    </div>
+
+    <!-- Broader Krabka ecosystem: projects built on the broker, documented on their own sites -->
+    <div class="mt-14 rounded-2xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
+        <div>
+          <h3 class="text-xl font-bold text-white">The Broader Krabka Ecosystem</h3>
+          <p class="mt-1 text-sm text-gray-400 max-w-2xl">
+            These projects build on the broker but are not part of the Kafka ecosystem. Each has its own repository and documentation.
+          </p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {broader.map((repo) => (
+          <a
+            href={repo.github}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="group rounded-xl border border-white/10 bg-slate-900/50 p-5 transition-colors hover:border-krab-500/40"
+          >
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-bold text-white group-hover:text-krab-400 transition-colors">{repo.name}</span>
+              <svg class="h-3.5 w-3.5 text-gray-500 group-hover:text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </div>
+            <p class="mt-2 text-xs text-gray-400 leading-relaxed">{repo.desc}</p>
+          </a>
+        ))}
+      </div>
     </div>
   </div>
 </section>

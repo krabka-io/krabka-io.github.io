@@ -1,28 +1,34 @@
 ---
+import { getPath } from '../utils/paths';
+
 const metrics = [
   {
-    value: '114 MiB',
-    label: 'Baseline Memory',
-    subtext: 'vs 2.5–5.5 GiB in JVM Strimzi Kafka',
-    highlight: true,
-  },
-  {
-    value: '1.2s',
-    label: 'Cold Start to Ready',
-    subtext: 'No JVM warmup, no heap tuning',
-    highlight: false,
-  },
-  {
     value: 'Zero',
-    label: 'GC Latency Spikes',
-    subtext: 'Predictable sub-millisecond p99 latencies',
-    highlight: false,
+    label: 'Lines of unsafe Rust',
+    subtext: 'unsafe_code is a forbid-level lint under Cargo and Bazel',
+    badge: 'Memory safe',
+    href: getPath('/verification#memory-safety'),
   },
   {
-    value: '100%',
-    label: 'Byte-Level Parity',
-    subtext: 'Speaks Apache Kafka 4.3 wire protocol',
-    highlight: false,
+    value: 'Proved',
+    label: 'Creusot Decision Kernels',
+    subtext: 'Contracts on election, ISR, retention, ACL, and quota decisions',
+    badge: null,
+    href: getPath('/verification#creusot'),
+  },
+  {
+    value: 'Exhaustive',
+    label: 'Stateright Model Checks',
+    subtext: 'Every reachable state within each model’s stated bounds',
+    badge: null,
+    href: getPath('/verification#stateright'),
+  },
+  {
+    value: 'Byte-exact',
+    label: 'Kafka Wire Protocol',
+    subtext: 'Apache Kafka 4.3 codecs generated from upstream schemas',
+    badge: null,
+    href: getPath('/versions'),
   },
 ];
 ---
@@ -31,14 +37,14 @@ const metrics = [
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {metrics.map((metric) => (
-        <div class="frosted-card rounded-2xl p-6 transition-all hover:translate-y-[-2px] hover:border-krab-500/40">
+        <a href={metric.href} class="frosted-card block rounded-2xl p-6 transition-all hover:translate-y-[-2px] hover:border-krab-500/40">
           <div class="flex items-baseline justify-between">
             <span class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
               {metric.value}
             </span>
-            {metric.highlight && (
+            {metric.badge && (
               <span class="text-xs font-semibold text-krab-400 tracking-wide">
-                10x Savings
+                {metric.badge}
               </span>
             )}
           </div>
@@ -48,7 +54,7 @@ const metrics = [
           <p class="mt-1 text-sm text-gray-400">
             {metric.subtext}
           </p>
-        </div>
+        </a>
       ))}
     </div>
   </div>

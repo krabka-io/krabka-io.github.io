@@ -20,7 +20,7 @@ const snippet = `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o d
 
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <strong class="text-white">Krabka</strong> is a clean-sheet, memory-safe implementation of the Apache Kafka streaming platform. Designed to eliminate the operational overhead, memory pressure, and garbage collection pauses of the JVM, Krabka delivers byte-exact wire-protocol parity across all Kafka APIs while operating in a fraction of the memory.
+        <strong class="text-white">Krabka</strong> is a clean-sheet, memory-safe implementation of the Apache Kafka streaming platform in Rust. It delivers byte-exact wire-protocol parity across the Kafka APIs, forbids <code class="font-mono text-krab-300">unsafe</code> code, proves its safety-critical decisions with Creusot, and model-checks its failure orderings with Stateright.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Key Architectural Pillars</h2>
@@ -39,23 +39,28 @@ const snippet = `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o d
         </li>
       </ul>
 
-      <h2 class="text-xl font-bold text-white pt-2">Empirical Validation</h2>
+      <h2 class="text-xl font-bold text-white pt-2">Correctness & Verification</h2>
       <p>
-        See our <a href={getPath('/docs/benchmarks')} class="text-krab-400 hover:text-krab-300 font-semibold underline">Benchmark Methodology & Performance</a> guide for reproducible comparisons against JVM Kafka across memory RSS, KRaft failover, and saturated throughput.
+        See <a href={getPath('/verification')} class="text-krab-400 hover:text-krab-300 font-semibold underline">Correctness & Verification</a> for how safe Rust, Creusot proofs, Stateright model checking, mutation testing, and differential suites fit together, and the <a href={getPath('/docs/broker/verification')} class="text-krab-400 hover:text-krab-300 font-semibold underline">verification catalog</a> for every proof, every model, and the formal boundary.
       </p>
 
-      <h2 class="text-xl font-bold text-white pt-2">Architectural Deep Dives & Whitepapers</h2>
+      <h2 class="text-xl font-bold text-white pt-2">Architectural Deep Dives</h2>
       <p>
-        For engineering rationale, scaling envelopes, and formal substrate guarantees:
+        For engineering rationale and system topology:
       </p>
       <ul class="space-y-2 list-disc pl-5">
         <li>
-          <a href={getPath('/whitepapers/gres-scaling')} class="text-krab-400 hover:text-krab-300 font-semibold underline">Scaling Postgres on a Kafka Substrate:</a> How Krabka Gres scales Postgres-compatible writes across tenants, ranges, and single tables with no per-tenant consensus and no synchronized clocks.
+          <a href={getPath('/docs/architecture')} class="text-krab-400 hover:text-krab-300 font-semibold underline">Ecosystem Architecture:</a> Repository boundaries and one-way dependency layering from the wire codecs up to the operator.
         </li>
         <li>
           <a href={getPath('/docs/runtime-architecture')} class="text-krab-400 hover:text-krab-300 font-semibold underline">Runtime Architecture:</a> Operational topology, control plane reconcile loops, and data plane interactions between broker nodes, schema registry, and operator.
         </li>
       </ul>
+
+      <h2 class="text-xl font-bold text-white pt-2">The Broader Krabka Ecosystem</h2>
+      <p>
+        This site covers the broker and the Kafka ecosystem around it. Projects that build on the broker but are not Kafka components are documented in their own repositories: <a href="https://github.com/krabka-io/krabka-o11y" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold underline">krabka-o11y</a> for observability and <a href="https://github.com/krabka-io/gres" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold underline">gres</a> for Postgres-compatible compute on Krabka.
+      </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Continuous Documentation Pipeline</h2>
       <p>

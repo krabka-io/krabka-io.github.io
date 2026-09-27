@@ -18,8 +18,8 @@ const pluginCode = `# Plugin subcommands are resolved from PATH as krabka-<name>
 # Point-in-time restore from tiered-storage archive (delegates to krabka-restore)
 krabka restore --archive-dir /mnt/backups/s3-archive --target-dir /var/lib/krabka
 
-# Inspect multi-tenant Gres metadata (delegates to krabka-gres)
-krabka gres list-tenants --bootstrap localhost:9092`;
+# Any krabka-<name> binary on PATH, including tools from the broader Krabka ecosystem
+krabka <name> --help`;
 ---
 
 <DocsLayout
@@ -98,17 +98,12 @@ krabka gres list-tenants --bootstrap localhost:9092`;
               <td class="py-3 px-4 text-gray-400">krabka-broker</td>
               <td class="py-3 px-4 text-gray-300">Dispatched to <code class="font-mono text-xs">krabka-restore</code> plugin</td>
             </tr>
-            <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka gres</td>
-              <td class="py-3 px-4 text-gray-400">gres</td>
-              <td class="py-3 px-4 text-gray-300">Dispatched to <code class="font-mono text-xs">krabka-gres</code> plugin</td>
-            </tr>
           </tbody>
         </table>
       </div>
 
       <p>
-        This decoupled architecture ensures that domain-specific tools—such as the 21k-line Gres storage engine—do not inflate the core operator binary dependency tree. A plugin that is not found on <code class="font-mono text-xs text-gray-200">PATH</code> exits with code 127; an unexecutable binary exits with 126.
+        This decoupled architecture keeps domain-specific tools, including those from the broader Krabka ecosystem, out of the core CLI binary's dependency tree. A plugin that is not found on <code class="font-mono text-xs text-gray-200">PATH</code> exits with code 127; an unexecutable binary exits with 126.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Architectural Layering</h2>
