@@ -81,8 +81,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
-    registry_client::{RegistryClient, RegistryReply, RegistryRequestId, retry_backoff},
-    serde::{SchemaFormat, ValueSchema, frame},
+    registry_client::{RegistrationEvent, SchemaRegistration},
+    serde::SchemaFormat,
     templates::{JsonTemplate, Scope, Template},
 };
 use crate::lab::{
@@ -92,7 +92,6 @@ use crate::lab::{
         ProducerRecord, SeqNo,
     },
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
-    registry::http::{HttpRequest, percent_encode},
     scenario::NodeSpec,
 };
 
@@ -300,68 +299,6 @@ enum ValueTemplate {
     Text(Template),
 }
 
-/// Where the schema registration stands.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Registration {
-    /// The next attempt goes out at `retry_at`, or is on the wire.
-    Pending {
-        request: Option<RegistryRequestId>,
-        retry_at: Millis,
-        attempts: u32,
-    },
-    Ready {
-        schema_id: i32,
-    },
-}
-
-struct Serialization {
-    client: RegistryClient,
-    subject: String,
-    schema_text: String,
-    schema: ValueSchema,
-    state: Registration,
-    failed: u64,
-    error: Option<String>,
-}
-
-impl Serialization {
-    fn schema_id(&self) -> Option<i32> {
-        match self.state {
-            Registration::Ready { schema_id } => Some(schema_id),
-            Registration::Pending { .. } => None,
-        }
-    }
-
-    fn register_request(&self) -> HttpRequest {
-        let mut body = json!({ "schema": self.schema_text });
-        if let Some(ty) = self.schema.format().registry_type() {
-            body["schemaType"] = json!(ty);
-        }
-        HttpRequest::new(
-            "POST",
-            &format!("/subjects/{}/versions", percent_encode(&self.subject)),
-        )
-        .with_json(&body)
-    }
-
-    fn snapshot(&self) -> Value {
-        let (state, schema_id) = match self.state {
-            Registration::Pending { .. } => ("registering", None),
-            Registration::Ready { schema_id } => ("ready", Some(schema_id)),
-        };
-        json!({
-            "registry": self.client.registry(),
-            "subject": self.subject,
-            "format": self.schema.format().name(),
-            "state": state,
-            "schema_id": schema_id,
-            "failed": self.failed,
-            "error": self.error,
-            "client": self.client.snapshot(),
-        })
-    }
-}
-
 /// The value template a config names, or the default one.
 fn parse_value(value: Option<ValueConfig>) -> Result<ValueTemplate, String> {
     Ok(match value {
@@ -389,27 +326,22 @@ fn parse_value(value: Option<ValueConfig>) -> Result<ValueTemplate, String> {
     })
 }
 
-/// The serialization a config names, with its schema parsed.
-fn parse_serialization(config: SerializationConfig, topic: &str) -> Result<Serialization, String> {
+/// The registration a serialization config names, with its schema parsed.
+fn parse_serialization(
+    config: SerializationConfig,
+    topic: &str,
+) -> Result<SchemaRegistration, String> {
     let schema_text = match config.schema {
         Value::String(text) => text,
         doc => doc.to_string(),
     };
-    let schema = ValueSchema::parse(config.format, &schema_text)
-        .map_err(|e| format!("`serialization.schema`: {e}"))?;
-    Ok(Serialization {
-        client: RegistryClient::new(config.registry),
-        subject: config.subject.unwrap_or_else(|| format!("{topic}-value")),
+    SchemaRegistration::new(
+        config.registry,
+        config.subject.unwrap_or_else(|| format!("{topic}-value")),
+        config.format,
         schema_text,
-        schema,
-        state: Registration::Pending {
-            request: None,
-            retry_at: 0,
-            attempts: 0,
-        },
-        failed: 0,
-        error: None,
-    })
+    )
+    .map_err(|e| format!("`serialization.schema`: {e}"))
 }
 
 /// One generated record, for the snapshot.
@@ -438,7 +370,7 @@ pub struct ProducerNode {
     next_seq: u64,
     /// Records the `send` command asked for that wait for the registration.
     queued: u64,
-    serialization: Option<Serialization>,
+    serialization: Option<SchemaRegistration>,
     last_records: VecDeque<LastRecord>,
 }
 
@@ -567,23 +499,17 @@ impl ProducerNode {
             })
             .collect();
         let bytes = match &mut self.serialization {
-            Some(ser) => {
-                let Some(schema_id) = ser.schema_id() else {
+            Some(registration) => match registration.serialize(&doc) {
+                Ok(Some(framed)) => framed,
+                Ok(None) => return false,
+                Err(e) => {
+                    ctx.event(
+                        "serialization_failed",
+                        json!({ "seq": seq, "error": e.to_string(), "level": "warn" }),
+                    );
                     return false;
-                };
-                match ser.schema.encode(&doc) {
-                    Ok(body) => frame(schema_id, &body),
-                    Err(e) => {
-                        ser.failed += 1;
-                        ser.error = Some(e.to_string());
-                        ctx.event(
-                            "serialization_failed",
-                            json!({ "seq": seq, "error": e.to_string(), "level": "warn" }),
-                        );
-                        return false;
-                    }
                 }
-            }
+            },
             None => match &doc {
                 Value::String(text) if matches!(self.value, ValueTemplate::Text(_)) => {
                     Bytes::from(text.clone())
@@ -662,92 +588,28 @@ impl ProducerNode {
         }
     }
 
-    fn on_registry_replies(
-        &mut self,
-        ctx: &mut Ctx<'_>,
-        replies: Vec<(RegistryRequestId, RegistryReply)>,
-    ) {
-        let now = ctx.now();
-        let Some(ser) = &mut self.serialization else {
-            return;
-        };
-        for (id, reply) in replies {
-            let Registration::Pending {
-                request, attempts, ..
-            } = ser.state
-            else {
-                continue;
-            };
-            if request != Some(id) {
-                continue;
-            }
-            let outcome = match reply {
-                RegistryReply::Response(response) if response.status == 200 => response
-                    .body_json()
-                    .and_then(|b| b.get("id").and_then(Value::as_i64))
-                    .and_then(|id| i32::try_from(id).ok())
-                    .ok_or_else(|| format!("the registry answered {}", response.body)),
-                RegistryReply::Response(response) => {
-                    let message = response
-                        .body_json()
-                        .and_then(|b| b.get("message").and_then(Value::as_str).map(str::to_string))
-                        .unwrap_or(response.body);
-                    Err(format!("HTTP {}: {message}", response.status))
-                }
-                RegistryReply::Failed(reason) => Err(reason),
-            };
-            match outcome {
-                Ok(schema_id) => {
-                    ser.state = Registration::Ready { schema_id };
-                    ser.error = None;
-                    ctx.event(
-                        "schema_registered",
-                        json!({ "subject": ser.subject, "id": schema_id }),
-                    );
+    fn on_registration(&mut self, ctx: &mut Ctx<'_>, events: Vec<RegistrationEvent>) {
+        for event in events {
+            match event {
+                RegistrationEvent::Registered { subject, id } => {
+                    ctx.event("schema_registered", json!({ "subject": subject, "id": id }));
                     // The records the rate owes start from the registration.
-                    self.meter.reset(self.rate, now);
+                    self.meter.reset(self.rate, ctx.now());
                 }
-                Err(error) => {
-                    ser.state = Registration::Pending {
-                        request: None,
-                        retry_at: now + retry_backoff(attempts),
-                        attempts: attempts.saturating_add(1),
-                    };
-                    ctx.event(
-                        "registry_error",
-                        json!({ "subject": ser.subject, "error": error, "level": "warn" }),
-                    );
-                    ser.error = Some(error);
-                }
+                RegistrationEvent::Failed { subject, error } => ctx.event(
+                    "registry_error",
+                    json!({ "subject": subject, "error": error, "level": "warn" }),
+                ),
             }
-        }
-    }
-
-    fn register_if_due(&mut self, ctx: &mut Ctx<'_>) {
-        let Some(ser) = &mut self.serialization else {
-            return;
-        };
-        if let Registration::Pending {
-            request: None,
-            retry_at,
-            attempts,
-        } = ser.state
-            && ctx.now() >= retry_at
-        {
-            let request = ser.register_request();
-            let id = ser.client.send(ctx, request);
-            ser.state = Registration::Pending {
-                request: Some(id),
-                retry_at,
-                attempts,
-            };
         }
     }
 
     /// Move everything on after a frame, a timer or a command, and arm the
     /// next deadline.
     fn drive(&mut self, ctx: &mut Ctx<'_>) {
-        self.register_if_due(ctx);
+        if let Some(registration) = &mut self.serialization {
+            registration.poll(ctx);
+        }
         self.generate_due(ctx);
         let (events, _) = self.producer.on_tick(ctx);
         self.on_producer_events(ctx, events);
@@ -756,17 +618,10 @@ impl ProducerNode {
             .then(|| self.meter.next_due())
             .flatten();
         let queued = (self.ready() && self.queued > 0).then_some(now);
-        let registry = self.serialization.as_ref().and_then(|s| {
-            let retry = match s.state {
-                Registration::Pending {
-                    request: None,
-                    retry_at,
-                    ..
-                } => Some(retry_at),
-                _ => None,
-            };
-            retry.into_iter().chain(s.client.next_deadline()).min()
-        });
+        let registry = self
+            .serialization
+            .as_ref()
+            .and_then(SchemaRegistration::next_deadline);
         let deadline = self
             .producer
             .next_deadline(now)
@@ -795,27 +650,18 @@ impl Node for ProducerNode {
         self.next_seq = 0;
         self.queued = 0;
         self.last_records.clear();
-        if let Some(ser) = &mut self.serialization {
-            ser.client.reset();
-            ser.state = Registration::Pending {
-                request: None,
-                retry_at: ctx.now(),
-                attempts: 0,
-            };
-            ser.error = None;
+        if let Some(registration) = &mut self.serialization {
+            registration.restart(ctx.now());
         }
         self.drive(ctx);
     }
 
     fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) {
-        let registry_frame = self
-            .serialization
-            .as_ref()
-            .is_some_and(|s| s.client.owns(&frame));
+        let registry_frame = self.serialization.as_ref().is_some_and(|s| s.owns(&frame));
         if registry_frame {
-            if let Some(ser) = &mut self.serialization {
-                let replies = ser.client.on_frame(ctx, frame);
-                self.on_registry_replies(ctx, replies);
+            if let Some(registration) = &mut self.serialization {
+                let events = registration.on_frame(ctx, frame);
+                self.on_registration(ctx, events);
             }
         } else {
             let (events, _) = self.producer.on_frame(ctx, frame);
@@ -825,9 +671,9 @@ impl Node for ProducerNode {
     }
 
     fn on_timer(&mut self, ctx: &mut Ctx<'_>) {
-        if let Some(ser) = &mut self.serialization {
-            let replies = ser.client.on_tick(ctx);
-            self.on_registry_replies(ctx, replies);
+        if let Some(registration) = &mut self.serialization {
+            let events = registration.on_tick(ctx);
+            self.on_registration(ctx, events);
         }
         self.drive(ctx);
     }
@@ -903,7 +749,7 @@ impl Node for ProducerNode {
                 "serialization".to_string(),
                 self.serialization
                     .as_ref()
-                    .map_or(Value::Null, Serialization::snapshot),
+                    .map_or(Value::Null, SchemaRegistration::snapshot),
             );
             map.insert("last_records".to_string(), Value::Array(last));
         }
@@ -916,7 +762,11 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::lab::testing::CtxBuffers;
+    use crate::lab::{
+        net::Payload,
+        registry::http::{HttpRequest, HttpResponse},
+        testing::CtxBuffers,
+    };
 
     #[test]
     fn rates_read_exactly_from_json_numbers() {
@@ -1059,8 +909,8 @@ mod tests {
         bufs.with(50, |ctx| node.on_timer(ctx));
         assert!(node.snapshot()["generated"] == 0);
         assert!(node.snapshot()["serialization"]["state"] == "registering");
-        let answer = to_registry[1].reply(crate::lab::net::Payload::Data(
-            crate::lab::registry::http::HttpResponse::ok(&json!({ "id": 3 })).encode(),
+        let answer = to_registry[1].reply(Payload::Data(
+            HttpResponse::ok(&json!({ "id": 3 })).encode(),
         ));
         bufs.with(60, |ctx| node.on_frame(ctx, answer));
         assert!(node.snapshot()["serialization"]["schema_id"] == 3);

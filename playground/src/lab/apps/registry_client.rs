@@ -7,25 +7,32 @@
 //! order. A refused or lost connection, and a request with no answer within
 //! [`REQUEST_TIMEOUT_MS`], fail every request the client holds; the caller
 //! retries with its own backoff, and the next request opens a new
-//! connection.
+//! connection. A registry that answers a new connection with a close (as it
+//! does until its store is loaded) refused it.
 //!
-//! The connection ids come from the upper half of the id space, from
-//! [`CONN_ID_BASE`] up, so they never meet the ids the node's Kafka client
-//! numbers from 1.
+//! The connection ids come from the upper half of the id space, so they
+//! never meet the ids the node's Kafka client numbers from 1: a
+//! [`SchemaCache`] numbers from [`LOOKUP_CONN_IDS`] and a
+//! [`SchemaRegistration`] from [`REGISTER_CONN_IDS`], so one node can hold
+//! one of each.
 
 use std::collections::{BTreeMap, VecDeque};
 
+use bytes::Bytes;
 use derive_more::{Display, From, Into};
 use serde_json::{Value, json};
 
-use super::serde::{SchemaFormat, ValueSchema};
+use super::serde::{SchemaFormat, SerdeError, ValueSchema, frame};
 use crate::lab::{
     net::{ConnId, Ctx, Endpoint, Frame, Millis, NodeId, Payload},
-    registry::http::{HttpRequest, HttpResponse},
+    registry::http::{HttpRequest, HttpResponse, percent_encode},
 };
 
-/// The first connection id of a registry client.
-pub const CONN_ID_BASE: u32 = 1 << 31;
+/// The first connection id of a [`SchemaCache`]'s client.
+pub const LOOKUP_CONN_IDS: u32 = 1 << 31;
+
+/// The first connection id of a [`SchemaRegistration`]'s client.
+pub const REGISTER_CONN_IDS: u32 = (1 << 31) | (1 << 30);
 
 /// How long a request may wait for its answer before the client closes the
 /// connection and fails it.
@@ -60,6 +67,10 @@ struct Request {
 pub struct RegistryClient {
     registry: NodeId,
     conn: Option<ConnId>,
+    /// The connection delivered an answer: a close then loses it rather
+    /// than refuses it.
+    answered: bool,
+    first_conn: u32,
     next_conn: u32,
     next_request: u64,
     queue: VecDeque<Request>,
@@ -71,13 +82,16 @@ pub struct RegistryClient {
 }
 
 impl RegistryClient {
-    /// A client of the registry node `registry`.
+    /// A client of the registry node `registry` whose connection ids count
+    /// up from `first_conn`.
     #[must_use]
-    pub fn new(registry: NodeId) -> Self {
+    pub fn new(registry: NodeId, first_conn: u32) -> Self {
         Self {
             registry,
             conn: None,
-            next_conn: CONN_ID_BASE,
+            answered: false,
+            first_conn,
+            next_conn: first_conn,
             next_request: 0,
             queue: VecDeque::new(),
             in_flight: None,
@@ -130,8 +144,9 @@ impl RegistryClient {
             conn
         } else {
             let conn = ConnId(self.next_conn);
-            self.next_conn = self.next_conn.wrapping_add(1).max(CONN_ID_BASE);
+            self.next_conn = self.next_conn.wrapping_add(1).max(self.first_conn);
             self.conn = Some(conn);
+            self.answered = false;
             ctx.send(Frame::open(me, self.endpoint(), conn));
             conn
         };
@@ -157,6 +172,7 @@ impl RegistryClient {
         let mut out = Vec::new();
         match frame.payload {
             Payload::Data(bytes) => {
+                self.answered = true;
                 if let Some((request, _)) = self.in_flight.take() {
                     let reply = match HttpResponse::parse(&bytes) {
                         Ok((response, _)) => {
@@ -172,7 +188,7 @@ impl RegistryClient {
                 }
             }
             Payload::Close => {
-                let reason = if self.in_flight.is_some() {
+                let reason = if self.answered {
                     "the registry closed the connection"
                 } else {
                     "the registry refused the connection"
@@ -253,6 +269,249 @@ impl RegistryClient {
     }
 }
 
+/// Where a schema registration stands.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Registration {
+    /// The next attempt goes out at `retry_at`, or is on the wire.
+    Pending {
+        request: Option<RegistryRequestId>,
+        retry_at: Millis,
+        attempts: u32,
+    },
+    Ready {
+        schema_id: i32,
+    },
+}
+
+/// What a registration answer did.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum RegistrationEvent {
+    Registered { subject: String, id: i32 },
+    Failed { subject: String, error: String },
+}
+
+/// A schema a node registers under a subject before it serializes with it,
+/// as a Confluent serializer with `auto.register.schemas` does before its
+/// first record: `POST /subjects/{subject}/versions`, retried with
+/// [`retry_backoff`] until the registry assigns the id. A refusal (409
+/// incompatible, 422 invalid, 500 when the registry cannot write its store),
+/// a refused or lost connection and a timeout are retried alike, and the last
+/// error stays in the snapshot.
+pub struct SchemaRegistration {
+    client: RegistryClient,
+    subject: String,
+    schema_text: String,
+    schema: ValueSchema,
+    state: Registration,
+    failed: u64,
+    error: Option<String>,
+}
+
+impl SchemaRegistration {
+    /// A registration of `schema_text` in `format` under `subject` on the
+    /// registry node `registry`, to send at the first [`poll`](Self::poll).
+    ///
+    /// # Errors
+    /// Returns [`SerdeError::Schema`] when the schema does not parse.
+    pub fn new(
+        registry: NodeId,
+        subject: String,
+        format: SchemaFormat,
+        schema_text: String,
+    ) -> Result<Self, SerdeError> {
+        let schema = ValueSchema::parse(format, &schema_text)?;
+        Ok(Self {
+            client: RegistryClient::new(registry, REGISTER_CONN_IDS),
+            subject,
+            schema_text,
+            schema,
+            state: Registration::Pending {
+                request: None,
+                retry_at: 0,
+                attempts: 0,
+            },
+            failed: 0,
+            error: None,
+        })
+    }
+
+    /// The id the registry assigned, once it did.
+    #[must_use]
+    pub fn schema_id(&self) -> Option<i32> {
+        match self.state {
+            Registration::Ready { schema_id } => Some(schema_id),
+            Registration::Pending { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// Whether `frame` belongs to the registration's connection.
+    #[must_use]
+    pub fn owns(&self, frame: &Frame) -> bool {
+        self.client.owns(frame)
+    }
+
+    /// Send the registration when an attempt is due.
+    pub fn poll(&mut self, ctx: &mut Ctx<'_>) {
+        if let Registration::Pending {
+            request: None,
+            retry_at,
+            attempts,
+        } = self.state
+            && ctx.now() >= retry_at
+        {
+            let mut body = json!({ "schema": self.schema_text });
+            if let Some(ty) = self.schema.format().registry_type() {
+                body["schemaType"] = json!(ty);
+            }
+            let request = HttpRequest::new(
+                "POST",
+                &format!("/subjects/{}/versions", percent_encode(&self.subject)),
+            )
+            .with_json(&body);
+            let id = self.client.send(ctx, request);
+            self.state = Registration::Pending {
+                request: Some(id),
+                retry_at,
+                attempts,
+            };
+        }
+    }
+
+    fn settle(
+        &mut self,
+        now: Millis,
+        replies: Vec<(RegistryRequestId, RegistryReply)>,
+    ) -> Vec<RegistrationEvent> {
+        let mut events = Vec::new();
+        for (id, reply) in replies {
+            let Registration::Pending {
+                request, attempts, ..
+            } = self.state
+            else {
+                continue;
+            };
+            if request != Some(id) {
+                continue;
+            }
+            let outcome = match reply {
+                RegistryReply::Response(response) if response.status == 200 => response
+                    .body_json()
+                    .and_then(|b| b.get("id").and_then(Value::as_i64))
+                    .and_then(|id| i32::try_from(id).ok())
+                    .ok_or_else(|| format!("the registry answered {}", response.body)),
+                RegistryReply::Response(response) => Err(refusal(&response)),
+                RegistryReply::Failed(reason) => Err(reason),
+            };
+            match outcome {
+                Ok(schema_id) => {
+                    self.state = Registration::Ready { schema_id };
+                    self.error = None;
+                    events.push(RegistrationEvent::Registered {
+                        subject: self.subject.clone(),
+                        id: schema_id,
+                    });
+                }
+                Err(error) => {
+                    self.state = Registration::Pending {
+                        request: None,
+                        retry_at: now + retry_backoff(attempts),
+                        attempts: attempts.saturating_add(1),
+                    };
+                    events.push(RegistrationEvent::Failed {
+                        subject: self.subject.clone(),
+                        error: error.clone(),
+                    });
+                    self.error = Some(error);
+                }
+            }
+        }
+        events
+    }
+
+    /// A frame of the registration's connection arrived.
+    pub fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) -> Vec<RegistrationEvent> {
+        let replies = self.client.on_frame(ctx, frame);
+        self.settle(ctx.now(), replies)
+    }
+
+    /// Time out the request on the wire.
+    pub fn on_tick(&mut self, ctx: &mut Ctx<'_>) -> Vec<RegistrationEvent> {
+        let replies = self.client.on_tick(ctx);
+        self.settle(ctx.now(), replies)
+    }
+
+    /// The next retry or request deadline.
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Millis> {
+        let retry = match self.state {
+            Registration::Pending {
+                request: None,
+                retry_at,
+                ..
+            } => Some(retry_at),
+            _ => None,
+        };
+        retry.into_iter().chain(self.client.next_deadline()).min()
+    }
+
+    /// Forget the id and the connection and register again from `now`, as
+    /// a restarted process does.
+    pub fn restart(&mut self, now: Millis) {
+        self.client.reset();
+        self.state = Registration::Pending {
+            request: None,
+            retry_at: now,
+            attempts: 0,
+        };
+        self.error = None;
+    }
+
+    /// The framed value of `doc`, or `None` before the registration
+    /// finished.
+    ///
+    /// # Errors
+    /// Returns what the schema refuses; the failure is counted.
+    pub fn serialize(&mut self, doc: &Value) -> Result<Option<Bytes>, SerdeError> {
+        let Some(schema_id) = self.schema_id() else {
+            return Ok(None);
+        };
+        match self.schema.encode(doc) {
+            Ok(body) => Ok(Some(frame(schema_id, &body))),
+            Err(e) => {
+                self.failed += 1;
+                self.error = Some(e.to_string());
+                Err(e)
+            }
+        }
+    }
+
+    /// The registration for the inspector: `{"registry", "subject",
+    /// "format", "state": "registering"|"ready", "schema_id", "failed",
+    /// "error", "client"}`.
+    #[must_use]
+    pub fn snapshot(&self) -> Value {
+        let (state, schema_id) = match self.state {
+            Registration::Pending { .. } => ("registering", None),
+            Registration::Ready { schema_id } => ("ready", Some(schema_id)),
+        };
+        json!({
+            "registry": self.client.registry(),
+            "subject": self.subject,
+            "format": self.schema.format().name(),
+            "state": state,
+            "schema_id": schema_id,
+            "failed": self.failed,
+            "error": self.error,
+            "client": self.client.snapshot(),
+        })
+    }
+}
+
 /// Where the lookup of one schema id stands.
 enum CacheEntry {
     Fetching {
@@ -291,7 +550,7 @@ impl SchemaCache {
     #[must_use]
     pub fn new(registry: NodeId) -> Self {
         Self {
-            client: RegistryClient::new(registry),
+            client: RegistryClient::new(registry, LOOKUP_CONN_IDS),
             entries: BTreeMap::new(),
         }
     }
@@ -434,6 +693,28 @@ impl SchemaCache {
     }
 }
 
+/// The error text of a registry answer other than 200: its status and
+/// Confluent's error body as `RestClientException` words it, `<message>;
+/// error code: <code>`, or the raw body.
+fn refusal(response: &HttpResponse) -> String {
+    let body = response.body_json();
+    let message = body
+        .as_ref()
+        .and_then(|b| b.get("message"))
+        .and_then(Value::as_str);
+    let code = body
+        .as_ref()
+        .and_then(|b| b.get("error_code"))
+        .and_then(Value::as_i64);
+    match (message, code) {
+        (Some(message), Some(code)) => {
+            format!("HTTP {}: {message}; error code: {code}", response.status)
+        }
+        (Some(message), None) => format!("HTTP {}: {message}", response.status),
+        _ => format!("HTTP {}: {}", response.status, response.body),
+    }
+}
+
 /// The schema a `GET /schemas/ids/{id}` answer carries.
 fn parse_schema_response(response: &HttpResponse) -> Result<ValueSchema, String> {
     let body = response
@@ -465,7 +746,7 @@ mod tests {
 
     #[test]
     fn requests_go_out_one_at_a_time_on_one_connection() {
-        let mut client = RegistryClient::new(REGISTRY);
+        let mut client = RegistryClient::new(REGISTRY, LOOKUP_CONN_IDS);
         let mut bufs = CtxBuffers::new(ME);
         let first = bufs.with(0, |ctx| {
             client.send(
@@ -478,7 +759,7 @@ mod tests {
             client.send(ctx, HttpRequest::new("GET", "/schemas/ids/1"))
         });
         let frames = bufs.take_frames();
-        let conn = ConnId(CONN_ID_BASE);
+        let conn = ConnId(LOOKUP_CONN_IDS);
         let to = Endpoint::http(REGISTRY);
         let from = Endpoint::client(ME);
         assert!(frames.len() == 2);
@@ -511,7 +792,7 @@ mod tests {
 
     #[test]
     fn a_refused_connection_fails_everything_and_the_next_request_reconnects() {
-        let mut client = RegistryClient::new(REGISTRY);
+        let mut client = RegistryClient::new(REGISTRY, LOOKUP_CONN_IDS);
         let mut bufs = CtxBuffers::new(ME);
         let a = bufs.with(0, |ctx| {
             client.send(ctx, HttpRequest::new("GET", "/subjects"))
@@ -526,20 +807,144 @@ mod tests {
             frames[0].conn,
         );
         let answers = bufs.with(5, |ctx| client.on_frame(ctx, close));
-        let failed = RegistryReply::Failed("the registry closed the connection".to_string());
+        let failed = RegistryReply::Failed("the registry refused the connection".to_string());
         assert!(answers == vec![(a, failed.clone()), (b, failed)]);
-        assert!(client.snapshot()["last_error"] == "the registry closed the connection");
-        bufs.with(6, |ctx| {
+        assert!(client.snapshot()["last_error"] == "the registry refused the connection");
+        let c = bufs.with(6, |ctx| {
             client.send(ctx, HttpRequest::new("GET", "/subjects"))
         });
         let frames = bufs.take_frames();
         assert!(frames[0].payload == Payload::Open);
-        assert!(frames[0].conn == ConnId(CONN_ID_BASE + 1));
+        assert!(frames[0].conn == ConnId(LOOKUP_CONN_IDS + 1));
+        // A connection that answered and then closes lost the request.
+        bufs.with(7, |ctx| {
+            client.on_frame(ctx, reply(&frames[1], 200, &json!([])))
+        });
+        let d = bufs.with(8, |ctx| {
+            client.send(ctx, HttpRequest::new("GET", "/config"))
+        });
+        let close = Frame::close(
+            Endpoint::http(REGISTRY),
+            Endpoint::client(ME),
+            frames[0].conn,
+        );
+        let answers = bufs.with(9, |ctx| client.on_frame(ctx, close));
+        assert!(
+            answers
+                == vec![(
+                    d,
+                    RegistryReply::Failed("the registry closed the connection".to_string())
+                )]
+        );
+        assert!(c != d);
+    }
+
+    #[test]
+    fn a_failed_registration_is_retried_with_backoff_and_shown() {
+        // How the registry turns the registration down, and the error the
+        // registration shows until the retry succeeds.
+        let refuse: fn(&Frame) -> Frame = |f| Frame::close(f.dst, f.src, f.conn);
+        let timed_out: fn(&Frame) -> Frame = |f| {
+            reply(
+                f,
+                500,
+                &json!({ "error_code": 50002, "message": "Register operation timed out" }),
+            )
+        };
+        let store_failed: fn(&Frame) -> Frame = |f| {
+            reply(
+                f,
+                500,
+                &json!({
+                    "error_code": 50001,
+                    "message": "Register schema operation failed while writing to the backend store",
+                }),
+            )
+        };
+        let incompatible: fn(&Frame) -> Frame = |f| {
+            reply(
+                f,
+                409,
+                &json!({
+                    "error_code": 409,
+                    "message": "Schema being registered is incompatible with an earlier schema",
+                }),
+            )
+        };
+        let bare: fn(&Frame) -> Frame = |f| {
+            let busy = HttpResponse {
+                status: 503,
+                body: "busy".to_string(),
+            };
+            f.reply(Payload::Data(busy.encode()))
+        };
+        let cases = [
+            (refuse, "the registry refused the connection"),
+            (
+                timed_out,
+                "HTTP 500: Register operation timed out; error code: 50002",
+            ),
+            (
+                store_failed,
+                "HTTP 500: Register schema operation failed while writing to the backend \
+                 store; error code: 50001",
+            ),
+            (
+                incompatible,
+                "HTTP 409: Schema being registered is incompatible with an earlier schema; \
+                 error code: 409",
+            ),
+            (bare, "HTTP 503: busy"),
+        ];
+        for (answer, error) in cases {
+            let mut registration = SchemaRegistration::new(
+                REGISTRY,
+                "t-value".to_string(),
+                SchemaFormat::Avro,
+                "\"string\"".to_string(),
+            )
+            .unwrap();
+            let mut bufs = CtxBuffers::new(ME);
+            bufs.with(0, |ctx| registration.poll(ctx));
+            let sent = bufs.take_frames();
+            let events = bufs.with(2, |ctx| registration.on_frame(ctx, answer(&sent[1])));
+            assert!(
+                events
+                    == vec![RegistrationEvent::Failed {
+                        subject: "t-value".to_string(),
+                        error: error.to_string(),
+                    }],
+                "{error}"
+            );
+            let snapshot = registration.snapshot();
+            assert!(
+                json!([snapshot["state"], snapshot["schema_id"], snapshot["error"]])
+                    == json!(["registering", null, error])
+            );
+            // Nothing goes out before the backoff.
+            assert!(registration.next_deadline() == Some(2 + retry_backoff(0)));
+            bufs.with(501, |ctx| registration.poll(ctx));
+            assert!(bufs.take_frames().is_empty());
+            bufs.with(502, |ctx| registration.poll(ctx));
+            let retry = bufs.take_frames();
+            let events = bufs.with(504, |ctx| {
+                registration.on_frame(ctx, reply(retry.last().unwrap(), 200, &json!({ "id": 7 })))
+            });
+            assert!(
+                events
+                    == vec![RegistrationEvent::Registered {
+                        subject: "t-value".to_string(),
+                        id: 7
+                    }]
+            );
+            assert!(registration.schema_id() == Some(7));
+            assert!(registration.snapshot()["error"] == Value::Null);
+        }
     }
 
     #[test]
     fn a_silent_registry_times_out() {
-        let mut client = RegistryClient::new(REGISTRY);
+        let mut client = RegistryClient::new(REGISTRY, LOOKUP_CONN_IDS);
         let mut bufs = CtxBuffers::new(ME);
         let id = bufs.with(0, |ctx| {
             client.send(ctx, HttpRequest::new("GET", "/subjects"))
@@ -566,7 +971,7 @@ mod tests {
 
     #[test]
     fn frames_of_other_connections_are_not_the_clients() {
-        let mut client = RegistryClient::new(REGISTRY);
+        let mut client = RegistryClient::new(REGISTRY, LOOKUP_CONN_IDS);
         let mut bufs = CtxBuffers::new(ME);
         bufs.with(0, |ctx| {
             client.send(ctx, HttpRequest::new("GET", "/subjects"))
@@ -574,7 +979,7 @@ mod tests {
         let stray = Frame::data(
             Endpoint::kafka(NodeId(1)),
             Endpoint::client(ME),
-            ConnId(CONN_ID_BASE),
+            ConnId(LOOKUP_CONN_IDS),
             Bytes::from_static(b"x"),
         );
         assert!(!client.owns(&stray));
