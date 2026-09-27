@@ -24,12 +24,15 @@
 //!
 //! A request for any broker, and the client's own metadata requests and
 //! coordinator lookups, go to the node Kafka's
-//! `NetworkClient.leastLoadedNode` picks among the brokers of the metadata
-//! and the bootstrap brokers, visited from a random one on: a ready
-//! connection with the fewest requests and room for another, else a
-//! connection being set up, else the node whose last connection attempt is
-//! the oldest, a node never tried first, and never a node in reconnect
-//! backoff. When the connection a request waits on fails, by a close, a
+//! `NetworkClient.leastLoadedNode` picks among the brokers of the metadata,
+//! visited from a random one on: a ready connection with the fewest
+//! requests and room for another, else a connection being set up, else the
+//! node whose last connection attempt is the oldest, a node never tried
+//! first, and never a node in reconnect backoff. With no metadata yet, or
+//! when no broker of the metadata can be picked and no connection to one is
+//! ready, the pick is among the bootstrap brokers, as Kafka's default
+//! `metadata.recovery.strategy`, `rebootstrap`, does. When the connection a
+//! request waits on fails, by a close, a
 //! request timeout or a setup timeout, a caller's request goes to the node
 //! its target names then, as `KafkaAdminClient.unassignUnsentCalls` hands
 //! the calls of a failed node back for another pick, while the client's own
@@ -215,8 +218,9 @@ pub type CoordinatorKey = (CoordinatorType, String);
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Target {
     /// The broker Kafka's `leastLoadedNode` picks among the brokers of the
-    /// metadata and the bootstrap brokers; see the module documentation. A
-    /// request that waits on a connection that fails goes to the next pick.
+    /// metadata, or the bootstrap brokers when none of those can be picked;
+    /// see the module documentation. A request that waits on a connection
+    /// that fails goes to the next pick.
     Any,
     /// One broker by id, from the metadata cache.
     Broker(i32),
@@ -827,17 +831,27 @@ impl KafkaClient {
         }
     }
 
-    /// Kafka's `NetworkClient.leastLoadedNode` (see [`pick_least_loaded`])
-    /// over the brokers of the metadata and the bootstrap brokers it does
-    /// not name, visited from a random one on as Kafka's `randOffset` does.
-    /// `None` when no node can take a request now.
+    /// Kafka's `NetworkClient.leastLoadedNode` over the brokers of the
+    /// metadata. With no metadata yet, or when no broker of the metadata can
+    /// take a request and no connection to one is ready, it picks among the
+    /// bootstrap brokers instead: the `rebootstrap` of Kafka's default
+    /// `metadata.recovery.strategy`, which `DefaultMetadataUpdater` and the
+    /// admin client's `MetadataUpdateNodeIdProvider` start then. `None` when
+    /// no node can take a request now.
     fn least_loaded(&self, ctx: &mut Ctx<'_>) -> Option<Endpoint> {
-        let mut nodes: Vec<Endpoint> = self.metadata.brokers.values().map(|b| b.endpoint).collect();
-        for endpoint in &self.bootstrap {
-            if !nodes.contains(endpoint) {
-                nodes.push(*endpoint);
-            }
+        let brokers: Vec<Endpoint> = self.metadata.brokers.values().map(|b| b.endpoint).collect();
+        let (picked, ready) = self.pick_among(ctx, &brokers);
+        if picked.is_some() || ready {
+            return picked;
         }
+        self.pick_among(ctx, &self.bootstrap).0
+    }
+
+    /// The node [`pick_least_loaded`] picks among `nodes`, visited from a
+    /// random one on as Kafka's `randOffset` does, and whether a connection
+    /// to one of them is ready: Kafka's `LeastLoadedNode`, whose
+    /// `hasNodeAvailableOrConnectionReady` decides a rebootstrap.
+    fn pick_among(&self, ctx: &mut Ctx<'_>, nodes: &[Endpoint]) -> (Option<Endpoint>, bool) {
         let states: Vec<NodeState> = nodes
             .iter()
             .map(|endpoint| match self.conns.get(endpoint) {
@@ -851,12 +865,17 @@ impl KafkaClient {
                 },
             })
             .collect();
+        let ready = states
+            .iter()
+            .any(|state| matches!(state, NodeState::Ready { .. }));
         // A single node needs no draw: the offset is 0 whatever it would be.
         let offset = match u64::try_from(nodes.len()) {
             Ok(len) if len > 1 => usize::try_from(ctx.rand(len)).unwrap_or(0),
             _ => 0,
         };
-        pick_least_loaded(&states, offset, ctx.now(), self.opts.max_in_flight).map(|i| nodes[i])
+        let picked = pick_least_loaded(&states, offset, ctx.now(), self.opts.max_in_flight)
+            .map(|i| nodes[i]);
+        (picked, ready)
     }
 
     fn dispatch(&mut self, ctx: &mut Ctx<'_>, endpoint: Endpoint, request: Outbound) {

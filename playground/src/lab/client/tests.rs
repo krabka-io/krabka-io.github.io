@@ -846,6 +846,58 @@ fn a_request_for_any_broker_waits_out_the_reconnect_backoff_of_the_only_broker()
 }
 
 #[test]
+fn a_request_for_any_broker_prefers_the_brokers_of_the_metadata_to_the_bootstrap_brokers() {
+    // Kafka's `leastLoadedNode` picks among the brokers of the metadata;
+    // the bootstrap brokers come back only when none of those can be picked
+    // and no connection to one is ready (the `rebootstrap` of
+    // `metadata.recovery.strategy`). Broker 2 is a bootstrap broker the
+    // metadata leaves out, as it leaves out a fenced broker, and it answers
+    // nothing. The client's connections to brokers 1 and 3 close when both
+    // restart, which makes broker 2 the node whose last attempt is the
+    // oldest; still, once the reconnect backoff of 1 and 3 passed, a request
+    // for any broker goes to one of them and is answered at once.
+    let state = cluster(&[]);
+    let mut h = Harness::new(client(&[1, 2, 3]), Rc::clone(&state));
+    {
+        let mut s = state.borrow_mut();
+        s.brokers.remove(&2);
+        s.knobs.silent_brokers = BTreeSet::from([2]);
+    }
+    assert!(h.run_until(|h| h.client.metadata().updated_at.is_some(), 30_000));
+    let named: Vec<i32> = h.client.metadata().brokers.keys().copied().collect();
+    assert!(named == vec![1, 3]);
+    for broker in [1, 3] {
+        h.with_client(|c, ctx| c.send(ctx, Target::Broker(broker), heartbeat()));
+    }
+    assert!(h.run_until(|h| responses_of(&h.events).len() == 2, 1_000));
+    h.take_events();
+    for node in [1, 3] {
+        h.kill_broker(NodeId(node));
+    }
+    assert!(h.run_until(
+        |h| conn_state_of(h, 1) == "closed" && conn_state_of(h, 3) == "closed",
+        1_000
+    ));
+    for node in [1, 3] {
+        h.restart_broker(NodeId(node));
+    }
+    h.run_for(100);
+    let sent_at = h.now();
+    let id = h.with_client(|c, ctx| c.send(ctx, Target::Any, heartbeat()));
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 1_000));
+    let took = h.now() - sent_at;
+    assert!(took <= 20, "{took} ms");
+    let results = responses(h.take_events());
+    assert!(results.len() == 1);
+    assert!(results[0].0 == id);
+    let answered_by = results[0].1.as_ref().map(|r| r.endpoint.node).ok();
+    assert!(
+        matches!(answered_by, Some(NodeId(1 | 3))),
+        "{answered_by:?}"
+    );
+}
+
+#[test]
 fn the_in_flight_window_holds_five_requests_and_queues_the_rest() {
     let state = ClusterState::new(&[(1, 1)]);
     let mut h = Harness::new(client(&[1]), Rc::clone(&state));
