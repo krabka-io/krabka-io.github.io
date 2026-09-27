@@ -520,6 +520,21 @@ impl Coordinator {
         offsets::commit(self, now, req, version, metadata)
     }
 
+    /// `OffsetCommit` for a group this coordinator does not hold, refused
+    /// with `error_code` behind the same topic checks as
+    /// [`Coordinator::offset_commit`], as Kafka answers a commit its group
+    /// coordinator service fails: the broker answers `NOT_COORDINATOR` for
+    /// a group of a partition it does not lead with it.
+    #[must_use]
+    pub fn offset_commit_refused(
+        req: &OffsetCommitRequest,
+        version: i16,
+        metadata: &dyn TopicMetadata,
+        error_code: i16,
+    ) -> OffsetCommitResponse {
+        offsets::commit_refused(req, version, metadata, error_code)
+    }
+
     /// `OffsetFetch`: the single-group shape below v8, the per-group shape
     /// from v8, topic ids at v10.
     #[must_use]
@@ -628,6 +643,18 @@ impl Coordinator {
         consumer::heartbeat(self, now, client, req, version, metadata)
     }
 
+    /// The error code and message of the first check of Kafka's
+    /// `throwIfConsumerGroupHeartbeatRequestIsInvalid` a request fails. Kafka
+    /// makes these checks before it routes the request, so the broker
+    /// answers them ahead of `NOT_COORDINATOR`.
+    #[must_use]
+    pub fn consumer_group_heartbeat_error(
+        req: &ConsumerGroupHeartbeatRequest,
+        version: i16,
+    ) -> Option<(i16, String)> {
+        consumer::request_error(req, version)
+    }
+
     /// `ConsumerGroupDescribe`.
     #[must_use]
     pub fn consumer_group_describe(
@@ -649,6 +676,17 @@ impl Coordinator {
         metadata: &dyn TopicMetadata,
     ) -> (StreamsGroupHeartbeatResponse, Vec<InternalTopicToCreate>) {
         streams::heartbeat(self, now, client, req, metadata)
+    }
+
+    /// The error code and message of the first request check a
+    /// `StreamsGroupHeartbeat` fails. Kafka makes these checks before it
+    /// routes the request, so the broker answers them ahead of
+    /// `NOT_COORDINATOR`.
+    #[must_use]
+    pub fn streams_group_heartbeat_error(
+        req: &StreamsGroupHeartbeatRequest,
+    ) -> Option<(i16, String)> {
+        streams::request_error(req)
     }
 
     /// `StreamsGroupDescribe`.

@@ -22,8 +22,8 @@
 //!
 //! With `acks=1` the request answers at once. With `acks=-1` it waits until
 //! the high watermark covers every appended batch, then answers
-//! `NOT_ENOUGH_REPLICAS_AFTER_APPEND` for a partition whose ISR shrank below
-//! the minimum meanwhile, `NOT_LEADER_OR_FOLLOWER` for one whose leadership
+//! `NOT_ENOUGH_REPLICAS_AFTER_APPEND` for a partition whose maximal ISR
+//! shrank below the minimum meanwhile, `NOT_LEADER_OR_FOLLOWER` for one whose leadership
 //! moved, and `REQUEST_TIMED_OUT` for one still short when the request's
 //! `timeout_ms` runs out (bounded by the broker's `request_timeout_ms`).
 //! `acks=0` answers nothing, and closes the connection when a row failed, as
@@ -364,7 +364,10 @@ pub fn retry(
             )),
             Some(replica) if !replica.leads(me) => Some(codes::NOT_LEADER_OR_FOLLOWER),
             Some(replica) if replica.log.high_watermark() >= wait.required_offset => {
-                if replica.isr.len() < effective_min_isr(min_isr, replica.replicas.len()) {
+                // Kafka's `checkEnoughReplicasReachOffset` counts the maximal
+                // ISR, a pending expansion included.
+                if replica.maximal_isr().len() < effective_min_isr(min_isr, replica.replicas.len())
+                {
                     Some(codes::NOT_ENOUGH_REPLICAS_AFTER_APPEND)
                 } else {
                     Some(codes::NONE)

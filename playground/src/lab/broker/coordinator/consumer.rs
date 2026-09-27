@@ -274,6 +274,15 @@ fn validate_request(
     Ok(())
 }
 
+/// The error code and message of the first check of Kafka's
+/// `throwIfConsumerGroupHeartbeatRequestIsInvalid` a request fails, which
+/// Kafka answers before it routes the request to a coordinator.
+pub fn request_error(req: &ConsumerGroupHeartbeatRequest, version: i16) -> Option<(i16, String)> {
+    validate_request(req, version)
+        .err()
+        .map(|error| (error.code, error.message))
+}
+
 /// `ConsumerGroupHeartbeat`.
 pub fn heartbeat(
     coord: &mut Coordinator,

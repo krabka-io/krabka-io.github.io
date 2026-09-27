@@ -170,7 +170,8 @@ fn create_topics_stripes_replicas_over_the_unfenced_brokers() {
     );
     assert!(image.partition("orders", 3).is_none());
     // The next topic starts its stripe one broker further, and a config
-    // override rides along as a config record.
+    // override rides along as a config record, between the topic record and
+    // the partition records as Kafka writes it.
     let mut spec = CreateTopicSpec::new("events", 2, 2);
     spec.configs.insert("retention.ms".into(), "1000".into());
     let results = decisions.create_topics(&image, &[spec]);
@@ -178,12 +179,12 @@ fn create_topics_stripes_replicas_over_the_unfenced_brokers() {
     assert!(
         created.records[1..]
             == vec![
-                MetadataRecord::V1Partition(partition("events", 0, 2, &[2, 3], &[2, 3], 0, 0)),
-                MetadataRecord::V1Partition(partition("events", 1, 3, &[3, 1], &[3, 1], 0, 0)),
                 MetadataRecord::V1TopicConfig(TopicConfigRecord {
                     topic: "events".into(),
                     overrides: BTreeMap::from([("retention.ms".to_string(), "1000".to_string())]),
                 }),
+                MetadataRecord::V1Partition(partition("events", 0, 2, &[2, 3], &[2, 3], 0, 0)),
+                MetadataRecord::V1Partition(partition("events", 1, 3, &[3, 1], &[3, 1], 0, 0)),
             ]
     );
 }
@@ -204,7 +205,7 @@ fn defaults_and_manual_assignments_are_honoured() {
     // A manual assignment keeps the listed order, may name a fenced broker,
     // and leaves it out of the ISR; the first active replica leads.
     let spec = CreateTopicSpec {
-        assignments: vec![nodes(&[3, 2, 1]), nodes(&[1, 3, 2])],
+        assignments: vec![(0, nodes(&[3, 2, 1])), (1, nodes(&[1, 3, 2]))],
         ..CreateTopicSpec::new("manual", -1, -1)
     };
     let results = decisions.create_topics(&image, &[spec]);
@@ -218,7 +219,7 @@ fn defaults_and_manual_assignments_are_honoured() {
     );
     // Every replica fenced: the row is refused.
     let spec = CreateTopicSpec {
-        assignments: vec![nodes(&[3])],
+        assignments: vec![(0, nodes(&[3]))],
         ..CreateTopicSpec::new("dark", -1, -1)
     };
     let results = decisions.create_topics(&image, &[spec]);
@@ -286,7 +287,7 @@ fn create_partitions_continues_the_stripe_and_refuses_shrinking() {
     for (label, name, count, assignments, code) in cases {
         let result = decisions.create_partitions(&image, name, count, assignments.as_deref());
         assert!(let Err(error) = result, "{label}");
-        assert!(error.code == code, "{label}: {}", error.message);
+        assert!(error.code == code, "{label}: {:?}", error.message);
     }
 }
 
@@ -305,7 +306,7 @@ fn delete_topics_answers_per_name() {
                 )]),
                 Err(TopicError {
                     code: codes::UNKNOWN_TOPIC_OR_PARTITION,
-                    message: "This server does not host this topic-partition.".into(),
+                    message: Some("This server does not host this topic-partition.".into()),
                 }),
             ]
     );
@@ -333,7 +334,8 @@ fn fencing_elects_the_next_isr_member_and_bumps_the_epochs() {
             MetadataRecord::V1Partition(partition("t", 0, 1, &[1, 2, 3], &[1, 2, 3], 4, 7)),
             // Led by 2 with 1 in the ISR: the ISR shrinks, the leader stays.
             MetadataRecord::V1Partition(partition("t", 1, 2, &[2, 1, 3], &[2, 1], 1, 1)),
-            // Led by 1 alone in the ISR, unclean election off: offline.
+            // Led by 1 alone in the ISR, unclean election off: offline, with
+            // 1 kept as the last ISR member.
             MetadataRecord::V1Partition(partition("t", 2, 1, &[1, 2, 3], &[1], 0, 0)),
             // Not involving broker 1 at all: untouched.
             MetadataRecord::V1Partition(partition("t", 3, 3, &[3, 2], &[3, 2], 0, 0)),
@@ -349,7 +351,7 @@ fn fencing_elects_the_next_isr_member_and_bumps_the_epochs() {
             == vec![
                 MetadataRecord::V1Partition(partition("t", 0, 2, &[1, 2, 3], &[2, 3], 5, 8)),
                 MetadataRecord::V1Partition(partition("t", 1, 2, &[2, 1, 3], &[2], 1, 2)),
-                MetadataRecord::V1Partition(partition("t", 2, NO_LEADER.0, &[1, 2, 3], &[], 1, 1)),
+                MetadataRecord::V1Partition(partition("t", 2, NO_LEADER.0, &[1, 2, 3], &[1], 1, 1)),
                 MetadataRecord::V1Partition(partition("u", 0, 3, &[1, 3, 2], &[3], 3, 3)),
             ]
     );
@@ -519,8 +521,8 @@ fn heartbeats_drive_the_fence_state_machine() {
         .unwrap();
     assert!(outcome.records.is_empty());
     // A session that lapses fences the broker, and its partition goes
-    // offline: no other ISR member is left. Broker 2 heartbeated later and
-    // keeps its session.
+    // offline: no other ISR member is left, and the broker stays in the ISR
+    // as its last member. Broker 2 heartbeated later and keeps its session.
     assert!(
         decisions
             .expire_sessions(&image, 300 + SESSION_MS - 1)
@@ -530,7 +532,7 @@ fn heartbeats_drive_the_fence_state_machine() {
     assert!(
         records
             == vec![
-                MetadataRecord::V1Partition(partition("t", 0, NO_LEADER.0, &[1, 2], &[], 3, 3)),
+                MetadataRecord::V1Partition(partition("t", 0, NO_LEADER.0, &[1, 2], &[1], 3, 3)),
                 MetadataRecord::V1Partition(partition("t", 1, 2, &[2, 1], &[2], 0, 1)),
                 MetadataRecord::V1BrokerRegistration(registration(1, true)),
             ]
@@ -632,7 +634,15 @@ fn controlled_shutdown_hands_leaderships_over_before_the_broker_may_stop() {
         outcome
             == HeartbeatOutcome {
                 records: vec![
-                    MetadataRecord::V1Partition(partition("t", 0, NO_LEADER.0, &[1, 2], &[], 1, 1)),
+                    MetadataRecord::V1Partition(partition(
+                        "t",
+                        0,
+                        NO_LEADER.0,
+                        &[1, 2],
+                        &[1],
+                        1,
+                        1
+                    )),
                     MetadataRecord::V1BrokerRegistration(registration(1, true)),
                 ],
                 is_caught_up: true,
@@ -799,8 +809,8 @@ fn create_topics_refuses_bad_counts_and_names() {
     ];
     for (label, spec, code) in cases {
         let error = refusal(&image, spec);
-        assert!(error.code == code, "{label}: {}", error.message);
-        assert!(!error.message.is_empty(), "{label}");
+        assert!(error.code == code, "{label}: {:?}", error.message);
+        assert!(error.message.is_some_and(|m| !m.is_empty()), "{label}");
     }
     // With every broker fenced nothing can be placed.
     let mut fenced = image_with(&[1]);
@@ -814,7 +824,7 @@ fn create_topics_refuses_bad_counts_and_names() {
 fn create_topics_refuses_manual_assignments_kafka_refuses() {
     let image = image_with(&[1, 2, 3]);
     let manual = |assignments: Vec<Vec<NodeId>>, partitions: i32, rf: i16| CreateTopicSpec {
-        assignments,
+        assignments: (0..).zip(assignments).collect(),
         ..CreateTopicSpec::new("t", partitions, rf)
     };
     let cases = [
@@ -846,7 +856,7 @@ fn create_topics_refuses_manual_assignments_kafka_refuses() {
     ];
     for (label, spec, code) in cases {
         let error = refusal(&image, spec);
-        assert!(error.code == code, "{label}: {}", error.message);
+        assert!(error.code == code, "{label}: {:?}", error.message);
     }
 }
 
@@ -1004,27 +1014,42 @@ fn alter_partition_rows_are_validated_in_kafkas_order() {
 fn alter_partition_admits_the_leaders_proposal_and_bumps_the_partition_epoch() {
     let mut image = alter_fixture();
     let decisions = decisions();
-    // Current epochs, the leader asking, a valid ISR of eligible members with
-    // their real epochs: admitted with the partition epoch bumped.
-    let admitted = decisions
+    // The ISR the partition has: admitted, and nothing is written, as
+    // Kafka's `PartitionChangeBuilder` builds no record for it.
+    let unchanged = decisions
         .alter_partition(
             &image,
             &alter_row(1, 5, 10, vec![member(1, 10), member(2, -1)]),
         )
         .unwrap();
     assert!(
-        admitted
+        unchanged
             == AlteredPartition {
                 leader: NodeId(1),
                 leader_epoch: 5,
                 isr: nodes(&[1, 2]),
+                partition_epoch: 10,
+                records: Vec::new(),
+            }
+    );
+    // Current epochs, the leader asking, a smaller ISR of eligible members
+    // with their real epochs: admitted with the partition epoch bumped.
+    let admitted = decisions
+        .alter_partition(&image, &alter_row(1, 5, 10, vec![member(1, 10)]))
+        .unwrap();
+    assert!(
+        admitted
+            == AlteredPartition {
+                leader: NodeId(1),
+                leader_epoch: 5,
+                isr: nodes(&[1]),
                 partition_epoch: 11,
                 records: vec![MetadataRecord::V1Partition(partition(
                     "t",
                     0,
                     1,
                     &[1, 2, 3],
-                    &[1, 2],
+                    &[1],
                     5,
                     11
                 ))],

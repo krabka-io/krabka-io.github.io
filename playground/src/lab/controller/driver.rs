@@ -90,8 +90,9 @@ pub struct DurableQuorumState {
 }
 /// Raft connection ids start here, so they never collide with the Kafka
 /// client connections a broker opens from the same client endpoint, which it
-/// counts from one.
-const RAFT_CONN_BASE: u32 = 1 << 30;
+/// counts from one. A broker tells the raft frames on its controller
+/// listener from the Kafka requests there by this bound.
+pub const RAFT_CONN_BASE: u32 = 1 << 30;
 /// Kafka's `Errors.NOT_LEADER_OR_FOLLOWER.message()`.
 const NOT_LEADER_OR_FOLLOWER_MESSAGE: &str = "For requests intended only for the leader, this \
      error indicates that the broker is not the current leader. For requests intended for any \
@@ -224,6 +225,9 @@ pub struct ControllerCore {
     held: BTreeMap<NodeId, HeldFetch>,
     /// Leader side: the progress of the observers that fetch from it.
     observers: BTreeMap<NodeId, ReplicaProgress>,
+    /// Leader side: the offset of the leader-change marker that opened this
+    /// node's leadership.
+    epoch_start_offset: Option<i64>,
 }
 
 impl ControllerCore {
@@ -253,6 +257,7 @@ impl ControllerCore {
             discovery_cursor: 0,
             held: BTreeMap::new(),
             observers: BTreeMap::new(),
+            epoch_start_offset: None,
         }
     }
 
@@ -263,7 +268,9 @@ impl ControllerCore {
 
     /// Boot, or boot again after a restart. The epoch and the vote survive a
     /// restart, as Kafka's `quorum-state` file does; the role, the leader
-    /// belief and every connection do not. A voter arms its election timer;
+    /// belief and every connection do not. A voter arms its election timer,
+    /// due at once for the only voter of its quorum, as Kafka's
+    /// `KafkaRaftClient.initialize` makes a lone voter a candidate at once;
     /// an observer starts looking for the leader.
     pub fn start(&mut self, ctx: &mut Ctx<'_>) {
         self.now = ctx.now();
@@ -277,10 +284,12 @@ impl ControllerCore {
         self.fetch = None;
         self.held.clear();
         self.observers.clear();
+        self.epoch_start_offset = None;
         self.timers = Timers::default();
         let timeout = election_timeout_ms(self.me);
         if self.machine.is_voter() {
-            self.timers.election = Some(self.now + timeout);
+            let lone = self.voters.as_slice() == [self.me];
+            self.timers.election = Some(if lone { self.now } else { self.now + timeout });
         } else {
             self.timers.fetch = Some(self.now + timeout);
             self.discover(ctx);
@@ -299,6 +308,7 @@ impl ControllerCore {
         self.fetch = None;
         self.held.clear();
         self.observers.clear();
+        self.epoch_start_offset = None;
     }
 
     /// Restore the log, the quorum state and the high watermark the host kept
@@ -563,6 +573,21 @@ impl ControllerCore {
     #[must_use]
     pub fn log_end_offset(&self) -> i64 {
         self.log.end_offset()
+    }
+
+    /// The offset of the leader-change marker that opened this node's
+    /// leadership, while it leads. Kafka's controller claims its leadership
+    /// once everything up to that marker is committed and applied, so the
+    /// state it decides on holds every committed record.
+    #[must_use]
+    pub fn epoch_start_offset(&self) -> Option<i64> {
+        self.epoch_start_offset
+    }
+
+    /// Whether the node runs: started and not stopped.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.running
     }
 
     /// This node's copy of the log.
@@ -1019,6 +1044,7 @@ impl ControllerCore {
                     epoch,
                     records: Vec::new(),
                 };
+                self.epoch_start_offset = Some(self.log.end_offset());
                 persist_entry(ctx, self.log.end_offset(), &entry);
                 self.log.append(entry.epoch, entry.records);
                 self.after_local_append(ctx);
@@ -1120,11 +1146,13 @@ impl ControllerCore {
         });
     }
 
-    /// The leader appended an entry: the held fetches can be answered, and a
-    /// lone voter, which no follower ever fetches from, commits it through the
-    /// machine's own high-watermark rule by scoring its own log end.
+    /// The leader appended an entry: a lone voter, which no follower ever
+    /// fetches from, commits it through the machine's own high-watermark
+    /// rule by scoring its own log end, and then the held fetches are
+    /// answered, carrying the new high watermark, as Kafka's
+    /// `updateLeaderEndOffsetAndTimestamp` moves the high watermark before it
+    /// completes the fetch purgatory.
     fn after_local_append(&mut self, ctx: &mut Ctx<'_>) {
-        self.release_held_fetches(ctx);
         if self.voters.len() == 1 && self.machine.role().is_leader() {
             self.step(
                 ctx,
@@ -1135,6 +1163,7 @@ impl ControllerCore {
                 },
             );
         }
+        self.release_held_fetches(ctx);
     }
 
     /// Keep only the timers and the state the current role uses, as
@@ -1156,6 +1185,7 @@ impl ControllerCore {
                 self.timers.purgatory = None;
                 self.held.clear();
                 self.observers.clear();
+                self.epoch_start_offset = None;
             }
             Role::Unattached { .. }
             | Role::Voted { .. }
@@ -1169,6 +1199,7 @@ impl ControllerCore {
                 self.fetch = None;
                 self.held.clear();
                 self.observers.clear();
+                self.epoch_start_offset = None;
             }
         }
     }

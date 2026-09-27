@@ -26,7 +26,10 @@
 //! stable offset and the log start as they were before the read.
 //!
 //! A follower fetch updates the leader's view of that follower, which may
-//! move the high watermark and expand the ISR. A fetch that read fewer than
+//! move the high watermark and propose to expand the ISR: a follower that
+//! caught up joins it when its broker is registered, unfenced, not shutting
+//! down, and at the broker epoch its fetch names (KIP-903), as Kafka's
+//! `Partition.isReplicaIsrEligible` checks. A fetch that read fewer than
 //! `min_bytes` waits up to `max_wait_ms` (bounded by `request_timeout_ms`)
 //! unless a row failed or diverged, and is answered early when a partition
 //! changes. Fetch sessions are not kept, as with Kafka's
@@ -49,7 +52,7 @@ use serde_json::json;
 
 use super::{
     super::{
-        BrokerNode, TopicPartition,
+        BrokerNode, TopicPartition, cluster,
         dispatch::{HoldReason, Outcome, RequestCtx},
     },
     EpochRule, current_leader, epoch_fence, resolve_topic, unhosted_error,
@@ -93,6 +96,8 @@ fn refused(partition_index: i32, error_code: i16) -> PartitionData {
 #[derive(Clone, Copy)]
 struct Fetcher {
     replica_id: i32,
+    /// The broker epoch a follower's fetch names, `-1` when it names none.
+    replica_epoch: i64,
     read_committed: bool,
     version: i16,
     retry: bool,
@@ -130,8 +135,14 @@ pub fn handle(
     } else {
         request.replica_id
     };
+    let replica_epoch = if req.version >= REPLICA_STATE_VERSION {
+        request.replica_state.replica_epoch
+    } else {
+        -1
+    };
     let fetcher = Fetcher {
         replica_id,
+        replica_epoch,
         read_committed: replica_id < 0 && request.isolation_level == READ_COMMITTED,
         version: req.version,
         retry: req.is_retry(),
@@ -379,7 +390,7 @@ fn read_partition(
         ..PartitionData::default()
     };
     if fetcher.is_follower() && !fetcher.retry {
-        note_follower(node, ctx, key, fetcher.replica_id, part, now);
+        note_follower(node, key, fetcher, part, now);
     }
     row
 }
@@ -403,13 +414,13 @@ fn out_of_range(
 /// watermark it lets advance, and the ISR it may rejoin.
 fn note_follower(
     node: &mut BrokerNode,
-    ctx: &mut Ctx<'_>,
     key: &TopicPartition,
-    follower: i32,
+    fetcher: Fetcher,
     part: &FetchPartition,
     now: u64,
 ) {
     let me = node.broker_id();
+    let follower = fetcher.replica_id;
     let expand = {
         let Some(replica) = node.replicas.get_mut(key) else {
             return;
@@ -417,18 +428,32 @@ fn note_follower(
         if !replica.leads(me) {
             return;
         }
-        let expand =
-            replica.record_follower_fetch(follower, part.fetch_offset, part.log_start_offset, now);
+        let expand = replica.record_follower_fetch(
+            follower,
+            part.fetch_offset,
+            part.log_start_offset,
+            fetcher.replica_epoch,
+            now,
+        );
         replica.recompute_hwm(me);
         expand
     };
-    if expand {
+    // Kafka's `isReplicaIsrEligible` in `KRaft` mode.
+    let eligible = node
+        .image()
+        .broker(cluster::meta_id(follower))
+        .is_some_and(|broker| {
+            !broker.fenced
+                && !broker.in_controlled_shutdown
+                && (fetcher.replica_epoch == -1 || fetcher.replica_epoch == broker.broker_epoch)
+        });
+    if expand && eligible {
         let mut isr = node
             .replicas
             .get(key)
             .map(|r| r.isr.clone())
             .unwrap_or_default();
         isr.push(follower);
-        node.change_isr(ctx, key, isr);
+        node.propose_isr(key, isr, Some(follower));
     }
 }

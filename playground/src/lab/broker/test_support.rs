@@ -64,19 +64,26 @@ impl TestClient {
         Endpoint::client(self.node)
     }
 
-    /// The frame that opens the connection to `broker`.
+    /// The frame that opens the connection to `broker`'s client listener.
     #[must_use]
     pub fn open(&self, broker: NodeId) -> Frame {
-        Frame::open(self.endpoint(), Endpoint::kafka(broker), self.conn)
+        self.open_to(Endpoint::kafka(broker))
     }
 
-    /// The frame that closes the connection to `broker`.
+    /// The frame that opens the connection to a listener.
+    #[must_use]
+    pub fn open_to(&self, listener: Endpoint) -> Frame {
+        Frame::open(self.endpoint(), listener, self.conn)
+    }
+
+    /// The frame that closes the connection to `broker`'s client listener.
     #[must_use]
     pub fn close(&self, broker: NodeId) -> Frame {
         Frame::close(self.endpoint(), Endpoint::kafka(broker), self.conn)
     }
 
-    /// A request frame to `broker` at `version`, with the next correlation id.
+    /// A request frame to `broker`'s client listener at `version`, with the
+    /// next correlation id.
     ///
     /// # Panics
     /// Panics when the request does not encode at `version`.
@@ -86,11 +93,26 @@ impl TestClient {
         version: i16,
         request: &R,
     ) -> Frame {
+        self.request_to(Endpoint::kafka(broker), version, request)
+    }
+
+    /// A request frame to a listener at `version`, with the next correlation
+    /// id: the controller listener of a broker takes the
+    /// `--bootstrap-controller` requests (KIP-919).
+    ///
+    /// # Panics
+    /// Panics when the request does not encode at `version`.
+    pub fn request_to<R: ProtocolRequest>(
+        &mut self,
+        listener: Endpoint,
+        version: i16,
+        request: &R,
+    ) -> Frame {
         let correlation = self.next_correlation;
         self.next_correlation += 1;
         let bytes = request_frame(version, correlation, &self.client_id, request)
             .expect("test request encodes");
-        Frame::data(self.endpoint(), Endpoint::kafka(broker), self.conn, bytes)
+        Frame::data(self.endpoint(), listener, self.conn, bytes)
     }
 
     /// The correlation id of the last request.

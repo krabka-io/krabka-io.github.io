@@ -1,17 +1,16 @@
 //! The simulated broker over the wire: a scripted client injects Kafka
 //! frames into a world that hosts only the brokers and reads the replies
-//! back from the egress queue.
+//! back from the egress queue. Every broker runs its share of the `KRaft`
+//! quorum, and the client talks to it once the controller unfenced it.
 
 use std::collections::BTreeMap;
 
 use assert2::assert;
 use bytes::{BufMut as _, Bytes, BytesMut};
-use krabka_metadata::{MetadataRecord, TopicConfigRecord, TopicRecord};
 use krabka_playground::lab::{
     Endpoint, Fault, NodeId, World,
     broker::{
-        LAB_CLUSTER_ID, api_versions_table, cluster_id_string, partition_record,
-        registration_record, supported_features,
+        LAB_CLUSTER_ID, broker_api_versions_table, cluster_id_string, supported_features,
         test_support::{TestClient, batch, decode_response, encode_batch, idempotent_batch},
     },
     codes,
@@ -23,7 +22,9 @@ use krabka_protocol::{
     owned::{
         api_versions_request::ApiVersionsRequest,
         api_versions_response::ApiVersionsResponse,
-        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+        create_topics_request::{
+            CreatableReplicaAssignment, CreatableTopic, CreatableTopicConfig, CreateTopicsRequest,
+        },
         delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
         delete_topics_response::DeletableTopicResult,
         describe_configs_request::{DescribeConfigsRequest, DescribeConfigsResource},
@@ -53,7 +54,6 @@ use krabka_protocol::{
     records::{Record, RecordBatch, RecordsPayload},
 };
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 const BROKER: NodeId = NodeId(1);
 const OTHER: NodeId = NodeId(2);
@@ -74,6 +74,7 @@ fn scenario(brokers: &[(u32, Value)]) -> Scenario {
 struct Lab {
     world: World,
     client: TestClient,
+    brokers: Vec<NodeId>,
 }
 
 impl Lab {
@@ -82,7 +83,10 @@ impl Lab {
     }
 
     fn from_scenario(scenario: &Scenario, hosted: &[NodeId]) -> Self {
-        Self::connect(World::from_scenario_hosted(scenario, hosted).unwrap())
+        Self::connect(
+            World::from_scenario_hosted(scenario, hosted).unwrap(),
+            hosted,
+        )
     }
 
     fn from_scenario_with_state(
@@ -90,18 +94,40 @@ impl Lab {
         hosted: &[NodeId],
         images: BTreeMap<NodeId, DurableImage>,
     ) -> Self {
-        Self::connect(World::from_scenario_with_state(scenario, hosted, images).unwrap())
+        Self::connect(
+            World::from_scenario_with_state(scenario, hosted, images).unwrap(),
+            hosted,
+        )
     }
 
-    fn connect(world: World) -> Self {
+    /// Open the client's connection at once, and wait until every broker
+    /// is unfenced and serves its clients.
+    fn connect(world: World, brokers: &[NodeId]) -> Self {
         let mut lab = Self {
             world,
             client: TestClient::new(CLIENT, 1),
+            brokers: brokers.to_vec(),
         };
         lab.world.push_ingress(vec![lab.client.open(BROKER)]);
-        lab.run(10);
+        lab.wait_until_serving();
         lab.drain();
         lab
+    }
+
+    /// Run until every broker is `RUNNING`. A reloaded broker waits out the
+    /// session of the incarnation it replaces before it registers again.
+    fn wait_until_serving(&mut self) {
+        for _ in 0..3_000 {
+            let brokers = self.brokers.clone();
+            if brokers
+                .iter()
+                .all(|b| self.snapshot(*b)["state"] == "RUNNING")
+            {
+                return;
+            }
+            self.run(10);
+        }
+        panic!("the brokers never served: {:?}", self.brokers);
     }
 
     fn run(&mut self, ms: u64) {
@@ -138,23 +164,55 @@ impl Lab {
     }
 
     fn create_topic(&mut self, name: &str, partitions: i32, configs: &[(&str, &str)]) -> WireUuid {
+        self.create(CreatableTopic {
+            name: name.to_string(),
+            num_partitions: partitions,
+            replication_factor: -1,
+            configs: configs
+                .iter()
+                .map(|(k, v)| CreatableTopicConfig {
+                    name: (*k).to_string(),
+                    value: Some((*v).to_string()),
+                    ..CreatableTopicConfig::default()
+                })
+                .collect(),
+            ..CreatableTopic::default()
+        })
+    }
+
+    /// Create a topic of one partition on `replicas`, in that order.
+    fn create_assigned(
+        &mut self,
+        name: &str,
+        replicas: &[i32],
+        configs: &[(&str, &str)],
+    ) -> WireUuid {
+        self.create(CreatableTopic {
+            name: name.to_string(),
+            num_partitions: -1,
+            replication_factor: -1,
+            assignments: vec![CreatableReplicaAssignment {
+                partition_index: 0,
+                broker_ids: replicas.to_vec(),
+                ..CreatableReplicaAssignment::default()
+            }],
+            configs: configs
+                .iter()
+                .map(|(k, v)| CreatableTopicConfig {
+                    name: (*k).to_string(),
+                    value: Some((*v).to_string()),
+                    ..CreatableTopicConfig::default()
+                })
+                .collect(),
+            ..CreatableTopic::default()
+        })
+    }
+
+    fn create(&mut self, topic: CreatableTopic) -> WireUuid {
         let response = self.call(
             7,
             &CreateTopicsRequest {
-                topics: vec![CreatableTopic {
-                    name: name.to_string(),
-                    num_partitions: partitions,
-                    replication_factor: -1,
-                    configs: configs
-                        .iter()
-                        .map(|(k, v)| CreatableTopicConfig {
-                            name: (*k).to_string(),
-                            value: Some((*v).to_string()),
-                            ..CreatableTopicConfig::default()
-                        })
-                        .collect(),
-                    ..CreatableTopic::default()
-                }],
+                topics: vec![topic],
                 ..CreateTopicsRequest::default()
             },
         );
@@ -163,6 +221,21 @@ impl Lab {
             "{:?}",
             response.topics[0]
         );
+        // The controller answers once the records commit; every broker then
+        // applies them as its metadata log catches up.
+        let name = response.topics[0].name.clone();
+        for _ in 0..1_000 {
+            let brokers = self.brokers.clone();
+            let everywhere = brokers.iter().all(|b| {
+                self.snapshot(*b)["topics"]
+                    .as_array()
+                    .is_some_and(|topics| topics.iter().any(|t| t["name"] == name.as_str()))
+            });
+            if everywhere {
+                break;
+            }
+            self.run(10);
+        }
         response.topics[0].topic_id
     }
 
@@ -316,50 +389,27 @@ fn stored(batch: &RecordBatch, base_offset: i64, epoch: i32) -> RecordBatch {
     }
 }
 
-const TOPIC_ID: Uuid = Uuid::from_u128(0xABCD);
-
-/// Both brokers' registrations, and `topic`/0 on `replicas` with `isr`, the
-/// first ISR member leading at `epoch`: one metadata batch every broker
-/// applies.
-fn assignment(topic: &str, replicas: &[i32], isr: &[i32], epoch: i32) -> Vec<MetadataRecord> {
-    vec![
-        MetadataRecord::V1BrokerRegistration(registration_record(1, None, Uuid::from_u128(1))),
-        MetadataRecord::V1BrokerRegistration(registration_record(2, None, Uuid::from_u128(2))),
-        MetadataRecord::V1Topic(TopicRecord {
-            name: topic.to_string(),
-            topic_id: TOPIC_ID,
-            partitions: 1,
-            replication_factor: 2,
-        }),
-        partition_record(topic, 0, replicas, isr, epoch),
-    ]
+/// Two brokers with short heartbeats and sessions and a two-second replica
+/// lag bound. Broker `voter` is the quorum's only voter, so the controller
+/// outlives the other broker; the other is an observer.
+fn two_broker_scenario(voter: u32) -> Scenario {
+    let config = |id: u32| {
+        json!({
+            "broker_id": id, "voter": id == voter, "controller_quorum_voters": [voter],
+            "replica_lag_time_max_ms": 2_000, "broker_heartbeat_interval_ms": 500,
+            "broker_session_timeout_ms": 3_000,
+        })
+    };
+    scenario(&[(1, config(1)), (2, config(2))])
 }
 
-fn apply_metadata(lab: &mut Lab, node: NodeId, records: &[MetadataRecord]) {
-    lab.world
-        .control(node, json!({ "cmd": "apply_metadata", "records": records }))
-        .unwrap();
-}
-
-/// Two brokers that replicate `t`/0, led by broker 1, with a two-second
-/// replica lag bound.
-fn two_brokers() -> Lab {
-    let scenario = scenario(&[
-        (
-            1,
-            json!({ "broker_id": 1, "replica_lag_time_max_ms": 2_000 }),
-        ),
-        (
-            2,
-            json!({ "broker_id": 2, "replica_lag_time_max_ms": 2_000 }),
-        ),
-    ]);
-    let mut lab = Lab::from_scenario(&scenario, &[BROKER, OTHER]);
-    let records = assignment("t", &[1, 2], &[1, 2], 0);
-    apply_metadata(&mut lab, BROKER, &records);
-    apply_metadata(&mut lab, OTHER, &records);
+/// Two brokers that replicate `t`/0, led by broker 1, which is also the
+/// controller. Returns the lab and the topic id.
+fn two_brokers() -> (Lab, WireUuid) {
+    let mut lab = Lab::from_scenario(&two_broker_scenario(1), &[BROKER, OTHER]);
+    let topic_id = lab.create_assigned("t", &[1, 2], &[]);
     lab.run(100);
-    lab
+    (lab, topic_id)
 }
 
 #[test]
@@ -374,7 +424,7 @@ fn api_versions_negotiates_and_answers_unsupported_versions_like_kafka() {
         },
     );
     let expected = ApiVersionsResponse {
-        api_keys: api_versions_table(),
+        api_keys: broker_api_versions_table(),
         supported_features: supported_features(4),
         finalized_features_epoch: -1,
         ..ApiVersionsResponse::default()
@@ -392,7 +442,7 @@ fn api_versions_negotiates_and_answers_unsupported_versions_like_kafka() {
     assert!(
         v0 == ApiVersionsResponse {
             error_code: codes::UNSUPPORTED_VERSION,
-            api_keys: api_versions_table(),
+            api_keys: broker_api_versions_table(),
             ..ApiVersionsResponse::default()
         }
     );
@@ -679,8 +729,9 @@ fn produce_rows_are_refused_in_kafka_order() {
 
 #[test]
 fn a_follower_answers_not_leader_with_the_kip_951_hint() {
-    let mut lab = Lab::one_broker();
-    apply_metadata(&mut lab, BROKER, &assignment("t", &[2, 1], &[2, 1], 3));
+    let mut lab = Lab::from_scenario(&two_broker_scenario(1), &[BROKER, OTHER]);
+    lab.create_assigned("t", &[2, 1], &[]);
+    lab.run(100);
     let response = lab.produce("t", 0, 1, &batch(&["a"], 1));
     assert!(
         response.responses[0].partition_responses
@@ -690,7 +741,7 @@ fn a_follower_answers_not_leader_with_the_kip_951_hint() {
                 base_offset: -1,
                 current_leader: LeaderIdAndEpoch {
                     leader_id: 2,
-                    leader_epoch: 3,
+                    leader_epoch: 0,
                     ..LeaderIdAndEpoch::default()
                 },
                 ..PartitionProduceResponse::default()
@@ -710,13 +761,18 @@ fn a_follower_answers_not_leader_with_the_kip_951_hint() {
 
 #[test]
 fn acks_all_refuses_a_short_isr_before_writing() {
-    let mut lab = Lab::one_broker();
-    let mut records = assignment("s", &[1, 2], &[1], 0);
-    records.push(MetadataRecord::V1TopicConfig(TopicConfigRecord {
-        topic: "s".into(),
-        overrides: BTreeMap::from([("min.insync.replicas".to_string(), "2".to_string())]),
-    }));
-    apply_metadata(&mut lab, BROKER, &records);
+    let mut lab = Lab::from_scenario(&two_broker_scenario(1), &[BROKER, OTHER]);
+    lab.world.fault(Fault::Kill { node: OTHER });
+    // The controller fences the dead broker once its session runs out, and
+    // a partition placed on it leaves it out of the ISR.
+    for _ in 0..1_000 {
+        if lab.snapshot(BROKER)["brokers"][1]["fenced"] == true {
+            break;
+        }
+        lab.run(10);
+    }
+    lab.create_assigned("s", &[1, 2], &[("min.insync.replicas", "2")]);
+    assert!(lab.partition_snapshot(BROKER, "s", 0)["isr"] == json!([1]));
     let response = lab.produce("s", 0, -1, &batch(&["a"], 1));
     assert!(
         response.responses[0].partition_responses
@@ -842,9 +898,9 @@ fn fetch_past_the_end_waits_for_max_wait_or_a_produce() {
 
 #[test]
 fn acks_all_waits_for_the_high_watermark_and_times_out_without_the_follower() {
-    let mut lab = Lab::one_broker();
-    apply_metadata(&mut lab, BROKER, &assignment("t", &[1, 2], &[1, 2], 0));
+    let (mut lab, _) = two_brokers();
     assert!(lab.partition_snapshot(BROKER, "t", 0)["isr"] == json!([1, 2]));
+    lab.world.fault(Fault::Kill { node: OTHER });
     let frame = lab.client.request(
         BROKER,
         11,
@@ -879,7 +935,7 @@ fn acks_all_waits_for_the_high_watermark_and_times_out_without_the_follower() {
 
 #[test]
 fn two_brokers_replicate_and_the_leader_advances_the_hwm_on_follower_fetches() {
-    let mut lab = two_brokers();
+    let (mut lab, topic_id) = two_brokers();
     let batches = [batch(&["a", "b"], 100), batch(&["c"], 200)];
     let frame = lab
         .client
@@ -904,11 +960,7 @@ fn two_brokers_replicate_and_the_leader_advances_the_hwm_on_follower_fetches() {
     // The follower serves a consumer fetch of the replicated bytes (v11+).
     let mut reader = TestClient::new(CLIENT, 3);
     lab.world.push_ingress(vec![reader.open(OTHER)]);
-    let frame = reader.request(
-        OTHER,
-        13,
-        &fetch_request("t", WireUuid(TOPIC_ID.into_bytes()), 0, 0, 0),
-    );
+    let frame = reader.request(OTHER, 13, &fetch_request("t", topic_id, 0, 0, 0));
     lab.world.push_ingress(vec![frame]);
     lab.run(30);
     let replies = replies_to(&lab.drain(), &reader);
@@ -925,7 +977,7 @@ fn two_brokers_replicate_and_the_leader_advances_the_hwm_on_follower_fetches() {
 
 #[test]
 fn a_dead_follower_leaves_the_isr_and_rejoins_after_catching_up() {
-    let mut lab = two_brokers();
+    let (mut lab, _) = two_brokers();
     lab.produce("t", 0, 1, &batch(&["a", "b"], 100));
     lab.run(600);
     lab.world.fault(Fault::Kill { node: OTHER });
@@ -942,14 +994,9 @@ fn a_dead_follower_leaves_the_isr_and_rejoins_after_catching_up() {
             .iter()
             .any(|e| e["isr"] == json!([1]) && e["level"] == "warn")
     );
-    let pending = lab
-        .world
-        .control(BROKER, json!({ "cmd": "pending_alter_partition" }))
-        .unwrap();
-    assert!(
-        pending
-            == json!([{ "topic": "t", "partition": 0, "new_isr": [1], "leader_epoch": 0, "partition_epoch": 0 }])
-    );
+    // The change went through the controller: the committed metadata has it.
+    let committed = lab.metadata("t");
+    assert!(committed.topics[0].partitions[0].isr_nodes == vec![1]);
     let quick = lab.produce("t", 0, -1, &batch(&["d"], 300));
     assert!(quick.responses[0].partition_responses[0].error_code == codes::NONE);
 
@@ -962,7 +1009,10 @@ fn a_dead_follower_leaves_the_isr_and_rejoins_after_catching_up() {
 
 #[test]
 fn a_diverging_follower_truncates_to_the_new_leaders_epoch() {
-    let mut lab = two_brokers();
+    // Broker 2 runs the controller, so it can move the partition away from
+    // a broker it no longer hears from.
+    let mut lab = Lab::from_scenario(&two_broker_scenario(2), &[BROKER, OTHER]);
+    let topic_id = lab.create_assigned("t", &[1, 2], &[]);
     let batches = [
         batch(&["a", "b"], 100),
         batch(&["b2"], 150),
@@ -970,18 +1020,29 @@ fn a_diverging_follower_truncates_to_the_new_leaders_epoch() {
     ];
     lab.produce("t", 0, 1, &batches[0]);
     lab.run(600);
-    // Broker 1 writes a batch broker 2 never sees, then broker 2 takes the
-    // partition at epoch 1 without it.
-    lab.world.fault(Fault::Kill { node: OTHER });
+    // Cut off from broker 2, broker 1 still leads and writes a batch broker
+    // 2 never sees; the controller fences broker 1 once its session runs
+    // out and moves the partition to broker 2 at epoch 1.
+    lab.world.fault(Fault::Partition {
+        a: BROKER,
+        b: OTHER,
+    });
     lab.produce("t", 0, 1, &batches[1]);
-    lab.world.fault(Fault::Restart { node: OTHER });
-    let moved = assignment("t", &[1, 2], &[2, 1], 1);
-    apply_metadata(&mut lab, BROKER, &moved);
-    apply_metadata(&mut lab, OTHER, &moved);
+    for _ in 0..1_000 {
+        if lab.partition_snapshot(OTHER, "t", 0)["leader"] == 2 {
+            break;
+        }
+        lab.run(10);
+    }
     let mut writer = TestClient::new(CLIENT, 2);
     let frame = writer.request(OTHER, 11, &produce_request("t", 0, 1, 1_000, &batches[2]));
     lab.world.push_ingress(vec![writer.open(OTHER), frame]);
-    lab.run(1_500);
+    lab.run(100);
+    lab.world.fault(Fault::Heal {
+        a: BROKER,
+        b: OTHER,
+    });
+    lab.run(3_000);
     assert!(
         lab.events("replica_truncated")
             == vec![json!({ "topic": "t", "partition": 0, "from": 3, "to": 2, "level": "warn" })]
@@ -993,11 +1054,7 @@ fn a_diverging_follower_truncates_to_the_new_leaders_epoch() {
     );
     let mut reader = TestClient::new(CLIENT, 3);
     lab.world.push_ingress(vec![reader.open(BROKER)]);
-    let frame = reader.request(
-        BROKER,
-        13,
-        &fetch_request("t", WireUuid(TOPIC_ID.into_bytes()), 0, 2, 0),
-    );
+    let frame = reader.request(BROKER, 13, &fetch_request("t", topic_id, 0, 2, 0));
     lab.world.push_ingress(vec![frame]);
     lab.run(30);
     let replies = replies_to(&lab.drain(), &reader);
@@ -1049,7 +1106,9 @@ fn a_reloaded_broker_serves_what_it_stored() {
     }
     assert!(image.logs["log/t/0"].len() == 2);
     assert!(image.kv["meta/t/0"]["hwm"].0.as_ref() == b"3");
-    assert!(!image.logs["metadata"].is_empty());
+    // The metadata log and the quorum state are the controller core's.
+    assert!(!image.logs["kraft"].is_empty());
+    assert!(image.kv["kraft-state"].contains_key("quorum"));
 
     let mut reloaded =
         Lab::from_scenario_with_state(&scenario, &[BROKER], BTreeMap::from([(BROKER, image)]));
@@ -1134,6 +1193,8 @@ fn find_coordinator_creates_the_offsets_topic_then_hashes_groups_like_kafka() {
         },
     );
     assert!(txn.coordinators == vec![row("tx", codes::COORDINATOR_NOT_AVAILABLE, None)]);
+    // The group coordinator checks a join's session timeout before it
+    // routes the group.
     let join = lab.call(
         9,
         &JoinGroupRequest {
@@ -1141,7 +1202,7 @@ fn find_coordinator_creates_the_offsets_topic_then_hashes_groups_like_kafka() {
             ..JoinGroupRequest::default()
         },
     );
-    assert!(join.error_code == codes::COORDINATOR_NOT_AVAILABLE);
+    assert!(join.error_code == codes::INVALID_SESSION_TIMEOUT);
 }
 
 #[test]
@@ -1300,7 +1361,7 @@ fn delete_topics_refuses_like_kafka_and_deletes_the_rest() {
 }
 
 #[test]
-fn metadata_auto_creates_missing_topics_after_the_existing_ones() {
+fn metadata_asks_the_controller_to_create_missing_topics() {
     let mut lab = Lab::one_broker();
     lab.create_topic("t", 1, &[]);
     let names = |response: &MetadataResponse| -> Vec<(Option<String>, i16)> {
@@ -1331,7 +1392,7 @@ fn metadata_auto_creates_missing_topics_after_the_existing_ones() {
             == vec![
                 (Some("t".into()), codes::NONE),
                 (Some("bad/name".into()), codes::INVALID_TOPIC_EXCEPTION),
-                (Some("auto".into()), codes::LEADER_NOT_AVAILABLE),
+                (Some("auto".into()), codes::UNKNOWN_TOPIC_OR_PARTITION),
             ]
     );
     let created = lab.metadata("auto");

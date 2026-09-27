@@ -15,7 +15,7 @@ use krabka_protocol::{
 };
 use thiserror::Error;
 
-use super::dispatch::{self, HoldReason};
+use super::dispatch::{self, HoldReason, Listener};
 use crate::lab::net::Millis;
 
 /// Kafka's `socket.request.max.bytes`: the largest frame the broker reads.
@@ -59,6 +59,8 @@ pub struct ParsedRequest {
     pub client_id: Option<String>,
     /// The request body, still encoded.
     pub body: Bytes,
+    /// The header and the body as they arrived, without the length prefix.
+    pub raw: Bytes,
 }
 
 /// Split a frame into its header and body.
@@ -84,6 +86,15 @@ pub fn parse_request_frame(frame: &Bytes) -> Result<ParsedRequest, FrameError> {
     if body.len() > MAX_FRAME_BYTES {
         return Err(FrameError::TooLarge(body.len()));
     }
+    parse_request_bytes(body)
+}
+
+/// Split a request without its length prefix into its header and body: the
+/// bytes an `Envelope` carries as `request_data`.
+///
+/// # Errors
+/// Returns why the bytes are not a Kafka request.
+pub fn parse_request_bytes(body: Bytes) -> Result<ParsedRequest, FrameError> {
     if body.len() < 8 {
         return Err(FrameError::TooShort(body.len()));
     }
@@ -100,6 +111,7 @@ pub fn parse_request_frame(frame: &Bytes) -> Result<ParsedRequest, FrameError> {
         correlation_id: header.correlation_id,
         client_id: header.client_id,
         body: body.slice(header_len..),
+        raw: body,
     })
 }
 
@@ -126,8 +138,9 @@ pub fn response_frame(api_key: ApiKey, version: i16, correlation_id: i32, body: 
 }
 
 /// A request frame: the length prefix, the request header at the version the
-/// api and version call for, and the body. The broker's replication links
-/// and the test client both send with it.
+/// request's flexible framing calls for (KIP-482), and the body. The
+/// broker's replication links, its channels to the controller and the test
+/// client all send with it.
 ///
 /// # Errors
 /// Returns the codec error when the request cannot be encoded at `version`.
@@ -137,8 +150,6 @@ pub fn request_frame<R: ProtocolRequest>(
     client_id: &str,
     request: &R,
 ) -> Result<Bytes, ProtocolError> {
-    let api_key =
-        ApiKey::from_i16(R::API_KEY).ok_or(ProtocolError::InvalidValue("unknown api key"))?;
     let header = RequestHeader {
         request_api_key: R::API_KEY,
         request_api_version: version,
@@ -146,7 +157,7 @@ pub fn request_frame<R: ProtocolRequest>(
         client_id: Some(client_id.to_string()),
         ..RequestHeader::default()
     };
-    let header_version = dispatch::request_header_version(api_key, version);
+    let header_version = if version >= R::FLEXIBLE_MIN { 2 } else { 1 };
     let body_len = header.encoded_len(header_version) + request.encoded_len(version);
     let mut frame = BytesMut::with_capacity(4 + body_len);
     frame.put_i32(i32::try_from(body_len).unwrap_or(i32::MAX));
@@ -178,7 +189,20 @@ pub fn parse_response_frame(
             "response length prefix does not match the frame",
         ));
     }
-    let mut cursor: &[u8] = &body;
+    parse_response_bytes(&body, api_key, version)
+}
+
+/// Split a response without its length prefix into its correlation id and
+/// body: the bytes an `Envelope` answer carries as `response_data`.
+///
+/// # Errors
+/// Returns the codec error when the header does not decode.
+pub fn parse_response_bytes(
+    body: &Bytes,
+    api_key: ApiKey,
+    version: i16,
+) -> Result<(i32, Bytes), ProtocolError> {
+    let mut cursor: &[u8] = body;
     let header = ResponseHeader::decode(
         &mut cursor,
         dispatch::response_header_version(api_key, version),
@@ -200,6 +224,8 @@ pub struct QueuedRequest {
     pub client_id: Option<String>,
     /// The request body, still encoded.
     pub body: Bytes,
+    /// The header and the body as they arrived, for forwarding.
+    pub raw: Bytes,
     /// When the request arrived.
     pub received_at: Millis,
     /// Set while the request is held at the head of the queue.
@@ -209,6 +235,8 @@ pub struct QueuedRequest {
 /// The server side of one client connection.
 #[derive(Debug)]
 pub struct Connection {
+    /// The listener the connection came in on.
+    pub listener: Listener,
     /// The client id of the last request.
     pub client_id: Option<String>,
     /// KIP-511 software name and version from the first `ApiVersions` v3+.
@@ -224,10 +252,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// A connection opened at `opened_at`, with no request yet.
+    /// A connection to `listener` opened at `opened_at`, with no request
+    /// yet.
     #[must_use]
-    pub fn new(opened_at: Millis) -> Self {
+    pub fn new(listener: Listener, opened_at: Millis) -> Self {
         Self {
+            listener,
             client_id: None,
             software_name: UNKNOWN_CLIENT_SOFTWARE.to_string(),
             software_version: UNKNOWN_CLIENT_SOFTWARE.to_string(),

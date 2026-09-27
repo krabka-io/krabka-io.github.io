@@ -3,9 +3,9 @@
 //! A group's coordinator is the leader of its `__consumer_offsets` partition,
 //! `Utils.abs(groupId.hashCode()) % 50`, when that leader is a live broker.
 //! As in Kafka's `KafkaApis.getCoordinator`, a request that finds no
-//! `__consumer_offsets` topic creates it and answers
-//! `COORDINATOR_NOT_AVAILABLE` for every key, and the next request finds the
-//! coordinator. The lab has no transaction or share coordinator, so those key
+//! `__consumer_offsets` topic asks the active controller to create it and
+//! answers `COORDINATOR_NOT_AVAILABLE` for every key; a later request finds
+//! the coordinator once the creation commits. The lab has no transaction or share coordinator, so those key
 //! types answer `COORDINATOR_NOT_AVAILABLE` per key; an unknown key type
 //! fails the whole request with `INVALID_REQUEST`, as `CoordinatorType.forId`
 //! throws.
@@ -88,7 +88,8 @@ pub fn handle(
         .topic(cluster::CONSUMER_OFFSETS_TOPIC)
         .is_some();
     if key_type == KEY_TYPE_GROUP && !keys.is_empty() && !topic_exists {
-        create_consumer_offsets(node, ctx);
+        let topic = node.creatable_topic(cluster::CONSUMER_OFFSETS_TOPIC);
+        node.create_topics_internally(ctx, vec![topic]);
     }
     let rows = keys
         .into_iter()
@@ -101,19 +102,6 @@ pub fn handle(
         })
         .collect();
     Outcome::Reply(respond(req.version, rows))
-}
-
-/// Create `__consumer_offsets` as Kafka's coordinator does on first use.
-fn create_consumer_offsets(node: &mut BrokerNode, ctx: &mut Ctx<'_>) {
-    let topic_id = cluster::new_topic_id(ctx);
-    let planned = {
-        let image = node.image().clone();
-        node.local_controller()
-            .plan_consumer_offsets(&image, topic_id)
-    };
-    if let Ok(planned) = planned {
-        node.apply_metadata(ctx, &planned.records);
-    }
 }
 
 /// The coordinator of `key`: the live leader of its partition.

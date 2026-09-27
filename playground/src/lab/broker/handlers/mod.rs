@@ -1,11 +1,14 @@
 //! The request handlers, one module per api, and what they share.
 //!
 //! Every handler is `fn(&mut BrokerNode, &mut Ctx<'_>, &RequestCtx, Req) ->
-//! Outcome<Resp>`, registered once in [`super::dispatch`]. The helpers here
-//! are the decisions several apis make the same way: resolving a topic by
-//! name or id, the KIP-320 leader-epoch fence, the topic settings an append
-//! honours, and the KIP-430 operation bit fields a cluster with no
-//! authorizer reports.
+//! Outcome<Resp>`, registered once in [`super::dispatch`] for the listener
+//! that serves it: the client listener's apis, the controller apis a broker
+//! forwards ([`forwarded`]), and the controller listener's apis, which the
+//! node answers as the active controller. The helpers here are the
+//! decisions several apis make the same way: resolving a topic by name or
+//! id, the KIP-320 leader-epoch fence, the topic settings an append honours,
+//! and the KIP-430 operation bit fields a cluster with no authorizer
+//! reports.
 
 use std::cmp::Ordering;
 
@@ -19,25 +22,40 @@ use super::{
 };
 use crate::lab::codes;
 
-/// `ApiVersions` (18).
+/// `AllocateProducerIds` (67), on the controller listener.
+pub mod allocate_producer_ids;
+/// `AlterPartition` (56), on the controller listener.
+pub mod alter_partition;
+/// `ApiVersions` (18), on both listeners.
 pub mod api_versions;
-/// `CreatePartitions` (37).
+/// `BrokerHeartbeat` (63), on the controller listener.
+pub mod broker_heartbeat;
+/// `BrokerRegistration` (62), on the controller listener.
+pub mod broker_registration;
+/// `CreatePartitions` (37), on the controller listener.
 pub mod create_partitions;
-/// `CreateTopics` (19).
+/// `CreateTopics` (19), on the controller listener.
 pub mod create_topics;
-/// `DeleteTopics` (20).
+/// `DeleteTopics` (20), on the controller listener.
 pub mod delete_topics;
 /// `DescribeCluster` (60).
 pub mod describe_cluster;
 /// `DescribeConfigs` (32).
 pub mod describe_configs;
+/// `DescribeQuorum` (55), on the controller listener.
+pub mod describe_quorum;
 /// `DescribeTopicPartitions` (75).
 pub mod describe_topic_partitions;
+/// `Envelope` (58), on the controller listener.
+pub mod envelope;
 /// `Fetch` (1).
 pub mod fetch;
 /// `FindCoordinator` (10).
 pub mod find_coordinator;
-/// The group apis, through the coordinator seam.
+/// The controller apis the client listener forwards to the active
+/// controller.
+pub mod forwarded;
+/// The group apis, through the group coordinator.
 pub mod groups;
 /// `InitProducerId` (22).
 pub mod init_producer_id;

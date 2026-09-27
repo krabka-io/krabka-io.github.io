@@ -6,9 +6,10 @@
 //! (`2`) answers `MISMATCHED_ENDPOINT_TYPE` and any other type
 //! `UNSUPPORTED_ENDPOINT_TYPE` from v1, and both answer `INVALID_REQUEST` at
 //! v0, whose error table predates KIP-919. Fenced brokers appear only when
-//! `include_fenced_brokers` asks for them (v2). The controller id is `-1`
-//! when the listed brokers do not include it. The KIP-430 bit field is
-//! filled only when the request opts in.
+//! `include_fenced_brokers` asks for them (v2). In `KRaft` the controller id
+//! is a random live broker, Kafka's `getRandomAliveBrokerId`, and `-1` when
+//! the listed brokers do not include it. The KIP-430 bit field is filled
+//! only when the request opts in.
 
 use krabka_protocol::owned::{
     describe_cluster_request::DescribeClusterRequest,
@@ -32,7 +33,7 @@ const ENDPOINT_TYPE_CONTROLLER: i8 = 2;
 /// Serve a `DescribeCluster`.
 pub fn handle(
     node: &mut BrokerNode,
-    _ctx: &mut Ctx<'_>,
+    ctx: &mut Ctx<'_>,
     req: &RequestCtx,
     DescribeClusterRequest {
         include_cluster_authorized_operations,
@@ -77,7 +78,7 @@ pub fn handle(
         })
         .collect();
     brokers.sort_by_key(|b| b.broker_id);
-    let controller_id = node.controller_id();
+    let controller_id = node.random_alive_broker(ctx);
     let controller_id = if brokers.iter().any(|b| b.broker_id == controller_id) {
         controller_id
     } else {

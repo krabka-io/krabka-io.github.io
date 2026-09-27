@@ -7,14 +7,18 @@
 //! rules follow Kafka's `QuorumController`: `ClusterControlManager` for
 //! registration and the heartbeat state machine, `ReplicationControlManager`
 //! for topics, `AlterPartition` and the leader elections a fenced broker
-//! forces, and `StripedReplicaPlacer`, simplified to a round-robin stripe
-//! over the unfenced brokers.
+//! forces, `ProducerIdControlManager` for producer-id blocks, and
+//! `StripedReplicaPlacer` on a cluster without racks, made deterministic: a
+//! partition leads with an unfenced broker in round-robin order and places
+//! its other replicas on the brokers after it, fenced ones included, as
+//! Kafka places them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use krabka_metadata::{
     BrokerEndpoint, BrokerRegistrationRecord, DeleteTopicRecord, LeaderEpoch, MetadataImage,
-    MetadataRecord, PartitionRecord, TopicConfigRecord, TopicRecord, UnregisterBrokerRecord,
+    MetadataRecord, PartitionRecord, ProducerIdsRecord, TopicConfigRecord, TopicRecord,
+    UnregisterBrokerRecord,
 };
 use uuid::Uuid;
 
@@ -35,10 +39,15 @@ pub const NO_LEADER: krabka_metadata::NodeId = krabka_metadata::NodeId(0);
 pub const CONSUMER_OFFSETS_TOPIC: &str = "__consumer_offsets";
 
 /// Kafka's `Topic.MAX_NAME_LENGTH`.
-const MAX_TOPIC_NAME_LENGTH: usize = 249;
+pub const MAX_TOPIC_NAME_LENGTH: usize = 249;
+
+/// Kafka's `ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE`: how many producer ids
+/// one `AllocateProducerIds` hands out.
+pub const PRODUCER_ID_BLOCK_SIZE: i32 = 1_000;
 
 /// Kafka's `Errors.UNKNOWN_TOPIC_OR_PARTITION.message()`.
-const UNKNOWN_TOPIC_OR_PARTITION_MESSAGE: &str = "This server does not host this topic-partition.";
+pub const UNKNOWN_TOPIC_OR_PARTITION_MESSAGE: &str =
+    "This server does not host this topic-partition.";
 
 /// The controller's settings, named after the Kafka configs they stand for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +59,8 @@ pub struct ControllerConfig {
     /// `-1`. Default: `1`.
     pub default_partitions: i32,
     /// `default.replication.factor`: the replication factor a create request
-    /// asks for with `-1`. Default: `1`.
+    /// asks for with `-1`. The lab also takes `-1` here, for as many replicas
+    /// as there are unfenced brokers. Default: `1`.
     pub default_replication_factor: i16,
     /// `unclean.leader.election.enable` for topics that do not set it.
     /// Default: `false`.
@@ -122,9 +132,10 @@ pub struct CreateTopicSpec {
     /// The replication factor, or `-1` for the controller's default. Must be
     /// `-1` with a manual assignment.
     pub replication_factor: i16,
-    /// The replicas of each partition, in order, when the caller places them.
-    /// Empty for automatic placement.
-    pub assignments: Vec<Vec<NodeId>>,
+    /// The replicas of each partition, as `(partition index, replicas)` in
+    /// request order, when the caller places them. Empty for automatic
+    /// placement.
+    pub assignments: Vec<(i32, Vec<NodeId>)>,
     /// The topic's config overrides.
     pub configs: BTreeMap<String, String>,
 }
@@ -147,16 +158,28 @@ impl CreateTopicSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopicError {
     pub code: i16,
-    pub message: String,
+    /// The message of the exception Kafka throws, `None` when it has none.
+    pub message: Option<String>,
 }
 
 impl TopicError {
     fn new(code: i16, message: impl Into<String>) -> Self {
         Self {
             code,
-            message: message.into(),
+            message: Some(message.into()),
         }
     }
+}
+
+/// A producer-id block the controller hands a broker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProducerIdBlock {
+    /// The first id of the block.
+    pub start: i64,
+    /// How many ids the block holds.
+    pub len: i32,
+    /// The record that claims the block.
+    pub records: Vec<MetadataRecord>,
 }
 
 /// A topic the controller decided to create.
@@ -457,9 +480,14 @@ impl ControllerDecisions {
     }
 
     /// Decide a `CreateTopics` request, one result per topic in request
-    /// order. A name that appears twice is refused on every row it has, as
-    /// Kafka refuses it, and a topic sees the topics before it in the same
-    /// request.
+    /// order, as Kafka's `ControllerApis.createTopics` and
+    /// `ReplicationControlManager.createTopics` do: a name that appears twice
+    /// is refused on every row it has, and every topic is checked against the
+    /// image as the request found it, so two new names that collide with
+    /// each other are both created. Config overrides are taken as they are;
+    /// a caller that validates them does so between the name checks and the
+    /// placement, as [`ControllerDecisions::topic_refusal`] and
+    /// [`ControllerDecisions::create_topic`] let it.
     pub fn create_topics(
         &mut self,
         image: &MetadataImage,
@@ -471,7 +499,7 @@ impl ControllerDecisions {
             .map(|spec| spec.name.as_str())
             .filter(|name| !seen.insert(*name))
             .collect();
-        let mut scratch = image.clone();
+        let mut taken: BTreeSet<Uuid> = BTreeSet::new();
         specs
             .iter()
             .map(|spec| {
@@ -481,32 +509,67 @@ impl ControllerDecisions {
                         "Duplicate topic name.",
                     ));
                 }
-                let created = self.create_topic(&scratch, spec)?;
-                for record in &created.records {
-                    scratch.apply(record);
+                if let Some(refusal) = Self::topic_refusal(image, &spec.name) {
+                    return Err(refusal);
                 }
+                let created = self.create_topic_avoiding(image, spec, &taken)?;
+                taken.insert(created.topic_id);
                 Ok(created)
             })
             .collect()
     }
 
-    /// Decide one topic, in the order of Kafka's
-    /// `ReplicationControlManager.createTopic`: the name, then existence,
-    /// then the counts and the placement.
-    fn create_topic(
+    /// The refusal of a new topic's name, in the precedence of Kafka's
+    /// `ReplicationControlManager.createTopics`: an existing topic answers
+    /// `TOPIC_ALREADY_EXISTS`, a name that differs from an existing one only
+    /// in `.` against `_` answers `INVALID_TOPIC_EXCEPTION` with the
+    /// collision, and a name `Topic.validate` refuses answers it with that
+    /// message.
+    #[must_use]
+    pub fn topic_refusal(image: &MetadataImage, name: &str) -> Option<TopicError> {
+        if image.topic(name).is_some() {
+            return Some(TopicError::new(
+                codes::TOPIC_ALREADY_EXISTS,
+                format!("Topic '{name}' already exists."),
+            ));
+        }
+        if let Some(existing) = colliding_topic(image, name) {
+            return Some(TopicError::new(
+                codes::INVALID_TOPIC_EXCEPTION,
+                format!("Topic '{name}' collides with existing topic: {existing}"),
+            ));
+        }
+        validate_topic_name(name)
+            .err()
+            .map(|message| TopicError::new(codes::INVALID_TOPIC_EXCEPTION, message))
+    }
+
+    /// Decide the counts and the placement of one new topic whose name the
+    /// caller already checked, in the order of Kafka's
+    /// `ReplicationControlManager.createTopic`, and build its records: the
+    /// topic record, the config record when there are overrides, then one
+    /// partition record per partition. A partition's ISR is its unfenced
+    /// replicas, the first of which leads.
+    ///
+    /// # Errors
+    /// The row's refusal: `INVALID_REPLICATION_FACTOR` or
+    /// `INVALID_PARTITIONS` for a count Kafka refuses or a placement the
+    /// brokers cannot satisfy, `INVALID_REQUEST` and
+    /// `INVALID_REPLICA_ASSIGNMENT` for a manual assignment Kafka refuses.
+    pub fn create_topic(
         &mut self,
         image: &MetadataImage,
         spec: &CreateTopicSpec,
     ) -> Result<CreatedTopic, TopicError> {
-        if let Some(message) = topic_name_error(image, &spec.name) {
-            return Err(TopicError::new(codes::INVALID_TOPIC_EXCEPTION, message));
-        }
-        if image.topic(&spec.name).is_some() {
-            return Err(TopicError::new(
-                codes::TOPIC_ALREADY_EXISTS,
-                format!("Topic '{}' already exists.", spec.name),
-            ));
-        }
+        self.create_topic_avoiding(image, spec, &BTreeSet::new())
+    }
+
+    fn create_topic_avoiding(
+        &mut self,
+        image: &MetadataImage,
+        spec: &CreateTopicSpec,
+        taken: &BTreeSet<Uuid>,
+    ) -> Result<CreatedTopic, TopicError> {
         let placement = if spec.assignments.is_empty() {
             if spec.replication_factor < -1 || spec.replication_factor == 0 {
                 return Err(TopicError::new(
@@ -526,28 +589,25 @@ impl ControllerDecisions {
                 spec.partitions
             };
             let replication_factor = if spec.replication_factor == -1 {
-                self.config.default_replication_factor
+                self.default_replication_factor(image)
             } else {
                 spec.replication_factor
             };
-            let brokers = unfenced_brokers(image);
+            let brokers = Usable::of(image);
             let start = self.placement_cursor;
             self.placement_cursor = self.placement_cursor.wrapping_add(1);
-            let assignments = stripe(&brokers, start, 0, partitions, replication_factor)
-                .ok_or_else(|| {
+            let assignments = brokers
+                .place(start, 0, partitions, replication_factor)
+                .map_err(|reason| {
                     TopicError::new(
                         codes::INVALID_REPLICATION_FACTOR,
-                        placement_failure_message(replication_factor, brokers.len()),
+                        format!(
+                            "Unable to replicate the partition {replication_factor} time(s): \
+                             {reason}"
+                        ),
                     )
                 })?;
-            assignments
-                .into_iter()
-                .map(|replicas| Placement {
-                    leader: replicas[0],
-                    isr: replicas.clone(),
-                    replicas,
-                })
-                .collect::<Vec<_>>()
+            brokers.placements(assignments)
         } else {
             if spec.replication_factor != -1 {
                 return Err(TopicError::new(
@@ -563,10 +623,15 @@ impl ControllerDecisions {
                      to -1.",
                 ));
             }
-            manual_placement(image, &spec.assignments, 0, None)
+            manual_topic_placement(image, &spec.assignments)
                 .map_err(|message| TopicError::new(codes::INVALID_REPLICA_ASSIGNMENT, message))?
         };
-        let topic_id = self.next_topic_id(image);
+        let topic_id = loop {
+            let id = self.next_topic_id(image);
+            if !taken.contains(&id) {
+                break id;
+            }
+        };
         let partitions = i32::try_from(placement.len()).unwrap_or(i32::MAX);
         let replication_factor = placement
             .first()
@@ -578,13 +643,15 @@ impl ControllerDecisions {
             partitions,
             replication_factor,
         })];
-        records.extend(partition_records(&spec.name, 0, &placement));
+        // Kafka writes the config records between the topic record and the
+        // partition records.
         if !spec.configs.is_empty() {
             records.push(MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: spec.name.clone(),
                 overrides: spec.configs.clone(),
             }));
         }
+        records.extend(partition_records(&spec.name, 0, &placement));
         Ok(CreatedTopic {
             name: spec.name.clone(),
             topic_id,
@@ -635,10 +702,11 @@ impl ControllerDecisions {
         assignments: Option<&[Vec<NodeId>]>,
     ) -> Result<Vec<MetadataRecord>, TopicError> {
         if image.topic(topic).is_none() {
-            return Err(TopicError::new(
-                codes::UNKNOWN_TOPIC_OR_PARTITION,
-                UNKNOWN_TOPIC_OR_PARTITION_MESSAGE,
-            ));
+            // Kafka's `UnknownTopicOrPartitionException()` carries no message.
+            return Err(TopicError {
+                code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                message: None,
+            });
         }
         let existing = image.topic_partition_count(topic);
         if count == existing {
@@ -663,43 +731,33 @@ impl ControllerDecisions {
             .unwrap_or(self.config.default_replication_factor);
         let placement = match assignments {
             None => {
-                let brokers = unfenced_brokers(image);
+                let brokers = Usable::of(image);
                 // The stripe continues from where partition 0 started, so the
                 // new partitions follow the pattern of the old ones.
                 let start = image
                     .partition(topic, 0)
                     .and_then(|partition| lab_id(partition.leader))
-                    .and_then(|leader| brokers.iter().position(|&broker| broker == leader))
+                    .and_then(|leader| brokers.unfenced.iter().position(|&broker| broker == leader))
                     .unwrap_or(0);
-                let assignments = stripe(
-                    &brokers,
-                    start,
-                    usize::try_from(existing).unwrap_or(0),
-                    new_partitions,
-                    replication_factor,
-                )
-                .ok_or_else(|| {
-                    TopicError::new(
-                        codes::INVALID_REPLICATION_FACTOR,
-                        placement_failure_message(replication_factor, brokers.len()),
+                // Kafka's `createPartitions` reports the placer's refusal as
+                // it is, without the prefix `createTopic` adds.
+                let assignments = brokers
+                    .place(
+                        start,
+                        usize::try_from(existing).unwrap_or(0),
+                        new_partitions,
+                        replication_factor,
                     )
-                })?;
-                assignments
-                    .into_iter()
-                    .map(|replicas| Placement {
-                        leader: replicas[0],
-                        isr: replicas.clone(),
-                        replicas,
-                    })
-                    .collect::<Vec<_>>()
+                    .map_err(|reason| TopicError::new(codes::INVALID_REPLICATION_FACTOR, reason))?;
+                brokers.placements(assignments)
             }
             Some(assignments) => {
                 if assignments.len() != usize::try_from(new_partitions).unwrap_or(usize::MAX) {
                     return Err(TopicError::new(
                         codes::INVALID_REPLICA_ASSIGNMENT,
                         format!(
-                            "Attempted to add {new_partitions} partitions, but only {} \
-                             assignments were specified.",
+                            "Attempted to add {new_partitions} additional partition(s), but \
+                             only {} assignment(s) were specified.",
                             assignments.len()
                         ),
                     ));
@@ -708,7 +766,7 @@ impl ControllerDecisions {
                     image,
                     assignments,
                     existing,
-                    Some(usize::try_from(replication_factor).unwrap_or(0)),
+                    usize::try_from(replication_factor).unwrap_or(0),
                 )
                 .map_err(|message| TopicError::new(codes::INVALID_REPLICA_ASSIGNMENT, message))?
             }
@@ -718,8 +776,9 @@ impl ControllerDecisions {
 
     /// Decide one `AlterPartition` row, in the order of Kafka's
     /// `ReplicationControlManager.validateAlterPartitionData`. An admitted
-    /// row bumps the partition epoch and keeps the leader and the leader
-    /// epoch.
+    /// row that changes the ISR bumps the partition epoch and keeps the
+    /// leader and the leader epoch; one that proposes the ISR the partition
+    /// has writes nothing and answers the partition as it is.
     ///
     /// # Errors
     /// `UNKNOWN_TOPIC_OR_PARTITION` for a partition that does not exist;
@@ -775,6 +834,17 @@ impl ControllerDecisions {
         if !eligible {
             return Err(codes::INELIGIBLE_REPLICA);
         }
+        // Kafka's `PartitionChangeBuilder` writes nothing when the ISR is the
+        // one the partition has, and the answer carries the unchanged state.
+        if proposed == partition.isr {
+            return Ok(AlteredPartition {
+                leader: request.broker_id,
+                leader_epoch,
+                isr: request.new_isr.iter().map(|member| member.broker).collect(),
+                partition_epoch: partition.partition_epoch,
+                records: Vec::new(),
+            });
+        }
         let partition_epoch = partition
             .partition_epoch
             .checked_add(1)
@@ -795,12 +865,13 @@ impl ControllerDecisions {
 
     /// The partition changes a fenced or unregistered broker forces, as
     /// Kafka's `handleBrokerFenced` generates them: `fenced` leaves every ISR
-    /// it is in, and every partition it led elects the first replica, in
-    /// assignment order, that stays in the ISR and is active. With no such
-    /// replica the partition elects the first active replica when the topic
-    /// enables unclean leader election, and goes offline with
-    /// [`NO_LEADER`] otherwise. An election bumps the leader epoch and the
-    /// partition epoch; an ISR shrink bumps the partition epoch alone.
+    /// it is in, unless it is the last member, which Kafka keeps, and every
+    /// partition it led elects the first replica, in assignment order, that
+    /// stays in the ISR and is active. With no such replica the partition
+    /// elects the first active replica when the topic enables unclean leader
+    /// election, and goes offline with [`NO_LEADER`] otherwise, until its
+    /// last ISR member is unfenced. An election bumps the leader epoch and
+    /// the partition epoch; an ISR shrink bumps the partition epoch alone.
     #[must_use]
     pub fn elect_leaders_after_fence(
         &self,
@@ -815,12 +886,18 @@ impl ControllerDecisions {
             if partition.leader != fenced && !partition.isr.contains(&fenced) {
                 continue;
             }
-            let target_isr: Vec<krabka_metadata::NodeId> = partition
-                .isr
-                .iter()
-                .copied()
-                .filter(|replica| *replica != fenced)
-                .collect();
+            // Kafka's `PartitionChangeBuilder` never empties the ISR: the
+            // last member stays, so it can lead again once it is unfenced.
+            let target_isr: Vec<krabka_metadata::NodeId> = Some(
+                partition
+                    .isr
+                    .iter()
+                    .copied()
+                    .filter(|replica| *replica != fenced)
+                    .collect::<Vec<_>>(),
+            )
+            .filter(|isr| !isr.is_empty())
+            .unwrap_or_else(|| partition.isr.clone());
             let leader_stays = partition.leader != fenced
                 && target_isr.contains(&partition.leader)
                 && active.contains(&partition.leader);
@@ -889,12 +966,57 @@ impl ControllerDecisions {
         Ok(records)
     }
 
+    /// Decide an `AllocateProducerIds`: the next block of
+    /// [`PRODUCER_ID_BLOCK_SIZE`] ids past every block the image knows, and
+    /// the `ProducerIdsRecord` that claims it, as Kafka's
+    /// `ProducerIdControlManager.generateNextProducerId` does.
+    ///
+    /// # Errors
+    /// `STALE_BROKER_EPOCH` for a broker that is not registered or that
+    /// names another epoch than its registration's, and
+    /// `UNKNOWN_SERVER_ERROR` once the ids would pass `i64::MAX`.
+    pub fn allocate_producer_ids(
+        &self,
+        image: &MetadataImage,
+        broker: NodeId,
+        broker_epoch: i64,
+    ) -> Result<ProducerIdBlock, i16> {
+        if image.broker_epoch(broker_id(broker)) != Some(broker_epoch) {
+            return Err(codes::STALE_BROKER_EPOCH);
+        }
+        let start = image.next_producer_id();
+        let next = start
+            .checked_add(i64::from(PRODUCER_ID_BLOCK_SIZE))
+            .ok_or(codes::UNKNOWN_SERVER_ERROR)?;
+        Ok(ProducerIdBlock {
+            start,
+            len: PRODUCER_ID_BLOCK_SIZE,
+            records: vec![MetadataRecord::V1ProducerIds(ProducerIdsRecord {
+                broker_id: broker_id(broker),
+                broker_epoch,
+                next_producer_id: next,
+            })],
+        })
+    }
+
+    /// The replication factor a `-1` asks for: `default.replication.factor`,
+    /// or with the lab's `-1` there, one replica per unfenced broker.
+    fn default_replication_factor(&self, image: &MetadataImage) -> i16 {
+        if self.config.default_replication_factor == -1 {
+            i16::try_from(unfenced_brokers(image).len())
+                .unwrap_or(i16::MAX)
+                .max(1)
+        } else {
+            self.config.default_replication_factor
+        }
+    }
+
     /// The spec of the group coordinator's topic: `offsets.topic.num.partitions`
     /// compacted partitions, replicated `offsets.topic.replication.factor`
-    /// times or as many as there are unfenced brokers.
+    /// times or on every broker a placement may use when there are fewer.
     #[must_use]
     pub fn consumer_offsets_spec(&self, image: &MetadataImage) -> CreateTopicSpec {
-        let brokers = i16::try_from(unfenced_brokers(image).len()).unwrap_or(i16::MAX);
+        let brokers = i16::try_from(Usable::of(image).len()).unwrap_or(i16::MAX);
         let mut spec = CreateTopicSpec::new(
             CONSUMER_OFFSETS_TOPIC,
             self.config.offsets_topic_partitions,
@@ -903,8 +1025,11 @@ impl ControllerDecisions {
                 .min(brokers)
                 .max(1),
         );
+        // The group coordinator's `groupMetadataTopicConfigs`.
         spec.configs
             .insert("cleanup.policy".to_string(), "compact".to_string());
+        spec.configs
+            .insert("compression.type".to_string(), "producer".to_string());
         spec.configs
             .insert("segment.bytes".to_string(), "104857600".to_string());
         spec
@@ -1010,96 +1135,240 @@ struct Placement {
     replicas: Vec<NodeId>,
 }
 
-/// Round-robin replica placement: partition `p`, counted from
-/// `first_partition`, puts its first replica on `brokers[(start + p) % n]`
-/// and the others on the brokers after it. `None` when the replication
-/// factor cannot be met.
-fn stripe(
-    brokers: &[NodeId],
-    start: usize,
-    first_partition: usize,
-    partitions: i32,
-    replication_factor: i16,
-) -> Option<Vec<Vec<NodeId>>> {
-    let n = brokers.len();
-    let rf = usize::try_from(replication_factor).unwrap_or(0);
-    if rf == 0 || rf > n {
-        return None;
-    }
-    let count = usize::try_from(partitions).unwrap_or(0);
-    Some(
-        (first_partition..first_partition + count)
-            .map(|p| (0..rf).map(|i| brokers[(start + p + i) % n]).collect())
-            .collect(),
-    )
+/// The brokers Kafka's `ClusterControlManager.usableBrokers` offers the
+/// placer: every registered broker that is not in controlled shutdown, the
+/// unfenced ones and the fenced ones apart, each in ascending id order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Usable {
+    unfenced: Vec<NodeId>,
+    fenced: Vec<NodeId>,
 }
 
-/// Kafka's `validateManualPartitionAssignment` and `buildPartitionRegistration`
-/// over a caller's assignment: every replica registered, none twice, every
-/// partition with the same count, and the ISR made of the active replicas in
-/// the listed order with the first of them as leader.
+impl Usable {
+    fn of(image: &MetadataImage) -> Self {
+        let mut unfenced = Vec::new();
+        let mut fenced = Vec::new();
+        for broker in image.brokers().filter(|b| !b.in_controlled_shutdown) {
+            let Some(id) = lab_id(broker.node_id) else {
+                continue;
+            };
+            if broker.fenced {
+                fenced.push(id);
+            } else {
+                unfenced.push(id);
+            }
+        }
+        unfenced.sort_unstable();
+        fenced.sort_unstable();
+        Self { unfenced, fenced }
+    }
+
+    fn len(&self) -> usize {
+        self.unfenced.len() + self.fenced.len()
+    }
+
+    /// Kafka's `StripedReplicaPlacer.place` on one rack, made deterministic:
+    /// partition `p`, counted from `first_partition`, takes the unfenced
+    /// brokers round-robin from the one at `(start + p) % unfenced`, the
+    /// first of which leads, and only once they are all used the fenced
+    /// brokers, round-robin from the one at `(start + p) % fenced`, as the
+    /// placer takes a rack's fenced list only when its unfenced list is
+    /// exhausted. With every broker unfenced this is the round-robin stripe
+    /// `[b(s+p), b(s+p+1), ...]`.
+    ///
+    /// # Errors
+    /// The message of the `InvalidReplicationFactorException` the placer
+    /// throws, in its order of checks: a factor that is not positive, no
+    /// unfenced broker, fewer brokers than the factor.
+    fn place(
+        &self,
+        start: usize,
+        first_partition: usize,
+        partitions: i32,
+        replication_factor: i16,
+    ) -> Result<Vec<Vec<NodeId>>, String> {
+        if replication_factor <= 0 {
+            return Err(format!(
+                "Invalid replication factor {replication_factor}: the replication factor must \
+                 be positive."
+            ));
+        }
+        if self.unfenced.is_empty() {
+            return Err(
+                "All brokers are currently fenced, or have all their log directories cordoned."
+                    .to_string(),
+            );
+        }
+        let rf = usize::try_from(replication_factor).unwrap_or(usize::MAX);
+        if rf > self.len() {
+            return Err(format!(
+                "The target replication factor of {replication_factor} cannot be reached \
+                 because only {} broker(s) are registered or some brokers have all their log \
+                 directories cordoned.",
+                self.len()
+            ));
+        }
+        let count = usize::try_from(partitions).unwrap_or(0);
+        let round_robin = |brokers: &[NodeId], from: usize, take: usize| -> Vec<NodeId> {
+            (0..take)
+                .map(|i| brokers[(from + i) % brokers.len()])
+                .collect()
+        };
+        Ok((first_partition..first_partition + count)
+            .map(|p| {
+                let unfenced = rf.min(self.unfenced.len());
+                let mut replicas = round_robin(&self.unfenced, start + p, unfenced);
+                if rf > unfenced {
+                    replicas.extend(round_robin(&self.fenced, start + p, rf - unfenced));
+                }
+                replicas
+            })
+            .collect())
+    }
+
+    /// The leader and ISR of each placed replica list, Kafka's
+    /// `buildPartitionRegistration`: the ISR is the unfenced replicas in
+    /// assignment order, and the first of them leads. The placer leads every
+    /// list with an unfenced broker, so no ISR is empty.
+    fn placements(&self, assignments: Vec<Vec<NodeId>>) -> Vec<Placement> {
+        assignments
+            .into_iter()
+            .map(|replicas| {
+                let isr: Vec<NodeId> = replicas
+                    .iter()
+                    .copied()
+                    .filter(|replica| self.unfenced.contains(replica))
+                    .collect();
+                Placement {
+                    leader: isr.first().copied().unwrap_or(replicas[0]),
+                    isr,
+                    replicas,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Kafka's `ReplicationControlManager.createTopic` on a manual assignment:
+/// assignment by assignment in request order, no partition assigned twice
+/// and [`manual_partition`]'s checks; then the partitions must be `0..n`.
+/// The placements come back in partition order.
+fn manual_topic_placement(
+    image: &MetadataImage,
+    assignments: &[(i32, Vec<NodeId>)],
+) -> Result<Vec<Placement>, String> {
+    let registered = registered_brokers(image);
+    let active = active_brokers(image);
+    let mut expected = None;
+    let mut by_partition: BTreeMap<i32, Placement> = BTreeMap::new();
+    for (partition, replicas) in assignments {
+        if by_partition.contains_key(partition) {
+            return Err(format!(
+                "Found multiple manual partition assignments for partition {partition}"
+            ));
+        }
+        let placement = manual_partition(&registered, &active, replicas, expected, *partition)?;
+        expected = Some(replicas.len());
+        by_partition.insert(*partition, placement);
+    }
+    let consecutive = by_partition
+        .keys()
+        .copied()
+        .eq(0..i32::try_from(by_partition.len()).unwrap_or(i32::MAX));
+    if !consecutive {
+        return Err("partitions should be a consecutive 0-based integer sequence".into());
+    }
+    Ok(by_partition.into_values().collect())
+}
+
+/// Kafka's `ReplicationControlManager.createPartitions` on a manual
+/// assignment of the partitions from `first_partition` on, each with
+/// `replication_factor` replicas: [`manual_partition`]'s checks, list by
+/// list.
 fn manual_placement(
     image: &MetadataImage,
     assignments: &[Vec<NodeId>],
     first_partition: i32,
-    replication_factor: Option<usize>,
+    replication_factor: usize,
 ) -> Result<Vec<Placement>, String> {
     let registered = registered_brokers(image);
     let active = active_brokers(image);
-    let mut expected = replication_factor;
-    let mut placements = Vec::with_capacity(assignments.len());
-    for (index, replicas) in assignments.iter().enumerate() {
-        let partition = first_partition.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));
-        if replicas.is_empty() {
-            return Err("The manual partition assignment includes an empty replica list.".into());
-        }
-        let mut sorted = replicas.clone();
-        sorted.sort_unstable();
-        let mut previous = None;
-        for &replica in &sorted {
-            if !registered.contains(&replica) {
-                return Err(format!(
-                    "The manual partition assignment includes broker {replica}, but no such \
-                     broker is registered."
-                ));
-            }
-            if previous == Some(replica) {
-                return Err(format!(
-                    "The manual partition assignment includes the broker {replica} more than \
-                     once."
-                ));
-            }
-            previous = Some(replica);
-        }
-        if let Some(expected) = expected
-            && replicas.len() != expected
-        {
-            return Err(format!(
-                "The manual partition assignment includes a partition with {} replica(s), but \
-                 this is not consistent with previous partitions, which have {expected} \
-                 replica(s).",
-                replicas.len()
-            ));
-        }
-        expected = Some(replicas.len());
-        let isr: Vec<NodeId> = replicas
-            .iter()
-            .copied()
-            .filter(|replica| active.contains(&broker_id(*replica)))
-            .collect();
-        let Some(&leader) = isr.first() else {
-            return Err(format!(
-                "All brokers specified in the manual partition assignment for partition \
-                 {partition} are fenced or in controlled shutdown."
-            ));
-        };
-        placements.push(Placement {
-            leader,
-            isr,
-            replicas: replicas.clone(),
-        });
+    assignments
+        .iter()
+        .enumerate()
+        .map(|(index, replicas)| {
+            let partition =
+                first_partition.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));
+            manual_partition(
+                &registered,
+                &active,
+                replicas,
+                Some(replication_factor),
+                partition,
+            )
+        })
+        .collect()
+}
+
+/// Kafka's `validateManualPartitionAssignment` and `buildPartitionRegistration`
+/// on one partition's replicas: not empty, every replica registered and
+/// named once (in ascending id order, so the message names the least
+/// offender), as many replicas as `expected`, and an ISR made of the active
+/// replicas in the listed order, the first of which leads.
+fn manual_partition(
+    registered: &[NodeId],
+    active: &BTreeSet<krabka_metadata::NodeId>,
+    replicas: &[NodeId],
+    expected: Option<usize>,
+    partition: i32,
+) -> Result<Placement, String> {
+    if replicas.is_empty() {
+        return Err("The manual partition assignment includes an empty replica list.".into());
     }
-    Ok(placements)
+    let mut sorted = replicas.to_vec();
+    sorted.sort_unstable();
+    let mut previous = None;
+    for &replica in &sorted {
+        if !registered.contains(&replica) {
+            return Err(format!(
+                "The manual partition assignment includes broker {replica}, but no such \
+                 broker is registered."
+            ));
+        }
+        if previous == Some(replica) {
+            return Err(format!(
+                "The manual partition assignment includes the broker {replica} more than \
+                 once."
+            ));
+        }
+        previous = Some(replica);
+    }
+    if let Some(expected) = expected
+        && replicas.len() != expected
+    {
+        return Err(format!(
+            "The manual partition assignment includes a partition with {} replica(s), but \
+             this is not consistent with previous partitions, which have {expected} \
+             replica(s).",
+            replicas.len()
+        ));
+    }
+    let isr: Vec<NodeId> = replicas
+        .iter()
+        .copied()
+        .filter(|replica| active.contains(&broker_id(*replica)))
+        .collect();
+    let Some(&leader) = isr.first() else {
+        return Err(format!(
+            "All brokers specified in the manual partition assignment for partition \
+             {partition} are fenced or in controlled shutdown."
+        ));
+    };
+    Ok(Placement {
+        leader,
+        isr,
+        replicas: replicas.to_vec(),
+    })
 }
 
 /// One partition record per placement, numbered from `first_partition`, at
@@ -1129,65 +1398,64 @@ fn partition_records(
         .collect()
 }
 
-/// The `INVALID_REPLICATION_FACTOR` message of a placement that cannot put
-/// `replication_factor` replicas on `usable` brokers, as Kafka wraps the
-/// `StripedReplicaPlacer` refusal.
-fn placement_failure_message(replication_factor: i16, usable: usize) -> String {
-    let reason = if usable == 0 {
-        "All brokers are currently fenced, or have all their log directories cordoned.".to_string()
-    } else {
+/// Kafka's `Topic.validate`, with Kafka 4.3's messages.
+///
+/// # Errors
+/// Returns the message `INVALID_TOPIC_EXCEPTION` carries: an empty name, `.`
+/// or `..`, a name longer than [`MAX_TOPIC_NAME_LENGTH`] UTF-16 units, or one
+/// with a character other than ASCII alphanumerics, `.`, `_` and `-`.
+pub fn validate_topic_name(name: &str) -> Result<(), String> {
+    let reason = if name.is_empty() {
+        "the empty string is not allowed".to_string()
+    } else if name == "." {
+        "'.' is not allowed".to_string()
+    } else if name == ".." {
+        "'..' is not allowed".to_string()
+    } else if name.encode_utf16().count() > MAX_TOPIC_NAME_LENGTH {
         format!(
-            "The target replication factor of {replication_factor} cannot be reached because \
-             only {usable} broker(s) are registered or some brokers have all their log \
-             directories cordoned."
+            "the length of '{name}' is longer than the max allowed length {MAX_TOPIC_NAME_LENGTH}"
         )
+    } else if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        format!(
+            "'{name}' contains one or more characters other than ASCII alphanumerics, '.', '_' \
+             and '-'"
+        )
+    } else {
+        return Ok(());
     };
-    format!("Unable to replicate the partition {replication_factor} time(s): {reason}")
+    Err(format!("Topic name is invalid: {reason}"))
 }
 
-/// Kafka's `Topic.validate`, plus the `.`/`_` collision check of
-/// `ReplicationControlManager.createTopic`: the message of the refusal, if
-/// there is one.
-fn topic_name_error(image: &MetadataImage, name: &str) -> Option<String> {
-    if name.is_empty() {
-        return Some("Topic name is illegal, it can't be empty".into());
+/// Whether two names are the same once `.` and `_` are unified, Kafka's
+/// `Topic.hasCollision`.
+#[must_use]
+pub fn topic_names_collide(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .all(|(x, y)| unify_collision_char(x) == unify_collision_char(y))
+}
+
+fn unify_collision_char(byte: u8) -> u8 {
+    if byte == b'.' { b'_' } else { byte }
+}
+
+/// The existing topic other than `name` that `name` collides with, Kafka's
+/// `topicsWithCollisionChars` check: the names differ only in `.` against
+/// `_`. The least such name, when several do.
+#[must_use]
+pub fn colliding_topic<'a>(image: &'a MetadataImage, name: &str) -> Option<&'a str> {
+    if !name.contains(['.', '_']) {
+        return None;
     }
-    if name == "." || name == ".." {
-        return Some("Topic name cannot be \".\" or \"..\"".into());
-    }
-    if name.len() > MAX_TOPIC_NAME_LENGTH {
-        return Some(format!(
-            "Topic name is illegal, it can't be longer than {MAX_TOPIC_NAME_LENGTH} characters, \
-             topic name: {name}"
-        ));
-    }
-    if !name
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'_' || byte == b'-')
-    {
-        return Some(format!(
-            "Topic name \"{name}\" is illegal, it contains a character other than ASCII \
-             alphanumerics, '.', '_' and '-'"
-        ));
-    }
-    let collides: Vec<&str> = {
-        let mut names: Vec<&str> = image
-            .topics()
-            .map(|topic| topic.name.as_str())
-            .filter(|existing| {
-                *existing != name && existing.replace('.', "_") == name.replace('.', "_")
-            })
-            .collect();
-        names.sort_unstable();
-        names
-    };
-    if !collides.is_empty() {
-        return Some(format!(
-            "Topic '{name}' collides with existing topics: {}",
-            collides.join(", ")
-        ));
-    }
-    None
+    image
+        .topics()
+        .map(|t| t.name.as_str())
+        .filter(|existing| *existing != name && topic_names_collide(existing, name))
+        .min()
 }
 
 /// `registration` with its fence and controlled-shutdown flags set.

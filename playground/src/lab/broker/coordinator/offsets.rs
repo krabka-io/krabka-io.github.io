@@ -113,6 +113,47 @@ pub fn commit(
     version: i16,
     metadata: &dyn TopicMetadata,
 ) -> OffsetCommitResponse {
+    checked_commit(req, version, metadata, |valid| {
+        commit_to_group(coord, now, req, version, valid)
+    })
+}
+
+/// `OffsetCommit` refused by the group coordinator service with
+/// `error_code`, behind the same topic checks as [`commit`]: the partitions
+/// that pass them carry the error, as Kafka's `OffsetCommitRequest
+/// .getErrorResponse` of the checked request merged into the refused rows.
+pub fn commit_refused(
+    req: &OffsetCommitRequest,
+    version: i16,
+    metadata: &dyn TopicMetadata,
+    error_code: i16,
+) -> OffsetCommitResponse {
+    checked_commit(req, version, metadata, |valid| {
+        valid
+            .into_iter()
+            .map(|topic| OffsetCommitResponseTopic {
+                name: topic.name,
+                topic_id: topic.topic_id,
+                partitions: topic
+                    .partitions
+                    .into_iter()
+                    .map(|partition| commit_row(partition.partition_index, error_code))
+                    .collect(),
+                ..Default::default()
+            })
+            .collect()
+    })
+}
+
+/// The topic checks of `KafkaApis.handleOffsetCommitRequest`, with the rows
+/// of the partitions that pass from `commit_valid`, which runs only when
+/// some do.
+fn checked_commit(
+    req: &OffsetCommitRequest,
+    version: i16,
+    metadata: &dyn TopicMetadata,
+    commit_valid: impl FnOnce(Vec<ValidTopic<'_>>) -> Vec<OffsetCommitResponseTopic>,
+) -> OffsetCommitResponse {
     let by_id = version >= FIRST_TOPIC_ID_VERSION;
     let mut response = CommitResponse {
         by_id,
@@ -157,7 +198,7 @@ pub fn commit(
     let rows = if valid.is_empty() {
         Vec::new()
     } else {
-        commit_to_group(coord, now, req, version, valid)
+        commit_valid(valid)
     };
     OffsetCommitResponse {
         throttle_time_ms: 0,

@@ -1,24 +1,30 @@
-//! `CreateTopics` (api key 19): topics through the local controller.
+//! `CreateTopics` (api key 19) on the controller listener: the active
+//! controller creates topics.
 //!
 //! Rows follow `ControllerApis.createTopics` and
-//! `ReplicationControlManager.createTopics`. Per topic, in request order: the
-//! name is checked (`INVALID_TOPIC_EXCEPTION`), an existing topic answers
-//! `TOPIC_ALREADY_EXISTS`, a name that collides with an existing one on `.`
-//! against `_` answers `INVALID_TOPIC_EXCEPTION`, the configs are validated
-//! (`INVALID_CONFIG`), then the counts or the manual assignment
-//! (`INVALID_REPLICATION_FACTOR`, `INVALID_PARTITIONS`, `INVALID_REQUEST`,
-//! `INVALID_REPLICA_ASSIGNMENT`) and the placement. A `-1` count takes the
-//! broker default (KIP-464). From v5 a successful row reports the effective
-//! configuration (KIP-525). Every topic is planned against the image as the
-//! request found it, and the records of all of them commit together, so two
-//! new names that collide with each other are both created, as in Kafka; a
-//! `validate_only` request runs every check and commits nothing. A
-//! duplicated name answers `INVALID_REQUEST` after the other rows, then the
-//! raft metadata topic does.
+//! `ReplicationControlManager.createTopics`. A name the request repeats, and
+//! the raft metadata topic, never reach the controller: they answer
+//! `INVALID_REQUEST` after the other rows, duplicates first. A node that is
+//! not the active controller answers `NOT_CONTROLLER` on every row of the
+//! request, with the message naming the controller it knows, unless nothing
+//! was left to create. Per topic, in request order: an existing topic
+//! answers `TOPIC_ALREADY_EXISTS`, a name that collides with an existing one
+//! on `.` against `_`, or that Kafka's `Topic.validate` refuses, answers
+//! `INVALID_TOPIC_EXCEPTION`, the configs are validated (`INVALID_CONFIG`),
+//! then the counts or the manual assignment and the placement
+//! ([`ControllerDecisions::create_topic`]). A `-1` count takes the
+//! controller default (KIP-464). From v5 a successful row reports the
+//! effective configuration (KIP-525). Every topic is planned against the
+//! image as the request found it, and the records of all of them commit
+//! together, so two new names that collide with each other are both
+//! created, as in Kafka; a `validate_only` request runs every check and
+//! commits nothing. The answer waits for the commit.
+//!
+//! [`ControllerDecisions::create_topic`]: crate::lab::controller::ControllerDecisions::create_topic
 
 use std::collections::BTreeMap;
 
-use krabka_metadata::{MetadataImage, MetadataRecord};
+use krabka_metadata::MetadataRecord;
 use krabka_protocol::owned::{
     create_topics_request::{CreatableTopic, CreateTopicsRequest},
     create_topics_response::{CreatableTopicConfigs, CreatableTopicResult, CreateTopicsResponse},
@@ -26,25 +32,24 @@ use krabka_protocol::owned::{
 
 use super::{
     super::{
-        BrokerNode, PlannedTopic, TopicPlan, cluster,
+        BrokerNode, cluster,
         dispatch::{Outcome, RequestCtx},
     },
     describe_configs::{effective_topic_configs, validate_topic_configs},
+    forwarded::create_topics_error,
     wire_uuid,
 };
-use crate::lab::{codes, net::Ctx};
+use crate::lab::{
+    codes,
+    controller::{
+        ControllerDecisions,
+        decisions::{CreateTopicSpec, CreatedTopic},
+    },
+    net::{Ctx, NodeId},
+};
 
 /// The first version whose successful rows carry the effective configs.
 const CONFIGS_VERSION: i16 = 5;
-
-/// A `-1` count means the broker default (KIP-464).
-fn resolve_default<T: PartialEq + From<i8>>(requested: T, default: T) -> T {
-    if requested == T::from(-1) {
-        default
-    } else {
-        requested
-    }
-}
 
 fn error_row(name: String, code: i16, message: Option<String>) -> CreatableTopicResult {
     CreatableTopicResult {
@@ -55,44 +60,51 @@ fn error_row(name: String, code: i16, message: Option<String>) -> CreatableTopic
     }
 }
 
-/// Serve a `CreateTopics`.
+/// Serve a `CreateTopics` as the controller.
 pub fn handle(
     node: &mut BrokerNode,
     ctx: &mut Ctx<'_>,
     req: &RequestCtx,
-    request: CreateTopicsRequest,
-) -> Outcome<CreateTopicsResponse> {
-    let CreateTopicsRequest {
+    CreateTopicsRequest {
         topics,
         validate_only,
         ..
-    } = request;
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    }: CreateTopicsRequest,
+) -> Outcome<CreateTopicsResponse> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for topic in &topics {
-        *counts.entry(topic.name.clone()).or_insert(0) += 1;
+        *counts.entry(topic.name.as_str()).or_insert(0) += 1;
     }
     let mut duplicates: Vec<String> = Vec::new();
     let mut metadata_topic = false;
-    let image = node.image().clone();
+    let mut effective: Vec<&CreatableTopic> = Vec::new();
+    for topic in &topics {
+        if counts[topic.name.as_str()] > 1 {
+            if !duplicates.contains(&topic.name) {
+                duplicates.push(topic.name.clone());
+            }
+        } else if topic.name == cluster::CLUSTER_METADATA_TOPIC {
+            metadata_topic = true;
+        } else {
+            effective.push(topic);
+        }
+    }
+    let not_controller =
+        |message: &str| create_topics_error(&topics, codes::NOT_CONTROLLER, Some(message));
     let mut results = Vec::with_capacity(topics.len());
     let mut records: Vec<MetadataRecord> = Vec::new();
-    for topic in topics {
-        if counts[&topic.name] > 1 {
-            if !duplicates.contains(&topic.name) {
-                duplicates.push(topic.name);
-            }
-            continue;
+    if !effective.is_empty() {
+        if node.quorum.active.is_none() {
+            return Outcome::Reply(not_controller(&node.quorum.not_controller_message()));
         }
-        if topic.name == cluster::CLUSTER_METADATA_TOPIC {
-            metadata_topic = true;
-            continue;
+        for topic in effective {
+            let (row, created) = create_one(node, req.version, topic);
+            records.extend(created);
+            results.push(row);
         }
-        let (result, planned) = create_one(node, ctx, &image, req.version, topic);
-        records.extend(planned);
-        results.push(result);
     }
-    if !validate_only && !records.is_empty() {
-        node.apply_metadata(ctx, &records);
+    if validate_only {
+        records.clear();
     }
     results.extend(duplicates.into_iter().map(|name| {
         error_row(
@@ -111,113 +123,98 @@ pub fn handle(
             )),
         ));
     }
-    Outcome::Reply(CreateTopicsResponse {
+    let response = CreateTopicsResponse {
         topics: results,
         ..CreateTopicsResponse::default()
-    })
+    };
+    node.controller_write(ctx, req, records, response, not_controller)
 }
 
-/// Plan one topic against `image`: its row, and the records that create it.
+/// Decide one topic against the active controller's image: its row, and the
+/// records that create it.
 fn create_one(
     node: &mut BrokerNode,
-    ctx: &mut Ctx<'_>,
-    image: &MetadataImage,
     version: i16,
-    topic: CreatableTopic,
+    topic: &CreatableTopic,
 ) -> (CreatableTopicResult, Vec<MetadataRecord>) {
-    let CreatableTopic {
-        name,
-        num_partitions,
-        replication_factor,
-        assignments,
-        configs,
-        ..
-    } = topic;
-    if let Err(message) = cluster::validate_topic_name(&name) {
+    let broker_config = node.config.clone();
+    let Some(active) = node.quorum.active.as_mut() else {
         return (
-            error_row(name, codes::INVALID_TOPIC_EXCEPTION, Some(message)),
+            error_row(topic.name.clone(), codes::NOT_CONTROLLER, None),
+            Vec::new(),
+        );
+    };
+    if let Some(refusal) = ControllerDecisions::topic_refusal(&active.image, &topic.name) {
+        return (
+            error_row(topic.name.clone(), refusal.code, refusal.message),
             Vec::new(),
         );
     }
-    if image.topic(&name).is_some() {
-        let message = format!("Topic '{name}' already exists.");
-        return (
-            error_row(name, codes::TOPIC_ALREADY_EXISTS, Some(message)),
-            Vec::new(),
-        );
-    }
-    if let Some(existing) = cluster::colliding_topic(image, &name) {
-        let message = format!("Topic '{name}' collides with existing topic: {existing}");
-        return (
-            error_row(name, codes::INVALID_TOPIC_EXCEPTION, Some(message)),
-            Vec::new(),
-        );
-    }
-    let overrides: Vec<(String, Option<String>)> =
-        configs.into_iter().map(|c| (c.name, c.value)).collect();
+    let overrides: Vec<(String, Option<String>)> = topic
+        .configs
+        .iter()
+        .map(|c| (c.name.clone(), c.value.clone()))
+        .collect();
     let configs = match validate_topic_configs(&overrides) {
         Ok(configs) => configs,
         Err(message) => {
             return (
-                error_row(name, codes::INVALID_CONFIG, Some(message)),
+                error_row(topic.name.clone(), codes::INVALID_CONFIG, Some(message)),
                 Vec::new(),
             );
         }
     };
-    let manual = !assignments.is_empty();
-    let plan = TopicPlan {
-        name,
-        partitions: if manual {
-            num_partitions
-        } else {
-            resolve_default(num_partitions, node.config().default_partitions)
-        },
-        replication_factor: if manual {
-            replication_factor
-        } else {
-            resolve_default(replication_factor, node.config().default_replication_factor)
-        },
-        configs,
-        assignments: assignments
-            .into_iter()
-            .map(|a| (a.partition_index, a.broker_ids))
+    let spec = CreateTopicSpec {
+        name: topic.name.clone(),
+        partitions: topic.num_partitions,
+        replication_factor: topic.replication_factor,
+        assignments: topic
+            .assignments
+            .iter()
+            .map(|assignment| {
+                let replicas = assignment
+                    .broker_ids
+                    .iter()
+                    .map(|&id| NodeId(u32::try_from(id).unwrap_or(u32::MAX)))
+                    .collect();
+                (assignment.partition_index, replicas)
+            })
             .collect(),
+        configs,
     };
-    let topic_id = cluster::new_topic_id(ctx);
-    match node.controller.plan_topic(image, &plan, topic_id) {
-        Ok(planned) => (created_row(node, version, &plan, &planned), planned.records),
+    match active.decisions.create_topic(&active.image, &spec) {
+        Ok(created) => {
+            let row = created_row(&broker_config, version, &spec, &created);
+            (row, created.records)
+        }
         Err(refusal) => (
-            error_row(plan.name, refusal.code, refusal.message),
+            error_row(topic.name.clone(), refusal.code, refusal.message),
             Vec::new(),
         ),
     }
 }
 
-/// The row of a topic the plan creates: its id and counts, and from v5 its
-/// effective configuration (KIP-525).
+/// The row of a topic the controller creates: its id and counts, and from
+/// v5 its effective configuration (KIP-525).
 fn created_row(
-    node: &BrokerNode,
+    config: &super::super::BrokerConfig,
     version: i16,
-    plan: &TopicPlan,
-    planned: &PlannedTopic,
+    spec: &CreateTopicSpec,
+    created: &CreatedTopic,
 ) -> CreatableTopicResult {
     let mut result = CreatableTopicResult {
-        name: plan.name.clone(),
-        topic_id: wire_uuid(planned.topic_id),
+        name: created.name.clone(),
+        topic_id: wire_uuid(created.topic_id),
         error_code: codes::NONE,
         error_message: None,
-        num_partitions: i32::try_from(planned.assignments.len()).unwrap_or(i32::MAX),
-        replication_factor: planned
-            .assignments
-            .first()
-            .and_then(|r| i16::try_from(r.len()).ok())
-            .unwrap_or(-1),
+        num_partitions: created.partitions,
+        replication_factor: created.replication_factor,
         configs: Some(Vec::new()),
         ..CreatableTopicResult::default()
     };
     if version >= CONFIGS_VERSION {
         result.configs = Some(
-            effective_topic_configs(node.config(), Some(&plan.configs), None)
+            effective_topic_configs(config, Some(&spec.configs), None)
                 .into_iter()
                 .map(|entry| CreatableTopicConfigs {
                     name: entry.name,

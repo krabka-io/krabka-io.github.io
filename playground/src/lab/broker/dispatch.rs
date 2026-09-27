@@ -1,19 +1,27 @@
-//! The dispatch registry: every request the broker serves, listed once.
+//! The dispatch registries: every request each listener serves, listed once.
 //!
-//! The [`registry!`] macro derives the version ranges of the `ApiVersions`
-//! table from [`ProtocolRequest`], decodes a request at its negotiated version,
-//! runs its handler, and encodes the reply at the same version. A handler is
-//! `fn(&mut BrokerNode, &mut Ctx<'_>, &RequestCtx, Req) -> Outcome<Resp>`; an
-//! entry may name a body type of its own after `as`, which the dispatcher
-//! decodes in place of the request type (`Produce` reads its framing only).
-//! A held outcome parks the request at the head of its connection until a
-//! timer or a state change lets [`retry`] finish it.
+//! A broker has two listeners, as a Kafka node in combined mode does: the
+//! client listener ([`Listener::Broker`], port 9092) and the controller
+//! listener ([`Listener::Controller`], port 9093), which serves the requests
+//! brokers send the active controller and the `--bootstrap-controller`
+//! admin requests (KIP-919). The [`registry!`] macro derives each listener's
+//! `ApiVersions` table from [`ProtocolRequest`] (the latest stable version,
+//! or a lower maximum an entry names as `[max = n]` where Kafka serves less
+//! than the codec knows), decodes a request at its negotiated version, runs
+//! its handler, and encodes the reply at the same version. A handler is `fn(&mut BrokerNode, &mut Ctx<'_>, &RequestCtx, Req)
+//! -> Outcome<Resp>`; an entry may name a body type of its own after `as`,
+//! which the dispatcher decodes in place of the request type (`Produce` reads
+//! its framing only). A held outcome parks the request at the head of its
+//! connection until a timer or a state change lets [`retry`] finish it.
 
 use bytes::{Bytes, BytesMut};
 use krabka_protocol::{
     ApiKey, Decode, Encode, ProtocolError, ProtocolRequest,
     owned::{
-        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersion,
+        allocate_producer_ids_request::AllocateProducerIdsRequest,
+        alter_partition_request::AlterPartitionRequest, api_versions_request::ApiVersionsRequest,
+        api_versions_response::ApiVersion, broker_heartbeat_request::BrokerHeartbeatRequest,
+        broker_registration_request::BrokerRegistrationRequest,
         consumer_group_describe_request::ConsumerGroupDescribeRequest,
         consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
         create_partitions_request::CreatePartitionsRequest,
@@ -21,13 +29,14 @@ use krabka_protocol::{
         describe_cluster_request::DescribeClusterRequest,
         describe_configs_request::DescribeConfigsRequest,
         describe_groups_request::DescribeGroupsRequest,
+        describe_quorum_request::DescribeQuorumRequest,
         describe_topic_partitions_request::DescribeTopicPartitionsRequest,
-        fetch_request::FetchRequest, find_coordinator_request::FindCoordinatorRequest,
-        heartbeat_request::HeartbeatRequest, init_producer_id_request::InitProducerIdRequest,
-        join_group_request::JoinGroupRequest, leave_group_request::LeaveGroupRequest,
-        list_groups_request::ListGroupsRequest, list_offsets_request::ListOffsetsRequest,
-        metadata_request::MetadataRequest, offset_commit_request::OffsetCommitRequest,
-        offset_fetch_request::OffsetFetchRequest,
+        envelope_request::EnvelopeRequest, fetch_request::FetchRequest,
+        find_coordinator_request::FindCoordinatorRequest, heartbeat_request::HeartbeatRequest,
+        init_producer_id_request::InitProducerIdRequest, join_group_request::JoinGroupRequest,
+        leave_group_request::LeaveGroupRequest, list_groups_request::ListGroupsRequest,
+        list_offsets_request::ListOffsetsRequest, metadata_request::MetadataRequest,
+        offset_commit_request::OffsetCommitRequest, offset_fetch_request::OffsetFetchRequest,
         offset_for_leader_epoch_request::OffsetForLeaderEpochRequest,
         produce_request::ProduceRequest, sasl_authenticate_request::SaslAuthenticateRequest,
         sasl_handshake_request::SaslHandshakeRequest,
@@ -38,17 +47,101 @@ use krabka_protocol::{
 };
 use thiserror::Error;
 
-use super::{BrokerNode, handlers, handlers::produce::PendingProduce};
-use crate::lab::net::{ConnId, Ctx, Endpoint, Millis};
+use super::{
+    BrokerNode, forward::PendingForward, groups::PendingGroupWrite, handlers,
+    handlers::produce::PendingProduce, quorum::PendingWrite,
+};
+use crate::lab::{
+    broker::coordinator::HoldToken,
+    controller::RAFT_PORT,
+    net::{ConnId, Ctx, Endpoint, KAFKA_PORT, Millis, NodeId},
+};
 
 /// The `(client endpoint, connection)` pair that identifies a connection.
 pub type ConnKey = (Endpoint, ConnId);
+
+/// A listener of the broker node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Listener {
+    /// The client listener, `PLAINTEXT` on [`KAFKA_PORT`].
+    Broker,
+    /// The controller listener, `CONTROLLER` on [`RAFT_PORT`]. The raft
+    /// messages between controllers arrive on the same port as JSON.
+    Controller,
+}
+
+impl Listener {
+    /// The port the listener sits on.
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        match self {
+            Self::Broker => KAFKA_PORT,
+            Self::Controller => RAFT_PORT,
+        }
+    }
+
+    /// The listener's endpoint on `node`.
+    #[must_use]
+    pub const fn endpoint(self, node: NodeId) -> Endpoint {
+        Endpoint::new(node, self.port())
+    }
+
+    /// The listener's name, as Kafka's configs name it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Broker => "PLAINTEXT",
+            Self::Controller => "CONTROLLER",
+        }
+    }
+
+    /// The versions the listener serves of `api_key`, or `None` for an api
+    /// it does not serve.
+    #[must_use]
+    pub fn versions(self, api_key: ApiKey) -> Option<VersionRange> {
+        match self {
+            Self::Broker => broker_versions(api_key),
+            Self::Controller => controller_versions(api_key),
+        }
+    }
+
+    /// The listener's `ApiVersions` table.
+    #[must_use]
+    pub fn api_versions_table(self) -> Vec<ApiVersion> {
+        match self {
+            Self::Broker => broker_api_versions_table(),
+            Self::Controller => controller_api_versions_table(),
+        }
+    }
+
+    /// Decode `body` as the request `req` names, run the listener's handler
+    /// and encode the reply.
+    ///
+    /// # Errors
+    /// Returns an error the connection closes on: an api the listener does
+    /// not serve, a version outside the served range of an api other than
+    /// `ApiVersions`, or a body that does not decode.
+    pub fn dispatch(
+        self,
+        node: &mut BrokerNode,
+        ctx: &mut Ctx<'_>,
+        req: &RequestCtx,
+        body: &[u8],
+    ) -> Result<Step, DispatchError> {
+        match self {
+            Self::Broker => dispatch_broker(node, ctx, req, body),
+            Self::Controller => dispatch_controller(node, ctx, req, body),
+        }
+    }
+}
 
 /// What a handler knows about the request it serves.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestCtx {
     /// The connection the request came on.
     pub conn: ConnKey,
+    /// The listener the connection belongs to.
+    pub listener: Listener,
     /// The request's api.
     pub api_key: ApiKey,
     /// The request's version, which the reply follows.
@@ -57,6 +150,9 @@ pub struct RequestCtx {
     pub correlation_id: i32,
     /// The header's `client_id`.
     pub client_id: Option<String>,
+    /// The request as the client framed it, header and body, without the
+    /// length prefix: what a forwarding broker wraps in an `Envelope`.
+    pub raw: Bytes,
     /// The deadline of a held request being retried; `None` on the first
     /// run. A handler that retries must not repeat its side effects.
     pub held_until: Option<Millis>,
@@ -78,15 +174,26 @@ pub enum HoldReason {
     Fetch { deadline: Millis },
     /// A `Produce` with `acks=-1` waits for the high watermark.
     Produce(Box<PendingProduce>),
+    /// A request forwarded to the active controller waits for its answer.
+    Forward(Box<PendingForward>),
+    /// A controller answer waits for its records to commit.
+    ControllerWrite(Box<PendingWrite>),
+    /// A `JoinGroup` or `SyncGroup` the group coordinator holds.
+    Group { token: HoldToken },
+    /// A group coordinator answer waits for its records to reach the ISR.
+    GroupWrite(Box<PendingGroupWrite>),
 }
 
 impl HoldReason {
-    /// When the wait ends whatever happens.
+    /// When the wait ends whatever happens. A wait another part of the
+    /// broker ends answers `Millis::MAX`.
     #[must_use]
     pub fn deadline(&self) -> Millis {
         match self {
             Self::Fetch { deadline } => *deadline,
             Self::Produce(pending) => pending.deadline,
+            Self::GroupWrite(pending) => pending.deadline,
+            Self::Forward(_) | Self::ControllerWrite(_) | Self::Group { .. } => Millis::MAX,
         }
     }
 }
@@ -135,7 +242,7 @@ pub enum DispatchError {
     Protocol(#[from] ProtocolError),
 }
 
-/// The versions the broker serves of one api.
+/// The versions a listener serves of one api.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VersionRange {
     /// The lowest version served.
@@ -171,19 +278,39 @@ pub fn encode_body<R: Encode>(resp: &R, version: i16) -> Result<Bytes, ProtocolE
     Ok(buf.freeze())
 }
 
+/// Encode a reply at `version`, for an answer a handler keeps to send later.
+///
+/// # Errors
+/// Returns the codec error when the body cannot be encoded at that version.
+pub fn encode_reply<R: Encode>(resp: &R, version: i16) -> Result<Reply, ProtocolError> {
+    Ok(Reply {
+        body: encode_body(resp, version)?,
+        version,
+    })
+}
+
 macro_rules! registry {
     (@body $req:ty) => { $req };
     (@body $req:ty, $body:ty) => { $body };
-    ($( $variant:ident : $req:ty $(as $body:ty)? => $handler:path, )*) => {
-        /// The `ApiVersions` table: every served api with its version range,
-        /// ascending by api key. The maximum is the latest stable version.
+    (@max $req:ty) => { <$req as ProtocolRequest>::LATEST_STABLE_VERSION };
+    (@max $req:ty, $max:literal) => { $max };
+    (
+        listener: $listener:expr,
+        table: $table:ident,
+        versions: $versions:ident,
+        dispatch: $dispatch:ident;
+        $( $variant:ident : $req:ty $(as $body:ty)? $([max = $max:literal])? => $handler:path, )*
+    ) => {
+        /// The listener's `ApiVersions` table: every served api with its
+        /// version range, ascending by api key. The maximum is the latest
+        /// stable version.
         #[must_use]
-        pub fn api_versions_table() -> Vec<ApiVersion> {
+        pub fn $table() -> Vec<ApiVersion> {
             let mut table = vec![
                 $( ApiVersion {
                     api_key: <$req as ProtocolRequest>::API_KEY,
                     min_version: <$req as ProtocolRequest>::MIN_VERSION,
-                    max_version: <$req as ProtocolRequest>::LATEST_STABLE_VERSION,
+                    max_version: registry!(@max $req $(, $max)?),
                     ..ApiVersion::default()
                 }, )*
             ];
@@ -191,14 +318,14 @@ macro_rules! registry {
             table
         }
 
-        /// The versions served of `api_key`, or `None` for an api the broker
-        /// does not serve.
+        /// The versions the listener serves of `api_key`, or `None` for an
+        /// api it does not serve.
         #[must_use]
-        pub fn versions(api_key: ApiKey) -> Option<VersionRange> {
+        pub fn $versions(api_key: ApiKey) -> Option<VersionRange> {
             match api_key {
                 $( ApiKey::$variant => Some(VersionRange {
                     min: <$req as ProtocolRequest>::MIN_VERSION,
-                    max: <$req as ProtocolRequest>::LATEST_STABLE_VERSION,
+                    max: registry!(@max $req $(, $max)?),
                     flexible_min: <$req as ProtocolRequest>::FLEXIBLE_MIN,
                 }), )*
                 _ => None,
@@ -209,19 +336,19 @@ macro_rules! registry {
         /// encode the reply.
         ///
         /// # Errors
-        /// Returns an error the connection closes on: an api the broker does
-        /// not serve, a version outside the served range of an api other
-        /// than `ApiVersions`, or a body that does not decode.
-        pub fn dispatch(
+        /// Returns an error the connection closes on: an api the listener
+        /// does not serve, a version outside the served range of an api
+        /// other than `ApiVersions`, or a body that does not decode.
+        pub fn $dispatch(
             node: &mut BrokerNode,
             ctx: &mut Ctx<'_>,
             req: &RequestCtx,
             body: &[u8],
         ) -> Result<Step, DispatchError> {
-            let range = versions(req.api_key).ok_or(DispatchError::UnknownApi(req.api_key as i16))?;
+            let range = $versions(req.api_key).ok_or(DispatchError::UnknownApi(req.api_key as i16))?;
             if !range.contains(req.version) {
                 if req.api_key == ApiKey::ApiVersions {
-                    let body = encode_body(&handlers::api_versions::unsupported_version(), 0)?;
+                    let body = encode_body(&handlers::api_versions::unsupported_version($listener), 0)?;
                     return Ok(Step::Reply(Reply { body, version: 0 }));
                 }
                 return Err(DispatchError::UnsupportedVersion {
@@ -251,6 +378,10 @@ macro_rules! registry {
 }
 
 registry! {
+    listener: Listener::Broker,
+    table: broker_api_versions_table,
+    versions: broker_versions,
+    dispatch: dispatch_broker;
     Produce: ProduceRequest as handlers::produce::ProduceBody => handlers::produce::handle,
     Fetch: FetchRequest => handlers::fetch::handle,
     ListOffsets: ListOffsetsRequest => handlers::list_offsets::handle,
@@ -266,19 +397,38 @@ registry! {
     ListGroups: ListGroupsRequest => handlers::groups::list_groups,
     SaslHandshake: SaslHandshakeRequest => handlers::sasl::handshake,
     ApiVersions: ApiVersionsRequest => handlers::api_versions::handle,
-    CreateTopics: CreateTopicsRequest => handlers::create_topics::handle,
-    DeleteTopics: DeleteTopicsRequest => handlers::delete_topics::handle,
+    CreateTopics: CreateTopicsRequest => handlers::forwarded::create_topics,
+    DeleteTopics: DeleteTopicsRequest => handlers::forwarded::delete_topics,
     InitProducerId: InitProducerIdRequest => handlers::init_producer_id::handle,
     OffsetForLeaderEpoch: OffsetForLeaderEpochRequest => handlers::offset_for_leader_epoch::handle,
     DescribeConfigs: DescribeConfigsRequest => handlers::describe_configs::handle,
     SaslAuthenticate: SaslAuthenticateRequest => handlers::sasl::authenticate,
-    CreatePartitions: CreatePartitionsRequest => handlers::create_partitions::handle,
+    CreatePartitions: CreatePartitionsRequest => handlers::forwarded::create_partitions,
+    DescribeQuorum: DescribeQuorumRequest => handlers::forwarded::describe_quorum,
     DescribeCluster: DescribeClusterRequest => handlers::describe_cluster::handle,
     ConsumerGroupHeartbeat: ConsumerGroupHeartbeatRequest => handlers::groups::consumer_group_heartbeat,
     ConsumerGroupDescribe: ConsumerGroupDescribeRequest => handlers::groups::consumer_group_describe,
     DescribeTopicPartitions: DescribeTopicPartitionsRequest => handlers::describe_topic_partitions::handle,
-    StreamsGroupHeartbeat: StreamsGroupHeartbeatRequest => handlers::groups::streams_group_heartbeat,
-    StreamsGroupDescribe: StreamsGroupDescribeRequest => handlers::groups::streams_group_describe,
+    // Kafka 4.3 serves v0 of the two streams group apis; the codec knows v1.
+    StreamsGroupHeartbeat: StreamsGroupHeartbeatRequest [max = 0] => handlers::groups::streams_group_heartbeat,
+    StreamsGroupDescribe: StreamsGroupDescribeRequest [max = 0] => handlers::groups::streams_group_describe,
+}
+
+registry! {
+    listener: Listener::Controller,
+    table: controller_api_versions_table,
+    versions: controller_versions,
+    dispatch: dispatch_controller;
+    ApiVersions: ApiVersionsRequest => handlers::api_versions::handle,
+    CreateTopics: CreateTopicsRequest => handlers::create_topics::handle,
+    DeleteTopics: DeleteTopicsRequest => handlers::delete_topics::handle,
+    CreatePartitions: CreatePartitionsRequest => handlers::create_partitions::handle,
+    DescribeQuorum: DescribeQuorumRequest => handlers::describe_quorum::handle,
+    AlterPartition: AlterPartitionRequest => handlers::alter_partition::handle,
+    Envelope: EnvelopeRequest => handlers::envelope::handle,
+    BrokerRegistration: BrokerRegistrationRequest => handlers::broker_registration::handle,
+    BrokerHeartbeat: BrokerHeartbeatRequest => handlers::broker_heartbeat::handle,
+    AllocateProducerIds: AllocateProducerIdsRequest => handlers::allocate_producer_ids::handle,
 }
 
 /// Run a held request again.
@@ -293,7 +443,7 @@ pub fn retry(
     held: HoldReason,
 ) -> Result<Step, DispatchError> {
     match held {
-        HoldReason::Fetch { .. } => dispatch(node, ctx, req, body),
+        HoldReason::Fetch { .. } => req.listener.dispatch(node, ctx, req, body),
         HoldReason::Produce(pending) => {
             Ok(match handlers::produce::retry(node, ctx, req, *pending) {
                 Outcome::Reply(resp) => Step::Reply(Reply {
@@ -305,15 +455,25 @@ pub fn retry(
                 Outcome::Close => Step::Close,
             })
         }
+        HoldReason::Forward(pending) => Ok(node.retry_forward(req, *pending)),
+        HoldReason::ControllerWrite(pending) => Ok(node.retry_controller_write(*pending)),
+        HoldReason::Group { token } => node.retry_group_hold(ctx, req, token),
+        HoldReason::GroupWrite(pending) => Ok(node.retry_group_write(ctx.now(), *pending)),
     }
 }
 
+/// The versions any listener serves of `api_key`: the client listener's,
+/// else the controller listener's.
+fn any_versions(api_key: ApiKey) -> Option<VersionRange> {
+    broker_versions(api_key).or_else(|| controller_versions(api_key))
+}
+
 /// The request header version of a request: 2 with flexible framing, else 1.
-/// An unknown api reads as a non-flexible header, which decodes the fields
-/// both versions share.
+/// An api neither listener serves reads as a non-flexible header, which
+/// decodes the fields both versions share.
 #[must_use]
 pub fn request_header_version(api_key: ApiKey, version: i16) -> i16 {
-    match versions(api_key) {
+    match any_versions(api_key) {
         Some(range) if range.is_flexible(version) => 2,
         _ => 1,
     }
@@ -326,7 +486,7 @@ pub fn response_header_version(api_key: ApiKey, version: i16) -> i16 {
     if api_key == ApiKey::ApiVersions {
         return 0;
     }
-    match versions(api_key) {
+    match any_versions(api_key) {
         Some(range) if range.is_flexible(version) => 1,
         _ => 0,
     }
@@ -339,15 +499,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_is_sorted_and_derived_from_the_codec() {
-        let table = api_versions_table();
+    fn the_tables_are_sorted_and_derived_from_the_codec() {
+        let table = broker_api_versions_table();
         assert!(table.windows(2).all(|w| w[0].api_key < w[1].api_key));
         let fetch = table.iter().find(|e| e.api_key == 1).unwrap();
         assert!(fetch.min_version == FetchRequest::MIN_VERSION);
         assert!(fetch.max_version == FetchRequest::LATEST_STABLE_VERSION);
-        assert!(versions(ApiKey::Fetch).unwrap().flexible_min == 12);
-        assert!(versions(ApiKey::DeleteRecords).is_none());
-        assert!(table.len() == 28);
+        assert!(broker_versions(ApiKey::Fetch).unwrap().flexible_min == 12);
+        assert!(broker_versions(ApiKey::DeleteRecords).is_none());
+        assert!(table.len() == 29);
+        let controller: Vec<i16> = controller_api_versions_table()
+            .iter()
+            .map(|entry| entry.api_key)
+            .collect();
+        assert!(controller == vec![18, 19, 20, 37, 55, 56, 58, 62, 63, 67]);
+        assert!(Listener::Broker.versions(ApiKey::BrokerHeartbeat).is_none());
+        assert!(Listener::Controller.versions(ApiKey::Produce).is_none());
     }
 
     #[test]
@@ -356,9 +523,11 @@ mod tests {
         assert!(request_header_version(ApiKey::Fetch, 12) == 2);
         assert!(request_header_version(ApiKey::ApiVersions, 3) == 2);
         assert!(request_header_version(ApiKey::ApiVersions, 2) == 1);
+        assert!(request_header_version(ApiKey::BrokerRegistration, 0) == 2);
         assert!(response_header_version(ApiKey::ApiVersions, 3) == 0);
         assert!(response_header_version(ApiKey::Metadata, 9) == 1);
         assert!(response_header_version(ApiKey::Metadata, 8) == 0);
         assert!(response_header_version(ApiKey::SaslHandshake, 1) == 0);
+        assert!(response_header_version(ApiKey::Envelope, 0) == 1);
     }
 }

@@ -681,17 +681,13 @@ mod tests {
 
     #[test]
     fn effective_configs_report_every_key_with_its_source() {
-        let config = BrokerConfig {
-            broker_id: 1,
-            rack: None,
-            voter: true,
-            default_partitions: 1,
-            default_replication_factor: -1,
-            min_insync_replicas: 2,
-            log_retention_ms: DEFAULT_RETENTION_MS,
-            replica_lag_time_max_ms: 10_000,
-            request_timeout_ms: 30_000,
-        };
+        let spec = crate::lab::scenario::NodeSpec::new(
+            1,
+            "broker",
+            "b",
+            serde_json::json!({ "broker_id": 1, "min_insync_replicas": 2 }),
+        );
+        let config = BrokerConfig::from_spec(&spec).unwrap();
         let overrides = BTreeMap::from([("retention.ms".to_string(), "5".to_string())]);
         let entries = effective_topic_configs(&config, Some(&overrides), None);
         assert!(entries.len() == TOPIC_CONFIGS.len());

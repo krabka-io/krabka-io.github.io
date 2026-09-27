@@ -6,8 +6,11 @@
 //! `INVALID_REQUEST`, and a request that carries half a producer identity
 //! (KIP-360: one of the id and the epoch `-1`) is refused the same way, as
 //! Kafka refuses it before the coordinator sees it; a refusal carries
-//! producer id and epoch `-1`, Kafka's `getErrorResponse`. Ids come from the
-//! broker's own block; see [`BrokerNode::allocate_producer_id`].
+//! producer id and epoch `-1`, Kafka's `getErrorResponse`. Ids come from a
+//! block the active controller allocated to the broker; while the broker
+//! waits for one, the request answers `COORDINATOR_LOAD_IN_PROGRESS` with
+//! the same `-1` identity, which a producer retries. See
+//! [`BrokerNode::generate_producer_id`].
 
 use krabka_protocol::owned::{
     init_producer_id_request::InitProducerIdRequest,
@@ -47,9 +50,17 @@ pub fn handle(
             ..InitProducerIdResponse::default()
         });
     }
-    Outcome::Reply(InitProducerIdResponse {
-        producer_id: node.allocate_producer_id(ctx),
-        producer_epoch: 0,
-        ..InitProducerIdResponse::default()
+    Outcome::Reply(match node.generate_producer_id(ctx) {
+        Ok(producer_id) => InitProducerIdResponse {
+            producer_id,
+            producer_epoch: 0,
+            ..InitProducerIdResponse::default()
+        },
+        Err(error_code) => InitProducerIdResponse {
+            error_code,
+            producer_id: NO_PRODUCER_ID,
+            producer_epoch: NO_PRODUCER_EPOCH,
+            ..InitProducerIdResponse::default()
+        },
     })
 }

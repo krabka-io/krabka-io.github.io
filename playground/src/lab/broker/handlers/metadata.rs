@@ -8,11 +8,17 @@
 //! `INVALID_REQUEST`. The rows come in Kafka's order: unknown ids, then the
 //! topics that exist, then the ones that do not. A missing topic answers
 //! `UNKNOWN_TOPIC_OR_PARTITION` (`INVALID_TOPIC_EXCEPTION` for a name Kafka
-//! refuses), or `LEADER_NOT_AVAILABLE` when the request allows
-//! auto-creation: the topic is then created with the broker's
-//! `num.partitions` and `default.replication.factor` (`__consumer_offsets`
-//! with its own settings), and the next request sees it, as with Kafka's
-//! asynchronous creation.
+//! refuses). When the request allows auto-creation, Kafka's
+//! `AutoTopicCreationManager` asks the active controller to create it with
+//! the broker's `num.partitions` and `default.replication.factor`
+//! (`__consumer_offsets` with its own settings) and still answers
+//! `UNKNOWN_TOPIC_OR_PARTITION`; a later request sees the topic once the
+//! creation commits. The rows the manager refuses come first: an invalid
+//! name, then a name whose creation is already on its way (also
+//! `UNKNOWN_TOPIC_OR_PARTITION`).
+//!
+//! In `KRaft` the response names a random live broker as `controller_id`,
+//! Kafka's `getRandomAliveBrokerId`, `-1` when none is live.
 //!
 //! A partition row comes from `KRaftMetadataCache.getPartitionMetadata`: a
 //! leader with no registration (a leaderless partition among them) answers
@@ -20,8 +26,6 @@
 //! is listed in `offline_replicas`; and v0 lists only live replicas, answering
 //! `REPLICA_NOT_AVAILABLE` when it dropped one. The broker list holds the
 //! unfenced brokers. Every version the codec knows, 0 to 13, is served.
-
-use std::collections::BTreeMap;
 
 use krabka_metadata::{MetadataImage, PartitionRecord};
 use krabka_protocol::{
@@ -37,7 +41,7 @@ use krabka_protocol::{
 
 use super::{
     super::{
-        BrokerNode, TopicPlan, cluster,
+        BrokerNode, cluster,
         dispatch::{Outcome, RequestCtx},
     },
     CLUSTER_AUTHORIZED_OPERATIONS, NO_AUTHORIZED_OPERATIONS, TOPIC_AUTHORIZED_OPERATIONS,
@@ -161,20 +165,29 @@ pub fn handle(
         Vec::new()
     } else if allow_auto_topic_creation {
         // Kafka's `AutoTopicCreationManager.createTopics`: the names it
-        // refuses first, then the ones it creates.
-        let (invalid, creatable): (Vec<String>, Vec<String>) = missing
-            .into_iter()
-            .partition(|name| cluster::validate_topic_name(name).is_err());
-        for name in &creatable {
-            auto_create_topic(node, ctx, name);
+        // refuses first, then the ones it sends the controller.
+        let mut refused = Vec::new();
+        let mut creatable = Vec::new();
+        for name in missing {
+            if cluster::validate_topic_name(&name).is_err() {
+                refused.push(missing_row(&name, codes::INVALID_TOPIC_EXCEPTION));
+            } else if node.forwarding.is_creating(&name) {
+                refused.push(missing_row(&name, codes::UNKNOWN_TOPIC_OR_PARTITION));
+            } else {
+                creatable.push(name);
+            }
         }
-        invalid
+        let topics = creatable
             .iter()
-            .map(|name| missing_row(name, codes::INVALID_TOPIC_EXCEPTION))
+            .map(|name| node.creatable_topic(name))
+            .collect();
+        node.create_topics_internally(ctx, topics);
+        refused
+            .into_iter()
             .chain(
                 creatable
                     .iter()
-                    .map(|name| missing_row(name, codes::LEADER_NOT_AVAILABLE)),
+                    .map(|name| missing_row(name, codes::UNKNOWN_TOPIC_OR_PARTITION)),
             )
             .collect()
     } else {
@@ -221,38 +234,15 @@ pub fn handle(
     } else {
         NO_AUTHORIZED_OPERATIONS
     };
+    let controller_id = node.random_alive_broker(ctx);
     Outcome::Reply(MetadataResponse {
         brokers: broker_rows(node.image()),
         cluster_id: Some(cluster::cluster_id_string(node.image().cluster_id())),
-        controller_id: node.controller_id(),
+        controller_id,
         topics,
         cluster_authorized_operations,
         ..MetadataResponse::default()
     })
-}
-
-/// Create a missing topic with the broker defaults, `__consumer_offsets`
-/// with the group coordinator's settings, as Kafka's
-/// `AutoTopicCreationManager.creatableTopicResult` does. A creation the
-/// controller refuses leaves the topic missing, and the next request tries
-/// again.
-fn auto_create_topic(node: &mut BrokerNode, ctx: &mut Ctx<'_>, name: &str) {
-    let topic_id = cluster::new_topic_id(ctx);
-    let planned = if name == cluster::CONSUMER_OFFSETS_TOPIC {
-        node.controller.plan_consumer_offsets(&node.image, topic_id)
-    } else {
-        let plan = TopicPlan {
-            name: name.to_string(),
-            partitions: node.config().default_partitions,
-            replication_factor: node.config().default_replication_factor,
-            configs: BTreeMap::new(),
-            assignments: Vec::new(),
-        };
-        node.controller.plan_topic(&node.image, &plan, topic_id)
-    };
-    if let Ok(planned) = planned {
-        node.apply_metadata(ctx, &planned.records);
-    }
 }
 
 /// The unfenced brokers, ascending by id: Kafka's

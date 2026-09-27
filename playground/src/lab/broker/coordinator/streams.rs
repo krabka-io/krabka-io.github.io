@@ -420,6 +420,13 @@ fn validate_request(req: &StreamsGroupHeartbeatRequest) -> Result<(), (i16, Stri
     Ok(())
 }
 
+/// The error code and message of the first request check a
+/// `StreamsGroupHeartbeat` fails, which Kafka answers before it routes the
+/// request to a coordinator.
+pub fn request_error(req: &StreamsGroupHeartbeatRequest) -> Option<(i16, String)> {
+    validate_request(req).err()
+}
+
 /// `StreamsGroupHeartbeat`, and the internal topics to create.
 pub fn heartbeat(
     coord: &mut Coordinator,

@@ -41,7 +41,7 @@ pub use self::{
         BASE_ELECTION_TIMEOUT_MS, ControllerCore, DISCOVERY_RETRY_MS, DurableQuorumState,
         ELECTION_TIMEOUT_STAGGER_MS, FETCH_MAX_WAIT_MS, HEARTBEAT_MS, HIGH_WATERMARK_KEY,
         KRAFT_LOG_STORE, KRAFT_STATE_STORE, MAX_FETCH_ENTRIES, METADATA_TOPIC, QUORUM_STATE_KEY,
-        RECONNECT_BACKOFF_MS, election_timeout_ms,
+        RAFT_CONN_BASE, RECONNECT_BACKOFF_MS, election_timeout_ms,
     },
     log::{Entry, MetadataLog},
     wire::{FetchResponse, LogPoint, MalformedFrame, RaftMessage},

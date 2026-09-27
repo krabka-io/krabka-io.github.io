@@ -1,39 +1,50 @@
-//! `CreatePartitions` (api key 37): more partitions for a topic, placed
-//! round-robin like a creation or as the request assigns them.
+//! `CreatePartitions` (api key 37) on the controller listener: the active
+//! controller grows topics.
 //!
 //! As in Kafka's `ControllerApis.createPartitions`, every duplicated name
 //! answers `INVALID_REQUEST` once, ahead of the other rows, and grows
-//! nothing. The other rows follow `ReplicationControlManager.createPartitions`
-//! in request order: an unknown topic answers `UNKNOWN_TOPIC_OR_PARTITION`
-//! with no message, a count that does not grow the topic
-//! `INVALID_PARTITIONS`, a bad assignment `INVALID_REPLICA_ASSIGNMENT`, and a
-//! placement the active brokers cannot satisfy `INVALID_REPLICATION_FACTOR`.
-//! The rows of one request commit together, and a `validate_only` request
-//! commits nothing.
+//! nothing. When other rows remain, a node that is not the active
+//! controller answers `NOT_CONTROLLER` on every row of the request. The
+//! other rows follow `ReplicationControlManager.createPartitions` in request
+//! order ([`ControllerDecisions::create_partitions`]): an unknown topic
+//! answers `UNKNOWN_TOPIC_OR_PARTITION` with no message, a count that does
+//! not grow the topic `INVALID_PARTITIONS`, a bad assignment
+//! `INVALID_REPLICA_ASSIGNMENT`, and a placement the brokers cannot satisfy
+//! `INVALID_REPLICATION_FACTOR`. The rows of one request commit together,
+//! and the answer waits for the commit; a `validate_only` request commits
+//! nothing.
+//!
+//! [`ControllerDecisions::create_partitions`]: crate::lab::controller::ControllerDecisions::create_partitions
 
+use krabka_metadata::MetadataRecord;
 use krabka_protocol::owned::{
     create_partitions_request::CreatePartitionsRequest,
     create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
 };
 
-use super::super::{
-    BrokerNode,
-    dispatch::{Outcome, RequestCtx},
+use super::{
+    super::{
+        BrokerNode,
+        dispatch::{Outcome, RequestCtx},
+    },
+    forwarded::create_partitions_error,
 };
-use crate::lab::{codes, net::Ctx};
+use crate::lab::{
+    codes,
+    net::{Ctx, NodeId},
+};
 
-/// Serve a `CreatePartitions`.
+/// Serve a `CreatePartitions` as the controller.
 pub fn handle(
     node: &mut BrokerNode,
     ctx: &mut Ctx<'_>,
-    _req: &RequestCtx,
-    request: CreatePartitionsRequest,
-) -> Outcome<CreatePartitionsResponse> {
-    let CreatePartitionsRequest {
+    req: &RequestCtx,
+    CreatePartitionsRequest {
         topics,
         validate_only,
         ..
-    } = request;
+    }: CreatePartitionsRequest,
+) -> Outcome<CreatePartitionsResponse> {
     let mut duplicates: Vec<String> = Vec::new();
     for topic in &topics {
         let repeated = topics.iter().filter(|t| t.name == topic.name).count() > 1;
@@ -50,22 +61,40 @@ pub fn handle(
             ..CreatePartitionsTopicResult::default()
         })
         .collect();
-    let image = node.image().clone();
-    let mut records = Vec::new();
-    for topic in topics {
-        if duplicates.contains(&topic.name) {
-            continue;
-        }
-        let assignments: Option<Vec<Vec<i32>>> = topic
-            .assignments
-            .map(|list| list.into_iter().map(|a| a.broker_ids).collect());
-        let planned = node.controller.plan_partitions(
-            &image,
+    let not_controller =
+        |message: &str| create_partitions_error(&topics, codes::NOT_CONTROLLER, Some(message));
+    let growing: Vec<_> = topics
+        .iter()
+        .filter(|t| !duplicates.contains(&t.name))
+        .collect();
+    if growing.is_empty() {
+        return Outcome::Reply(CreatePartitionsResponse {
+            results,
+            ..CreatePartitionsResponse::default()
+        });
+    }
+    let Some(active) = node.quorum.active.as_mut() else {
+        return Outcome::Reply(not_controller(&node.quorum.not_controller_message()));
+    };
+    let mut records: Vec<MetadataRecord> = Vec::new();
+    for topic in growing {
+        let assignments: Option<Vec<Vec<NodeId>>> = topic.assignments.as_ref().map(|list| {
+            list.iter()
+                .map(|a| {
+                    a.broker_ids
+                        .iter()
+                        .map(|&id| NodeId(u32::try_from(id).unwrap_or(u32::MAX)))
+                        .collect()
+                })
+                .collect()
+        });
+        let decided = active.decisions.create_partitions(
+            &active.image,
             &topic.name,
             topic.count,
             assignments.as_deref(),
         );
-        let (error_code, error_message) = match planned {
+        let (error_code, error_message) = match decided {
             Ok(planned) => {
                 records.extend(planned);
                 (codes::NONE, None)
@@ -73,17 +102,18 @@ pub fn handle(
             Err(refusal) => (refusal.code, refusal.message),
         };
         results.push(CreatePartitionsTopicResult {
-            name: topic.name,
+            name: topic.name.clone(),
             error_code,
             error_message,
             ..CreatePartitionsTopicResult::default()
         });
     }
-    if !validate_only && !records.is_empty() {
-        node.apply_metadata(ctx, &records);
+    if validate_only {
+        records.clear();
     }
-    Outcome::Reply(CreatePartitionsResponse {
+    let response = CreatePartitionsResponse {
         results,
         ..CreatePartitionsResponse::default()
-    })
+    };
+    node.controller_write(ctx, req, records, response, not_controller)
 }

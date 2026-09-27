@@ -17,9 +17,14 @@
 //! reconnects with backoff.
 //!
 //! ISR shrink and expand are decided here, as Kafka's `Partition` decides
-//! them, and applied locally through [`BrokerNode::apply_metadata`]; each
-//! decision is also queued for the controller batch as an
-//! [`AlterPartitionProposal`].
+//! them, and proposed to the active controller through `AlterPartition`
+//! (see the broker's `isr` module). While a proposal is out the replica is
+//! in Kafka's pending state ([`PendingIsr`]): it proposes nothing else, and
+//! the high watermark moves over the maximal ISR, the committed one plus a
+//! follower being added. A committed partition record, or the controller's
+//! answer, ends the pending state; a record older than the partition epoch
+//! the replica holds is skipped, as Kafka's `makeLeader` and `makeFollower`
+//! skip it.
 
 use std::{collections::BTreeMap, ops::Range};
 
@@ -38,7 +43,6 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
     records::{RecordBatchBorrowed, RecordsPayloadBorrowed},
 };
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -94,6 +98,9 @@ pub struct FollowerState {
     /// The leader's log end when the follower last fetched, for Kafka's
     /// "caught up to the previous end" rule.
     pub leader_log_end_at_last_fetch: i64,
+    /// The broker epoch the follower's last fetch named (KIP-903), `-1`
+    /// when it named none.
+    pub broker_epoch: i64,
 }
 
 impl FollowerState {
@@ -107,6 +114,7 @@ impl FollowerState {
             last_fetch_at: 0,
             last_caught_up_at: if in_sync { now } else { 0 },
             leader_log_end_at_last_fetch: UNKNOWN_LOG_END,
+            broker_epoch: -1,
         }
     }
 
@@ -162,16 +170,14 @@ pub struct ReplicaChange {
     pub isr_changed: bool,
 }
 
-/// An ISR change this broker decided as leader, in the shape an
-/// `AlterPartition` request carries.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AlterPartitionProposal {
-    /// The topic.
-    pub topic: String,
-    /// The partition.
-    pub partition: i32,
-    /// The ISR the leader proposes.
-    pub new_isr: Vec<i32>,
+/// An ISR change a leader proposed and the controller has not answered:
+/// Kafka's `PendingExpandIsr` and `PendingShrinkIsr`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingIsr {
+    /// The ISR the leader sent.
+    pub proposed: Vec<i32>,
+    /// The follower an expansion adds, `None` for a shrink.
+    pub adding: Option<i32>,
     /// The leader epoch the proposal was made under.
     pub leader_epoch: i32,
     /// The partition epoch the proposal replaces.
@@ -197,8 +203,10 @@ pub struct Replica {
     pub partition_epoch: i32,
     /// The assigned replicas, in assignment order.
     pub replicas: Vec<i32>,
-    /// The in-sync replicas.
+    /// The in-sync replicas, as last committed.
     pub isr: Vec<i32>,
+    /// The ISR change this leader proposed and waits on.
+    pub pending_isr: Option<PendingIsr>,
     /// The followers a leader tracks.
     pub followers: BTreeMap<i32, FollowerState>,
     /// The log end when this broker took the lead at `leader_epoch`.
@@ -221,6 +229,7 @@ impl Replica {
             partition_epoch: -1,
             replicas: Vec::new(),
             isr: Vec::new(),
+            pending_isr: None,
             followers: BTreeMap::new(),
             epoch_start_offset: 0,
             fetch: FetchState::Idle,
@@ -233,16 +242,36 @@ impl Replica {
         self.leader == Some(me)
     }
 
-    /// Take the leader, ISR and epochs of a committed partition record. A
-    /// new leadership assigns the epoch at the log end and resets the
-    /// follower tracking; a new leader or epoch sends a follower back to
-    /// truncation.
+    /// Kafka's `maximalIsr`: the committed ISR, plus the follower a pending
+    /// expansion adds. A pending shrink keeps the committed ISR, so a
+    /// refused shrink cannot have moved the high watermark too far.
+    #[must_use]
+    pub fn maximal_isr(&self) -> Vec<i32> {
+        let mut isr = self.isr.clone();
+        if let Some(adding) = self.pending_isr.as_ref().and_then(|p| p.adding)
+            && !isr.contains(&adding)
+        {
+            isr.push(adding);
+        }
+        isr
+    }
+
+    /// Take the leader, ISR and epochs of a committed partition record, and
+    /// end a pending ISR change. A record older than the partition epoch
+    /// the replica holds changes nothing: the controller's answer to an
+    /// `AlterPartition` got there first. A new leadership assigns the epoch
+    /// at the log end and resets the follower tracking; a new leader or
+    /// epoch sends a follower back to truncation.
     pub fn apply_record(
         &mut self,
         record: &PartitionRecord,
         me: i32,
         now: Millis,
     ) -> ReplicaChange {
+        if record.partition_epoch < self.partition_epoch {
+            return ReplicaChange::default();
+        }
+        self.pending_isr = None;
         let leader = cluster::record_leader(record);
         let epoch = record.leader_epoch.0;
         let replicas: Vec<i32> = record
@@ -292,6 +321,7 @@ impl Replica {
         self.log.assign_epoch(self.leader_epoch, log_end);
         self.epoch_start_offset = log_end;
         self.fetch = FetchState::Idle;
+        self.pending_isr = None;
         self.followers = self
             .replicas
             .iter()
@@ -301,9 +331,10 @@ impl Replica {
             .collect();
     }
 
-    /// Reset the in-memory state a boot loses: follower tracking on a leader,
-    /// the fetch loop on a follower.
+    /// Reset the in-memory state a boot loses: follower tracking and a
+    /// pending ISR change on a leader, the fetch loop on a follower.
     pub fn on_restart(&mut self, me: i32, now: Millis) {
+        self.pending_isr = None;
         if self.leads(me) {
             self.become_leader(me, now);
             self.recompute_hwm(me);
@@ -312,15 +343,18 @@ impl Replica {
         }
     }
 
-    /// Note a follower's fetch at `fetch_offset`. Returns whether the
-    /// follower now qualifies for the ISR: it is a replica outside the ISR
-    /// that has caught up to the high watermark and to this leader's epoch
-    /// start, Kafka's `Partition.isFollowerInSync`.
+    /// Note a follower's fetch at `fetch_offset`, naming `broker_epoch`.
+    /// Returns whether the follower may now join the ISR, as far as the
+    /// partition can tell: no ISR change is pending, and the follower is a
+    /// replica outside the ISR that has caught up to the high watermark and
+    /// to this leader's epoch start, Kafka's `Partition.isFollowerInSync`.
+    /// Whether its broker is eligible is the caller's check.
     pub fn record_follower_fetch(
         &mut self,
         follower: i32,
         fetch_offset: i64,
         log_start_offset: i64,
+        broker_epoch: i64,
         now: Millis,
     ) -> bool {
         let leader_log_end = self.log.log_end_offset();
@@ -334,27 +368,51 @@ impl Replica {
         state.log_end_offset = fetch_offset;
         state.log_start_offset = log_start_offset;
         state.last_fetch_at = now;
+        state.broker_epoch = broker_epoch;
         if fetch_offset >= leader_log_end {
             state.last_caught_up_at = state.last_caught_up_at.max(now);
         } else if fetch_offset >= previous_leader_log_end {
             state.last_caught_up_at = state.last_caught_up_at.max(previous_fetch_at);
         }
         state.leader_log_end_at_last_fetch = leader_log_end;
-        !in_sync
+        self.pending_isr.is_none()
+            && !in_sync
             && self.replicas.contains(&follower)
             && fetch_offset >= self.log.high_watermark()
             && fetch_offset >= self.epoch_start_offset
     }
 
-    /// Move the high watermark to the smallest log end over the ISR. A
-    /// follower whose end this leader has not learnt holds it back. Returns
-    /// whether it advanced.
+    /// Kafka's `handleAlterPartitionUpdate`: take the ISR the controller
+    /// committed for this leader's proposal, unless the leader epoch moved
+    /// or the replica already holds a newer partition epoch. Returns whether
+    /// the ISR changed.
+    pub fn commit_isr(
+        &mut self,
+        me: i32,
+        leader_epoch: i32,
+        isr: Vec<i32>,
+        partition_epoch: i32,
+    ) -> bool {
+        if leader_epoch != self.leader_epoch || partition_epoch < self.partition_epoch {
+            return false;
+        }
+        self.pending_isr = None;
+        self.partition_epoch = partition_epoch;
+        let changed = isr != self.isr;
+        self.isr = isr;
+        self.recompute_hwm(me);
+        changed
+    }
+
+    /// Move the high watermark to the smallest log end over the maximal
+    /// ISR. A follower whose end this leader has not learnt holds it back.
+    /// Returns whether it advanced.
     pub fn recompute_hwm(&mut self, me: i32) -> bool {
         if !self.leads(me) {
             return false;
         }
         let mut floor = self.log.log_end_offset();
-        for id in &self.isr {
+        for id in &self.maximal_isr() {
             if *id == me {
                 continue;
             }
@@ -367,9 +425,14 @@ impl Replica {
     }
 
     /// The ISR followers that have not caught up for longer than `lag`
-    /// while behind the log end, Kafka's `Partition.isFollowerOutOfSync`.
+    /// while behind the log end, Kafka's `Partition.isFollowerOutOfSync`;
+    /// none while an ISR change is pending, as Kafka's `maybeShrinkIsr`
+    /// waits for it.
     #[must_use]
     pub fn out_of_sync_followers(&self, me: i32, now: Millis, lag: Millis) -> Vec<i32> {
+        if self.pending_isr.is_some() {
+            return Vec::new();
+        }
         let log_end = self.log.log_end_offset();
         self.isr
             .iter()
@@ -789,10 +852,9 @@ impl BrokerNode {
                 ..FetchPartition::default()
             });
         }
-        let broker_epoch = self
-            .image
-            .broker_epoch(cluster::meta_id(self.config.broker_id))
-            .unwrap_or(-1);
+        // KIP-903: the follower names the broker epoch of its registration,
+        // which the leader checks before it adds the follower to the ISR.
+        let broker_epoch = self.lifecycle.broker_epoch;
         // A Kafka follower opens every fetch as a full one at session epoch
         // 0; a leader that keeps no sessions answers each in full.
         let request = FetchRequest {
@@ -1136,8 +1198,8 @@ mod tests {
         assert!(replica.log.epoch_cache() == [(0, 0)]);
         assert!(replica.followers.len() == 2);
         assert!(!replica.recompute_hwm(1));
-        assert!(!replica.record_follower_fetch(2, 0, 0, 10));
-        assert!(!replica.record_follower_fetch(3, 0, 0, 10));
+        assert!(!replica.record_follower_fetch(2, 0, 0, -1, 10));
+        assert!(!replica.record_follower_fetch(3, 0, 0, -1, 10));
         assert!(replica.log.high_watermark() == 0);
         assert!(replica.out_of_sync_followers(1, 20_000, 10_000).is_empty());
     }
@@ -1157,7 +1219,7 @@ mod tests {
             .log
             .append(&one_record_batch(), 0, 0, policy, "t-0")
             .unwrap();
-        replica.record_follower_fetch(2, 0, 0, 100);
+        replica.record_follower_fetch(2, 0, 0, -1, 100);
         // The first fetch is behind the end, so the follower stays caught up
         // as of the election at time 0.
         assert!(replica.follower_lag_ms(&replica.followers[&2], 5_000) == 5_000);
@@ -1165,7 +1227,7 @@ mod tests {
         assert!(replica.out_of_sync_followers(1, 10_101, 10_000) == vec![2]);
         replica.apply_record(&record(1, &[1], 0), 1, 10_101);
         assert!(replica.log.high_watermark() == 1);
-        assert!(replica.record_follower_fetch(2, 1, 0, 10_200));
+        assert!(replica.record_follower_fetch(2, 1, 0, -1, 10_200));
         assert!(replica.follower_lag_ms(&replica.followers[&2], 10_300) == 0);
         replica.apply_record(&record(1, &[1, 2], 0), 1, 10_200);
         assert!(replica.isr == vec![1, 2]);

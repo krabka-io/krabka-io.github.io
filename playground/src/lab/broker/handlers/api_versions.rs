@@ -1,5 +1,5 @@
-//! `ApiVersions` (api key 18): the served version range of every api, and
-//! the KIP-584 features.
+//! `ApiVersions` (api key 18): the served version range of every api of the
+//! listener the request came on, and the KIP-584 features.
 //!
 //! From v3 the request carries the KIP-511 client software name and version,
 //! which must match `[a-zA-Z0-9](?:[a-zA-Z0-9\-.]*[a-zA-Z0-9])?`; an invalid
@@ -94,14 +94,14 @@ pub fn is_valid_client_info(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.'))
 }
 
-/// The v0 answer to an `ApiVersions` request at a version the broker does
-/// not serve: `UNSUPPORTED_VERSION` with the table, so the client retries at
-/// a version in it.
+/// The v0 answer to an `ApiVersions` request at a version `listener` does
+/// not serve: `UNSUPPORTED_VERSION` with the listener's table, so the client
+/// retries at a version in it.
 #[must_use]
-pub fn unsupported_version() -> ApiVersionsResponse {
+pub fn unsupported_version(listener: dispatch::Listener) -> ApiVersionsResponse {
     ApiVersionsResponse {
         error_code: codes::UNSUPPORTED_VERSION,
-        api_keys: dispatch::api_versions_table(),
+        api_keys: listener.api_versions_table(),
         ..ApiVersionsResponse::default()
     }
 }
@@ -146,7 +146,7 @@ pub fn handle(
         conn.software_version = request.client_software_version;
     }
     dispatch::Outcome::Reply(ApiVersionsResponse {
-        api_keys: dispatch::api_versions_table(),
+        api_keys: req.listener.api_versions_table(),
         supported_features: supported_features(req.version),
         finalized_features_epoch: node.image().finalized_features_epoch(),
         finalized_features: finalized_features(node.image()),
