@@ -44,12 +44,16 @@
 //! Kafka Streams' `auto.offset.reset=earliest`), pipes every record, and
 //! produces what the task emits: sink and repartition records to the
 //! partition the default partitioner picks for their key, changelog records
-//! to the task's own partition (see [`writer`]). The embedded stores have no
-//! record cache, so every update of a count is emitted, as with
+//! to the task's own partition. The node produces through the client's
+//! idempotent [`Producer`] with `acks=all`, on connections of its own, as a
+//! stream thread has a producer beside its consumers. The embedded stores
+//! have no record cache, so every update of a count is emitted, as with
 //! `statestore.cache.max.bytes=0`.
 //!
-//! Every `commit_interval_ms` the node flushes what its tasks emitted, waits
-//! for the acknowledgements, commits the offsets after the records it piped
+//! Every `commit_interval_ms` the node waits until everything its tasks
+//! emitted is acknowledged (Kafka Streams flushes its producer; the lab's
+//! producer lingers 5 ms, where Kafka Streams sets `linger.ms` to 100 and
+//! flushes), commits the offsets after the records it piped
 //! with `OffsetCommit` for the group (member id and epoch), and fires the
 //! tasks' wall-clock punctuators; nothing is piped while a commit is under
 //! way, as a stream thread blocks in its commit. A revoked task commits and
@@ -63,8 +67,13 @@
 //! `LogAndContinueExceptionHandler`. Sink records wait while the `serialize`
 //! schema is not registered; a sink value the schema refuses is dropped with
 //! `serialization_failed`. Records for a topic the brokers do not have wait
-//! for it, as Kafka's producer waits on metadata, and hold up the next
-//! commit (`topic_missing`).
+//! for it up to `max.block.ms` (60 s), as Kafka's producer waits on
+//! metadata, and hold up the next commit; then they fail with Kafka's text
+//! (`produce_failed`).
+//!
+//! Each start of the node builds new clients whose connection ids come from
+//! lanes of their own ([`conn_base`]), so an answer still on the way to the
+//! previous run never reaches the new one.
 //!
 //! # Control commands
 //!
@@ -86,17 +95,18 @@
 //! "entries": [[key, value]]}]` (the first 20 entries per task; a window
 //! store's value is `{"window_start", "window_end", "count"}`), `records_in`,
 //! `records_out`, `commits`, `commit_interval_ms`, `paused`, `last_outputs`
-//! (the last ten sink records), `producer` (the record collector),
-//! `deserialize`, `serialize` and `client`.
+//! (the last ten sink records), `producer` (the client [`Producer`]'s
+//! snapshot), `deserialize`, `serialize` and `client`.
 //!
 //! # Events
 //!
 //! `streams_joined`, `streams_status`, `tasks_assigned`, `task_restored`,
 //! `tasks_revoked`, `streams_fenced` (warn), `streams_error` (error),
-//! `commit_failed` (warn), `produce_failed` (warn), `schema_registered`,
-//! `registry_error` (warn), `streams_config` (warn, at start when
-//! `num_standby_replicas` is set), and at most one per five seconds of each
-//! of `record_skipped`, `serialization_failed` and `topic_missing` (warn).
+//! `commit_failed` (warn), `schema_registered`, `registry_error` (warn),
+//! `streams_config` (warn, at start when `num_standby_replicas` is set), and
+//! at most one per five seconds of each of `produce_failed` (with Kafka's
+//! text when the producer itself failed the record), `record_skipped` and
+//! `serialization_failed` (warn).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -118,8 +128,6 @@ use krabka_protocol::{
             self, OffsetFetchRequest, OffsetFetchRequestGroup, OffsetFetchRequestTopics,
         },
         offset_fetch_response::OffsetFetchResponse,
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::ProduceResponse,
         streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
     },
     primitives::uuid::Uuid,
@@ -131,7 +139,6 @@ use serde_json::{Value, json};
 use self::{
     membership::{Membership, MembershipEvent, Tasks},
     task::{Changelog, Decoded, Emitted, Position, RestoreEnd, Role, StreamTask, TaskId},
-    writer::{Outgoing, RecordWriter, Settled},
 };
 use super::{
     registry_client::{RegistrationEvent, SchemaCache, SchemaLookup, SchemaRegistration},
@@ -141,8 +148,9 @@ use super::{
 use crate::lab::{
     LabError,
     client::{
-        BatchRecord, ClientError, ClientEvent, ClientOptions, ConsumedRecord, CoordinatorType,
-        KafkaClient, RequestId, Response, Target, build_batch, records_of,
+        CONN_ID_LANES, ClientError, ClientEvent, ClientOptions, ConsumedRecord, CoordinatorType,
+        KafkaClient, Producer, ProducerConfig, ProducerEvent, ProducerRecord, RequestId, Response,
+        Target, conn_base, records_of,
     },
     codes,
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
@@ -151,7 +159,6 @@ use crate::lab::{
 
 pub mod membership;
 pub mod task;
-pub mod writer;
 
 /// How many sink records the snapshot lists.
 const LAST_OUTPUTS: usize = 10;
@@ -171,9 +178,6 @@ const MAX_BUFFERED: usize = 1_000;
 
 /// The wait before a failed lookup or fetch goes again: `retry.backoff.ms`.
 const RETRY_MS: Millis = 100;
-
-/// `request.timeout.ms`, sent as the produce `timeout_ms`.
-const PRODUCE_TIMEOUT_MS: i32 = 30_000;
 
 /// How long a repeated warning stays out of the timeline.
 const QUIET_MS: Millis = 5_000;
@@ -343,7 +347,11 @@ pub struct StreamsNode {
     target: Tasks,
     /// The standby-role tasks that are warm-ups.
     warmups: BTreeSet<TaskId>,
-    writer: RecordWriter,
+    /// The stream thread's producer, on connections of its own.
+    producer: Producer,
+    /// How many times the node started: the connection-id lanes of its
+    /// clients.
+    starts: u32,
     pending: BTreeMap<RequestId, Pending>,
     /// Brokers with a fetch on the wire.
     fetching: BTreeSet<i32>,
@@ -402,6 +410,7 @@ impl StreamsNode {
             .map(|n| Endpoint::kafka(*n))
             .collect();
         let client = KafkaClient::new(bootstrap.clone(), "streams", ClientOptions::default());
+        let producer = build_producer(&bootstrap, "streams-producer", 1);
         let membership = Membership::new(
             &config.application_id,
             "",
@@ -423,7 +432,8 @@ impl StreamsNode {
             tasks: BTreeMap::new(),
             target: Tasks::default(),
             warmups: BTreeSet::new(),
-            writer: RecordWriter::default(),
+            producer,
+            starts: 0,
             pending: BTreeMap::new(),
             fetching: BTreeSet::new(),
             commit: Commit::Idle,
@@ -481,10 +491,6 @@ impl StreamsNode {
             let ClientEvent::Response { id, result } = event else {
                 continue;
             };
-            if self.writer.owns(id) {
-                self.on_produce(ctx, id, result);
-                continue;
-            }
             match self.pending.remove(&id) {
                 Some(Pending::Heartbeat) => {
                     let response = result
@@ -931,39 +937,28 @@ impl StreamsNode {
         self.finish_commit(ctx);
     }
 
-    fn on_produce(
-        &mut self,
-        ctx: &mut Ctx<'_>,
-        id: RequestId,
-        result: Result<Response, ClientError>,
-    ) {
-        let response = result.ok().and_then(Response::downcast::<ProduceResponse>);
-        let code = response.map_or(codes::NETWORK_EXCEPTION, |r| {
-            r.responses
-                .first()
-                .and_then(|t| t.partition_responses.first())
-                .map_or(codes::UNKNOWN_SERVER_ERROR, |p| p.error_code)
-        });
-        let jitter = ctx.rand(400);
-        match self.writer.settle(ctx.now(), id, code, jitter) {
-            Some(Settled::Retrying { partition, code }) => {
-                let target = Target::Leader {
-                    topic: partition.0,
-                    partition: partition.1,
-                };
-                self.client.note_error(code, &target);
-            }
-            Some(Settled::Failed {
+    fn on_producer_events(&mut self, ctx: &mut Ctx<'_>, events: Vec<ProducerEvent>) {
+        for event in events {
+            if let ProducerEvent::Failed {
+                topic,
                 partition,
-                records,
                 code,
-            }) => {
-                ctx.event(
+                message,
+                ..
+            } = event
+            {
+                self.warn(
+                    ctx,
                     "produce_failed",
-                    json!({ "topic": partition.0, "partition": partition.1, "records": records, "code": code, "level": "warn" }),
+                    json!({
+                        "topic": topic,
+                        "partition": partition,
+                        "code": code,
+                        "message": message,
+                        "level": "warn",
+                    }),
                 );
             }
-            Some(Settled::Acked { .. }) | None => {}
         }
     }
 
@@ -1069,7 +1064,7 @@ impl StreamsNode {
     }
 
     /// Pipe what the running tasks fetched, and hand what they emit to the
-    /// writer.
+    /// producer.
     fn process(&mut self, ctx: &mut Ctx<'_>) {
         if self.paused || self.failed.is_some() || self.commit != Commit::Idle {
             return;
@@ -1089,8 +1084,8 @@ impl StreamsNode {
         }
     }
 
-    /// Hand what a task emitted to the writer: its changelog records to the
-    /// task's partition, its outputs through the sink serializer.
+    /// Hand what a task emitted to the producer: its changelog records to
+    /// the task's partition, its outputs through the sink serializer.
     fn emit(&mut self, ctx: &mut Ctx<'_>, partition: i32, emitted: Emitted) {
         self.records_in += emitted.piped;
         for (topic, offset, error) in emitted.skipped {
@@ -1100,22 +1095,26 @@ impl StreamsNode {
                 json!({ "topic": topic, "offset": offset, "error": error, "level": "warn" }),
             );
         }
-        let now = i64::try_from(ctx.now()).unwrap_or(i64::MAX);
+        let now = ctx.now();
         for record in emitted.changelogs {
-            self.writer.push(Outgoing {
-                topic: record.topic,
-                partition: Some(partition),
-                key: Some(record.key),
-                value: record.value,
-                timestamp: record.timestamp.unwrap_or(now),
-            });
+            self.producer.send(
+                now,
+                ProducerRecord {
+                    topic: record.topic,
+                    partition: Some(partition),
+                    key: Some(record.key),
+                    value: record.value,
+                    timestamp: record.timestamp,
+                    ..ProducerRecord::default()
+                },
+            );
         }
         self.records_out += u64::try_from(emitted.outputs.len()).unwrap_or(u64::MAX);
         self.held.extend(emitted.outputs);
         self.release_held(ctx);
     }
 
-    /// Hand the emitted records to the writer; sink records wait while the
+    /// Hand the emitted records to the producer; sink records wait while the
     /// sink schema is not registered.
     fn release_held(&mut self, ctx: &mut Ctx<'_>) {
         while let Some(output) = self.held.front() {
@@ -1156,51 +1155,16 @@ impl StreamsNode {
                     "timestamp": output.timestamp,
                 }));
             }
-            self.writer.push(Outgoing {
-                topic: output.topic,
-                partition: None,
-                key: output.key,
-                value,
-                timestamp: output.timestamp,
-            });
-        }
-    }
-
-    /// Place the writer's records and send what may go. Records for a topic
-    /// the brokers do not know wait for it, as Kafka's producer waits on
-    /// metadata, and hold up the next commit.
-    fn flush_writer(&mut self, ctx: &mut Ctx<'_>) {
-        let metadata = self.client.metadata();
-        let unknown = self.writer.place(|topic| metadata.partition_count(topic));
-        if !unknown.is_empty() {
-            let missing: Vec<String> = unknown
-                .iter()
-                .filter(|t| metadata.unknown_topics.contains(*t))
-                .cloned()
-                .collect();
-            self.client.add_topics(unknown.iter().map(String::as_str));
-            self.client.request_metadata_refresh();
-            if !missing.is_empty() {
-                self.warn(
-                    ctx,
-                    "topic_missing",
-                    json!({ "topics": missing, "level": "warn" }),
-                );
-            }
-        }
-        while let Some(((topic, partition), batch)) = self.writer.next_batch(ctx.now()) {
-            let request = produce_request(
-                &topic,
-                partition,
-                &batch,
-                self.client.metadata().topic_id(&topic),
+            self.producer.send(
+                ctx.now(),
+                ProducerRecord {
+                    topic: output.topic,
+                    key: output.key,
+                    value,
+                    timestamp: Some(output.timestamp),
+                    ..ProducerRecord::default()
+                },
             );
-            let target = Target::Leader {
-                topic: topic.clone(),
-                partition,
-            };
-            let id = self.client.send(ctx, target, request);
-            self.writer.sent(id, (topic, partition), batch);
         }
     }
 
@@ -1215,7 +1179,10 @@ impl StreamsNode {
                 self.commit = Commit::Flushing;
             }
         }
-        if self.commit != Commit::Flushing || !self.writer.is_flushed() || !self.held.is_empty() {
+        if self.commit != Commit::Flushing
+            || self.producer.pending_records() > 0
+            || !self.held.is_empty()
+        {
             return;
         }
         let offsets: Vec<(TaskId, String, i64)> = self
@@ -1437,8 +1404,6 @@ impl StreamsNode {
         self.request_positions(ctx);
         self.process(ctx);
         self.commit_step(ctx);
-        self.flush_writer(ctx);
-        self.commit_step(ctx);
         self.fetch(ctx);
         self.heartbeat(ctx);
         let now = ctx.now();
@@ -1456,7 +1421,7 @@ impl StreamsNode {
             .next_deadline(now)
             .into_iter()
             .chain(self.membership.next_deadline(now))
-            .chain(self.writer.next_deadline())
+            .chain(self.producer.next_deadline(now))
             .chain(commit)
             .chain(retries)
             .chain(self.schemas.as_ref().and_then(SchemaCache::next_deadline))
@@ -1607,29 +1572,18 @@ fn list_offsets(topic: &str, partition: i32, lookup: Lookup) -> ListOffsetsReque
     }
 }
 
-/// A produce request of one batch with `acks=all`.
-fn produce_request(
-    topic: &str,
-    partition: i32,
-    records: &[BatchRecord],
-    topic_id: Option<Uuid>,
-) -> ProduceRequest {
-    ProduceRequest {
-        transactional_id: None,
-        acks: -1,
-        timeout_ms: PRODUCE_TIMEOUT_MS,
-        topic_data: vec![TopicProduceData {
-            name: topic.to_string(),
-            topic_id: topic_id.unwrap_or(Uuid::ZERO),
-            partition_data: vec![PartitionProduceData {
-                index: partition,
-                records: Some(RecordsPayload::V2(vec![build_batch(records, None, 0)])),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
-        ..Default::default()
-    }
+/// The stream thread's producer: idempotent with `acks=all`, Kafka's
+/// defaults, whose client numbers its connections in `lane`.
+fn build_producer(bootstrap: &[Endpoint], client_id: &str, lane: u32) -> Producer {
+    let client = KafkaClient::new(
+        bootstrap.to_vec(),
+        client_id,
+        ClientOptions {
+            conn_base: conn_base(lane),
+            ..ClientOptions::default()
+        },
+    );
+    Producer::new(client, ProducerConfig::default(), u64::from(lane))
 }
 
 /// A random id drawn from the node's generator: 16 bytes as Kafka's
@@ -1655,11 +1609,20 @@ impl Node for StreamsNode {
         }
         let process_id = self.process_id.clone().unwrap_or_default();
         let member_id = URL_SAFE_NO_PAD.encode(random_uuid(ctx).as_bytes());
+        // Kafka Streams names its clients after the thread; each start takes
+        // two lanes of connection ids, the consumer's and the producer's.
+        let lane = 2 * (self.starts % (CONN_ID_LANES / 2));
+        self.starts = self.starts.wrapping_add(1);
+        let thread = format!("{}-{process_id}-StreamThread-1", self.application_id);
         self.client = KafkaClient::new(
             self.bootstrap.clone(),
-            &format!("{}-{process_id}-StreamThread-1", self.application_id),
-            ClientOptions::default(),
+            &format!("{thread}-consumer"),
+            ClientOptions {
+                conn_base: conn_base(lane),
+                ..ClientOptions::default()
+            },
         );
+        self.producer = build_producer(&self.bootstrap, &format!("{thread}-producer"), lane + 1);
         let topics = self.topics();
         self.client.add_topics(topics.iter().map(String::as_str));
         self.membership = Membership::new(
@@ -1673,7 +1636,6 @@ impl Node for StreamsNode {
         self.tasks.clear();
         self.target = Tasks::default();
         self.warmups.clear();
-        self.writer.reset();
         self.pending.clear();
         self.fetching.clear();
         self.commit = Commit::Idle;
@@ -1711,6 +1673,9 @@ impl Node for StreamsNode {
         } else if let Some(registration) = self.serializer.as_mut().filter(|r| r.owns(&frame)) {
             let events = registration.on_frame(ctx, frame);
             on_registration(ctx, events);
+        } else if self.producer.client().owns_conn(frame.conn) {
+            let (events, _) = self.producer.on_frame(ctx, frame);
+            self.on_producer_events(ctx, events);
         } else {
             let events = self.client.on_frame(ctx, frame);
             self.on_client_events(ctx, events);
@@ -1728,6 +1693,8 @@ impl Node for StreamsNode {
         }
         let (events, _) = self.client.on_tick(ctx);
         self.on_client_events(ctx, events);
+        let (events, _) = self.producer.on_tick(ctx);
+        self.on_producer_events(ctx, events);
         self.drive(ctx);
     }
 
@@ -1790,7 +1757,7 @@ impl Node for StreamsNode {
             "commit_interval_ms": self.commit_interval_ms,
             "paused": self.paused,
             "last_outputs": self.last_outputs,
-            "producer": self.writer.snapshot(),
+            "producer": self.producer.snapshot(),
             "deserialize": self.schemas.as_ref().map_or(Value::Null, SchemaCache::snapshot),
             "serialize": self.serializer.as_ref().map_or(Value::Null, SchemaRegistration::snapshot),
             "client": self.client.snapshot(),

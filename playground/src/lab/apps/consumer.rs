@@ -8,7 +8,7 @@
 //!   "protocol": "consumer", "auto_offset_reset": "earliest", "process_ms": 2,
 //!   "max_poll_records": 500, "enable_auto_commit": true,
 //!   "auto_commit_interval_ms": 5000, "session_timeout_ms": 45000,
-//!   "heartbeat_interval_ms": 3000, "instance_id": null,
+//!   "heartbeat_interval_ms": 3000, "instance_id": "billing-1",
 //!   "deserialize": { "registry": 4 } }
 //! ```
 //!
@@ -23,8 +23,15 @@
 //! - `session_timeout_ms`, `heartbeat_interval_ms`: the classic protocol's
 //!   settings, defaults 45000 and 3000. A KIP-848 member takes both from the
 //!   broker, as in Kafka.
-//! - `instance_id`: static membership. Only `null` is accepted: the lab's
-//!   consumer does not send a `group.instance.id` yet.
+//! - `instance_id`: `null`, or Kafka's `group.instance.id`: the member is
+//!   static (KIP-345), so a restart within the session timeout gets its
+//!   partitions back without a rebalance. A classic static member may crash
+//!   and come back; a KIP-848 static member must `close` first (it leaves
+//!   with epoch -2), as a member that crashed still owns its instance id
+//!   until its session expires, and Kafka refuses the new one with
+//!   `UNRELEASED_INSTANCE_ID`. Checked as Kafka checks it: not empty, at
+//!   most 249 characters of ASCII letters, digits, `.`, `_` and `-`.
+//!   Default: `null`.
 //! - `deserialize`: `null`, or `{"registry": <node id>}` to decode values in
 //!   the Confluent wire format through that registry for the inspector.
 //!
@@ -32,16 +39,22 @@
 //!
 //! The node works like a JVM application's poll loop: it polls up to
 //! `max_poll_records` records when it has none left to process, and
-//! processes them one at a time, each taking `process_ms`. With auto-commit
-//! on, it commits in the poll that follows `auto_commit_interval_ms`, before
-//! it takes new records, as Kafka's consumers do, so a commit covers only
-//! records the node processed; the client's own interval timer is set beyond
-//! reach, and the client still commits on a rebalance and on close. Records
-//! of revoked partitions that were already polled are still processed, as a
-//! JVM application finishes the batch its poll returned; records of lost
-//! partitions are dropped. With `deserialize`, a framed value waits for its
-//! schema (`GET /schemas/ids/{id}`, cached), as a Confluent deserializer
-//! blocks the poll that first meets the id.
+//! processes them one at a time, each taking `process_ms`. The poll is the
+//! client's [`Consumer::poll_at`], Kafka's `poll`: with auto-commit on it
+//! commits the positions once `auto_commit_interval_ms` passed, before it
+//! takes new records, so a commit covers only records the node processed; an
+//! idle node polls when the commit falls due, a paused one does not. The
+//! client also commits before a rebalance and on close. Records of revoked
+//! partitions that were already polled are still processed, as a JVM
+//! application finishes the batch its poll returned, and so are the polled
+//! records of a partition the node seeks; records of lost partitions are
+//! dropped. With `deserialize`, a framed value waits for its schema (`GET
+//! /schemas/ids/{id}`, cached), as a Confluent deserializer blocks the poll
+//! that first meets the id.
+//!
+//! Each start of the node builds a new client whose connection ids come from
+//! a lane of its own ([`conn_base`]), so an answer still on the way to the
+//! previous run never reaches the new one.
 //!
 //! # Control commands
 //!
@@ -49,8 +62,14 @@
 //!   records; the member keeps its heartbeats.
 //! - `{"cmd": "process_ms", "ms": n}`: change the processing time.
 //! - `{"cmd": "commit"}`: commit the positions now.
-//! - `{"cmd": "seek", "topic", "partition", "offset"}`: refused until the
-//!   client has a seek (see the batch report).
+//! - `{"cmd": "seek", "topic": t, "partition": p, "offset": o}`: Kafka's
+//!   `seek`: the next poll reads `t-p` from `o`. Answers `{"topic",
+//!   "partition", "offset"}`, or Kafka's error text for a partition the
+//!   member does not hold or a negative offset.
+//! - `{"cmd": "close"}`: close the consumer as a JVM application's shutdown
+//!   does: commit, then leave the group (a dynamic member at once, a
+//!   KIP-848 static member with epoch -2, a classic static member not at
+//!   all). The node then takes no records until it starts again.
 //!
 //! # Snapshot
 //!
@@ -59,7 +78,7 @@
 //! `assignment: [{"topic", "partition", "position", "committed", "hwm",
 //! "lag"}]` where `lag` counts the records written and not yet processed,
 //! `lag` (their sum), `processed`, `processing_backlog`, `process_ms`,
-//! `paused`, `max_poll_records`, `rebalances`, `records`, `polled`,
+//! `paused`, `closed`, `max_poll_records`, `rebalances`, `records`, `polled`,
 //! `fetches`, `commits`, `last_records: [{"topic", "partition", "offset",
 //! "key", "value_preview", "schema_id"}]` (the last ten processed),
 //! `deserialize` and `client`.
@@ -82,8 +101,8 @@ use super::{
 use crate::lab::{
     LabError,
     client::{
-        AutoOffsetReset, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig, ConsumerEvent,
-        GroupProtocol, KafkaClient,
+        AutoOffsetReset, CONN_ID_LANES, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig,
+        ConsumerEvent, GroupProtocol, KafkaClient, conn_base,
     },
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
     scenario::NodeSpec,
@@ -91,11 +110,6 @@ use crate::lab::{
 
 /// How many processed records the snapshot lists.
 const LAST_RECORDS: usize = 10;
-
-/// The interval the client's own auto-commit timer gets: beyond any run, so
-/// only the node's poll-time commits and the client's rebalance commits
-/// happen.
-const CLIENT_AUTO_COMMIT_INTERVAL_MS: Millis = 1 << 50;
 
 /// How long a repeated consumer error stays out of the timeline.
 const ERROR_EVENT_QUIET_MS: Millis = 5_000;
@@ -302,6 +316,32 @@ struct Config {
     deserialize: Option<DeserializeConfig>,
 }
 
+/// Kafka's `JoinGroupRequest.validateGroupInstanceId`, which is
+/// `Topic.validate` with the prefix "Group instance id".
+fn validate_group_instance_id(id: &str) -> Result<(), String> {
+    const MAX_LENGTH: usize = 249;
+    if id.is_empty() {
+        return Err("Group instance id is illegal, it can't be empty".to_string());
+    }
+    if id == "." || id == ".." {
+        return Err("Group instance id cannot be \".\" or \"..\"".to_string());
+    }
+    if id.len() > MAX_LENGTH {
+        return Err(format!(
+            "Group instance id is illegal, it can't be longer than {MAX_LENGTH} characters, Group instance id: {id}"
+        ));
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(format!(
+            "Group instance id \"{id}\" is illegal, it contains a character other than ASCII alphanumerics, '.', '_' and '-'"
+        ));
+    }
+    Ok(())
+}
+
 /// One processed record, for the snapshot.
 struct LastRecord {
     topic: String,
@@ -318,12 +358,14 @@ pub struct ConsumerNode {
     topics: Vec<String>,
     config: ConsumerConfig,
     process_ms: Millis,
-    enable_auto_commit: bool,
-    auto_commit_interval_ms: Millis,
     consumer: Consumer,
+    /// How many times the node started: the connection-id lane of its
+    /// client.
+    starts: u32,
     processing: Processing,
-    next_auto_commit_at: Millis,
     paused: bool,
+    /// The `close` command closed the consumer.
+    closed: bool,
     last_records: VecDeque<LastRecord>,
     schemas: Option<SchemaCache>,
     /// The last error event: api, code and time.
@@ -333,7 +375,8 @@ pub struct ConsumerNode {
 impl ConsumerNode {
     /// # Errors
     /// Returns a config error for an unknown or malformed key, an empty
-    /// bootstrap list, group or topic list, or an `instance_id`.
+    /// bootstrap list, group or topic list, or an `instance_id` Kafka would
+    /// refuse.
     pub fn from_spec(spec: &NodeSpec) -> Result<Self, LabError> {
         let bad = |reason: String| LabError::config(spec, reason);
         let config: Config =
@@ -347,21 +390,19 @@ impl ConsumerNode {
         if config.topics.is_empty() {
             return Err(bad("`topics` needs at least one topic".to_string()));
         }
-        if config.instance_id.is_some() {
-            return Err(bad(
-                "`instance_id`: static membership is not available; the lab's consumer sends no `group.instance.id`"
-                    .to_string(),
-            ));
+        if let Some(id) = &config.instance_id {
+            validate_group_instance_id(id).map_err(|e| bad(format!("`instance_id`: {e}")))?;
         }
         let client_config = ConsumerConfig {
             group_id: config.group,
+            group_instance_id: config.instance_id,
             group_protocol: config.protocol,
             auto_offset_reset: config.auto_offset_reset,
             session_timeout_ms: config.session_timeout_ms,
             heartbeat_interval_ms: config.heartbeat_interval_ms,
             max_poll_records: config.max_poll_records.max(1),
             enable_auto_commit: config.enable_auto_commit,
-            auto_commit_interval_ms: CLIENT_AUTO_COMMIT_INTERVAL_MS,
+            auto_commit_interval_ms: config.auto_commit_interval_ms,
             ..ConsumerConfig::default()
         };
         let bootstrap: Vec<Endpoint> = config
@@ -369,34 +410,39 @@ impl ConsumerNode {
             .iter()
             .map(|n| Endpoint::kafka(*n))
             .collect();
-        let consumer = Self::build_consumer(&bootstrap, spec.id, &client_config, &config.topics);
+        let consumer = Self::build_consumer(&bootstrap, spec.id, &client_config, &config.topics, 0);
         Ok(Self {
             bootstrap,
             topics: config.topics,
             config: client_config,
             process_ms: config.process_ms,
-            enable_auto_commit: config.enable_auto_commit,
-            auto_commit_interval_ms: config.auto_commit_interval_ms,
             consumer,
+            starts: 0,
             processing: Processing::default(),
-            next_auto_commit_at: 0,
             paused: false,
+            closed: false,
             last_records: VecDeque::new(),
             schemas: config.deserialize.map(|d| SchemaCache::new(d.registry)),
             last_error: None,
         })
     }
 
+    /// A consumer subscribed to `topics` whose client numbers its
+    /// connections in `lane`.
     fn build_consumer(
         bootstrap: &[Endpoint],
         id: NodeId,
         config: &ConsumerConfig,
         topics: &[String],
+        lane: u32,
     ) -> Consumer {
         let client = KafkaClient::new(
             bootstrap.to_vec(),
             &format!("consumer-{id}"),
-            ClientOptions::default(),
+            ClientOptions {
+                conn_base: conn_base(lane),
+                ..ClientOptions::default()
+            },
         );
         let mut consumer = Consumer::new(client, config.clone());
         let topics: Vec<&str> = topics.iter().map(String::as_str).collect();
@@ -500,7 +546,7 @@ impl ConsumerNode {
     /// Process what is due, poll when the node has nothing left, and arm the
     /// next deadline.
     fn drive(&mut self, ctx: &mut Ctx<'_>) {
-        loop {
+        while !self.closed {
             let take = !self.paused;
             let finished = {
                 let schemas = &mut self.schemas;
@@ -515,26 +561,27 @@ impl ConsumerNode {
             if self.paused || !self.processing.is_idle() {
                 break;
             }
-            // The poll loop: commit what was processed when the interval
-            // passed, then take the next records.
-            let now = ctx.now();
-            if self.enable_auto_commit && now >= self.next_auto_commit_at {
-                self.consumer.commit(ctx);
-                self.next_auto_commit_at = now + self.auto_commit_interval_ms;
-            }
-            let polled = self.consumer.poll(self.config.max_poll_records);
+            // The poll loop: the poll commits what was processed when the
+            // interval passed, then takes the next records.
+            let polled = self.consumer.poll_at(ctx, self.config.max_poll_records);
             if polled.is_empty() {
                 break;
             }
             self.processing.accept(polled);
         }
         let now = ctx.now();
+        // An idle poll loop polls again when the auto-commit falls due; a
+        // busy or paused one commits at its next poll.
+        let commit = (!self.paused && !self.closed && self.processing.is_idle())
+            .then(|| self.consumer.next_auto_commit())
+            .flatten();
         let deadline = self
             .consumer
             .next_deadline(now)
             .into_iter()
             .chain(self.processing.next_finish())
             .chain(self.schemas.as_ref().and_then(SchemaCache::next_deadline))
+            .chain(commit)
             .min();
         if let Some(at) = deadline {
             ctx.arm(at.max(now));
@@ -558,10 +605,18 @@ impl Node for ConsumerNode {
     }
 
     fn start(&mut self, ctx: &mut Ctx<'_>) {
-        // A process starts over: a new member, nothing polled.
-        self.consumer = Self::build_consumer(&self.bootstrap, ctx.me(), &self.config, &self.topics);
+        // A process starts over: a new member (the same one again when it is
+        // static), nothing polled, connections from a lane of its own.
+        self.consumer = Self::build_consumer(
+            &self.bootstrap,
+            ctx.me(),
+            &self.config,
+            &self.topics,
+            self.starts % CONN_ID_LANES,
+        );
+        self.starts = self.starts.wrapping_add(1);
         self.processing = Processing::default();
-        self.next_auto_commit_at = ctx.now() + self.auto_commit_interval_ms;
+        self.closed = false;
         self.last_records.clear();
         self.last_error = None;
         if let Some(cache) = &mut self.schemas {
@@ -616,11 +671,30 @@ impl Node for ConsumerNode {
                 self.consumer.commit(ctx);
                 json!({ "committing": true })
             }
+            Some("close") => {
+                let events = self.consumer.close(ctx);
+                self.on_consumer_events(ctx, events);
+                self.closed = true;
+                json!({ "closed": true })
+            }
             Some("seek") => {
-                return Err(
-                    "seek is not available: the lab's consumer client has no `seek` yet"
-                        .to_string(),
-                );
+                let topic = command
+                    .get("topic")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "`topic` is a topic name".to_string())?;
+                let partition = command
+                    .get("partition")
+                    .and_then(Value::as_i64)
+                    .and_then(|p| i32::try_from(p).ok())
+                    .ok_or_else(|| "`partition` is a partition number".to_string())?;
+                let offset = command
+                    .get("offset")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| "`offset` is an offset".to_string())?;
+                self.consumer
+                    .seek(topic, partition, offset)
+                    .map_err(|e| e.to_string())?;
+                json!({ "topic": topic, "partition": partition, "offset": offset })
             }
             other => return Err(format!("unknown consumer command {other:?}")),
         };
@@ -674,6 +748,7 @@ impl Node for ConsumerNode {
             "processing_backlog": self.processing.unprocessed(),
             "process_ms": self.process_ms,
             "paused": self.paused,
+            "closed": self.closed,
             "max_poll_records": self.config.max_poll_records,
             "rebalances": base["rebalances"],
             "records": base["records"],
@@ -693,6 +768,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::lab::testing::CtxBuffers;
 
     fn record(topic: &str, partition: i32, offset: i64) -> ConsumedRecord {
         ConsumedRecord {
@@ -826,36 +902,92 @@ mod tests {
         );
     }
 
+    fn node(config: Value) -> Result<ConsumerNode, LabError> {
+        ConsumerNode::from_spec(&NodeSpec::new(6, "consumer", "c", config))
+    }
+
     #[test]
     fn the_config_is_checked_at_load() {
-        let node =
-            |config: Value| ConsumerNode::from_spec(&NodeSpec::new(6, "consumer", "c", config));
+        let with = |extra: Value| {
+            let mut config = json!({ "bootstrap": [1], "group": "g", "topics": ["t"] });
+            for (key, value) in extra.as_object().into_iter().flatten() {
+                config[key] = value.clone();
+            }
+            config
+        };
+        let long = "i".repeat(250);
         let cases = [
             (
                 json!({ "bootstrap": [1], "group": "g" }),
-                "missing field `topics`",
+                "config: missing field `topics`".to_string(),
             ),
             (
-                json!({ "bootstrap": [1], "group": "g", "topics": ["t"], "protocol": "eager" }),
-                "unknown variant `eager`",
+                with(json!({ "protocol": "eager" })),
+                "config: unknown variant `eager`, expected `classic` or `consumer`".to_string(),
             ),
             (
-                json!({ "bootstrap": [1], "group": "g", "topics": ["t"], "instance_id": "i-1" }),
-                "`instance_id`: static membership is not available",
+                with(json!({ "topics": [] })),
+                "`topics` needs at least one topic".to_string(),
             ),
             (
-                json!({ "bootstrap": [1], "group": "g", "topics": [] }),
-                "`topics` needs at least one topic",
+                with(json!({ "deserialize": { "registry": 4, "x": 1 } })),
+                "config: unknown field `x`, expected `registry`".to_string(),
             ),
             (
-                json!({ "bootstrap": [1], "group": "g", "topics": ["t"], "deserialize": { "registry": 4, "x": 1 } }),
-                "unknown field `x`",
+                with(json!({ "instance_id": "" })),
+                "`instance_id`: Group instance id is illegal, it can't be empty".to_string(),
+            ),
+            (
+                with(json!({ "instance_id": ".." })),
+                "`instance_id`: Group instance id cannot be \".\" or \"..\"".to_string(),
+            ),
+            (
+                with(json!({ "instance_id": long })),
+                format!(
+                    "`instance_id`: Group instance id is illegal, it can't be longer than 249 characters, Group instance id: {long}"
+                ),
+            ),
+            (
+                with(json!({ "instance_id": "billing 1" })),
+                "`instance_id`: Group instance id \"billing 1\" is illegal, it contains a character other than ASCII alphanumerics, '.', '_' and '-'".to_string(),
             ),
         ];
-        for (config, message) in cases {
-            let err = node(config.clone()).err().unwrap().to_string();
-            assert!(err.contains(message), "{config}: {err}");
+        for (config, reason) in cases {
+            let error = node(config.clone()).err().map(|e| e.to_string());
+            assert!(
+                error == Some(format!("node 6 (consumer): {reason}")),
+                "{config}"
+            );
         }
-        assert!(node(json!({ "bootstrap": [1], "group": "g", "topics": ["t"] })).is_ok());
+        // The page's probe config takes the defaults, and a static member's
+        // instance id goes to the client.
+        assert!(node(with(json!({}))).is_ok());
+        let consumer = node(with(json!({ "instance_id": "billing-1.a_b" }))).unwrap();
+        assert!(consumer.consumer.config().group_instance_id == Some("billing-1.a_b".to_string()));
+    }
+
+    #[test]
+    fn a_seek_names_what_kafka_refuses() {
+        let mut consumer =
+            node(json!({ "bootstrap": [1], "group": "g", "topics": ["t"] })).unwrap();
+        let mut bufs = CtxBuffers::new(NodeId(6));
+        let cases = [
+            (
+                json!({ "cmd": "seek", "topic": "t", "partition": 0, "offset": 5 }),
+                Err("No current assignment for partition t-0".to_string()),
+            ),
+            (
+                json!({ "cmd": "seek", "topic": "t", "partition": 0, "offset": -1 }),
+                Err("seek offset must not be a negative number".to_string()),
+            ),
+            (
+                json!({ "cmd": "seek", "partition": 0, "offset": 5 }),
+                Err("`topic` is a topic name".to_string()),
+            ),
+        ];
+        for (command, expected) in cases {
+            let answer = bufs.with(0, |ctx| consumer.control(ctx, command.clone()));
+            assert!(answer == expected, "{command}");
+        }
     }
 }

@@ -47,7 +47,11 @@
 //! incompatible, 422, a refused connection) is retried with a backoff and
 //! shown in the snapshot. A document the schema rejects is counted in
 //! `serialization.failed` and not sent. Batching, partitioning, idempotence
-//! and retries are the client's [`Producer`].
+//! and retries are the client's [`Producer`]; a record whose topic does not
+//! exist yet waits for it up to `max.block.ms` (60 s), as Kafka's producer
+//! waits on metadata. Each start of the node builds a new client whose
+//! connection ids come from a lane of its own ([`conn_base`]), so an answer
+//! still on the way to the previous run never reaches the new one.
 //!
 //! # Control commands
 //!
@@ -71,7 +75,10 @@
 //! # Events
 //!
 //! `schema_registered`, `registry_error` (warn), `serialization_failed`
-//! (warn) and `produce_failed` (warn, once per step with the count).
+//! (warn) and `produce_failed` (warn, once per step with the count, the last
+//! error code, and Kafka's exception text when the producer itself failed
+//! the record, such as a topic that did not appear within
+//! `max.block.ms`).
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -88,8 +95,8 @@ use super::{
 use crate::lab::{
     LabError,
     client::{
-        Acks, ClientOptions, Compression, KafkaClient, Producer, ProducerConfig, ProducerEvent,
-        ProducerRecord, SeqNo,
+        Acks, CONN_ID_LANES, ClientOptions, Compression, KafkaClient, Producer, ProducerConfig,
+        ProducerEvent, ProducerRecord, SeqNo, conn_base,
     },
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
     scenario::NodeSpec,
@@ -365,6 +372,9 @@ pub struct ProducerNode {
     rate: Rate,
     rate_json: Value,
     producer: Producer,
+    /// How many times the node started: the connection-id lane of its
+    /// client.
+    starts: u32,
     meter: RateMeter,
     paused: bool,
     next_seq: u64,
@@ -431,7 +441,7 @@ impl ProducerNode {
             .iter()
             .map(|n| Endpoint::kafka(*n))
             .collect();
-        let producer = Self::build_producer(&bootstrap, spec.id, &producer_config, 0);
+        let producer = Self::build_producer(&bootstrap, spec.id, &producer_config, 0, 0);
         Ok(Self {
             bootstrap,
             topic: config.topic,
@@ -442,6 +452,7 @@ impl ProducerNode {
             rate,
             rate_json: config.rate_per_sec,
             producer,
+            starts: 0,
             meter: RateMeter::new(rate, 0),
             paused: false,
             next_seq: 0,
@@ -451,16 +462,21 @@ impl ProducerNode {
         })
     }
 
+    /// A producer whose client numbers its connections in `lane`.
     fn build_producer(
         bootstrap: &[Endpoint],
         id: NodeId,
         config: &ProducerConfig,
         seed: u64,
+        lane: u32,
     ) -> Producer {
         let client = KafkaClient::new(
             bootstrap.to_vec(),
             &format!("producer-{id}"),
-            ClientOptions::default(),
+            ClientOptions {
+                conn_base: conn_base(lane),
+                ..ClientOptions::default()
+            },
         );
         Producer::new(client, config.clone(), seed)
     }
@@ -561,6 +577,7 @@ impl ProducerNode {
     fn on_producer_events(&mut self, ctx: &mut Ctx<'_>, events: Vec<ProducerEvent>) {
         let mut failed = 0_u64;
         let mut last_code = 0;
+        let mut last_message = None;
         for event in events {
             match event {
                 ProducerEvent::Acked {
@@ -574,16 +591,22 @@ impl ProducerNode {
                         r.offset = Some(offset);
                     }
                 }
-                ProducerEvent::Failed { code, .. } => {
+                ProducerEvent::Failed { code, message, .. } => {
                     failed += 1;
                     last_code = code;
+                    last_message = message;
                 }
             }
         }
         if failed > 0 {
             ctx.event(
                 "produce_failed",
-                json!({ "records": failed, "code": last_code, "level": "warn" }),
+                json!({
+                    "records": failed,
+                    "code": last_code,
+                    "message": last_message,
+                    "level": "warn",
+                }),
             );
         }
     }
@@ -642,10 +665,13 @@ impl Node for ProducerNode {
     }
 
     fn start(&mut self, ctx: &mut Ctx<'_>) {
-        // A process starts over: a new client, no records generated, and the
-        // registration asked for again.
+        // A process starts over: a new client with connections from a lane
+        // of its own, no records generated, and the registration asked for
+        // again.
         let seed = ctx.rand(u64::MAX);
-        self.producer = Self::build_producer(&self.bootstrap, ctx.me(), &self.config, seed);
+        let lane = self.starts % CONN_ID_LANES;
+        self.starts = self.starts.wrapping_add(1);
+        self.producer = Self::build_producer(&self.bootstrap, ctx.me(), &self.config, seed, lane);
         self.meter.reset(self.rate, ctx.now());
         self.next_seq = 0;
         self.queued = 0;

@@ -18,6 +18,7 @@ use krabka_protocol::{
         },
         fetch_request::FetchRequest,
         find_coordinator_request::FindCoordinatorRequest,
+        init_producer_id_request::InitProducerIdRequest,
         list_offsets_request::ListOffsetsRequest,
         metadata_request::MetadataRequest,
         offset_commit_request::OffsetCommitRequest,
@@ -165,8 +166,8 @@ impl Registry {
     }
 }
 
-/// The versions the scripted broker lists: the fake broker's, and the streams
-/// group heartbeat the coordinator script answers.
+/// The versions the scripted broker lists: the fake broker's apis the node
+/// uses, and the streams group heartbeat the coordinator script answers.
 fn api_versions() -> ApiVersionsResponse {
     fn row<R: ProtocolRequest>() -> ApiVersion {
         ApiVersion {
@@ -185,6 +186,7 @@ fn api_versions() -> ApiVersionsResponse {
             row::<OffsetCommitRequest>(),
             row::<OffsetFetchRequest>(),
             row::<FindCoordinatorRequest>(),
+            row::<InitProducerIdRequest>(),
             row::<ApiVersionsRequest>(),
             row::<StreamsGroupHeartbeatRequest>(),
         ],
@@ -569,6 +571,18 @@ fn counting_cluster(extra: &Value) -> Cluster {
     )
 }
 
+/// The settings and counters of the node's producer snapshot.
+fn producer_counts(producer: &Value) -> Value {
+    json!({
+        "acks": producer["acks"],
+        "idempotent": producer["idempotent"],
+        "sent": producer["sent"],
+        "acked": producer["acked"],
+        "failed": producer["failed"],
+        "pending_records": producer["pending_records"],
+    })
+}
+
 fn count(key: &str, n: i64) -> (String, Value) {
     (key.to_string(), json!({ "key": key, "count": n }))
 }
@@ -653,6 +667,15 @@ fn a_fresh_node_describes_its_topology() {
     .unwrap();
     let mut snapshot = node.snapshot();
     assert!(snapshot.as_object_mut().unwrap().remove("client").is_some());
+    let producer = snapshot
+        .as_object_mut()
+        .unwrap()
+        .remove("producer")
+        .unwrap();
+    assert!(
+        producer_counts(&producer)
+            == json!({ "acks": -1, "idempotent": true, "sent": 0, "acked": 0, "failed": 0, "pending_records": 0 })
+    );
     assert!(
         snapshot
             == json!({
@@ -706,7 +729,6 @@ fn a_fresh_node_describes_its_topology() {
                 "commit_interval_ms": 100,
                 "paused": false,
                 "last_outputs": [],
-                "producer": { "pending": 0, "in_flight_requests": 0, "acked": 0, "failed": 0 },
                 "deserialize": null,
                 "serialize": null,
             })
@@ -811,6 +833,12 @@ fn the_snapshot_shows_the_member_its_tasks_and_their_stores() {
     let process_id = snapshot["membership"]["process_id"].clone();
     let object = snapshot.as_object_mut().unwrap();
     assert!(object.remove("client").is_some());
+    // Three counts and their changelog records, all acknowledged.
+    let producer = object.remove("producer").unwrap();
+    assert!(
+        producer_counts(&producer)
+            == json!({ "acks": -1, "idempotent": true, "sent": 6, "acked": 6, "failed": 0, "pending_records": 0 })
+    );
     assert!(
         object.remove("membership")
             == Some(json!({
@@ -878,7 +906,6 @@ fn the_snapshot_shows_the_member_its_tasks_and_their_stores() {
                 "commit_interval_ms": 100,
                 "paused": false,
                 "last_outputs": [output("a", 1, 1_000), output("a", 2, 1_002), output("c", 1, 1_003)],
-                "producer": { "pending": 0, "in_flight_requests": 0, "acked": 6, "failed": 0 },
                 "deserialize": null,
                 "serialize": null,
             })

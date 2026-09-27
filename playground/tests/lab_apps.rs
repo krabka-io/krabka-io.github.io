@@ -8,12 +8,9 @@
 //! client would, so the tests check what the brokers stored, not what the
 //! nodes say they did.
 //!
-//! The lab's client does not yet ask again for a topic its first metadata
-//! request missed, so a producer or a classic consumer that starts before
-//! the scenario's topics exist would wait for `metadata.max.age.ms`. The
-//! producers therefore start at no rate and get one once the topics exist,
-//! and the consumers join then; the streams app looks its topics up again
-//! itself and starts with the scenario.
+//! Every node starts with the scenario, before the scenario's admin created
+//! the topics: the producers' records wait for their topic, and the
+//! consumers and streams apps find theirs once they exist.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,7 +21,7 @@ use krabka_playground::lab::{
     broker::test_support::{TestClient, decode_response},
     client::partition_for_key,
     net::Frame,
-    scenario::{NodeSpec, Scenario},
+    scenario::Scenario,
     world::Fault,
 };
 use krabka_protocol::{
@@ -74,16 +71,6 @@ impl Lab {
         }
     }
 
-    /// Add a node and start it here, as the page adds one to a running
-    /// world.
-    fn add(&mut self, spec: &Value) {
-        let spec: NodeSpec = serde_json::from_value(spec.clone()).unwrap();
-        let mut hosted = self.world.hosted();
-        hosted.push(spec.id);
-        self.world.set_hosted(&hosted);
-        self.world.add_node(spec).unwrap();
-    }
-
     /// Advance the world `ms` of logical time.
     fn run_for(&mut self, ms: u64) {
         let until = self.world.now() + ms;
@@ -93,15 +80,6 @@ impl Lab {
     /// Step until `pred` holds on the node's snapshot, for at most `max_ms`.
     fn run_until(&mut self, node: u32, max_ms: u64, pred: impl Fn(&Value) -> bool) -> bool {
         self.run_until_all(max_ms, |lab| pred(&lab.snapshot(node)))
-    }
-
-    /// Step until the scenario's admin reports every topic created.
-    fn wait_for_topics(&mut self) {
-        let created = |lab: &Self| lab.world.events().any(|e| e.kind == "topics_created");
-        assert!(
-            self.run_until_all(5_000, created),
-            "the topics were not created"
-        );
     }
 
     /// Step until `pred` holds on the whole lab, for at most `max_ms`,
@@ -145,7 +123,12 @@ impl Lab {
 
     /// Send a node a control command and take its answer.
     fn control(&mut self, node: u32, command: Value) -> Value {
-        self.world.control(NodeId(node), command).unwrap()
+        self.command(node, command).unwrap()
+    }
+
+    /// Send a node a control command and take its answer or its error.
+    fn command(&mut self, node: u32, command: Value) -> Result<Value, String> {
+        self.world.control(NodeId(node), command)
     }
 
     /// Send one request from the scripted client to `broker` and take its
@@ -363,7 +346,7 @@ fn a_producer_writes_to_the_brokers_and_every_record_reads_back() {
     let producer = json!({ "id": 10, "kind": "producer", "config": {
         "bootstrap": [1],
         "topic": "orders",
-        "rate_per_sec": 0,
+        "rate_per_sec": 200,
         "key": { "pattern": "customer-{seq % 10}" },
         "value": { "format": "json", "template": { "id": "{seq}", "total": "{rand 1 500}" } },
     } });
@@ -371,8 +354,6 @@ fn a_producer_writes_to_the_brokers_and_every_record_reads_back() {
         vec![producer],
         &json!([{ "name": "orders", "partitions": 3 }]),
     ));
-    lab.wait_for_topics();
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 200 }));
     assert!(lab.run_until(10, 10_000, |s| s["acked"].as_u64() >= Some(60)));
     lab.control(10, json!({ "cmd": "pause" }));
     // Whatever was generated before the pause gets its answer.
@@ -452,7 +433,7 @@ fn an_avro_producer_registers_its_schema_and_frames_every_value() {
     let producer = json!({ "id": 10, "kind": "producer", "config": {
         "bootstrap": [1],
         "topic": "orders",
-        "rate_per_sec": 0,
+        "rate_per_sec": 50,
         "key": { "pattern": "c-{seq % 3}" },
         "value": { "format": "json", "template": { "id": "{seq}", "total": "{rand 1 500}" } },
         "serialization": { "registry": 4, "format": "avro", "schema": ORDER_SCHEMA },
@@ -462,8 +443,6 @@ fn an_avro_producer_registers_its_schema_and_frames_every_value() {
         vec![registry, producer],
         &json!([{ "name": "orders", "partitions": 1 }]),
     ));
-    lab.wait_for_topics();
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 50 }));
     assert!(lab.run_until(10, 10_000, |s| s["acked"].as_u64() >= Some(20)));
     let mut serialization = lab.snapshot(10)["serialization"].clone();
     let schema_id = serialization["schema_id"].as_i64().unwrap();
@@ -534,13 +513,13 @@ fn an_avro_producer_registers_its_schema_and_frames_every_value() {
     }));
 }
 
-/// A producer of JSON orders keyed by customer, at no rate until a test
-/// starts it.
+/// A producer of JSON orders keyed by customer, 50 a second unless `extra`
+/// says otherwise.
 fn orders_producer(id: u32, extra: &Value) -> Value {
     let mut config = json!({
         "bootstrap": [1, 2, 3],
         "topic": "orders",
-        "rate_per_sec": 0,
+        "rate_per_sec": 50,
         "key": { "pattern": "customer-{seq % 10}" },
         "value": { "format": "json", "template": { "id": "{seq}", "total": "{rand 1 500}" } },
     });
@@ -577,13 +556,13 @@ fn processed(lab: &Lab, node: u32) -> u64 {
 fn a_group_of_two_shares_three_partitions_and_both_consume() {
     for protocol in ["classic", "consumer"] {
         let mut lab = Lab::new(&scenario(
-            vec![orders_producer(10, &json!({}))],
+            vec![
+                orders_producer(10, &json!({ "rate_per_sec": 100 })),
+                billing_consumer(21, protocol, &json!({})),
+                billing_consumer(22, protocol, &json!({})),
+            ],
             &json!([{ "name": "orders", "partitions": 3 }]),
         ));
-        lab.wait_for_topics();
-        lab.add(&billing_consumer(21, protocol, &json!({})));
-        lab.add(&billing_consumer(22, protocol, &json!({})));
-        lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 100 }));
         // Each member takes a share of the three partitions and consumes it.
         let shared = |lab: &Lab| {
             let (a, b) = (lab.assigned(21), lab.assigned(22));
@@ -624,18 +603,14 @@ fn a_group_of_two_shares_three_partitions_and_both_consume() {
 
 #[test]
 fn a_slow_consumer_shows_lag_that_drains_when_it_speeds_up() {
+    // Ten records a second against fifty.
     let mut lab = Lab::new(&scenario(
-        vec![orders_producer(10, &json!({}))],
+        vec![
+            orders_producer(10, &json!({})),
+            billing_consumer(21, "consumer", &json!({ "process_ms": 100 })),
+        ],
         &json!([{ "name": "orders", "partitions": 3 }]),
     ));
-    lab.wait_for_topics();
-    // Ten records a second against fifty.
-    lab.add(&billing_consumer(
-        21,
-        "consumer",
-        &json!({ "process_ms": 100 }),
-    ));
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 50 }));
     assert!(lab.run_until(21, 30_000, |s| s["lag"].as_i64() >= Some(200)));
     lab.control(10, json!({ "cmd": "pause" }));
     assert!(lab.run_until(10, 5_000, |s| s["pending_records"] == 0));
@@ -667,13 +642,13 @@ fn a_killed_members_partitions_move_when_its_session_expires() {
     for (protocol, session, heartbeat) in [("classic", 45_000, 3_000), ("consumer", 45_000, 5_000)]
     {
         let mut lab = Lab::new(&scenario(
-            vec![orders_producer(10, &json!({}))],
+            vec![
+                orders_producer(10, &json!({ "rate_per_sec": 20 })),
+                billing_consumer(21, protocol, &json!({})),
+                billing_consumer(22, protocol, &json!({})),
+            ],
             &json!([{ "name": "orders", "partitions": 3 }]),
         ));
-        lab.wait_for_topics();
-        lab.add(&billing_consumer(21, protocol, &json!({})));
-        lab.add(&billing_consumer(22, protocol, &json!({})));
-        lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 20 }));
         let shared = |lab: &Lab| {
             let (a, b) = (lab.assigned(21), lab.assigned(22));
             !a.is_empty() && !b.is_empty() && a.is_disjoint(&b) && a.len() + b.len() == 3
@@ -723,24 +698,18 @@ fn a_consumer_decodes_what_an_avro_producer_framed() {
     let producer = json!({ "id": 10, "kind": "producer", "config": {
         "bootstrap": [1, 2, 3],
         "topic": "orders",
-        "rate_per_sec": 0,
+        "rate_per_sec": 20,
         "key": { "pattern": "c-{seq % 3}" },
         "value": { "format": "json", "template": { "id": "{seq}", "total": "{rand 1 500}" } },
         "serialization": { "registry": 4, "format": "avro", "schema": ORDER_SCHEMA },
     } });
     let registry =
         json!({ "id": 4, "kind": "schema-registry", "config": { "bootstrap": [1, 2, 3] } });
+    let consumer = billing_consumer(21, "consumer", &json!({ "deserialize": { "registry": 4 } }));
     let mut lab = Lab::new(&scenario(
-        vec![registry, producer],
+        vec![registry, producer, consumer],
         &json!([{ "name": "orders", "partitions": 1 }]),
     ));
-    lab.wait_for_topics();
-    lab.add(&billing_consumer(
-        21,
-        "consumer",
-        &json!({ "deserialize": { "registry": 4 } }),
-    ));
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 20 }));
     assert!(lab.run_until(21, 20_000, |s| s["processed"].as_u64() >= Some(30)));
     lab.control(10, json!({ "cmd": "pause" }));
     assert!(lab.run_until(10, 5_000, |s| s["pending_records"] == 0));
@@ -790,22 +759,21 @@ fn counting_app(id: u32) -> Value {
 }
 
 fn counting_lab() -> Lab {
-    let mut lab = Lab::new(&scenario(
+    Lab::new(&scenario(
         vec![orders_producer(10, &json!({})), counting_app(20)],
         &json!([
             { "name": "orders", "partitions": 3 },
             { "name": "order-counts", "partitions": 3 },
         ]),
-    ));
-    lab.wait_for_topics();
-    lab
+    ))
 }
 
-/// Send orders at 50 a second for `ms`, then wait for their answers.
+/// Let the producer send orders at 50 a second for `ms`, then pause it and
+/// wait for their answers.
 fn send_orders(lab: &mut Lab, ms: u64) {
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 50 }));
+    lab.control(10, json!({ "cmd": "resume" }));
     lab.run_for(ms);
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 0 }));
+    lab.control(10, json!({ "cmd": "pause" }));
     assert!(lab.run_until(10, 5_000, |s| s["pending_records"] == 0));
 }
 
@@ -955,7 +923,7 @@ fn window_count_emits_a_count_per_key_and_window() {
     let producer = json!({ "id": 10, "kind": "producer", "config": {
         "bootstrap": [1, 2, 3],
         "topic": "clicks",
-        "rate_per_sec": 0,
+        "rate_per_sec": 10,
         "key": { "pattern": "user-{seq % 2}" },
         "value": { "format": "json", "template": { "page": "{pick home|cart|search}" } },
     } });
@@ -975,8 +943,6 @@ fn window_count_emits_a_count_per_key_and_window() {
             { "name": "click-counts", "partitions": 1 },
         ]),
     ));
-    lab.wait_for_topics();
-    lab.control(10, json!({ "cmd": "rate", "rate_per_sec": 10 }));
     lab.run_for(4_000);
     lab.control(10, json!({ "cmd": "pause" }));
     assert!(lab.run_until(10, 5_000, |s| s["pending_records"] == 0));
@@ -1041,7 +1007,7 @@ fn a_rekeyed_count_goes_through_the_repartition_topic() {
     let producer = json!({ "id": 10, "kind": "producer", "config": {
         "bootstrap": [1, 2, 3],
         "topic": "orders",
-        "rate_per_sec": 0,
+        "rate_per_sec": 50,
         "key": { "pattern": "order-{seq}" },
         "value": { "format": "json", "template": {
             "customer": "{pick alice|bob|carol|dave}", "total": "{rand 1 500}",
@@ -1066,7 +1032,6 @@ fn a_rekeyed_count_goes_through_the_repartition_topic() {
             { "name": "customer-counts", "partitions": 3 },
         ]),
     ));
-    lab.wait_for_topics();
     send_orders(&mut lab, 3_000);
     let repartition = "order-stats-per-customer-repartition";
     assert!(lab.wait_committed("order-stats", "orders", 30_000));
@@ -1114,7 +1079,6 @@ fn two_instances_share_the_tasks_and_one_takes_over_when_the_other_dies() {
                 { "name": "order-counts", "partitions": 3 },
             ]),
         ));
-        lab.wait_for_topics();
         send_orders(&mut lab, 3_000);
         assert!(lab.wait_committed("order-stats", "orders", 30_000));
         // The two processes split the three tasks; with a standby replica,
@@ -1158,4 +1122,155 @@ fn two_instances_share_the_tasks_and_one_takes_over_when_the_other_dies() {
         let counted = counts_by_key(&lab.read_topic(NodeId(1), "order-counts"), false);
         assert!(counted == expected_runs(&orders), "{standbys}");
     }
+}
+
+#[test]
+fn a_seek_reads_a_partition_again_from_the_offset() {
+    let mut lab = Lab::new(&scenario(
+        vec![
+            orders_producer(10, &json!({ "rate_per_sec": 20 })),
+            billing_consumer(21, "consumer", &json!({})),
+        ],
+        &json!([{ "name": "orders", "partitions": 1 }]),
+    ));
+    assert!(lab.run_until(21, 20_000, |s| s["processed"].as_u64() >= Some(30)));
+    lab.control(10, json!({ "cmd": "pause" }));
+    assert!(lab.run_until(10, 5_000, |s| s["pending_records"] == 0));
+    let acked = lab.snapshot(10)["acked"].as_u64().unwrap();
+    assert!(lab.run_until(21, 10_000, |s| s["processed"] == acked));
+
+    // Kafka refuses a partition the member does not hold and a negative
+    // offset, with its own words.
+    let refused = [
+        (
+            json!({ "cmd": "seek", "topic": "orders", "partition": 7, "offset": 0 }),
+            "No current assignment for partition orders-7",
+        ),
+        (
+            json!({ "cmd": "seek", "topic": "orders", "partition": 0, "offset": -3 }),
+            "seek offset must not be a negative number",
+        ),
+    ];
+    for (command, error) in refused {
+        assert!(lab.command(21, command) == Err(error.to_string()));
+    }
+    // The next poll reads the partition again from offset 10, and the group
+    // commits the end again.
+    assert!(
+        lab.command(
+            21,
+            json!({ "cmd": "seek", "topic": "orders", "partition": 0, "offset": 10 })
+        ) == Ok(json!({ "topic": "orders", "partition": 0, "offset": 10 }))
+    );
+    let end = i64::try_from(acked).unwrap();
+    let again = acked + acked - 10;
+    let reread = |lab: &Lab| {
+        let s = lab.snapshot(21);
+        s["processed"] == again
+            && s["assignment"]
+                == json!([{
+                    "topic": "orders", "partition": 0,
+                    "position": end, "committed": end, "hwm": end, "lag": 0,
+                }])
+    };
+    assert!(lab.run_until_all(15_000, reread), "{}", lab.snapshot(21));
+    let offsets: Vec<Value> = lab.snapshot(21)["last_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["offset"].clone())
+        .collect();
+    let expected: Vec<Value> = (end - 10..end).map(|o| json!(o)).collect();
+    assert!(offsets == expected);
+}
+
+#[test]
+fn a_static_member_restarted_within_its_session_keeps_its_partitions() {
+    // A classic static member may crash and come back; a KIP-848 one closes
+    // first, leaving with epoch -2, as Kafka refuses a new member with the
+    // instance id of one that is still in the group.
+    for (protocol, closes) in [("classic", false), ("consumer", true)] {
+        let mut lab = Lab::new(&scenario(
+            vec![
+                orders_producer(10, &json!({ "rate_per_sec": 20 })),
+                billing_consumer(21, protocol, &json!({ "instance_id": "billing-a" })),
+                billing_consumer(22, protocol, &json!({ "instance_id": "billing-b" })),
+            ],
+            &json!([{ "name": "orders", "partitions": 3 }]),
+        ));
+        let shared = |lab: &Lab| {
+            let (a, b) = (lab.assigned(21), lab.assigned(22));
+            !a.is_empty() && !b.is_empty() && a.is_disjoint(&b) && a.len() + b.len() == 3
+        };
+        assert!(lab.run_until_all(30_000, shared), "{protocol}");
+        lab.run_for(2_000);
+        let (kept, held) = (lab.assigned(21), lab.assigned(22));
+        let rebalances = lab.snapshot(21)["rebalances"].clone();
+        let mark = lab.world.event_count();
+
+        // The member's process goes down and comes back well within its
+        // session: it takes its partitions back under the same instance id,
+        // and the group does not rebalance.
+        if closes {
+            assert!(lab.control(22, json!({ "cmd": "close" })) == json!({ "closed": true }));
+            lab.run_for(1_000);
+        }
+        lab.world.fault(Fault::Kill { node: NodeId(22) });
+        lab.run_for(5_000);
+        let restarted_at = lab.world.now();
+        lab.world.fault(Fault::Restart { node: NodeId(22) });
+        assert!(
+            lab.run_until_all(20_000, |lab| lab.assigned(22) == held),
+            "{protocol}: {}",
+            lab.snapshot(22)
+        );
+        assert!(lab.world.now() - restarted_at < 20_000, "{protocol}");
+        assert!(lab.assigned(21) == kept, "{protocol}");
+        assert!(lab.snapshot(21)["rebalances"] == rebalances, "{protocol}");
+        let moved: Vec<String> = lab
+            .world
+            .events_since(mark)
+            .into_iter()
+            .filter(|e| e.node == Some(NodeId(21)) && e.kind.starts_with("partitions_"))
+            .map(|e| e.kind)
+            .collect();
+        assert!(moved.is_empty(), "{protocol}: {moved:?}");
+        // It consumes on from the group's committed offsets.
+        lab.control(10, json!({ "cmd": "pause" }));
+        let caught_up = |lab: &Lab| {
+            lab.snapshot(10)["pending_records"] == 0
+                && [21, 22].iter().all(|n| lab.snapshot(*n)["lag"] == 0)
+        };
+        assert!(lab.run_until_all(20_000, caught_up), "{protocol}");
+    }
+}
+
+#[test]
+fn a_crashed_kip848_static_member_keeps_its_instance_id_until_its_session_expires() {
+    let mut lab = Lab::new(&scenario(
+        vec![
+            orders_producer(10, &json!({ "rate_per_sec": 20 })),
+            billing_consumer(21, "consumer", &json!({ "instance_id": "billing-a" })),
+        ],
+        &json!([{ "name": "orders", "partitions": 3 }]),
+    ));
+    assert!(lab.run_until(21, 30_000, |s| {
+        s["assignment"].as_array().is_some_and(|a| a.len() == 3)
+    }));
+    lab.world.fault(Fault::Kill { node: NodeId(21) });
+    lab.run_for(2_000);
+    lab.world.fault(Fault::Restart { node: NodeId(21) });
+    // The old member still owns the instance id: Kafka refuses the new one
+    // with UNRELEASED_INSTANCE_ID, and the consumer fails.
+    assert!(
+        lab.run_until(21, 10_000, |s| s["state"] == "failed(111)"),
+        "{}",
+        lab.snapshot(21)
+    );
+    // Once the old member's session expired, the next start joins.
+    lab.run_for(45_000);
+    lab.world.fault(Fault::Restart { node: NodeId(21) });
+    assert!(lab.run_until(21, 20_000, |s| {
+        s["assignment"].as_array().is_some_and(|a| a.len() == 3)
+    }));
 }
