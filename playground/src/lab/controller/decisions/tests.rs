@@ -705,6 +705,34 @@ fn topic_ids_are_deterministic_per_seed_and_never_reserved() {
     assert!(id(&mut first) != a);
 }
 
+#[test]
+fn a_controller_that_takes_over_never_reuses_a_topic_id() {
+    let mut image = image_with(&[1]);
+    let mut first = ControllerDecisions::new(ControllerConfig::default(), 42);
+    first.activate(&image, 0);
+    let mut taken = Vec::new();
+    for name in ["a", "b", "c"] {
+        let results = first.create_topics(&image, &[CreateTopicSpec::new(name, 1, 1)]);
+        assert!(let [Ok(created)] = results.as_slice());
+        for record in &created.records {
+            image.apply(record);
+        }
+        taken.push(created.topic_id);
+    }
+    // The successor starts from the same seed. Activated later, it draws a
+    // different sequence; not activated, it replays the predecessor's
+    // sequence and must step past every id the image already holds.
+    for activation in [Some(5_000), None] {
+        let mut successor = ControllerDecisions::new(ControllerConfig::default(), 42);
+        if let Some(now) = activation {
+            successor.activate(&image, now);
+        }
+        let results = successor.create_topics(&image, &[CreateTopicSpec::new("d", 1, 1)]);
+        assert!(let [Ok(created)] = results.as_slice());
+        assert!(!taken.contains(&created.topic_id), "{activation:?}");
+    }
+}
+
 /// The refusal of one topic spec against `image`.
 fn refusal(image: &MetadataImage, spec: CreateTopicSpec) -> TopicError {
     let results = decisions().create_topics(image, &[spec]);

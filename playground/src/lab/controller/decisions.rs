@@ -264,6 +264,8 @@ pub struct ControllerDecisions {
     last_heartbeat: BTreeMap<NodeId, Millis>,
     /// Where the next automatic placement starts its stripe.
     placement_cursor: usize,
+    /// The scenario seed the topic-id generator derives from.
+    seed: u64,
     /// Deterministic topic ids.
     rng: Rng,
 }
@@ -277,6 +279,7 @@ impl ControllerDecisions {
             config,
             last_heartbeat: BTreeMap::new(),
             placement_cursor: 0,
+            seed,
             rng: Rng::new(seed),
         }
     }
@@ -288,12 +291,15 @@ impl ControllerDecisions {
 
     /// This controller became active at `now`. Every registered broker gets a
     /// full session before it can be fenced, as Kafka's heartbeat manager
-    /// gives after a failover.
+    /// gives after a failover. The topic-id generator restarts from the seed
+    /// and the activation time, so a controller that takes over does not
+    /// replay the ids its predecessor handed out, deleted topics' included.
     pub fn activate(&mut self, image: &MetadataImage, now: Millis) {
         self.last_heartbeat = registered_brokers(image)
             .into_iter()
             .map(|broker| (broker, now))
             .collect();
+        self.rng = Rng::new(self.seed ^ now.rotate_left(29));
     }
 
     /// When `broker` last heartbeated this controller.
@@ -560,7 +566,7 @@ impl ControllerDecisions {
             manual_placement(image, &spec.assignments, 0, None)
                 .map_err(|message| TopicError::new(codes::INVALID_REPLICA_ASSIGNMENT, message))?
         };
-        let topic_id = self.next_topic_id();
+        let topic_id = self.next_topic_id(image);
         let partitions = i32::try_from(placement.len()).unwrap_or(i32::MAX);
         let replication_factor = placement
             .first()
@@ -978,14 +984,18 @@ impl ControllerDecisions {
             })
     }
 
-    /// A topic id no other topic has: never nil, never the metadata topic's,
-    /// and never one whose base64 form starts with `-`, which Kafka avoids so
-    /// an id is never mistaken for a command-line flag.
-    fn next_topic_id(&mut self) -> Uuid {
+    /// A topic id no topic in `image` has: never nil, never the metadata
+    /// topic's, and never one whose base64 form starts with `-`, which Kafka
+    /// avoids so an id is never mistaken for a command-line flag.
+    fn next_topic_id(&mut self, image: &MetadataImage) -> Uuid {
         loop {
             let id = Uuid::from_u64_pair(self.rng.next_u64(), self.rng.next_u64());
             let starts_with_dash = (id.as_u128() >> 122) == 62;
-            if !id.is_nil() && id != Uuid::from_u128(1) && !starts_with_dash {
+            if !id.is_nil()
+                && id != Uuid::from_u128(1)
+                && !starts_with_dash
+                && image.topic_by_id(&id).is_none()
+            {
                 return id;
             }
         }
