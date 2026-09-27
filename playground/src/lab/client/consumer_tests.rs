@@ -810,6 +810,137 @@ fn a_fetch_that_meets_a_new_leader_follows_it() {
     );
 }
 
+/// How a consumer of these tests takes its partitions.
+#[derive(Clone, Copy, Debug)]
+enum Takes {
+    /// `assign` without a group.
+    Assign,
+    /// `subscribe` in the group `billing` with a protocol.
+    Subscribe(GroupProtocol),
+}
+
+impl Takes {
+    fn consumer(self) -> Consumer {
+        match self {
+            Self::Assign => groupless(AutoOffsetReset::Earliest),
+            Self::Subscribe(protocol) => consumer(config(protocol, AutoOffsetReset::Earliest)),
+        }
+    }
+
+    fn take(self, h: &mut Harness<Consumer>) {
+        match self {
+            Self::Assign => {
+                assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+            }
+            Self::Subscribe(_) => h.with_client(|c, _| c.subscribe(&["orders"])),
+        }
+    }
+}
+
+/// The ways a consumer takes partitions, each against a broker that
+/// answers a partition without a leader with `LEADER_NOT_AVAILABLE`, as
+/// Kafka's do, and with `NONE`, which asks for nothing by itself.
+fn leaderless_rows() -> Vec<(Takes, i16)> {
+    let takes = [
+        Takes::Assign,
+        Takes::Subscribe(GroupProtocol::Classic),
+        Takes::Subscribe(GroupProtocol::Consumer),
+    ];
+    takes
+        .into_iter()
+        .flat_map(|t| [(t, codes::LEADER_NOT_AVAILABLE), (t, codes::NONE)])
+        .collect()
+}
+
+#[test]
+fn partitions_without_a_leader_at_the_first_metadata_answer_are_read_once_the_leader_is_back() {
+    // As the producer's records do, the consumer's partitions that need a
+    // leader ask for the metadata while they have none: Kafka's
+    // `OffsetFetcher.groupListOffsetRequests` and
+    // `AbstractFetch.maybeNodeForPosition` call `requestUpdate` for a
+    // partition without a leader on every poll. The consumer's first
+    // answer, to a request for every topic, shows `orders` without a leader
+    // before the consumer takes it, as right after every broker restarted;
+    // the leader comes back on broker 2 a second after the consumer took
+    // the partition, and the consumer reads the partition within the most
+    // the metadata backoff grows to (1 s) and a few round trips.
+    for (takes, code) in leaderless_rows() {
+        let name = format!("{takes:?}, {code}");
+        let state = cluster(&[("orders", 1)]);
+        seed(&state, "orders", 0, &["a", "b"]);
+        {
+            let mut s = state.borrow_mut();
+            s.knobs.leaderless_error = code;
+            s.set_leader("orders", 0, -1);
+        }
+        let mut h = Harness::new(takes.consumer(), Rc::clone(&state));
+        assert!(
+            h.run_until(|h| h.client.client().metadata().updated_at.is_some(), 1_000),
+            "{name}"
+        );
+        h.run_for(1_000);
+        takes.take(&mut h);
+        h.run_for(1_000);
+        assert!(
+            h.client.assignment() == partitions("orders", &[0]),
+            "{name}"
+        );
+        assert!(h.client.buffered() == 0, "{name}");
+        state.borrow_mut().set_leader("orders", 0, 2);
+        assert!(h.run_until(|h| h.client.buffered() == 2, 1_200), "{name}");
+        let polled = h.with_client(|c, _| c.poll(500));
+        assert!(
+            polled == vec![consumed(0, 0, 1_000, "a"), consumed(0, 1, 1_001, "b")],
+            "{name}"
+        );
+        let listed: Vec<NodeId> = h
+            .seen(ListOffsetsRequest::API_KEY)
+            .iter()
+            .map(|s| s.broker)
+            .collect();
+        assert!(listed == vec![NodeId(2)], "{name}");
+    }
+}
+
+#[test]
+fn a_fetch_whose_partition_loses_its_leader_goes_on_once_the_leader_is_back() {
+    // The partition loses its leader under a fetch: broker 1 answers
+    // `NOT_LEADER_OR_FOLLOWER` without a new leader, and the consumer asks
+    // for the metadata until one shows, as Kafka's
+    // `AbstractFetch.maybeNodeForPosition` does on every poll. The leader
+    // comes back on broker 2 a second later, and the next record is read
+    // within the most the metadata backoff grows to (1 s) and a few round
+    // trips.
+    for (takes, code) in leaderless_rows() {
+        let name = format!("{takes:?}, {code}");
+        let state = cluster(&[("orders", 1)]);
+        seed(&state, "orders", 0, &["before"]);
+        state.borrow_mut().knobs.leaderless_error = code;
+        let mut h = Harness::new(takes.consumer(), Rc::clone(&state));
+        takes.take(&mut h);
+        assert!(h.run_until(|h| h.client.buffered() == 1, 2_000), "{name}");
+        let polled = h.with_client(|c, _| c.poll(500));
+        assert!(polled == vec![consumed(0, 0, 1_000, "before")], "{name}");
+        state.borrow_mut().set_leader("orders", 0, -1);
+        seed(&state, "orders", 0, &["after"]);
+        h.run_for(1_000);
+        assert!(h.client.buffered() == 0, "{name}");
+        state.borrow_mut().set_leader("orders", 0, 2);
+        assert!(h.run_until(|h| h.client.buffered() == 1, 1_200), "{name}");
+        let polled = h.with_client(|c, _| c.poll(500));
+        assert!(
+            polled
+                == vec![ConsumedRecord {
+                    leader_epoch: 1,
+                    ..consumed(0, 1, 1_000, "after")
+                }],
+            "{name}"
+        );
+        let last_fetch = h.seen(FetchRequest::API_KEY).last().map(|s| s.broker);
+        assert!(last_fetch == Some(NodeId(2)), "{name}");
+    }
+}
+
 /// What a test does to the partitions of `orders`.
 #[derive(Clone, Copy, Debug)]
 enum Change {
