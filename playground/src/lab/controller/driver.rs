@@ -14,7 +14,9 @@
 //! re-announces its epoch every 300 ms. The leader also holds a fetch that
 //! finds nothing new for a short while, as Kafka's `fetch.max.wait.ms` does,
 //! so an idle follower polls at a steady pace and a proposal reaches the
-//! followers as soon as it is appended.
+//! followers as soon as it is appended. A fetch carries the follower's high
+//! watermark, and a leader whose own is higher answers it at once (KIP-1166),
+//! so a commit reaches every follower without waiting out a held fetch.
 
 use std::collections::BTreeMap;
 
@@ -756,7 +758,14 @@ impl ControllerCore {
                 correlation,
                 fetch_epoch,
                 fetch_offset,
-            } => self.serve_fetch(ctx, from, correlation, fetch_epoch, fetch_offset),
+                high_watermark,
+            } => self.serve_fetch(
+                ctx,
+                from,
+                correlation,
+                (fetch_epoch, fetch_offset),
+                high_watermark,
+            ),
             RaftMessage::FetchResponse(response) => self.on_fetch_response(ctx, from, response),
         }
     }
@@ -833,15 +842,18 @@ impl ControllerCore {
         }
     }
 
-    /// Leader side of a `Fetch`. A node that does not lead redirects the
-    /// fetch to the leader it knows.
+    /// Leader side of a `Fetch` from the log point `(fetch_epoch,
+    /// fetch_offset)`. A node that does not lead redirects the fetch to the
+    /// leader it knows. The leader answers at once when it has entries, a
+    /// divergence or a high watermark the fetcher lacks, and holds the fetch
+    /// otherwise.
     fn serve_fetch(
         &mut self,
         ctx: &mut Ctx<'_>,
         from: NodeId,
         correlation: u64,
-        fetch_epoch: Epoch,
-        fetch_offset: i64,
+        (fetch_epoch, fetch_offset): (Epoch, i64),
+        high_watermark: i64,
     ) {
         let actions = self.step(
             ctx,
@@ -881,7 +893,8 @@ impl ControllerCore {
             }
         }
         let has_data = diverging.is_none() && fetch_offset < self.log.end_offset();
-        if diverging.is_some() || has_data || advanced {
+        let stale = high_watermark < self.high_watermark;
+        if diverging.is_some() || has_data || advanced || stale {
             self.answer_fetch(ctx, from, correlation, fetch_offset, diverging);
         } else {
             let deadline = self.now + FETCH_MAX_WAIT_MS;
@@ -963,6 +976,7 @@ impl ControllerCore {
             correlation,
             fetch_epoch: self.log.last_epoch(),
             fetch_offset: self.log.end_offset(),
+            high_watermark: self.high_watermark,
         };
         self.send_to(ctx, target, &fetch);
     }

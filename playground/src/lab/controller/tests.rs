@@ -271,6 +271,24 @@ fn a_follower_that_missed_entries_catches_up_through_fetch() {
 }
 
 #[test]
+fn every_follower_learns_a_commit_without_waiting_out_a_held_fetch() {
+    let mut cluster = three();
+    let leader = settle(&mut cluster, ELECTION_BUDGET_MS);
+    // Idle, both followers wait in fetches the leader holds.
+    cluster.run_for(1_000);
+    let id = cluster
+        .with_node(leader, |core, ctx| core.propose(ctx, delete("a")))
+        .unwrap();
+    // The first follower's next fetch commits the entry; the second's
+    // carries the old high watermark and is answered at once (KIP-1166)
+    // rather than held for `FETCH_MAX_WAIT_MS`. Three link latencies do.
+    assert!(cluster.run_until(
+        |c| c.ids().iter().all(|&n| c.node(n).high_watermark() > id.0),
+        15
+    ));
+}
+
+#[test]
 fn killing_the_leader_elects_another_and_the_old_one_rejoins() {
     let mut cluster = three();
     let first = settle(&mut cluster, ELECTION_BUDGET_MS);

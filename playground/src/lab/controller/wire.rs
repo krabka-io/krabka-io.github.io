@@ -76,6 +76,9 @@ pub enum RaftMessage {
         correlation: u64,
         fetch_epoch: Epoch,
         fetch_offset: i64,
+        /// The fetcher's high watermark. A leader whose own is higher answers
+        /// at once rather than hold the fetch, as Kafka's does since KIP-1166.
+        high_watermark: i64,
     },
     /// The answer to a `Fetch`.
     FetchResponse(FetchResponse),
@@ -169,6 +172,7 @@ mod tests {
                 correlation: 12,
                 fetch_epoch: 4,
                 fetch_offset: 20,
+                high_watermark: 18,
             },
             RaftMessage::FetchResponse(FetchResponse {
                 correlation: 12,
