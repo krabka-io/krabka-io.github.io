@@ -2,9 +2,10 @@ name: Rebuild Helm chart index
 
 # The aggregated Helm chart repository is served from this site at
 # https://krabka.io/charts. Charts live in the component repositories. This job
-# discovers them, packages and signs them, and commits the repacked charts and
-# the index to main. It then starts the Pages deploy itself, because a push made
-# with GITHUB_TOKEN does not trigger other workflows.
+# discovers them, packages and signs them, and opens a pull request with the
+# repacked charts and the index, because the main ruleset takes changes only
+# through a pull request that passed deploy.yml's `build` check. A maintainer
+# merges it, and that push to main deploys the site.
 #
 # A component repository can request a rebuild right after it releases a chart:
 #
@@ -24,8 +25,11 @@ on:
       - '.github/workflows/helm-index.yml'
 
 permissions:
+  # To push the index branch.
   contents: write
-  # To start deploy.yml after the index commit. See the last step.
+  # To open the index pull request.
+  pull-requests: write
+  # To start deploy.yml's `build` check on the index branch. See the last step.
   actions: write
 
 concurrency:
@@ -55,14 +59,15 @@ jobs:
           HELM_GPG_PASSPHRASE: ${{ secrets.HELM_GPG_PASSPHRASE }}
         run: bash scripts/build-helm-index.sh
 
-      - name: Commit the index when it changed
+      - name: Open a pull request with the index when it changed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: helm-index/rebuild
         run: |
           set -euo pipefail
           # `generated` and `created` carry a fresh timestamp on every run, so
           # compare the chart digests instead. An unchanged set of digests means
-          # no chart moved and the commit is noise.
+          # no chart moved and the pull request is noise.
           if git diff --quiet -- public/charts; then
             echo "No chart changes."
             exit 0
@@ -77,6 +82,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${BRANCH}"
           git add public/charts
           # The blank line and the trailers stay inside the YAML block, so they
           # keep the block's indentation. YAML strips it back off again.
@@ -86,11 +92,20 @@ jobs:
           Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
           Claude-Session: https://claude.ai/code/session_01Xj9Yz7B2gp85n9KvAJ5npu
           MSG
-          git push
+          # The branch belongs to this job alone, and one open pull request
+          # tracks it. A later run replaces an unmerged index with its own, so
+          # the pull request always carries the newest one.
+          git push --force origin "HEAD:refs/heads/${BRANCH}"
 
-          # GitHub does not start a workflow from a push made with GITHUB_TOKEN,
-          # so deploy.yml does not see this commit. It would publish the charts
-          # only at its next scheduled run, up to a day later. A
-          # workflow_dispatch event is exempt from that rule, so start the
-          # deploy directly.
-          gh workflow run deploy.yml --ref main
+          if [[ -z "$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')" ]]; then
+            gh pr create --base main --head "${BRANCH}" \
+              --title "chore: rebuild the aggregated Helm chart index" \
+              --body "Opened by the \`helm-index\` workflow in ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Merge it to publish the charts."
+          fi
+
+          # The ruleset requires deploy.yml's `build` check on the pull
+          # request's head, but a push or a pull request made with GITHUB_TOKEN
+          # starts no workflow. A workflow_dispatch event is exempt from that
+          # rule, and its `build` check lands on the same commit, so run
+          # deploy.yml on the branch. deploy.yml deploys only from main.
+          gh workflow run deploy.yml --ref "${BRANCH}"
