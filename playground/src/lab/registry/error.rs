@@ -93,9 +93,19 @@ pub enum RegistryError {
     /// A delete was blocked because another schema still references the target.
     #[error("One or more references exist to the schema {0}.")]
     ReferencedByOthers(String),
-    /// The store did not read a write back.
-    #[error("Error in the backend data store: {0}")]
-    Backend(String),
+    /// A write to the Kafka store timed out: Confluent's
+    /// `RestSchemaRegistryTimeoutException`. The message names the
+    /// operation, as the REST resource words it.
+    #[error("{0}")]
+    OperationTimeout(String),
+    /// A write to the Kafka store failed: Confluent's
+    /// `RestSchemaRegistryStoreException`.
+    #[error("{0}")]
+    Store(String),
+    /// Any other failure on the server: Confluent's
+    /// `RestSchemaRegistryException`, whose `error_code` is the HTTP status.
+    #[error("{0}")]
+    Internal(String),
 }
 
 impl RegistryError {
@@ -121,7 +131,9 @@ impl RegistryError {
             Self::InvalidMode => 42204,
             Self::OperationNotPermitted(_) | Self::SchemaIdConflict(_) => 42205,
             Self::ReferencedByOthers(_) => 42206,
-            Self::Backend(_) => 50001,
+            Self::Internal(_) => 500,
+            Self::Store(_) => 50001,
+            Self::OperationTimeout(_) => 50002,
         }
     }
 
@@ -150,7 +162,7 @@ impl RegistryError {
             | Self::OperationNotPermitted(_)
             | Self::SchemaIdConflict(_)
             | Self::ReferencedByOthers(_) => 422,
-            Self::Backend(_) => 500,
+            Self::OperationTimeout(_) | Self::Store(_) | Self::Internal(_) => 500,
         }
     }
 
@@ -220,7 +232,9 @@ mod tests {
             (RegistryError::OperationNotPermitted("x".into()), 42205, 422),
             (RegistryError::SchemaIdConflict(SchemaId(1)), 42205, 422),
             (RegistryError::ReferencedByOthers("s:1".into()), 42206, 422),
-            (RegistryError::Backend("x".into()), 50001, 500),
+            (RegistryError::Internal("x".into()), 500, 500),
+            (RegistryError::Store("x".into()), 50001, 500),
+            (RegistryError::OperationTimeout("x".into()), 50002, 500),
         ] {
             assert!(error.error_code() == code, "{error:?}");
             assert!(error.status() == status, "{error:?}");

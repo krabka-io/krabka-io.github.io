@@ -6,6 +6,10 @@
 //! "magic":0}`. Values are parsed structurally; the writers here still emit
 //! Confluent's order (`subject, version, id, schemaType?, references?,
 //! schema, deleted`) so a captured topic compares equal byte for byte.
+//!
+//! The store writes one more record of its own: [`encode_noop`], the key
+//! `{"keytype":"NOOP","magic":0}` with no value, which Confluent's
+//! `KafkaStore` produces to learn the offset of the end of the topic.
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -333,6 +337,27 @@ pub fn encode_version_high_water(subject: &str, next_version: SchemaVersion) -> 
     )
 }
 
+/// The key of Confluent's `NoopKey`: no subject, magic `0`.
+#[derive(Serialize)]
+struct NoopKey {
+    keytype: &'static str,
+    magic: u8,
+}
+
+/// The record Confluent's `KafkaStore.getLatestOffset` produces to learn
+/// the end of the topic: the `NOOP` key and no value. The reader applies
+/// nothing for it and only moves its offset.
+#[must_use]
+pub fn encode_noop() -> RawRecord {
+    RawRecord::of::<_, ()>(
+        &NoopKey {
+            keytype: "NOOP",
+            magic: 0,
+        },
+        None,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use assert2::assert;
@@ -414,6 +439,12 @@ mod tests {
                 encode_version_high_water("s", SchemaVersion(4)),
                 r#"{"keytype":"NOOP","subject":"s","magic":0}"#,
                 Some(r#"{"nextVersion":4}"#),
+            ),
+            (
+                "noop",
+                encode_noop(),
+                r#"{"keytype":"NOOP","magic":0}"#,
+                None,
             ),
         ] {
             assert!(record.key == Bytes::from(key), "{name}");
@@ -497,6 +528,7 @@ mod tests {
                     },
                 ),
             ),
+            ("noop", encode_noop(), SchemaRecord::Noop),
         ];
         for (name, raw, expected) in cases {
             assert!(SchemaRecord::decode(&raw) == expected, "{name}");

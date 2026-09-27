@@ -1,20 +1,18 @@
-//! The registry service: the real registry's write path over a
-//! [`SchemaStore`].
+//! The registry service: the real registry's decisions over the replay of
+//! `_schemas`.
 //!
-//! Every mutation decides its outcome on a clone of the state, appends the
-//! record, and folds the log's tail back into the live state. The live state
-//! only ever changes by applying records, so it is always the replay of the
-//! log, and a mutation's outcome is visible to the next request only when the
-//! record has been read back. The node holds the HTTP response until
-//! [`RegistryService::applied`] passes the record's offset: with the in-memory
-//! log that is immediate; with a Kafka-backed store it is the fetch loop.
+//! A mutation decides its outcome on the current state and returns the
+//! records that carry it; it changes nothing. The state changes only when
+//! the store's reader hands a record back to [`RegistryService::apply`], so
+//! it is always the replay of the topic, and a mutation's outcome is visible
+//! to the next request only once its records have been read back, as in
+//! Confluent's `KafkaStore`.
 
 use super::{
     compat::{self, Candidate},
     error::RegistryError,
     format::{self, SchemaType},
     ids::{LogOffset, SchemaId, SchemaVersion},
-    log::SchemaStore,
     record::{self, RawRecord, SchemaRecord, SchemaReference, SchemaValue},
     store::{Registered, StoreState},
 };
@@ -36,42 +34,55 @@ pub struct RegisterRequest<'a> {
     pub import_version: Option<SchemaVersion>,
 }
 
-/// The outcome of a mutation: its value and the offset of the last record it
-/// wrote, which the response must wait for. `None` when the mutation wrote
+/// The outcome of a mutation: its value and the records that carry it, in
+/// the order they must be written. No records means the mutation writes
 /// nothing (an idempotent registration, a clear of something already clear),
 /// so the response goes out at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written<T> {
     pub value: T,
-    pub offset: Option<LogOffset>,
+    pub records: Vec<RawRecord>,
 }
 
-/// The registry over its log.
-pub struct RegistryService<S> {
+impl<T> Written<T> {
+    fn nothing(value: T) -> Self {
+        Self {
+            value,
+            records: Vec::new(),
+        }
+    }
+
+    fn one(value: T, record: RawRecord) -> Self {
+        Self {
+            value,
+            records: vec![record],
+        }
+    }
+}
+
+/// The registry state and its decisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryService {
     state: StoreState,
-    store: S,
     /// The offset the reader applies next.
     applied: LogOffset,
-    /// Records this service appended and has not yet handed to the node.
-    appended: Vec<(LogOffset, RawRecord)>,
+    records: u64,
     unknown_records: u64,
     undecodable_records: u64,
 }
 
-impl<S: SchemaStore> RegistryService<S> {
-    /// A service over `store`, with the level and mode that apply until the
-    /// log sets global ones. Records already in the store are applied.
-    pub fn new(store: S, default_compatibility: &str, default_mode: &str) -> Self {
-        let mut service = Self {
+impl RegistryService {
+    /// An empty registry, with the level and mode that apply until the topic
+    /// sets global ones.
+    #[must_use]
+    pub fn new(default_compatibility: &str, default_mode: &str) -> Self {
+        Self {
             state: StoreState::with_defaults(default_compatibility, default_mode),
-            store,
             applied: LogOffset::default(),
-            appended: Vec::new(),
+            records: 0,
             unknown_records: 0,
             undecodable_records: 0,
-        };
-        service.poll();
-        service
+        }
     }
 
     /// The live state: the replay of the applied records.
@@ -80,22 +91,17 @@ impl<S: SchemaStore> RegistryService<S> {
         &self.state
     }
 
-    #[must_use]
-    pub fn store(&self) -> &S {
-        &self.store
-    }
-
-    /// The offset the reader applies next; every record below it is in the
-    /// state.
+    /// The offset after the last record applied; every record below it is in
+    /// the state.
     #[must_use]
     pub fn applied(&self) -> LogOffset {
         self.applied
     }
 
-    /// How many records the log holds.
+    /// How many records the reader applied, noops included.
     #[must_use]
     pub fn record_count(&self) -> u64 {
-        u64::try_from(self.store.end_offset().0).unwrap_or(0)
+        self.records
     }
 
     /// Replayed records with a key type this registry does not know.
@@ -110,34 +116,15 @@ impl<S: SchemaStore> RegistryService<S> {
         self.undecodable_records
     }
 
-    /// Fold every record the store holds past `applied` into the state; the
-    /// reader's step. Returns how many records were applied.
-    pub fn poll(&mut self) -> usize {
-        let tail = self.store.replay(self.applied);
-        let count = tail.len();
-        for (offset, record) in tail {
-            self.apply(&SchemaRecord::decode(&record));
-            self.applied = offset.next();
-        }
-        count
+    /// Fold the record at `offset` into the state: the reader's step, as
+    /// Confluent's `KafkaStoreReaderThread` applies each record it consumes.
+    pub fn apply(&mut self, offset: LogOffset, record: &RawRecord) {
+        self.apply_decoded(&SchemaRecord::decode(record));
+        self.records += 1;
+        self.applied = offset.next();
     }
 
-    /// The records appended since the last call, for the node to persist.
-    pub fn take_appended(&mut self) -> Vec<(LogOffset, RawRecord)> {
-        std::mem::take(&mut self.appended)
-    }
-
-    /// Put records the host kept back into the log and apply them: a restart
-    /// replaying `_schemas`. They are not reported by
-    /// [`RegistryService::take_appended`], because the host already has them.
-    pub fn restore(&mut self, records: impl IntoIterator<Item = RawRecord>) -> usize {
-        for record in records {
-            self.store.append(record);
-        }
-        self.poll()
-    }
-
-    fn apply(&mut self, record: &SchemaRecord) {
+    fn apply_decoded(&mut self, record: &SchemaRecord) {
         match record {
             SchemaRecord::Schema(_, value) => self.state.apply_schema(value),
             SchemaRecord::Tombstone(key) => {
@@ -171,24 +158,6 @@ impl<S: SchemaStore> RegistryService<S> {
         }
     }
 
-    /// Append a record, then fold the log's tail back. Returns the record's
-    /// offset; the state reflects the record once `applied` passes it.
-    fn write(&mut self, record: RawRecord) -> LogOffset {
-        let offset = self.store.append(record.clone());
-        self.appended.push((offset, record));
-        self.poll();
-        offset
-    }
-
-    /// Append several records in order; returns the last offset.
-    fn write_all(&mut self, records: Vec<RawRecord>) -> LogOffset {
-        let mut last = self.applied;
-        for record in records {
-            last = self.write(record);
-        }
-        last
-    }
-
     fn ensure_writable(&self, subject: &str) -> Result<(), RegistryError> {
         if self.state.effective_mode(subject) == "READONLY" {
             return Err(RegistryError::OperationNotPermitted(format!(
@@ -208,10 +177,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// Returns the Confluent error the request maps to: an invalid schema or
     /// reference (42201), an incompatible one (409), a read-only subject or a
     /// missing import id (42205), an id bound to another schema (42205).
-    pub fn register(
-        &mut self,
-        req: RegisterRequest<'_>,
-    ) -> Result<Written<Registered>, RegistryError> {
+    pub fn register(&self, req: RegisterRequest<'_>) -> Result<Written<Registered>, RegistryError> {
         self.ensure_writable(req.subject)?;
         let resolved = self.state.resolve_closure(req.references)?;
         let parsed = format::parse(req.ty, req.schema, &resolved)?;
@@ -231,7 +197,7 @@ impl<S: SchemaStore> RegistryService<S> {
             let version = req
                 .import_version
                 .unwrap_or_else(|| self.state.next_version(req.subject));
-            let offset = self.write(record::encode_schema(&SchemaValue {
+            let record = record::encode_schema(&SchemaValue {
                 subject: req.subject.to_string(),
                 version,
                 id,
@@ -239,20 +205,14 @@ impl<S: SchemaStore> RegistryService<S> {
                 references: req.references.to_vec(),
                 schema: schema.to_string(),
                 deleted: false,
-            }));
-            return Ok(Written {
-                value: Registered { id, version },
-                offset: Some(offset),
             });
+            return Ok(Written::one(Registered { id, version }, record));
         }
         if let Some(existing) =
             self.state
                 .find_under_subject(req.subject, req.ty, schema, req.references, false)
         {
-            return Ok(Written {
-                value: existing,
-                offset: None,
-            });
+            return Ok(Written::nothing(existing));
         }
         compat::check_registration(
             &self.state,
@@ -269,7 +229,7 @@ impl<S: SchemaStore> RegistryService<S> {
             self.state
                 .clone()
                 .register(req.subject, req.ty, schema, req.references)?;
-        let offset = self.write(record::encode_schema(&SchemaValue {
+        let record = record::encode_schema(&SchemaValue {
             subject: req.subject.to_string(),
             version: registered.version,
             id: registered.id,
@@ -277,11 +237,8 @@ impl<S: SchemaStore> RegistryService<S> {
             references: req.references.to_vec(),
             schema: schema.to_string(),
             deleted: false,
-        }));
-        Ok(Written {
-            value: registered,
-            offset: Some(offset),
-        })
+        });
+        Ok(Written::one(registered, record))
     }
 
     // ---- levels ----------------------------------------------------------------------------
@@ -291,7 +248,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// # Errors
     /// Returns 42205 when the scope is read-only.
     pub fn set_compat(
-        &mut self,
+        &self,
         subject: Option<&str>,
         level: &str,
     ) -> Result<Written<()>, RegistryError> {
@@ -305,11 +262,7 @@ impl<S: SchemaStore> RegistryService<S> {
                 subject.unwrap_or("global")
             )));
         }
-        let offset = self.write(record::encode_config(subject, level));
-        Ok(Written {
-            value: (),
-            offset: Some(offset),
-        })
+        Ok(Written::one((), record::encode_config(subject, level)))
     }
 
     /// Remove a subject's level so it inherits the global one. Returns the
@@ -318,21 +271,17 @@ impl<S: SchemaStore> RegistryService<S> {
     /// # Errors
     /// Returns 42205 when the subject is read-only.
     pub fn delete_subject_compat(
-        &mut self,
+        &self,
         subject: &str,
     ) -> Result<Written<Option<String>>, RegistryError> {
         self.ensure_writable(subject)?;
         let Some(level) = self.state.subject_compat(subject).map(str::to_string) else {
-            return Ok(Written {
-                value: None,
-                offset: None,
-            });
+            return Ok(Written::nothing(None));
         };
-        let offset = self.write(record::config_tombstone(Some(subject)));
-        Ok(Written {
-            value: Some(level),
-            offset: Some(offset),
-        })
+        Ok(Written::one(
+            Some(level),
+            record::config_tombstone(Some(subject)),
+        ))
     }
 
     /// Remove the global level so the configured default applies again.
@@ -340,18 +289,14 @@ impl<S: SchemaStore> RegistryService<S> {
     ///
     /// # Errors
     /// Returns 42205 when the registry is read-only.
-    pub fn delete_global_compat(&mut self) -> Result<Written<String>, RegistryError> {
+    pub fn delete_global_compat(&self) -> Result<Written<String>, RegistryError> {
         if self.state.global_mode() == "READONLY" {
             return Err(RegistryError::OperationNotPermitted(
                 "Subject global is in read-only mode".to_string(),
             ));
         }
         let level = self.state.global_compat().to_string();
-        let offset = self.write(record::config_tombstone(None));
-        Ok(Written {
-            value: level,
-            offset: Some(offset),
-        })
+        Ok(Written::one(level, record::config_tombstone(None)))
     }
 
     // ---- deletes ---------------------------------------------------------------------------
@@ -382,7 +327,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// Returns 40401 for an unknown subject, 40402 for an unknown version,
     /// 42206 when a live schema references it, 42205 when read-only.
     pub fn soft_delete_version(
-        &mut self,
+        &self,
         subject: &str,
         version: SchemaVersion,
     ) -> Result<Written<SchemaVersion>, RegistryError> {
@@ -395,7 +340,7 @@ impl<S: SchemaStore> RegistryService<S> {
             .version(subject, Some(version), false)
             .ok_or_else(|| RegistryError::VersionNotFound(version.to_string()))?;
         self.ensure_not_referenced(subject, version, false)?;
-        let offset = self.write(record::encode_schema(&SchemaValue {
+        let record = record::encode_schema(&SchemaValue {
             subject: subject.to_string(),
             version: found.version,
             id: found.id,
@@ -403,11 +348,8 @@ impl<S: SchemaStore> RegistryService<S> {
             references: found.references,
             schema: found.schema,
             deleted: true,
-        }));
-        Ok(Written {
-            value: found.version,
-            offset: Some(offset),
-        })
+        });
+        Ok(Written::one(found.version, record))
     }
 
     /// Delete a version for good: a tombstone, preceded by the subject's
@@ -419,7 +361,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// Returns 40401, 40402, 40407 when it was not soft-deleted, 42206 when a
     /// schema (deleted or not) references it, 42205 when read-only.
     pub fn permanent_delete_version(
-        &mut self,
+        &self,
         subject: &str,
         version: SchemaVersion,
     ) -> Result<Written<SchemaVersion>, RegistryError> {
@@ -448,10 +390,9 @@ impl<S: SchemaStore> RegistryService<S> {
         if last {
             records.extend(self.scope_tombstones(subject));
         }
-        let offset = self.write_all(records);
         Ok(Written {
             value: version,
-            offset: Some(offset),
+            records,
         })
     }
 
@@ -475,7 +416,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// already, 42206 when another subject's live schema references a
     /// version, 42205 when read-only.
     pub fn soft_delete_subject(
-        &mut self,
+        &self,
         subject: &str,
     ) -> Result<Written<Vec<SchemaVersion>>, RegistryError> {
         self.ensure_writable(subject)?;
@@ -488,11 +429,10 @@ impl<S: SchemaStore> RegistryService<S> {
         };
         self.ensure_no_foreign_referrer(subject, &versions, false)?;
         let high = versions.iter().copied().max().unwrap_or(SchemaVersion(0));
-        let offset = self.write(record::encode_delete_subject(subject, high));
-        Ok(Written {
-            value: versions,
-            offset: Some(offset),
-        })
+        Ok(Written::one(
+            versions,
+            record::encode_delete_subject(subject, high),
+        ))
     }
 
     /// Whether a subject other than `subject` references one of `versions`.
@@ -532,7 +472,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// remains, 42206 when another subject references a version, 42205 when
     /// read-only.
     pub fn permanent_delete_subject(
-        &mut self,
+        &self,
         subject: &str,
     ) -> Result<Written<Vec<SchemaVersion>>, RegistryError> {
         self.ensure_writable(subject)?;
@@ -555,10 +495,9 @@ impl<S: SchemaStore> RegistryService<S> {
                 .map(|&v| record::encode_tombstone(subject, v)),
         );
         records.extend(self.scope_tombstones(subject));
-        let offset = self.write_all(records);
         Ok(Written {
             value: versions,
-            offset: Some(offset),
+            records,
         })
     }
 
@@ -570,7 +509,7 @@ impl<S: SchemaStore> RegistryService<S> {
     /// # Errors
     /// Returns 42204 for an unknown mode and 42205 when schemas exist.
     pub fn set_mode(
-        &mut self,
+        &self,
         subject: Option<&str>,
         mode: &str,
         force: bool,
@@ -593,47 +532,35 @@ impl<S: SchemaStore> RegistryService<S> {
                 ));
             }
         }
-        let offset = self.write(record::encode_mode(subject, mode));
-        Ok(Written {
-            value: (),
-            offset: Some(offset),
-        })
+        Ok(Written::one((), record::encode_mode(subject, mode)))
     }
 
     /// Remove the global mode so the configured default applies again.
     /// Returns the mode that was in force.
-    pub fn clear_global_mode(&mut self) -> Written<String> {
+    #[must_use]
+    pub fn clear_global_mode(&self) -> Written<String> {
         let mode = self.state.global_mode().to_string();
-        let offset = self.write(record::mode_tombstone(None));
-        Written {
-            value: mode,
-            offset: Some(offset),
-        }
+        Written::one(mode, record::mode_tombstone(None))
     }
 
     /// Remove a subject's mode so it inherits the global one. Returns the
     /// removed mode, or `None` when the subject had none.
-    pub fn clear_subject_mode(&mut self, subject: &str) -> Written<Option<String>> {
+    #[must_use]
+    pub fn clear_subject_mode(&self, subject: &str) -> Written<Option<String>> {
         let Some(mode) = self.state.subject_mode(subject).map(str::to_string) else {
-            return Written {
-                value: None,
-                offset: None,
-            };
+            return Written::nothing(None);
         };
-        let offset = self.write(record::mode_tombstone(Some(subject)));
-        Written {
-            value: Some(mode),
-            offset: Some(offset),
-        }
+        Written::one(Some(mode), record::mode_tombstone(Some(subject)))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+
     use assert2::assert;
 
     use super::*;
-    use crate::lab::registry::log::SchemaLog;
 
     fn av(name: &str) -> String {
         format!(
@@ -641,8 +568,43 @@ mod tests {
         )
     }
 
-    fn service() -> RegistryService<SchemaLog> {
-        RegistryService::new(SchemaLog::new(), "BACKWARD", "READWRITE")
+    /// A registry whose store reads every record back as soon as it is
+    /// written, with the log it wrote.
+    struct Loopback {
+        service: RegistryService,
+        log: Vec<RawRecord>,
+    }
+
+    impl Loopback {
+        fn new() -> Self {
+            Self {
+                service: RegistryService::new("BACKWARD", "READWRITE"),
+                log: Vec::new(),
+            }
+        }
+
+        /// Write the records a mutation decided, read them back, and give its
+        /// value.
+        fn commit<T>(
+            &mut self,
+            written: Result<Written<T>, RegistryError>,
+        ) -> Result<T, RegistryError> {
+            let written = written?;
+            for record in written.records {
+                let offset = LogOffset(i64::try_from(self.log.len()).unwrap());
+                self.service.apply(offset, &record);
+                self.log.push(record);
+            }
+            Ok(written.value)
+        }
+    }
+
+    impl Deref for Loopback {
+        type Target = RegistryService;
+
+        fn deref(&self) -> &RegistryService {
+            &self.service
+        }
     }
 
     fn request<'a>(subject: &'a str, schema: &'a str) -> RegisterRequest<'a> {
@@ -658,8 +620,17 @@ mod tests {
 
     #[test]
     fn a_write_is_visible_once_its_record_is_read_back() {
-        let mut s = service();
+        let mut s = RegistryService::new("BACKWARD", "READWRITE");
         let written = s.register(request("s", &av("A"))).unwrap();
+        let value = SchemaValue {
+            subject: "s".into(),
+            version: SchemaVersion(1),
+            id: SchemaId(1),
+            schema_type: None,
+            references: vec![],
+            schema: av("A"),
+            deleted: false,
+        };
         assert!(
             written
                 == Written {
@@ -667,50 +638,37 @@ mod tests {
                         id: SchemaId(1),
                         version: SchemaVersion(1)
                     },
-                    offset: Some(LogOffset(0))
+                    records: vec![record::encode_schema(&value)],
                 }
         );
+        // The decision changed nothing: the state moves when the record is
+        // read back.
+        assert!(s.state().versions("s", false).is_none());
+        assert!(s.applied() == LogOffset(0));
+        s.apply(LogOffset(0), &written.records[0]);
         assert!(s.applied() == LogOffset(1));
         assert!(s.record_count() == 1);
         assert!(s.state().versions("s", false) == Some(vec![SchemaVersion(1)]));
-        let appended = s.take_appended();
-        assert!(appended.len() == 1);
-        assert!(appended[0].0 == LogOffset(0));
-        assert!(
-            SchemaRecord::decode(&appended[0].1)
-                == SchemaRecord::Schema(
-                    record::SchemaKey::new("s", SchemaVersion(1)),
-                    SchemaValue {
-                        subject: "s".into(),
-                        version: SchemaVersion(1),
-                        id: SchemaId(1),
-                        schema_type: None,
-                        references: vec![],
-                        schema: av("A"),
-                        deleted: false
-                    }
-                )
-        );
-        assert!(s.take_appended().is_empty());
         // Registering the same schema again writes nothing.
         let again = s.register(request("s", &av("A"))).unwrap();
-        assert!(again.value == written.value);
-        assert!(s.record_count() == 1);
+        assert!(again == Written::nothing(written.value));
     }
 
     #[test]
     fn the_state_is_the_replay_of_the_log() {
-        let mut s = service();
-        s.register(request("s", &av("A"))).unwrap();
-        s.register(request("s", &av("B"))).unwrap();
-        s.set_compat(Some("s"), "FULL").unwrap();
-        s.set_mode(Some("t"), "READONLY", false).unwrap();
-        s.soft_delete_version("s", SchemaVersion(1)).unwrap();
-        let records: Vec<RawRecord> = s.store().records().to_vec();
-        let mut replayed = RegistryService::new(SchemaLog::new(), "BACKWARD", "READWRITE");
-        assert!(replayed.restore(records) == 5);
-        assert!(replayed.state() == s.state());
-        assert!(replayed.take_appended().is_empty());
+        let mut s = Loopback::new();
+        s.commit(s.register(request("s", &av("A")))).unwrap();
+        s.commit(s.register(request("s", &av("B")))).unwrap();
+        s.commit(s.set_compat(Some("s"), "FULL")).unwrap();
+        s.commit(s.set_mode(Some("t"), "READONLY", false)).unwrap();
+        s.commit(s.soft_delete_version("s", SchemaVersion(1)))
+            .unwrap();
+        let mut replayed = RegistryService::new("BACKWARD", "READWRITE");
+        for (offset, record) in (0..).map(LogOffset).zip(&s.log) {
+            replayed.apply(offset, record);
+        }
+        assert!(replayed == s.service);
+        assert!(replayed.record_count() == 5);
         assert!(replayed.state().versions("s", false) == Some(vec![SchemaVersion(2)]));
         assert!(replayed.state().subject_compat("s") == Some("FULL"));
         assert!(replayed.state().effective_mode("t") == "READONLY");
@@ -718,41 +676,41 @@ mod tests {
 
     #[test]
     fn incompatible_and_invalid_schemas_write_nothing() {
-        let mut s = service();
+        let mut s = Loopback::new();
         let base = r#"{"type":"record","name":"U","fields":[{"name":"id","type":"int"}]}"#;
         let bad = r#"{"type":"record","name":"U","fields":[{"name":"id","type":"int"},{"name":"x","type":"int"}]}"#;
-        s.register(request("s", base)).unwrap();
+        s.commit(s.register(request("s", base))).unwrap();
         let error = s.register(request("s", bad)).unwrap_err();
         assert!(matches!(error, RegistryError::Incompatible { .. }));
         assert!(s.register(request("s", "{nope")).unwrap_err().error_code() == 42201);
-        assert!(s.record_count() == 1);
-        s.set_compat(Some("s"), "NONE").unwrap();
-        assert!(s.register(request("s", bad)).unwrap().value.version == SchemaVersion(2));
+        assert!(s.log.len() == 1);
+        s.commit(s.set_compat(Some("s"), "NONE")).unwrap();
+        assert!(s.commit(s.register(request("s", bad))).unwrap().version == SchemaVersion(2));
     }
 
     #[test]
     fn modes_gate_writes_and_import_takes_client_ids() {
-        let mut s = service();
-        s.register(request("s", &av("A"))).unwrap();
+        let mut s = Loopback::new();
+        s.commit(s.register(request("s", &av("A")))).unwrap();
         assert!(s.set_mode(None, "IMPORT", false).unwrap_err().error_code() == 42205);
         assert!(s.set_mode(None, "SIDEWAYS", false) == Err(RegistryError::InvalidMode));
-        s.set_mode(Some("s"), "READONLY", false).unwrap();
+        s.commit(s.set_mode(Some("s"), "READONLY", false)).unwrap();
         assert!(s.register(request("s", &av("B"))).unwrap_err().error_code() == 42205);
         assert!(s.soft_delete_subject("s").unwrap_err().error_code() == 42205);
         assert!(s.set_compat(Some("s"), "FULL").unwrap_err().error_code() == 42205);
-        assert!(s.clear_subject_mode("s").value == Some("READONLY".to_string()));
-        assert!(s.clear_subject_mode("s").value.is_none());
-        s.set_mode(None, "IMPORT", true).unwrap();
+        assert!(s.commit(Ok(s.clear_subject_mode("s"))) == Ok(Some("READONLY".to_string())));
+        assert!(s.clear_subject_mode("s") == Written::nothing(None));
+        s.commit(s.set_mode(None, "IMPORT", true)).unwrap();
         assert!(s.register(request("t", &av("T"))).unwrap_err().error_code() == 42205);
         let imported = s
-            .register(RegisterRequest {
+            .commit(s.register(RegisterRequest {
                 import_id: Some(SchemaId(42)),
                 import_version: Some(SchemaVersion(7)),
                 ..request("t", &av("T"))
-            })
+            }))
             .unwrap();
         assert!(
-            imported.value
+            imported
                 == Registered {
                     id: SchemaId(42),
                     version: SchemaVersion(7)
@@ -766,40 +724,29 @@ mod tests {
             }) == Err(RegistryError::SchemaIdConflict(SchemaId(42)))
         );
         let next = s
-            .register(RegisterRequest {
+            .commit(s.register(RegisterRequest {
                 import_id: Some(SchemaId(43)),
                 import_version: None,
                 ..request("t", &av("T2"))
-            })
+            }))
             .unwrap();
-        assert!(next.value.version == SchemaVersion(8));
+        assert!(next.version == SchemaVersion(8));
     }
 
     #[test]
     fn deletes_follow_the_soft_then_permanent_protocol() {
-        let mut s = service();
-        s.register(request("s", &av("A"))).unwrap();
-        s.register(request("s", &av("B"))).unwrap();
-        s.set_compat(Some("s"), "FULL").unwrap();
-        assert!(
-            s.permanent_delete_version("s", SchemaVersion(1))
-                .unwrap_err()
-                .error_code()
-                == 40407
-        );
-        assert!(
-            s.soft_delete_version("s", SchemaVersion(9))
-                .unwrap_err()
-                .error_code()
-                == 40402
-        );
-        assert!(
-            s.soft_delete_version("nope", SchemaVersion(1))
-                .unwrap_err()
-                .error_code()
-                == 40401
-        );
-        assert!(s.soft_delete_version("s", SchemaVersion(1)).unwrap().value == SchemaVersion(1));
+        let mut s = Loopback::new();
+        s.commit(s.register(request("s", &av("A")))).unwrap();
+        s.commit(s.register(request("s", &av("B")))).unwrap();
+        s.commit(s.set_compat(Some("s"), "FULL")).unwrap();
+        let refused = [
+            s.permanent_delete_version("s", SchemaVersion(1)),
+            s.soft_delete_version("s", SchemaVersion(9)),
+            s.soft_delete_version("nope", SchemaVersion(1)),
+        ]
+        .map(|r| r.unwrap_err().error_code());
+        assert!(refused == [40407, 40402, 40401]);
+        assert!(s.commit(s.soft_delete_version("s", SchemaVersion(1))) == Ok(SchemaVersion(1)));
         assert!(
             s.soft_delete_version("s", SchemaVersion(1))
                 .unwrap_err()
@@ -807,43 +754,45 @@ mod tests {
                 == 40402
         );
         assert!(
-            s.permanent_delete_version("s", SchemaVersion(1))
-                .unwrap()
-                .value
-                == SchemaVersion(1)
+            s.commit(s.permanent_delete_version("s", SchemaVersion(1))) == Ok(SchemaVersion(1))
         );
         assert!(s.permanent_delete_subject("s").unwrap_err().error_code() == 40405);
-        assert!(s.soft_delete_subject("s").unwrap().value == vec![SchemaVersion(2)]);
+        assert!(s.commit(s.soft_delete_subject("s")) == Ok(vec![SchemaVersion(2)]));
         assert!(s.soft_delete_subject("s").unwrap_err().error_code() == 40404);
         assert!(s.soft_delete_subject("nope").unwrap_err().error_code() == 40401);
         assert!(s.state().subjects(false).is_empty());
-        assert!(s.permanent_delete_subject("s").unwrap().value == vec![SchemaVersion(2)]);
+        assert!(s.commit(s.permanent_delete_subject("s")) == Ok(vec![SchemaVersion(2)]));
         assert!(s.state().subjects(true).is_empty());
         assert!(s.state().subject_compat("s").is_none());
         // The version numbers are not reused after a permanent delete.
-        assert!(s.register(request("s", &av("C"))).unwrap().value.version == SchemaVersion(3));
+        assert!(
+            s.commit(s.register(request("s", &av("C"))))
+                .unwrap()
+                .version
+                == SchemaVersion(3)
+        );
     }
 
     #[test]
     fn references_block_deletes_of_their_targets() {
-        let mut s = service();
-        s.register(request(
+        let mut s = Loopback::new();
+        s.commit(s.register(request(
             "base",
             r#"{"type":"record","name":"Base","fields":[]}"#,
-        ))
+        )))
         .unwrap();
         let reference = SchemaReference {
             name: "Base".into(),
             subject: "base".into(),
             version: SchemaVersion(1),
         };
-        s.register(RegisterRequest {
+        s.commit(s.register(RegisterRequest {
             references: std::slice::from_ref(&reference),
             ..request(
                 "dep",
                 r#"{"type":"record","name":"Dep","fields":[{"name":"b","type":"Base"}]}"#,
             )
-        })
+        }))
         .unwrap();
         assert!(
             s.soft_delete_version("base", SchemaVersion(1))
@@ -852,11 +801,11 @@ mod tests {
                 == 42206
         );
         assert!(s.soft_delete_subject("base").unwrap_err().error_code() == 42206);
-        s.soft_delete_subject("dep").unwrap();
-        assert!(s.soft_delete_subject("base").unwrap().value == vec![SchemaVersion(1)]);
+        s.commit(s.soft_delete_subject("dep")).unwrap();
+        assert!(s.commit(s.soft_delete_subject("base")) == Ok(vec![SchemaVersion(1)]));
         assert!(s.permanent_delete_subject("base").unwrap_err().error_code() == 42206);
-        s.permanent_delete_subject("dep").unwrap();
-        assert!(s.permanent_delete_subject("base").unwrap().value == vec![SchemaVersion(1)]);
+        s.commit(s.permanent_delete_subject("dep")).unwrap();
+        assert!(s.commit(s.permanent_delete_subject("base")) == Ok(vec![SchemaVersion(1)]));
         let missing = s.register(RegisterRequest {
             references: std::slice::from_ref(&reference),
             ..request("dep", &av("Dep"))
@@ -866,38 +815,44 @@ mod tests {
 
     #[test]
     fn levels_can_be_set_and_cleared() {
-        let mut s = service();
-        assert!(s.delete_subject_compat("s").unwrap().value.is_none());
-        s.set_compat(None, "FORWARD").unwrap();
-        s.set_compat(Some("s"), "NONE").unwrap();
+        let mut s = Loopback::new();
+        assert!(s.delete_subject_compat("s") == Ok(Written::nothing(None)));
+        s.commit(s.set_compat(None, "FORWARD")).unwrap();
+        s.commit(s.set_compat(Some("s"), "NONE")).unwrap();
         assert!(s.state().global_compat() == "FORWARD");
         assert!(s.state().subject_compat("s") == Some("NONE"));
-        assert!(s.delete_subject_compat("s").unwrap().value == Some("NONE".to_string()));
+        assert!(s.commit(s.delete_subject_compat("s")) == Ok(Some("NONE".to_string())));
         assert!(s.state().subject_compat("s").is_none());
-        assert!(s.delete_global_compat().unwrap().value == "FORWARD");
+        assert!(s.commit(s.delete_global_compat()) == Ok("FORWARD".to_string()));
         assert!(s.state().global_compat() == "BACKWARD");
-        s.set_mode(None, "READONLY", false).unwrap();
+        s.commit(s.set_mode(None, "READONLY", false)).unwrap();
         assert!(s.delete_global_compat().unwrap_err().error_code() == 42205);
-        assert!(s.clear_global_mode().value == "READONLY");
+        assert!(s.commit(Ok(s.clear_global_mode())) == Ok("READONLY".to_string()));
         assert!(s.state().global_mode() == "READWRITE");
     }
 
     #[test]
     fn foreign_records_are_counted_not_applied() {
-        let mut log = SchemaLog::new();
-        log.append(RawRecord {
-            key: bytes::Bytes::from_static(br#"{"keytype":"CONTEXT","magic":0}"#),
-            value: None,
-        });
-        log.append(RawRecord {
-            key: bytes::Bytes::from_static(b"garbage"),
-            value: None,
-        });
-        log.append(record::encode_config(None, "FULL"));
-        let s = RegistryService::new(log, "BACKWARD", "READWRITE");
+        let mut s = RegistryService::new("BACKWARD", "READWRITE");
+        let records = [
+            RawRecord {
+                key: bytes::Bytes::from_static(br#"{"keytype":"CONTEXT","magic":0}"#),
+                value: None,
+            },
+            RawRecord {
+                key: bytes::Bytes::from_static(b"garbage"),
+                value: None,
+            },
+            record::encode_noop(),
+            record::encode_config(None, "FULL"),
+        ];
+        for (offset, record) in (0..).map(LogOffset).zip(&records) {
+            s.apply(offset, record);
+        }
         assert!(s.unknown_records() == 1);
         assert!(s.undecodable_records() == 1);
         assert!(s.state().global_compat() == "FULL");
-        assert!(s.applied() == LogOffset(3));
+        assert!(s.applied() == LogOffset(4));
+        assert!(s.record_count() == 4);
     }
 }

@@ -2,8 +2,9 @@
 //! [`RegistryService`].
 //!
 //! Routes and error codes follow Confluent Schema Registry. A mutation's
-//! response carries the offset of the record it wrote, so the node can hold
-//! the response until the record has been read back.
+//! outcome carries the records it must write and its [`WriteOp`]; the node
+//! writes them through the Kafka store and sends the response only once they
+//! have been read back, or the operation's store error when the write fails.
 
 use serde_json::{Value, json};
 
@@ -12,32 +13,140 @@ use super::{
     error::RegistryError,
     format::{self, SchemaType},
     http::{HttpRequest, HttpResponse},
-    ids::{LogOffset, SchemaId, SchemaVersion},
-    log::SchemaStore,
-    record::SchemaReference,
+    ids::{SchemaId, SchemaVersion},
+    kafkastore::StoreError,
+    record::{RawRecord, SchemaReference},
     service::{RegisterRequest, RegistryService, Written},
     store::StoreState,
 };
 
-/// A response and, for a mutation, the record offset it must wait for.
+/// The REST operations that write to `_schemas`, each as the Confluent
+/// resource that serves it names its store failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteOp {
+    /// `POST /subjects/{subject}/versions`.
+    Register,
+    /// `DELETE /subjects/{subject}/versions/{version}`.
+    DeleteVersion,
+    /// `DELETE /subjects/{subject}`.
+    DeleteSubject { subject: String },
+    /// `PUT /config` and `PUT /config/{subject}`.
+    UpdateConfig,
+    /// `DELETE /config` and `DELETE /config/{subject}`.
+    DeleteConfig,
+    /// `PUT /mode` and `PUT /mode/{subject}`.
+    UpdateMode,
+    /// `DELETE /mode` and `DELETE /mode/{subject}`.
+    DeleteMode,
+}
+
+impl WriteOp {
+    /// A short name for the inspector and the timeline.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Register => "register",
+            Self::DeleteVersion => "delete_version",
+            Self::DeleteSubject { .. } => "delete_subject",
+            Self::UpdateConfig => "update_config",
+            Self::DeleteConfig => "delete_config",
+            Self::UpdateMode => "update_mode",
+            Self::DeleteMode => "delete_mode",
+        }
+    }
+
+    /// The error the REST resource answers when the store fails the write:
+    /// a `StoreTimeoutException` becomes 50002 where the registry keeps it
+    /// apart, and 50001 where it catches every `StoreException` alike; a
+    /// subject delete reports any other store failure as a plain 500.
+    #[must_use]
+    pub fn failure(&self, error: &StoreError) -> RegistryError {
+        let timed_out = matches!(error, StoreError::Timeout(_));
+        match self {
+            Self::Register if timed_out => {
+                RegistryError::OperationTimeout("Register operation timed out".to_string())
+            }
+            Self::Register => RegistryError::Store(
+                "Register schema operation failed while writing to the backend store".to_string(),
+            ),
+            Self::DeleteVersion if timed_out => RegistryError::OperationTimeout(
+                "Delete Schema Version operation timed out".to_string(),
+            ),
+            Self::DeleteVersion => RegistryError::Store(
+                "Delete Schema Version operation failed while writing to the backend store"
+                    .to_string(),
+            ),
+            Self::DeleteSubject { .. } if timed_out => {
+                RegistryError::OperationTimeout("Delete subject operation timed out".to_string())
+            }
+            Self::DeleteSubject { subject } => {
+                RegistryError::Internal(format!("Error while deleting the subject {subject}"))
+            }
+            Self::UpdateConfig => {
+                RegistryError::Store("Failed to update compatibility level".to_string())
+            }
+            Self::DeleteConfig => {
+                RegistryError::Store("Failed to delete compatibility level".to_string())
+            }
+            Self::UpdateMode if timed_out => {
+                RegistryError::OperationTimeout("Update mode operation timed out".to_string())
+            }
+            Self::UpdateMode => RegistryError::Store("Failed to update mode".to_string()),
+            Self::DeleteMode => RegistryError::Store("Failed to delete mode".to_string()),
+        }
+    }
+}
+
+/// The operation a request performs when it may write, or `None` for a
+/// request that only reads: a lookup, a listing, a compatibility check.
+#[must_use]
+pub fn write_op(req: &HttpRequest) -> Option<WriteOp> {
+    let segments = req.segments();
+    let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
+    match (req.method.as_str(), parts.as_slice()) {
+        ("POST", ["subjects", _, "versions"]) => Some(WriteOp::Register),
+        ("DELETE", ["subjects", _, "versions", _]) => Some(WriteOp::DeleteVersion),
+        ("DELETE", ["subjects", subject]) => Some(WriteOp::DeleteSubject {
+            subject: (*subject).to_string(),
+        }),
+        ("PUT", ["config"] | ["config", _]) => Some(WriteOp::UpdateConfig),
+        ("DELETE", ["config"] | ["config", _]) => Some(WriteOp::DeleteConfig),
+        ("PUT", ["mode"] | ["mode", _]) => Some(WriteOp::UpdateMode),
+        ("DELETE", ["mode"] | ["mode", _]) => Some(WriteOp::DeleteMode),
+        _ => None,
+    }
+}
+
+/// The records a mutation writes, and its operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Write {
+    pub op: WriteOp,
+    pub records: Vec<RawRecord>,
+}
+
+/// A response and, for a mutation that writes, what it writes. The
+/// response of a write goes out only once the write succeeded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     pub response: HttpResponse,
-    pub wait_for: Option<LogOffset>,
+    pub write: Option<Write>,
 }
 
 impl Outcome {
     fn now(response: HttpResponse) -> Self {
         Self {
             response,
-            wait_for: None,
+            write: None,
         }
     }
 
-    fn after<T>(written: &Written<T>, response: HttpResponse) -> Self {
+    fn after<T>(op: WriteOp, written: Written<T>, response: HttpResponse) -> Self {
         Self {
             response,
-            wait_for: written.offset,
+            write: (!written.records.is_empty()).then_some(Write {
+                op,
+                records: written.records,
+            }),
         }
     }
 }
@@ -162,17 +271,14 @@ fn version_json(
 }
 
 /// Serve one request.
-pub fn handle<S: SchemaStore>(service: &mut RegistryService<S>, req: &HttpRequest) -> Outcome {
+pub fn handle(service: &RegistryService, req: &HttpRequest) -> Outcome {
     match route(service, req) {
         Ok(outcome) => outcome,
         Err(error) => Outcome::now(error.to_response()),
     }
 }
 
-fn route<S: SchemaStore>(
-    service: &mut RegistryService<S>,
-    req: &HttpRequest,
-) -> Result<Outcome, RegistryError> {
+fn route(service: &RegistryService, req: &HttpRequest) -> Result<Outcome, RegistryError> {
     let segments = req.segments();
     let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
     let method = req.method.as_str();
@@ -200,8 +306,8 @@ fn route<S: SchemaStore>(
 }
 
 /// The `/subjects/...` routes.
-fn route_subjects<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn route_subjects(
+    service: &RegistryService,
     req: &HttpRequest,
     parts: &[&str],
 ) -> Result<Outcome, RegistryError> {
@@ -246,8 +352,8 @@ fn route_subjects<S: SchemaStore>(
 }
 
 /// The `/schemas/...` routes.
-fn route_schemas<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn route_schemas(
+    service: &RegistryService,
     req: &HttpRequest,
     parts: &[&str],
 ) -> Result<Outcome, RegistryError> {
@@ -349,8 +455,8 @@ fn effective_schema(
     format::normalize(body.ty, &body.schema, &refs)
 }
 
-fn lookup<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn lookup(
+    service: &RegistryService,
     subject: &str,
     req: &HttpRequest,
 ) -> Result<Outcome, RegistryError> {
@@ -386,8 +492,8 @@ fn lookup<S: SchemaStore>(
     ))))
 }
 
-fn delete_subject<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn delete_subject(
+    service: &RegistryService,
     subject: &str,
     req: &HttpRequest,
 ) -> Result<Outcome, RegistryError> {
@@ -396,7 +502,11 @@ fn delete_subject<S: SchemaStore>(
     } else {
         service.soft_delete_subject(subject)?
     };
-    Ok(Outcome::after(&written, HttpResponse::ok(&written.value)))
+    let response = HttpResponse::ok(&written.value);
+    let op = WriteOp::DeleteSubject {
+        subject: subject.to_string(),
+    };
+    Ok(Outcome::after(op, written, response))
 }
 
 // ---- versions ------------------------------------------------------------------------
@@ -419,8 +529,8 @@ fn list_versions(
     Ok(Outcome::now(HttpResponse::ok(&versions)))
 }
 
-fn register<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn register(
+    service: &RegistryService,
     subject: &str,
     req: &HttpRequest,
 ) -> Result<Outcome, RegistryError> {
@@ -434,10 +544,21 @@ fn register<S: SchemaStore>(
         import_id: body.id,
         import_version: body.version,
     })?;
-    Ok(Outcome::after(
-        &written,
-        HttpResponse::ok(&json!({ "id": written.value.id })),
-    ))
+    let response = HttpResponse::ok(&json!({ "id": written.value.id }));
+    Ok(Outcome::after(WriteOp::Register, written, response))
+}
+
+/// The answer to a registration of a schema the subject already holds,
+/// which writes nothing: Confluent's `registerOrForward` looks the schema up
+/// before it takes the write lock, so this answer never waits for another
+/// write. `None` for any other request.
+#[must_use]
+pub fn registered_already(service: &RegistryService, req: &HttpRequest) -> Option<HttpResponse> {
+    if write_op(req) != Some(WriteOp::Register) {
+        return None;
+    }
+    let outcome = handle(service, req);
+    (outcome.write.is_none() && outcome.response.status == 200).then_some(outcome.response)
 }
 
 fn find_version(
@@ -472,8 +593,8 @@ fn get_version(
     )))
 }
 
-fn delete_version<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn delete_version(
+    service: &RegistryService,
     subject: &str,
     version: &str,
     req: &HttpRequest,
@@ -501,7 +622,8 @@ fn delete_version<S: SchemaStore>(
     } else {
         service.soft_delete_version(subject, resolved)?
     };
-    Ok(Outcome::after(&written, HttpResponse::ok(&written.value)))
+    let response = HttpResponse::ok(&written.value);
+    Ok(Outcome::after(WriteOp::DeleteVersion, written, response))
 }
 
 // ---- schemas ----------------------------------------------------------------------------
@@ -561,8 +683,8 @@ fn list_schemas(state: &StoreState, req: &HttpRequest) -> Outcome {
 
 // ---- config and mode --------------------------------------------------------------------
 
-fn config<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn config(
+    service: &RegistryService,
     subject: Option<&str>,
     req: &HttpRequest,
 ) -> Result<Outcome, RegistryError> {
@@ -594,30 +716,30 @@ fn config<S: SchemaStore>(
                 .and_then(compat::CompatibilityLevel::parse)
                 .ok_or(RegistryError::InvalidCompatibilityLevel)?;
             let written = service.set_compat(subject, level.as_str())?;
-            Ok(Outcome::after(
-                &written,
-                HttpResponse::ok(&json!({ "compatibility": level.as_str() })),
-            ))
+            let response = HttpResponse::ok(&json!({ "compatibility": level.as_str() }));
+            Ok(Outcome::after(WriteOp::UpdateConfig, written, response))
         }
         "DELETE" => match subject {
             None => {
                 let written = service.delete_global_compat()?;
-                Ok(Outcome::after(&written, HttpResponse::ok(&written.value)))
+                let response = HttpResponse::ok(&written.value);
+                Ok(Outcome::after(WriteOp::DeleteConfig, written, response))
             }
             Some(s) => {
                 let written = service.delete_subject_compat(s)?;
                 let Some(level) = written.value.clone() else {
                     return Err(RegistryError::SubjectNotFound(s.to_string()));
                 };
-                Ok(Outcome::after(&written, HttpResponse::ok(&level)))
+                let response = HttpResponse::ok(&level);
+                Ok(Outcome::after(WriteOp::DeleteConfig, written, response))
             }
         },
         _ => Err(RegistryError::MethodNotAllowed),
     }
 }
 
-fn mode<S: SchemaStore>(
-    service: &mut RegistryService<S>,
+fn mode(
+    service: &RegistryService,
     subject: Option<&str>,
     req: &HttpRequest,
 ) -> Result<Outcome, RegistryError> {
@@ -643,22 +765,22 @@ fn mode<S: SchemaStore>(
                 .map(str::to_ascii_uppercase)
                 .ok_or(RegistryError::InvalidMode)?;
             let written = service.set_mode(subject, &mode, req.flag("force"))?;
-            Ok(Outcome::after(
-                &written,
-                HttpResponse::ok(&json!({ "mode": mode })),
-            ))
+            let response = HttpResponse::ok(&json!({ "mode": mode }));
+            Ok(Outcome::after(WriteOp::UpdateMode, written, response))
         }
         "DELETE" => match subject {
             None => {
                 let written = service.clear_global_mode();
-                Ok(Outcome::after(&written, HttpResponse::ok(&written.value)))
+                let response = HttpResponse::ok(&written.value);
+                Ok(Outcome::after(WriteOp::DeleteMode, written, response))
             }
             Some(s) => {
                 let written = service.clear_subject_mode(s);
                 let Some(mode) = written.value.clone() else {
                     return Err(RegistryError::SubjectNotFound(s.to_string()));
                 };
-                Ok(Outcome::after(&written, HttpResponse::ok(&mode)))
+                let response = HttpResponse::ok(&mode);
+                Ok(Outcome::after(WriteOp::DeleteMode, written, response))
             }
         },
         _ => Err(RegistryError::MethodNotAllowed),
@@ -703,12 +825,15 @@ mod tests {
     use assert2::assert;
 
     use super::*;
-    use crate::lab::registry::log::SchemaLog;
+    use crate::lab::registry::{
+        ids::LogOffset,
+        record::{self, SchemaValue},
+    };
 
-    type Registry = RegistryService<SchemaLog>;
+    type Registry = RegistryService;
 
     fn registry() -> Registry {
-        RegistryService::new(SchemaLog::new(), "BACKWARD", "READWRITE")
+        RegistryService::new("BACKWARD", "READWRITE")
     }
 
     fn av(name: &str) -> String {
@@ -717,13 +842,27 @@ mod tests {
         )
     }
 
-    fn call(service: &mut Registry, method: &str, path: &str, body: Option<Value>) -> HttpResponse {
+    fn parsed(method: &str, path: &str, body: Option<Value>) -> HttpRequest {
         let mut req = HttpRequest::new(method, path);
         if let Some(body) = body {
             req = req.with_json(&body);
         }
-        let (req, _) = HttpRequest::parse(&req.encode()).unwrap();
-        handle(service, &req).response
+        HttpRequest::parse(&req.encode()).unwrap().0
+    }
+
+    /// Read the records an outcome writes back into the service, as a store
+    /// whose reader is never behind.
+    fn read_back(service: &mut Registry, outcome: &Outcome) {
+        for record in outcome.write.iter().flat_map(|w| &w.records) {
+            let offset = service.applied();
+            service.apply(offset, record);
+        }
+    }
+
+    fn call(service: &mut Registry, method: &str, path: &str, body: Option<Value>) -> HttpResponse {
+        let outcome = handle(service, &parsed(method, path, body));
+        read_back(service, &outcome);
+        outcome.response
     }
 
     fn register(service: &mut Registry, subject: &str, schema: &str) -> HttpResponse {
@@ -736,21 +875,52 @@ mod tests {
     }
 
     #[test]
+    fn a_registration_decides_its_record_and_changes_nothing_until_read_back() {
+        let mut s = registry();
+        register(&mut s, "orders-value", &av("Order"));
+        let outcome = handle(
+            &s,
+            &parsed(
+                "POST",
+                "/subjects/orders-value/versions",
+                Some(json!({ "schema": av("Order2") })),
+            ),
+        );
+        let value = SchemaValue {
+            subject: "orders-value".into(),
+            version: SchemaVersion(2),
+            id: SchemaId(2),
+            schema_type: None,
+            references: Vec::new(),
+            schema: av("Order2"),
+            deleted: false,
+        };
+        assert!(
+            outcome
+                == Outcome {
+                    response: HttpResponse::ok(&json!({ "id": 2 })),
+                    write: Some(Write {
+                        op: WriteOp::Register,
+                        records: vec![record::encode_schema(&value)],
+                    }),
+                }
+        );
+        assert!(s.applied() == LogOffset(1));
+        assert!(call(&mut s, "GET", "/schemas/ids/2", None).status == 404);
+        read_back(&mut s, &outcome);
+        assert!(s.applied() == LogOffset(2));
+        assert!(call(&mut s, "GET", "/schemas/ids/2", None).status == 200);
+    }
+
+    #[test]
     fn register_lookup_and_read_back() {
         let mut s = registry();
         let resp = register(&mut s, "orders-value", &av("Order"));
         assert!(resp.status == 200);
         assert!(resp.body_json() == Some(json!({ "id": 1 })));
-        let outcome = {
-            let (req, _) = HttpRequest::parse(
-                &HttpRequest::new("POST", "/subjects/orders-value/versions")
-                    .with_json(&json!({ "schema": av("Order2") }))
-                    .encode(),
-            )
-            .unwrap();
-            handle(&mut s, &req)
-        };
-        assert!(outcome.wait_for == Some(LogOffset(1)));
+        assert!(
+            register(&mut s, "orders-value", &av("Order2")).body_json() == Some(json!({ "id": 2 }))
+        );
         assert!(
             call(&mut s, "GET", "/subjects/orders-value/versions/1", None).body_json()
                 == Some(
@@ -1150,5 +1320,121 @@ mod tests {
             .unwrap();
         assert!(got["schemaType"] == "PROTOBUF");
         assert!(got["schema"] == "syntax = \"proto3\";\n\nmessage U {\n  int32 id = 1;\n}\n");
+    }
+
+    #[test]
+    fn requests_that_may_write_name_their_operation() {
+        let subject = |s: &str| WriteOp::DeleteSubject {
+            subject: s.to_string(),
+        };
+        for (method, path, op) in [
+            ("POST", "/subjects/s/versions", Some(WriteOp::Register)),
+            ("POST", "/subjects/s", None),
+            ("GET", "/subjects/s/versions", None),
+            (
+                "DELETE",
+                "/subjects/s/versions/1",
+                Some(WriteOp::DeleteVersion),
+            ),
+            ("DELETE", "/subjects/a%2Fb", Some(subject("a/b"))),
+            ("PUT", "/config", Some(WriteOp::UpdateConfig)),
+            ("PUT", "/config/s", Some(WriteOp::UpdateConfig)),
+            ("DELETE", "/config/s", Some(WriteOp::DeleteConfig)),
+            ("GET", "/config", None),
+            ("PUT", "/mode/s", Some(WriteOp::UpdateMode)),
+            ("DELETE", "/mode", Some(WriteOp::DeleteMode)),
+            ("POST", "/compatibility/subjects/s/versions/latest", None),
+        ] {
+            assert!(
+                write_op(&HttpRequest::new(method, path)) == op,
+                "{method} {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn store_failures_are_worded_as_each_resource_words_them() {
+        let timeout = StoreError::Timeout("reader".into());
+        let failed = StoreError::Failed("ack".into());
+        let register_store = "Register schema operation failed while writing to the backend store";
+        let version_store =
+            "Delete Schema Version operation failed while writing to the backend store";
+        for (op, on_timeout, on_failure) in [
+            (
+                WriteOp::Register,
+                (50002, "Register operation timed out"),
+                (50001, register_store),
+            ),
+            (
+                WriteOp::DeleteVersion,
+                (50002, "Delete Schema Version operation timed out"),
+                (50001, version_store),
+            ),
+            (
+                WriteOp::DeleteSubject {
+                    subject: "orders".into(),
+                },
+                (50002, "Delete subject operation timed out"),
+                (500, "Error while deleting the subject orders"),
+            ),
+            (
+                WriteOp::UpdateConfig,
+                (50001, "Failed to update compatibility level"),
+                (50001, "Failed to update compatibility level"),
+            ),
+            (
+                WriteOp::DeleteConfig,
+                (50001, "Failed to delete compatibility level"),
+                (50001, "Failed to delete compatibility level"),
+            ),
+            (
+                WriteOp::UpdateMode,
+                (50002, "Update mode operation timed out"),
+                (50001, "Failed to update mode"),
+            ),
+            (
+                WriteOp::DeleteMode,
+                (50001, "Failed to delete mode"),
+                (50001, "Failed to delete mode"),
+            ),
+        ] {
+            for (error, (code, message)) in [(&timeout, on_timeout), (&failed, on_failure)] {
+                assert!(
+                    op.failure(error).to_response() == HttpResponse::error(500, code, message),
+                    "{op:?} {error:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_registration_the_subject_holds_is_answered_without_a_write() {
+        let mut s = registry();
+        register(&mut s, "s", &av("A"));
+        let again = parsed(
+            "POST",
+            "/subjects/s/versions",
+            Some(json!({ "schema": av("A") })),
+        );
+        assert!(registered_already(&s, &again) == Some(HttpResponse::ok(&json!({ "id": 1 }))));
+        for (method, path, body) in [
+            (
+                "POST",
+                "/subjects/s/versions",
+                Some(json!({ "schema": av("B") })),
+            ),
+            (
+                "POST",
+                "/subjects/s/versions",
+                Some(json!({ "schema": "{" })),
+            ),
+            ("POST", "/subjects/s", Some(json!({ "schema": av("A") }))),
+            ("DELETE", "/subjects/s", None),
+        ] {
+            assert!(
+                registered_already(&s, &parsed(method, path, body)).is_none(),
+                "{method} {path}"
+            );
+        }
     }
 }
