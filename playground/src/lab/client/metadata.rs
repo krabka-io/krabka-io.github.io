@@ -84,6 +84,32 @@ pub fn uuid_hex(id: Uuid) -> String {
     uuid::Uuid::from_bytes(id.0).simple().to_string()
 }
 
+/// Whether `response` tells `cache` something about a partition's
+/// leadership it did not know: a partition the cache lacks, a topic whose id
+/// changed, a partition without a leader epoch, or a higher leader epoch.
+/// These are the cases in which Kafka's `Metadata.updateLatestMetadata`
+/// starts its count of equivalent responses over; any other answer is
+/// equivalent to the last one.
+#[must_use]
+pub fn moves_epochs(cache: &MetadataCache, response: &MetadataResponse) -> bool {
+    response
+        .topics
+        .iter()
+        .filter(|topic| topic.error_code == codes::NONE)
+        .any(|topic| {
+            let cached = topic
+                .name
+                .as_deref()
+                .and_then(|name| cache.topics.get(name))
+                .filter(|t| topic.topic_id == Uuid::ZERO || t.topic_id == topic.topic_id);
+            topic.partitions.iter().any(|p| {
+                cached
+                    .and_then(|t| t.partitions.get(&p.partition_index))
+                    .is_none_or(|old| p.leader_epoch < 0 || p.leader_epoch > old.leader_epoch)
+            })
+        })
+}
+
 impl MetadataCache {
     /// Apply a response. `full` says the request asked for every topic, so a
     /// topic the response does not name is gone.

@@ -1,5 +1,6 @@
 //! The client against the fake broker: negotiation, framing, routing,
-//! coordinator lookups, timeouts and reconnection.
+//! coordinator lookups, timeouts and reconnection, and the metadata refresh
+//! and its backoff.
 
 use std::rc::Rc;
 
@@ -26,11 +27,11 @@ use super::{
     VersionTable,
     fake_broker::ClusterState,
     request::{frame_request, response_header_version},
-    test_support::{Harness, client, cluster},
+    test_support::{Driven, Harness, client, cluster},
 };
 use crate::lab::{
     codes,
-    net::{Endpoint, NodeId},
+    net::{Endpoint, Millis, NodeId},
 };
 
 fn responses(events: Vec<ClientEvent>) -> Vec<(RequestId, Result<Response, ClientError>)> {
@@ -550,7 +551,9 @@ fn an_unreachable_broker_times_out_the_setup_and_the_backoffs_double() {
         assert!(setup.contains(&took), "attempt {attempt}: took {took} ms");
         closed_at = h.now();
     }
-    // The request waited in the queue and expired at `request.timeout.ms`.
+    // The request waited in the queue and expires at `request.timeout.ms`,
+    // during the second attempt or after it, as the jitter falls.
+    assert!(h.run_until(|h| !responses_of(&h.events).is_empty(), 30_000));
     let results = responses(h.take_events());
     assert!(results.len() == 1);
     assert!(matches!(
@@ -632,4 +635,84 @@ fn close_fails_everything_pending() {
     );
     assert!(h.open_connections() == 0);
     let _ = Uuid::ZERO;
+}
+
+/// A `Metadata` request for `topics` by name, as the client sends it.
+fn metadata_for(topics: &[&str]) -> MetadataRequest {
+    MetadataRequest {
+        topics: Some(
+            topics
+                .iter()
+                .map(|name| MetadataRequestTopic {
+                    name: Some((*name).to_string()),
+                    ..Default::default()
+                })
+                .collect(),
+        ),
+        allow_auto_topic_creation: false,
+        ..Default::default()
+    }
+}
+
+/// The `Metadata` requests the brokers saw, with when each arrived.
+fn metadata_requests(h: &Harness<impl Driven>) -> Vec<(Millis, MetadataRequest)> {
+    h.seen(MetadataRequest::API_KEY)
+        .iter()
+        .map(|s| (s.at, s.decode()))
+        .collect()
+}
+
+#[test]
+fn a_topic_tracked_while_a_refresh_is_out_is_looked_up_after_it() {
+    // Kafka's `Metadata.update` leaves `needPartialUpdate` set when a topic
+    // was added after the answered request left (its `requestVersion` is
+    // older), so the new topic is looked up next.
+    let state = cluster(&[("a", 1), ("b", 1)]);
+    let mut c = client(&[1]);
+    c.add_topics(["a"]);
+    let mut h = Harness::new(c, Rc::clone(&state));
+    // `ApiVersions` answers at 10 ms; `Metadata` for `a` leaves then and
+    // is answered at 20 ms.
+    h.run_for(12);
+    h.with_client(|c, _| c.add_topics(["b"]));
+    assert!(h.run_until(|h| h.client.metadata().topics.contains_key("b"), 1_000));
+    let asked = metadata_requests(&h);
+    let requests: Vec<MetadataRequest> = asked.iter().map(|(_, r)| r.clone()).collect();
+    assert!(requests == vec![metadata_for(&["a"]), metadata_for(&["a", "b"])]);
+    // The second request waited `retry.backoff.ms` (100 ms, 20 % jitter)
+    // after the first answer, and reached the broker 5 ms later.
+    assert!((105..=145).contains(&asked[1].0));
+}
+
+#[test]
+fn metadata_refreshes_back_off_while_a_tracked_topic_stays_unknown() {
+    // Each answer that reports the topic unknown asks again (Kafka's
+    // `handleMetadataResponse` on an `InvalidMetadataException`), and each
+    // such answer moves no leader epoch, so the wait grows: Kafka's
+    // equivalent responses, `retry.backoff.ms` 100 ms doubling to
+    // `retry.backoff.max.ms` 1 s with 20 % jitter. Rows: the gap between
+    // two requests at the broker, which adds the 10 ms round trip.
+    let gaps = [90..=129, 170..=249, 330..=489, 650..=969, 810..=1_010];
+    let state = cluster(&[]);
+    let mut h = Harness::new(client(&[1]), Rc::clone(&state));
+    bootstrap(&mut h);
+    let t0 = h.now();
+    // A new topic is looked up at once, whatever the backoff.
+    h.with_client(|c, _| c.add_topics(["later"]));
+    let lookups = gaps.len() + 1;
+    assert!(h.run_until(|h| metadata_requests(h).len() > lookups, 5_000));
+    let asked: Vec<(Millis, MetadataRequest)> = metadata_requests(&h)[1..=lookups].to_vec();
+    assert!(asked[0].0 == t0 + 5);
+    assert!(asked.iter().all(|(_, r)| *r == metadata_for(&["later"])));
+    for (i, range) in gaps.iter().enumerate() {
+        let gap = asked[i + 1].0 - asked[i].0;
+        assert!(range.contains(&gap), "gap {i}: {gap} ms");
+    }
+    // Once the topic appears, the answer has what the client wants, and the
+    // client asks no more until the metadata ages.
+    state.borrow_mut().add_topic("later", 1, 1);
+    assert!(h.run_until(|h| h.client.metadata().topics.contains_key("later"), 2_000));
+    let seen = h.seen(MetadataRequest::API_KEY).len();
+    h.run_for(60_000);
+    assert!(h.seen(MetadataRequest::API_KEY).len() == seen);
 }

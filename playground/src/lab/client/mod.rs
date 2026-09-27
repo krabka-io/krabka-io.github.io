@@ -22,6 +22,18 @@
 //! `FindCoordinator` lookups started when a request needs one and cached per
 //! key.
 //!
+//! The metadata refresh keeps Kafka's `Metadata` bookkeeping. A request for
+//! a refresh (`requestUpdate`) is met by the next answer; a topic the client
+//! starts to track (`requestUpdateForNewTopics`) goes out at once and stays
+//! wanted until an answer to a request that named it arrives, so a topic
+//! asked for while a request is out is looked up after it. A tracked topic
+//! the answer reports with an error of the `InvalidMetadataException` class,
+//! such as `UNKNOWN_TOPIC_OR_PARTITION`, asks again, as
+//! `Metadata.handleMetadataResponse` does. Between requests the client waits
+//! `retry.backoff.ms`, doubling up to `retry.backoff.max.ms` with 20 %
+//! jitter for each answer in a row that moved no partition's leader epoch
+//! (Kafka's equivalent responses) and for each request in a row that failed.
+//!
 //! A node arms the deadline `on_tick` returns, or
 //! [`KafkaClient::next_deadline`] after it handed the client work. The
 //! deadline names only what a tick can act on, so a node never spins at one
@@ -282,6 +294,11 @@ pub struct ClientOptions {
     /// `retry.backoff.ms`: the wait before a failed lookup or metadata
     /// refresh is sent again. Default: 100.
     pub retry_backoff_ms: Millis,
+    /// `retry.backoff.max.ms`: the most the wait between metadata refreshes
+    /// grows to, doubling from `retry_backoff_ms` for each answer in a row
+    /// that brought nothing new and each request in a row that failed.
+    /// Default: 1 000.
+    pub retry_backoff_max_ms: Millis,
     /// `reconnect.backoff.ms`. Default: 50.
     pub reconnect_backoff_ms: Millis,
     /// `reconnect.backoff.max.ms`. Default: 1 000.
@@ -301,6 +318,7 @@ impl Default for ClientOptions {
             max_in_flight: 5,
             metadata_max_age_ms: 300_000,
             retry_backoff_ms: 100,
+            retry_backoff_max_ms: 1_000,
             reconnect_backoff_ms: 50,
             reconnect_backoff_max_ms: 1_000,
             software_name: "krabka-lab".to_string(),
@@ -316,18 +334,45 @@ struct Lookup {
     retry_at: Millis,
 }
 
-/// Where the metadata refresh stands.
+/// The `Metadata` request that is out.
+#[derive(Clone, Copy, Debug)]
+struct Sent {
+    /// It asked for every topic, so a topic its answer does not name is gone.
+    full: bool,
+    /// The `topics_version` it was built at: Kafka's request version.
+    topics_version: u64,
+}
+
+/// Where the metadata refresh stands: Kafka's `Metadata` bookkeeping.
 #[derive(Clone, Copy, Debug)]
 struct Refresh {
-    /// A `Metadata` request is out.
-    in_flight: bool,
-    /// The last request asked for every topic.
-    full: bool,
-    /// Something asked for a refresh.
+    /// The `Metadata` request that is out, if one is.
+    out: Option<Sent>,
+    /// Something asked for a refresh: Kafka's `needFullUpdate`. The next
+    /// answer clears it.
     needed: bool,
-    /// The earliest time the next request may go out: `retry.backoff.ms`
-    /// after the last answer.
+    /// Bumped each time the client starts to track a topic its cache lacks:
+    /// Kafka's `requestVersion`.
+    topics_version: u64,
+    /// A tracked topic waits for an answer to a request that named it:
+    /// Kafka's `needPartialUpdate`. An answer to a request built before the
+    /// topic was tracked leaves it set.
+    new_topics: bool,
+    /// Requests in a row that got no answer: Kafka's `attempts`.
+    failures: u32,
+    /// Answers in a row that moved no partition's leader epoch: Kafka's
+    /// `equivalentResponseCount`.
+    equivalent: u32,
+    /// The earliest time the next request may go out.
     next_at: Millis,
+}
+
+impl Refresh {
+    /// Whether something waits for a refresh: Kafka's
+    /// `Metadata.updateRequested`.
+    const fn requested(self) -> bool {
+        self.needed || self.new_topics
+    }
 }
 
 /// How a target resolved.
@@ -376,9 +421,12 @@ impl KafkaClient {
             next_request: 0,
             metadata: MetadataCache::default(),
             refresh: Refresh {
-                in_flight: false,
-                full: true,
+                out: None,
                 needed: true,
+                topics_version: 0,
+                new_topics: false,
+                failures: 0,
+                equivalent: 0,
                 next_at: 0,
             },
             topics: BTreeSet::new(),
@@ -426,11 +474,17 @@ impl KafkaClient {
         }
     }
 
-    /// Track `topic` from now on; a topic the cache does not hold yet asks
-    /// for a refresh, as Kafka's `Metadata.add` does for a new topic.
+    /// Track `topic` from now on. A topic the cache does not hold yet asks
+    /// for a refresh at once, without the backoff, and the refresh stays
+    /// wanted until an answer to a request that named the topic arrives:
+    /// Kafka's `requestUpdateForNewTopics`, which `ProducerMetadata.add`
+    /// calls for a new topic.
     fn track_topic(&mut self, topic: &str) {
         if self.topics.insert(topic.to_string()) && !self.metadata.topics.contains_key(topic) {
-            self.refresh.needed = true;
+            self.refresh.topics_version += 1;
+            self.refresh.new_topics = true;
+            self.refresh.equivalent = 0;
+            self.refresh.next_at = 0;
         }
     }
 
@@ -586,7 +640,7 @@ impl KafkaClient {
         }
         let now = ctx.now();
         self.expire_connections(ctx, &mut out);
-        self.expire_waiting(now, &mut out);
+        self.expire_waiting(ctx, &mut out);
         self.refresh_metadata_if_due(ctx, now);
         self.run_lookups(ctx);
         self.route_waiting(ctx);
@@ -598,7 +652,6 @@ impl KafkaClient {
     /// [`ClientError::Closed`].
     pub fn close(&mut self, ctx: &mut Ctx<'_>) {
         self.closed = true;
-        let now = ctx.now();
         let endpoints: Vec<Endpoint> = self.conns.keys().copied().collect();
         let mut out = Vec::new();
         for endpoint in endpoints {
@@ -609,11 +662,11 @@ impl KafkaClient {
                 .map(Connection::take_queue)
                 .unwrap_or_default();
             for request in queued {
-                self.fail(now, request, ClientError::Closed, &mut out);
+                self.fail(ctx, request, ClientError::Closed, &mut out);
             }
         }
         for request in std::mem::take(&mut self.waiting) {
-            self.fail(now, request, ClientError::Closed, &mut out);
+            self.fail(ctx, request, ClientError::Closed, &mut out);
         }
         self.pending_events.extend(out);
     }
@@ -790,7 +843,7 @@ impl KafkaClient {
                     body,
                 }),
             }),
-            Purpose::Metadata => self.on_metadata(ctx.now(), result, out),
+            Purpose::Metadata => self.on_metadata(ctx, result, out),
             Purpose::FindCoordinator(key) => self.on_coordinator(ctx.now(), key, result),
         }
     }
@@ -800,7 +853,7 @@ impl KafkaClient {
     /// wait for their retry.
     fn fail(
         &mut self,
-        now: Millis,
+        ctx: &mut Ctx<'_>,
         request: Outbound,
         error: ClientError,
         out: &mut Vec<ClientEvent>,
@@ -810,33 +863,79 @@ impl KafkaClient {
                 id: request.id,
                 result: Err(error),
             }),
-            Purpose::Metadata => self.on_metadata(now, Err(error), out),
-            Purpose::FindCoordinator(key) => self.on_coordinator(now, key, Err(error)),
+            Purpose::Metadata => self.on_metadata(ctx, Err(error), out),
+            Purpose::FindCoordinator(key) => self.on_coordinator(ctx.now(), key, Err(error)),
         }
     }
 
+    /// A `Metadata` request ended. An answer is Kafka's `Metadata.update`:
+    /// it meets the refresh asked for (`needFullUpdate`), but a topic
+    /// tracked after its request left stays wanted (`needPartialUpdate`),
+    /// and a tracked topic it reports with an invalid-metadata error asks
+    /// again. No answer is `failedUpdate`. Either way the next request waits
+    /// the backoff of `retry.backoff.ms`, doubling up to
+    /// `retry.backoff.max.ms` over the answers in a row that moved no leader
+    /// epoch, or over the failures in a row.
     fn on_metadata(
         &mut self,
-        now: Millis,
+        ctx: &mut Ctx<'_>,
         result: Result<Box<dyn Any>, ClientError>,
         out: &mut Vec<ClientEvent>,
     ) {
-        self.refresh.in_flight = false;
-        self.refresh.next_at = now + self.opts.retry_backoff_ms;
-        match result
+        let now = ctx.now();
+        let sent = self.refresh.out.take().unwrap_or(Sent {
+            full: true,
+            topics_version: self.refresh.topics_version,
+        });
+        let attempts = if let Some(response) = result
             .ok()
             .and_then(|b| b.downcast::<MetadataResponse>().ok())
         {
-            Some(response) => {
-                self.metadata.apply(&response, self.refresh.full, now);
-                self.refresh.needed = false;
-                for conn in self.conns.values_mut() {
-                    conn.set_broker_id(self.metadata.broker_at(conn.endpoint()));
-                }
-                out.push(ClientEvent::MetadataUpdated);
+            let progressed = metadata::moves_epochs(&self.metadata, &response);
+            self.metadata.apply(&response, sent.full, now);
+            self.refresh.needed = self.asks_again(&response);
+            self.refresh.new_topics = sent.topics_version < self.refresh.topics_version;
+            self.refresh.failures = 0;
+            self.refresh.equivalent = if progressed {
+                0
+            } else {
+                self.refresh.equivalent.saturating_add(1)
+            };
+            for conn in self.conns.values_mut() {
+                conn.set_broker_id(self.metadata.broker_at(conn.endpoint()));
             }
-            None => self.refresh.needed = true,
-        }
+            out.push(ClientEvent::MetadataUpdated);
+            self.refresh.equivalent.saturating_sub(1)
+        } else {
+            self.refresh.needed = true;
+            self.refresh.failures = self.refresh.failures.saturating_add(1);
+            self.refresh.equivalent = 0;
+            self.refresh.failures - 1
+        };
+        self.refresh.next_at = now
+            + retry::exponential_backoff(
+                self.opts.retry_backoff_ms,
+                self.opts.retry_backoff_max_ms,
+                attempts,
+                ctx.rand(400),
+            );
+    }
+
+    /// Whether an answer asks for another refresh: a tracked topic, or a
+    /// partition of one, carries an error of the `InvalidMetadataException`
+    /// class, as in Kafka's `Metadata.handleMetadataResponse`. A client that
+    /// tracks no topic asks for every topic, and keeps no topic the way a
+    /// producer or a consumer does, so its answers never ask again.
+    fn asks_again(&self, response: &MetadataResponse) -> bool {
+        let invalid = |code: i16| retry::class(code) == retry::ErrorClass::InvalidMetadata;
+        response.topics.iter().any(|topic| {
+            topic
+                .name
+                .as_ref()
+                .is_some_and(|name| self.topics.contains(name))
+                && (invalid(topic.error_code)
+                    || topic.partitions.iter().any(|p| invalid(p.error_code)))
+        })
     }
 
     fn on_coordinator(
@@ -963,11 +1062,12 @@ impl KafkaClient {
         for request in expired_queued {
             self.timeouts += 1;
             let api = request.api.name;
-            self.fail(now, request, ClientError::Timeout { api, timeout_ms }, out);
+            self.fail(ctx, request, ClientError::Timeout { api, timeout_ms }, out);
         }
     }
 
-    fn expire_waiting(&mut self, now: Millis, out: &mut Vec<ClientEvent>) {
+    fn expire_waiting(&mut self, ctx: &mut Ctx<'_>, out: &mut Vec<ClientEvent>) {
+        let now = ctx.now();
         let (expired, waiting): (Vec<Outbound>, Vec<Outbound>) = std::mem::take(&mut self.waiting)
             .into_iter()
             .partition(|r| now >= r.deadline);
@@ -976,21 +1076,28 @@ impl KafkaClient {
         for request in expired {
             self.timeouts += 1;
             let api = request.api.name;
-            self.fail(now, request, ClientError::Timeout { api, timeout_ms }, out);
+            self.fail(ctx, request, ClientError::Timeout { api, timeout_ms }, out);
         }
     }
 
     // ---- metadata and coordinators ---------------------------------------------
 
+    /// Send a `Metadata` request when one is wanted and the backoff passed:
+    /// Kafka's `Metadata.timeToNextUpdate`.
     fn refresh_metadata_if_due(&mut self, ctx: &mut Ctx<'_>, now: Millis) {
-        if self.refresh.in_flight || now < self.refresh.next_at {
+        if self.refresh.out.is_some() || now < self.refresh.next_at {
             return;
         }
         let stale = self
             .metadata
             .age(now)
             .is_none_or(|age| age >= self.opts.metadata_max_age_ms);
-        if !(self.refresh.needed || stale) {
+        if stale {
+            // Kafka's `timeToAllowUpdate`: a refresh on expiry does not back
+            // off over equivalent answers.
+            self.refresh.equivalent = 0;
+        }
+        if !(self.refresh.requested() || stale) {
             return;
         }
         let full = self.topics.is_empty();
@@ -1016,8 +1123,10 @@ impl KafkaClient {
             now + self.opts.request_timeout_ms,
             false,
         );
-        self.refresh.in_flight = true;
-        self.refresh.full = full;
+        self.refresh.out = Some(Sent {
+            full,
+            topics_version: self.refresh.topics_version,
+        });
         self.route(ctx, out);
     }
 
@@ -1078,9 +1187,9 @@ impl KafkaClient {
     pub fn next_deadline(&self, now: Millis) -> Option<Millis> {
         let conns = self.conns.values().filter_map(Connection::next_deadline);
         let waiting = self.waiting.iter().map(|r| r.deadline);
-        let metadata = if self.refresh.in_flight {
+        let metadata = if self.refresh.out.is_some() {
             None
-        } else if self.refresh.needed || self.metadata.updated_at.is_none() {
+        } else if self.refresh.requested() || self.metadata.updated_at.is_none() {
             Some(self.refresh.next_at)
         } else {
             self.metadata
