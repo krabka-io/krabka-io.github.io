@@ -24,10 +24,10 @@ source "${src}/pins.env"
 mkdir -p "${work}"
 cd "${work}"
 
-echo "==> opam switch on the system OCaml"
+echo "==> opam switch on OCaml ${OCAML_VERSION}"
 export OPAMYES=1 OPAMCONFIRMLEVEL=unsafe-yes
 opam init --disable-sandboxing --bare -y --no-setup
-opam switch create default ocaml-system
+opam switch create default "ocaml-base-compiler.${OCAML_VERSION}"
 eval "$(opam env --switch=default --set-switch)"
 
 echo "==> OCaml libraries"

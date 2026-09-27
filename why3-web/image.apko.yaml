@@ -1,8 +1,10 @@
 # Base of the builder that compiles Why3 and Alt-Ergo to JavaScript.
 #
-# Wolfi supplies the OCaml 5.3 compiler, opam and dune; opam then builds the
-# pinned OCaml libraries (js_of_ocaml, Why3's and Alt-Ergo's dependencies) from
-# source inside the container. Node runs the Creusot prelude generator port.
+# Wolfi supplies opam and the C toolchain; opam then builds the pinned OCaml
+# compiler (pins.env) and the OCaml libraries (js_of_ocaml, Why3's and
+# Alt-Ergo's dependencies) from source inside the container. Wolfi's own
+# `ocaml` package is deliberately absent: it tracks the newest OCaml, which
+# js_of_ocaml 6.2.0 does not support. Node runs the Creusot prelude generator.
 contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
@@ -21,8 +23,6 @@ contents:
     - gmp-dev
     - m4
     - nodejs
-    - ocaml
-    - ocaml-findlib
     - opam
     - pkgconf
     - rsync

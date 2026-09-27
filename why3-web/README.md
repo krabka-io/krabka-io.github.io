@@ -35,8 +35,10 @@ bazel build //why3-web:bundle        # bazel-bin/why3-web/why3-web.tar
 bash why3-web/install.sh             # npm run build:why3-web: unpack into public/why3-web/
 ```
 
-`image.apko.yaml` and its lock are the Wolfi base with OCaml 5.3, opam, dune
-and Node. Bazel assembles the builder image from that base plus the scripts and
+`image.apko.yaml` and its lock are the Wolfi base with opam, a C toolchain and
+Node; opam builds the OCaml compiler pinned in `pins.env` inside the container,
+because js_of_ocaml 6.2.0 does not accept the newest OCaml that Wolfi ships.
+Bazel assembles the builder image from that base plus the scripts and
 worker source here, loads it into Docker, runs `build-why3-web.sh` inside it,
 and copies the tar out. The action needs the network (opam, the pinned source
 archives) and Docker, so it is `local` and unsandboxed; its inputs are the
