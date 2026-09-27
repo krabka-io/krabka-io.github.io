@@ -1,0 +1,33 @@
+"""krabka-io.github.io — Bazel module (bzlmod).
+
+The site itself is an npm project. Bazel builds the one artefact npm cannot:
+the Why3 web bundle under //why3-web, which compiles Why3 and Alt-Ergo to
+JavaScript with js_of_ocaml inside a locked Wolfi container, the same way
+krabka-broker builds its Creusot proof image.
+"""
+
+module(
+    name = "krabka_website",
+    version = "0.1.0",
+)
+
+# //why3-web constrains its container layers with `@platforms//os:linux`.
+bazel_dep(name = "platforms", version = "1.1.0")
+
+# rules_img owns the assembled builder image; it starts from an apko lock file,
+# so the OCaml toolchain's base is pinned package by package.
+bazel_dep(name = "rules_img", version = "0.3.21")
+bazel_dep(name = "rules_apko", version = "1.5.56")
+
+apko_toolchain = use_extension("@rules_apko//apko:extensions.bzl", "apko")
+apko_toolchain.toolchain(apko_version = "v1.2.40")
+use_repo(apko_toolchain, "apko_toolchains")
+
+register_toolchains("@apko_toolchains//:all")
+
+apk = use_extension("@rules_apko//apko:extensions.bzl", "apko")
+apk.translate_lock(
+    name = "why3_web_base_lock",
+    lock = "//why3-web:image.apko.lock.json",
+)
+use_repo(apk, "why3_web_base_lock")
