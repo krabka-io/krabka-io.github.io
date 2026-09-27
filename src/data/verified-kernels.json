@@ -201,7 +201,7 @@
   {
     "id": "producer_decision",
     "title": "Idempotent producer decision",
-    "area": "Producers",
+    "area": "Producers and transactions",
     "module": "producer",
     "function": "producer_decision",
     "summary": "Classifies an incoming batch against the last accepted producer batch. A producer with no last batch appends; a lower epoch is fenced and a higher epoch appends; at the same epoch the batch appends when it continues at the last sequence plus one modulo 2^31, is a duplicate of the last batch when its sequence range matches it, and is otherwise out of order.",
@@ -233,7 +233,7 @@
   {
     "id": "epoch_and_offset_for_entries",
     "title": "Leader epoch lookup",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "leader_epoch",
     "function": "epoch_and_offset_for_entries",
     "summary": "Resolves a requested leader epoch to (found_epoch, end_offset), the KIP-101 pair a follower uses to truncate a divergent suffix. The checkpoint entries must be strictly increasing in both epoch and start offset.",
@@ -264,7 +264,7 @@
   {
     "id": "offset_index_lookup",
     "title": "Offset index lookup",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "log_index",
     "function": "offset_index_lookup",
     "summary": "The byte position to start reading at for a target relative offset: the position field of the largest entry with relative_offset <= target, or 0 if no such entry exists. The entries must be strictly sorted by relative offset, which the construction of OffsetIndex guarantees.",
@@ -292,7 +292,7 @@
   {
     "id": "stretch_durability",
     "title": "Stretch-cluster durability",
-    "area": "Stretch clusters",
+    "area": "Replication and failover",
     "module": "stretch",
     "function": "site_loss_survivors + min_insync_is_site_loss_safe",
     "summary": "site_loss_survivors gives the replica count that survives the loss of any one site when rf replicas are placed one per site in turn: rf minus ceil(rf / sites). min_insync_is_site_loss_safe is true if min.insync.replicas keeps acks=all writes durable and available through that loss: no single site may hold min_insync replicas (else one site alone could acknowledge a write the others never saw), and min_insync must not exceed the survivors.",
@@ -327,7 +327,7 @@
   {
     "id": "quorum_survives_any_single_site_loss",
     "title": "Quorum survives a site loss",
-    "area": "Stretch clusters",
+    "area": "Replication and failover",
     "module": "stretch",
     "function": "quorum_survives_any_single_site_loss",
     "summary": "True if the surviving KRaft voters still form a strict majority after the loss of any one site: for every site k, 2 * (total - voters_per_site[k]) > total. Two sites never pass, which is why a third site must hold at least one voter; an empty slice returns true.",
@@ -393,7 +393,7 @@
   {
     "id": "isr_maintenance_selected",
     "title": "ISR maintenance selection",
-    "area": "Replication and ISR",
+    "area": "Replication and failover",
     "module": "isr",
     "function": "isr_maintenance_selected",
     "summary": "Decides whether one unique assigned replica belongs in an ISR proposal. An assigned replica is selected if it is the leader, or if it fetched recently and is either already in the ISR or caught up recently; an unassigned replica is never selected.",
@@ -421,7 +421,7 @@
   {
     "id": "retain_decision",
     "title": "Compaction retain decision",
-    "area": "Storage",
+    "area": "Storage and log",
     "module": "compaction",
     "function": "retain_decision",
     "summary": "The single per-record KIP-534 retain decision. Control batches (transaction commit and abort markers) are retained as long as their transaction's data survives and then age out through the delete horizon; data records dedup newest-wins; a tombstone ages out through the delete horizon after it becomes the newest entry for its key.",
