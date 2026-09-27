@@ -206,6 +206,9 @@ pub struct World {
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     topics: Vec<TopicSpec>,
+    /// The ids of the controller quorum's voters: fixed when the scenario
+    /// loads, as a static `KRaft` quorum is fixed when its cluster starts.
+    quorum_voters: Vec<u32>,
     rng: Rng,
 }
 
@@ -233,6 +236,7 @@ impl World {
             events: EventLog::default(),
             delivered: BTreeMap::new(),
             topics: Vec::new(),
+            quorum_voters: Vec::new(),
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
         }
     }
@@ -293,6 +297,13 @@ impl World {
         for o in &scenario.link_overrides {
             world.apply_link_override(o);
         }
+        world.quorum_voters = scenario
+            .nodes
+            .iter()
+            .filter(|spec| wants_quorum_vote(spec))
+            .map(|spec| spec.id.0)
+            .collect();
+        world.quorum_voters.sort_unstable();
         for spec in &scenario.nodes {
             let image = images.remove(&spec.id).filter(|image| !image.is_empty());
             world.add_node_with_state(spec.clone(), image)?;
@@ -371,11 +382,13 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let mut node = build_node(&spec)?;
+        let quorum = self.quorum_role(&spec)?;
+        let mut node = build_node(&quorum.spec)?;
         if let Some(image) = image {
             node.load(image);
         }
         let id = spec.id;
+        self.join_quorum(id, &quorum);
         let external = node.external();
         let rng = Rng::new(self.seed ^ (u64::from(id.0) << 32) ^ u64::from(id.0));
         self.nodes.insert(
@@ -397,6 +410,69 @@ impl World {
             self.call(id, |node, ctx| node.start(ctx));
         }
         Ok(id)
+    }
+
+    /// The spec a node is built from, with its place in the controller quorum.
+    ///
+    /// A broker that names no `controller_quorum_voters` gets the scenario's
+    /// quorum and votes only when it is one of its voters. A broker added
+    /// after the scenario loaded therefore joins as an observer until the
+    /// scenario loads again, except the first voter of a world with no
+    /// quorum yet, which starts one. A voter of the loaded quorum stays one.
+    fn quorum_role(&self, spec: &NodeSpec) -> Result<QuorumRole, LabError> {
+        let mut built = spec.clone();
+        let names_voters = spec.config.get("controller_quorum_voters").is_some();
+        if spec.kind != "broker" || names_voters {
+            return Ok(QuorumRole {
+                spec: built,
+                starts_quorum: false,
+                observes: false,
+            });
+        }
+        let id = spec.id.0;
+        let wants = wants_quorum_vote(spec);
+        let in_quorum = self.quorum_voters.contains(&id);
+        if in_quorum && !wants {
+            return Err(LabError::config(
+                spec,
+                "the controller quorum is static: this broker stays a voter until the scenario loads again",
+            ));
+        }
+        let starts_quorum = wants && self.quorum_voters.is_empty();
+        let mut voters = self.quorum_voters.clone();
+        if starts_quorum {
+            voters.push(id);
+        }
+        let is_voter = in_quorum || starts_quorum;
+        if built.config.is_null() {
+            built.config = serde_json::json!({});
+        }
+        if let Some(config) = built.config.as_object_mut() {
+            config.insert(
+                "controller_quorum_voters".to_string(),
+                serde_json::json!(voters),
+            );
+            config.insert("voter".to_string(), serde_json::json!(is_voter));
+        }
+        Ok(QuorumRole {
+            spec: built,
+            starts_quorum,
+            observes: wants && !is_voter,
+        })
+    }
+
+    /// Record a built node's place in the controller quorum.
+    fn join_quorum(&mut self, id: NodeId, role: &QuorumRole) {
+        if role.starts_quorum {
+            self.quorum_voters.push(id.0);
+        }
+        if role.observes {
+            self.record(
+                Some(id),
+                "quorum_observer",
+                serde_json::json!({ "level": "info", "voters": self.quorum_voters }),
+            );
+        }
     }
 
     /// Remove a node. Its connections close and its queued frames are dropped.
@@ -424,7 +500,12 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let node = build_node(&spec)?;
+        if !self.nodes.contains_key(&id) {
+            return Err(LabError::NoSuchNode(id));
+        }
+        let quorum = self.quorum_role(&spec)?;
+        let node = build_node(&quorum.spec)?;
+        self.join_quorum(id, &quorum);
         let slot = self.nodes.get_mut(&id).ok_or(LabError::NoSuchNode(id))?;
         slot.spec = spec;
         slot.node = node;
@@ -1125,6 +1206,27 @@ impl World {
     }
 }
 
+/// Whether `spec` is a broker that asks to vote in the controller quorum:
+/// its `voter` key, true unless set to false.
+fn wants_quorum_vote(spec: &NodeSpec) -> bool {
+    spec.kind == "broker"
+        && spec
+            .config
+            .get("voter")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+}
+
+/// A node's spec as it is built, with its place in the controller quorum.
+struct QuorumRole {
+    /// The spec with the quorum filled in.
+    spec: NodeSpec,
+    /// The node is the first voter of a world with no quorum yet.
+    starts_quorum: bool,
+    /// The node asked to vote but joins an existing quorum as an observer.
+    observes: bool,
+}
+
 /// The unordered pair key of a link.
 fn pair(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
     if a <= b { (a, b) } else { (b, a) }
@@ -1175,6 +1277,107 @@ mod tests {
 
     use super::*;
     use crate::lab::testing::TestWorld;
+
+    /// A broker's config for the quorum tests: its id and nothing else.
+    fn broker(id: u32) -> NodeSpec {
+        NodeSpec::new(id, "broker", "", serde_json::json!({ "broker_id": id }))
+    }
+
+    /// Each broker's `(voters, voter)` as its snapshot reports them.
+    fn quorum_roles(world: &World, ids: &[u32]) -> Vec<(serde_json::Value, serde_json::Value)> {
+        ids.iter()
+            .map(|&id| {
+                let quorum = &world.node_snapshot(NodeId(id)).unwrap()["quorum"];
+                (quorum["voters"].clone(), quorum["voter"].clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_quorum_is_the_scenarios_brokers_and_a_later_broker_observes() {
+        let mut scenario = Scenario::empty(7);
+        scenario.nodes = vec![broker(1), broker(2), broker(3)];
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.add_node(broker(4)).unwrap();
+
+        let voters = serde_json::json!([1, 2, 3]);
+        assert!(
+            quorum_roles(&world, &[1, 2, 3, 4])
+                == vec![
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters.clone(), serde_json::json!(false)),
+                ]
+        );
+        let observed: Vec<(Option<NodeId>, serde_json::Value)> = world
+            .events()
+            .filter(|e| e.kind == "quorum_observer")
+            .map(|e| (e.node, e.detail.clone()))
+            .collect();
+        assert!(
+            observed
+                == vec![(
+                    Some(NodeId(4)),
+                    serde_json::json!({ "level": "info", "voters": [1, 2, 3] })
+                )]
+        );
+        // The scenario keeps what its author wrote.
+        let written: Vec<serde_json::Value> = world
+            .scenario()
+            .nodes
+            .iter()
+            .map(|n| n.config.clone())
+            .collect();
+        assert!(written == (1..=4).map(|id| broker(id).config).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_first_broker_of_an_empty_world_starts_the_quorum() {
+        let mut world = World::from_scenario(&Scenario::empty(7)).unwrap();
+        world.add_node(broker(5)).unwrap();
+        world.add_node(broker(6)).unwrap();
+
+        let voters = serde_json::json!([5]);
+        assert!(
+            quorum_roles(&world, &[5, 6])
+                == vec![
+                    (voters.clone(), serde_json::json!(true)),
+                    (voters, serde_json::json!(false)),
+                ]
+        );
+    }
+
+    #[test]
+    fn a_voter_of_the_loaded_quorum_stays_one() {
+        let mut scenario = Scenario::empty(7);
+        scenario.nodes = vec![broker(1), broker(2), broker(3)];
+        let mut world = World::from_scenario(&scenario).unwrap();
+
+        let observer = NodeSpec::new(
+            2,
+            "broker",
+            "",
+            serde_json::json!({ "broker_id": 2, "voter": false }),
+        );
+        let refused = world.update_node(NodeId(2), observer);
+        assert!(let Err(LabError::Config { .. }) = refused);
+        assert!(
+            quorum_roles(&world, &[2])
+                == vec![(serde_json::json!([1, 2, 3]), serde_json::json!(true))]
+        );
+        // A broker that names its own quorum keeps it.
+        let named = NodeSpec::new(
+            7,
+            "broker",
+            "",
+            serde_json::json!({ "broker_id": 7, "controller_quorum_voters": [7] }),
+        );
+        world.add_node(named).unwrap();
+        assert!(
+            quorum_roles(&world, &[7]) == vec![(serde_json::json!([7]), serde_json::json!(true))]
+        );
+    }
 
     /// Two echo nodes and one ticker; the ticker pings the echo every 100 ms.
     fn scenario() -> Scenario {

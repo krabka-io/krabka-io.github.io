@@ -85,7 +85,8 @@ const BROKERS: [NodeId; 3] = [NodeId(1), NodeId(2), NodeId(3)];
 /// The longest a request waits for its answer, in logical milliseconds.
 const ANSWER_WAIT_MS: Millis = 5_000;
 
-/// Three brokers on 5 ms links, each told the quorum's voters.
+/// Three brokers on 5 ms links. None names the quorum: the world gives every
+/// broker the scenario's voters.
 fn scenario() -> Scenario {
     scenario_with_topics(&json!([]))
 }
@@ -97,7 +98,7 @@ fn scenario_with_topics(topics: &Value) -> Scenario {
         .map(|broker| {
             json!({
                 "id": broker.0, "kind": "broker",
-                "config": { "broker_id": broker.0, "controller_quorum_voters": [1, 2, 3] },
+                "config": { "broker_id": broker.0 },
             })
         })
         .collect();
@@ -148,7 +149,8 @@ impl Cluster {
     /// The cluster rebuilt from the durable images a page keeps across a
     /// reload.
     fn reloaded(images: BTreeMap<NodeId, DurableImage>) -> Self {
-        Self::around(World::from_scenario_with_state(&scenario(), &BROKERS, images).unwrap())
+        let mut test_world = TestWorld::from_scenario_with_state(&scenario(), &BROKERS, images);
+        Self::around(test_world.take())
     }
 
     fn around(world: World) -> Self {

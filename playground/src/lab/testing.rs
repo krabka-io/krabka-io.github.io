@@ -6,6 +6,8 @@
 //! same bytes; `pinger` opens a connection to a target and pings it on a
 //! period. They also serve the page as a latency probe.
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use serde_json::{Value, json};
 
@@ -32,6 +34,25 @@ impl TestWorld {
     pub fn from_scenario(scenario: &Scenario) -> Self {
         Self {
             world: Some(World::from_scenario(scenario).expect("test scenario builds")),
+        }
+    }
+
+    /// Build a world from a scenario and the durable images a page keeps
+    /// across a reload, hosting `hosted` (empty = all), and start it.
+    ///
+    /// # Panics
+    /// Panics when the scenario is invalid; a test scenario is a literal.
+    #[must_use]
+    pub fn from_scenario_with_state(
+        scenario: &Scenario,
+        hosted: &[NodeId],
+        images: BTreeMap<NodeId, DurableImage>,
+    ) -> Self {
+        Self {
+            world: Some(
+                World::from_scenario_with_state(scenario, hosted, images)
+                    .expect("test scenario builds"),
+            ),
         }
     }
 
