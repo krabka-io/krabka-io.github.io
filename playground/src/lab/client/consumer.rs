@@ -2074,8 +2074,14 @@ impl Consumer {
         let backoff = self.config.retry_backoff_ms;
         let Some(response) = self.expect::<OffsetFetchResponse>(ctx, "OffsetFetch", result, events)
         else {
+            // A partition sought while the request was out keeps its
+            // position; the others look their committed offset up again.
             for key in partitions {
-                if let Some(p) = self.assigned.get_mut(key) {
+                if let Some(p) = self
+                    .assigned
+                    .get_mut(key)
+                    .filter(|p| p.state == PositionState::FetchingCommitted)
+                {
                     p.state = PositionState::Init;
                     p.retry_at = now + backoff;
                 }

@@ -30,7 +30,7 @@ use krabka_protocol::{
 
 use super::{
     AutoOffsetReset, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig, ConsumerError,
-    ConsumerEvent, GroupProtocol, KafkaClient, MemberState,
+    ConsumerEvent, CoordinatorType, GroupProtocol, KafkaClient, MemberState,
     assignor::{encode_assignment, encode_subscription},
     batch::BatchRecord,
     conn_base,
@@ -1177,6 +1177,45 @@ fn an_answer_to_a_reset_that_a_later_seek_replaced_is_ignored() {
     );
     assert!(h.run_until(|h| h.client.buffered() == 3, 2_000));
     assert!(offsets(&h.with_client(|c, _| c.poll(500))) == vec![0, 1, 2]);
+}
+
+#[test]
+fn a_partition_sought_while_its_committed_offset_is_looked_up_keeps_its_position() {
+    // The answer to the `OffsetFetch` of a manual assignment is lost, and
+    // the consumer seeks to 3 while it waits. When the request times out at
+    // `request.timeout.ms` (30 s), the sought partition keeps its position:
+    // Kafka looks committed offsets up only for the partitions that still
+    // wait for one.
+    let state = cluster(&[("orders", 1)]);
+    seed(&state, "orders", 0, &["r0", "r1", "r2", "r3", "r4"]);
+    state
+        .borrow_mut()
+        .groups
+        .entry("billing".to_string())
+        .or_default()
+        .committed
+        .insert(("orders".to_string(), 0), (1, 0));
+    let config = config(GroupProtocol::Classic, AutoOffsetReset::Earliest);
+    let mut h = Harness::new(consumer(config), Rc::clone(&state));
+    assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+    // The `OffsetFetch` leaves when the coordinator is known.
+    assert!(h.run_until(
+        |h| {
+            h.client
+                .client()
+                .coordinator(CoordinatorType::Group, "billing")
+                .is_some()
+        },
+        1_000
+    ));
+    state.borrow_mut().knobs.drop_responses = 1;
+    assert!(h.with_client(|c, _| c.seek("orders", 0, 3)) == Ok(()));
+    assert!(h.run_until(|h| h.client.buffered() == 2, 1_000));
+    assert!(offsets(&h.with_client(|c, _| c.poll(500))) == vec![3, 4]);
+    h.run_for(31_000);
+    assert!(h.with_client(|c, _| c.poll(500)).is_empty());
+    assert!(h.client.position("orders", 0) == Some(5));
+    assert!(h.seen(OffsetFetchRequest::API_KEY).len() == 1);
 }
 
 /// A static member of `billing` with the instance id `instance` and a
