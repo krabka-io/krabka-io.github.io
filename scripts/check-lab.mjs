@@ -6,7 +6,7 @@
 // the echo node's frame counter survives a page reload through IndexedDB and
 // comes back when the saved scenario is reopened from the "Saved" list, the
 // durable state stored after persistence is turned back on equals the live
-// state (echo counter and a schema registry), a share link reproduces the
+// state, a share link reproduces the
 // scenario even without `DecompressionStream`, and two pages in one browser
 // host a cluster together over WebRTC with the link latency intact and the
 // scenario edited only by the host. Before the browser starts, the
@@ -22,7 +22,11 @@
 // back from IndexedDB and the group resumes from its committed offsets; a
 // broker added to the running scenario observes the quorum and says why. The
 // registry preset's producer registers its schema, the registry answers
-// `GET /subjects` and the consumer decodes every value; the streams preset
+// `GET /subjects` and the consumer decodes every value; schemas registered
+// through REST with persistence on and off come back after a reload from the
+// brokers' `_schemas` log, since the registry keeps nothing of its own; a
+// second registry joins the group as a secondary and serves a write by
+// forwarding it to the primary; the streams preset
 // counts words into its store, with the changelog topic the group created,
 // and answers a store query; in the five-broker preset the majority serves
 // while two brokers are cut off, and they join once the links heal.
@@ -270,29 +274,20 @@ async function setPersistUI(page, on) {
 }
 
 const avro = (name, fields) => JSON.stringify({ type: 'record', name, namespace: 'io.krabka.lab', fields });
-const ORDER_V1 = avro('Order', [{ name: 'id', type: 'long' }, { name: 'customer', type: 'string' }]);
-const ORDER_V2 = avro('Order', [{ name: 'id', type: 'long' }, { name: 'customer', type: 'string' }, { name: 'total', type: 'double', default: 0 }]);
+// The registry preset's Order schema with one more field, which has a
+// default: a BACKWARD-compatible second version of orders-value.
+const ORDER_V2 = avro('Order', [{ name: 'id', type: 'long' }, { name: 'customer', type: 'string' }, { name: 'total', type: 'double' }, { name: 'note', type: 'string', default: '' }]);
 const PAYMENT_V1 = avro('Payment', [{ name: 'id', type: 'long' }, { name: 'amount', type: 'double' }]);
+const INVENTORY_V1 = avro('Inventory', [{ name: 'sku', type: 'string' }, { name: 'count', type: 'int' }]);
+const SHIPMENT_V1 = avro('Shipment', [{ name: 'order', type: 'long' }, { name: 'carrier', type: 'string' }]);
 
-// What a registry restores: its subjects, versions and ids, and the records
-// of its `_schemas` log.
-const registryState = (page, id) =>
-  page.evaluate((id) => {
-    const n = window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id);
-    const s = n && n.state;
-    return s && s.subjects ? JSON.stringify({ subjects: s.subjects, schemas: s.schemas, records: s.records, compatibility: s.compatibility, mode: s.mode }) : null;
-  }, id);
-
-// What the store holds: the echo counter of node 1 and the registry's log entries.
-const storedState = (page, scenarioId, registryId) =>
-  page.evaluate(
-    async ([id, reg]) => {
-      const images = await window.krabkaLab.storage.loadImages(id);
-      const b64 = images['1']?.kv?.counters?.frames;
-      return { frames: b64 == null ? null : Number(atob(b64)), schemas: images[String(reg)]?.logs?.schemas?.length ?? 0 };
-    },
-    [scenarioId, registryId],
-  );
+// What the store holds for the echo counter of node 1.
+const storedFrames = (page, scenarioId) =>
+  page.evaluate(async (id) => {
+    const images = await window.krabkaLab.storage.loadImages(id);
+    const b64 = images['1']?.kv?.counters?.frames;
+    return b64 == null ? null : Number(atob(b64));
+  }, scenarioId);
 
 // ---- the KRaft cluster presets ---------------------------------------------------------------
 
@@ -321,6 +316,11 @@ function until(page, label, fn, timeout = 60_000) {
 }
 
 const nodeStateOf = (page, id) => page.evaluate((id) => window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id)?.state ?? null, id);
+
+// Fit every card into the canvas, as a reader does after adding a node.
+async function fit(page) {
+  await page.locator('#krabka-lab .lab-canvas-tools button', { hasText: 'Fit' }).click();
+}
 
 // Select a node on the canvas and wait for the inspector to show it.
 async function inspect(page, id, name) {
@@ -495,6 +495,7 @@ async function checkThreeBrokers(page, preset) {
   await page.waitForSelector('#krabka-lab dialog[open]');
   await page.locator('#krabka-lab dialog button[type="submit"]').click();
   const added = await waitFor(page, `(() => { const n = window.krabkaLab.world.scenario().nodes.find((x) => x.kind === 'broker' && x.id > 3); return n ? n.id : null; })()`, 'the added broker');
+  await fit(page);
   await inspect(page, added, `broker-${added}`);
   await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_votes"]')?.textContent === 'no: an observer'`, 'the added broker to observe', 60_000);
   const why = await page.evaluate(() => document.querySelector('#krabka-lab .lab-inspector [data-field="observer-note"]')?.textContent || '');
@@ -578,7 +579,98 @@ async function checkRegistryPreset(page, preset) {
   await inspect(page, 6, 'billing');
   const shown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector td[data-col="schema_id"]')?.textContent || null`, 'the schema column');
   check('the consumer inspector shows the schema id of each record', shown === `id ${registered.schema_id}`, shown);
+
+  // The registry keeps nothing of its own: a schema's record lives in
+  // `_schemas` on the brokers, which the page persists. With persistence on,
+  // then off, then on again, a reload brings every schema back.
+  const scenarioId = await page.evaluate(() => window.krabkaLab.world.id);
+  const payments = await registryWrite(page, 4, 'POST', '/subjects/payments-value/versions', { schema: PAYMENT_V1 });
+  check('a schema registered through REST is answered once its record is back from the brokers', payments.ok && payments.answer.status === 200 && Number.isInteger(payments.answer.body.id), JSON.stringify(payments));
+  await setPersistUI(page, false);
+  const storedAtOff = await schemasStored(page, scenarioId);
+  const inventory = await registryWrite(page, 4, 'POST', '/subjects/inventory-value/versions', { schema: INVENTORY_V1 });
+  const orders2 = await registryWrite(page, 4, 'POST', '/subjects/orders-value/versions', { schema: ORDER_V2 });
+  const storedWhileOff = await schemasStored(page, scenarioId);
+  check(
+    'with persistence off the registry still writes, and the brokers\' new _schemas records are not stored',
+    inventory.ok && inventory.answer.status === 200 && orders2.ok && orders2.answer.status === 200 && storedAtOff > 0 && storedWhileOff === storedAtOff,
+    JSON.stringify({ inventory, orders2, storedAtOff, storedWhileOff }),
+  );
+  await setPersistUI(page, true);
+  const version2 = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/orders-value/versions/latest' }));
+  const live = await until(page, 'the registry to show every subject', `(n) => n[4].state.subjects.length === 3 && n[4].state.subjects`);
+  await page.evaluate(() => window.krabkaLab.saveNow());
+  await page.evaluate(() => window.krabkaLab.storage.flush());
+  check('turning persistence back on stores the _schemas records written while it was off', (await schemasStored(page, scenarioId)) > storedAtOff);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
+  await fastest(page);
+  const replayed = await until(page, 'the registry to replay _schemas', `(n) => n[4].state.state === 'ready' && n[4].state.subjects`, 120_000);
+  check('after a reload the registry replays every schema from the brokers\' _schemas log', JSON.stringify(replayed) === JSON.stringify(live), `${JSON.stringify(replayed)} vs ${JSON.stringify(live)}`);
+  const served = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/inventory-value/versions/1' }));
+  const latest = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/orders-value/versions/latest' }));
+  check(
+    'and serves the schemas registered while persistence was off, with the same ids and versions',
+    served.ok && served.answer.status === 200 && served.answer.body.id === inventory.answer.body.id && latest.ok && JSON.stringify(latest.answer.body) === JSON.stringify(version2.answer.body) && latest.answer.body.version === 2,
+    JSON.stringify({ served, latest }),
+  );
+
+  // A second registry joins the group. The eligible instance with the
+  // smallest URL, node 4, stays the primary; the new one is a secondary that
+  // forwards the writes it takes to the primary.
+  await page.locator('#krabka-lab .lab-kind-btn[data-kind="schema-registry"]').click();
+  await page.waitForSelector('#krabka-lab dialog[open]');
+  await page.locator('#krabka-lab dialog button[type="submit"]').click();
+  const second = await waitFor(page, `(() => { const n = window.krabkaLab.world.scenario().nodes.find((x) => x.kind === 'schema-registry' && x.id !== 4); return n ? n.id : null; })()`, 'the second registry');
+  const roles = await until(page, 'the two registries to elect a primary', `(n) => {
+    const e = [4, ${second}].map((i) => n[i].state.state === 'ready' && n[i].state.election);
+    return e[0] && e[1] && e[0].leader && e[0].leader === e[1].leader && { leader: e[0].leader, primary: e.map((x) => x.is_leader) };
+  }`, 120_000);
+  const cards = await waitFor(page, `(() => { const s = [4, ${second}].map((i) => document.querySelector('#krabka-lab .lab-node[data-node-id="' + i + '"]')?.dataset.status || ''); return /primary/.test(s[0]) && /secondary/.test(s[1]) ? JSON.stringify(s) : null; })()`, 'the cards to say primary and secondary');
+  check(
+    'two registries of one group elect one primary, the smaller URL, and the cards say so',
+    roles.leader === 'http://node-4:8081' && JSON.stringify(roles.primary) === '[true,false]',
+    `${JSON.stringify(roles)} ${cards}`,
+  );
+  const via = await registryWrite(page, second, 'POST', '/subjects/shipments-value/versions', { schema: SHIPMENT_V1 });
+  const onPrimary = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/shipments-value/versions/1' }));
+  const forwarded = await until(page, 'the secondary to count the forward', `(n) => n[${second}].state.forwarder && n[${second}].state.forwarder.forwarded > 0 && n[${second}].state.forwarder`);
+  check(
+    'a write through the secondary is forwarded to the primary and served',
+    via.ok && via.answer.status === 200 && onPrimary.ok && onPrimary.answer.status === 200 && onPrimary.answer.body.id === via.answer.body.id && forwarded.forwarded > 0,
+    JSON.stringify({ via, onPrimary: onPrimary.answer, forwarded }),
+  );
+  await fit(page);
+  await inspect(page, second, `schema-registry-${second}`);
+  const role = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="election_role"]')?.textContent || null`, 'the election in the inspector');
+  const labelled = await page.evaluate(() => [...document.querySelectorAll('#krabka-lab .lab-ev-kind[data-kind="election"]')].map((e) => e.textContent));
+  check('the inspector names the secondary, and the timeline labels the election', /^secondary/.test(role) && labelled.length > 0 && labelled.every((t) => t === 'registry election'), `${role}; ${labelled.length} election rows`);
+  const listed = await command(page, 'http', { path: '/subjects' });
+  check('the registry command bar reads a REST resource', listed.ok && /"status":200/.test(listed.text) && /shipments-value/.test(listed.text), listed.text);
 }
+
+// A REST write through the registry's `http` command: it joins the write
+// queue and is answered by the `registry` event that carries its number.
+async function registryWrite(page, id, method, path, body) {
+  const r = await page.evaluate(([id, method, path, body]) => window.krabkaLab.world.control(id, { cmd: 'http', method, path, body }), [id, method, path, body]);
+  if (!r.ok || r.answer.queued == null) return r;
+  const detail = JSON.parse(
+    await waitFor(
+      page,
+      `(() => { const e = window.krabkaLab.timeline.events.find((x) => x.node === ${id} && x.kind === 'registry' && x.detail && x.detail.request === ${r.answer.queued}); return e ? JSON.stringify(e.detail) : null; })()`,
+      `the answer to request ${r.answer.queued}`,
+      60_000,
+    ),
+  );
+  return { ok: true, answer: { status: detail.status, body: detail.result ?? { message: detail.message } } };
+}
+
+// How many `_schemas` records the page stored, over every broker.
+const schemasStored = (page, scenarioId) =>
+  page.evaluate(async (id) => {
+    const images = await window.krabkaLab.storage.loadImages(id);
+    return Object.values(images).reduce((sum, image) => sum + (image.logs?.['log/_schemas/0']?.length ?? 0), 0);
+  }, scenarioId);
 
 async function checkPartitionPreset(page, preset) {
   console.log(`Cluster Lab: ${preset.name}`);
@@ -749,31 +841,14 @@ async function main() {
     await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${reopened.state.frames}; })()`, 'the counter to keep counting');
     check('and the counter keeps counting from there', true);
 
-    // A schema registry joins the scenario and registers one schema while
-    // persistence is on.
-    const registryId = await page.evaluate(() => window.krabkaLab.world.addNode({ id: 0, kind: 'schema-registry', name: 'registry', x: 460, y: 330, config: {} }));
-    check('a schema registry node joins the scenario', registryId === 4, `id ${registryId}`);
-    const register = (subject, schema) =>
-      page.evaluate(([id, subject, schema]) => window.krabkaLab.world.control(id, { cmd: 'register', subject, schema }), [registryId, subject, schema]);
-    const orders1 = await register('orders-value', ORDER_V1);
-    check('the registry registers a schema', orders1.ok && orders1.answer.id === 1 && orders1.answer.version === 1, JSON.stringify(orders1));
-
     // "Persist to this browser" off: the ops fold into the in-memory mirror and
-    // are not stored. The echo counts on and two schemas are registered; the
-    // store keeps the counter and the one log entry it had.
+    // are not stored. The echo counts on; the store keeps the counter it had.
     await setPersistUI(page, false);
-    const storedAtOff = await storedState(page, scenarioId, registryId);
+    const storedAtOff = await storedFrames(page, scenarioId);
     const liveAtOff = (await readNode(page, 1)).state.frames;
-    const payments1 = await register('payments-value', PAYMENT_V1);
-    const orders2 = await register('orders-value', ORDER_V2);
-    check('schemas register while persistence is off', payments1.ok && orders2.ok && orders2.answer.version === 2, `${JSON.stringify(payments1)} ${JSON.stringify(orders2)}`);
     await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${liveAtOff} + 3; })()`, 'echo-a to count on with persistence off');
-    const storedWhileOff = await storedState(page, scenarioId, registryId);
-    check(
-      'with persistence off, new durable ops are not stored',
-      storedAtOff.frames != null && storedWhileOff.frames === storedAtOff.frames && storedAtOff.schemas === 1 && storedWhileOff.schemas === 1,
-      `${JSON.stringify(storedAtOff)} -> ${JSON.stringify(storedWhileOff)}`,
-    );
+    const storedWhileOff = await storedFrames(page, scenarioId);
+    check('with persistence off, new durable ops are not stored', storedAtOff != null && storedWhileOff === storedAtOff, `${storedAtOff} -> ${storedWhileOff}`);
 
     // Persistence back on: the store is replaced with the live state before any
     // later op, so the reload restores exactly what was live. Cutting the
@@ -785,15 +860,10 @@ async function main() {
     await page.evaluate(() => window.krabkaLab.storage.flush());
     await page.evaluate(() => window.krabkaLab.saveNow());
     const liveEcho = (await readNode(page, 1)).state.frames;
-    const liveRegistry = await registryState(page, registryId);
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
     const restoredEcho = (await readNode(page, 1)).state.frames;
-    const restoredRegistry = await waitFor(page, `(() => { const n = window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === ${registryId}); const st = n && n.state; return st && st.subjects ? JSON.stringify({ subjects: st.subjects, schemas: st.schemas, records: st.records, compatibility: st.compatibility, mode: st.mode }) : null; })()`, 'the registry snapshot');
     check('after persistence is back on, the restored echo counter equals the live one', restoredEcho === liveEcho, `${restoredEcho} vs ${liveEcho} live`);
-    check('after persistence is back on, the restored registry equals the live one', restoredRegistry === liveRegistry && JSON.parse(liveRegistry).schemas === 3, `${restoredRegistry} vs ${liveRegistry}`);
-    const served = await page.evaluate((id) => window.krabkaLab.world.control(id, { cmd: 'http', method: 'GET', path: '/subjects/payments-value/versions/1' }), registryId);
-    check('a schema registered while persistence was off is served after the reload', served.ok && served.answer.status === 200 && served.answer.body.id === payments1.answer.id, JSON.stringify(served));
 
     // Forget while the node runs: its records go, and it is not written again
     // (its next op alone would be a partial image), so a reload starts it
@@ -823,7 +893,7 @@ async function main() {
     await page2.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
     const sharedNodes = await page2.evaluate(() => window.krabkaLab.world.scenario().nodes.map((n) => n.name).sort());
     const sharedId = await page2.evaluate(() => window.krabkaLab.world.id);
-    const expectedNodes = JSON.stringify(['echo-a', 'echo-b', 'pinger', 'registry']);
+    const expectedNodes = JSON.stringify(['echo-a', 'echo-b', 'pinger']);
     check('opening the link reproduces the nodes', JSON.stringify(sharedNodes) === expectedNodes, sharedNodes.join(','));
     check('a shared scenario gets its own identity', sharedId !== scenarioId, sharedId);
     await page2.close();
@@ -862,11 +932,11 @@ async function main() {
     await page.waitForSelector('#krabka-lab dialog[open]');
     await page.locator('#krabka-lab dialog select').first().selectOption('2');
     await page.locator('#krabka-lab dialog button[type="submit"]').click();
-    await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 5`, 'the new node');
-    const added = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.id === 5));
+    await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 4`, 'the new node');
+    const added = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.id === 4));
     check('the palette adds a configured node', added && added.kind === 'pinger' && added.config.target === 2, JSON.stringify(added));
     await page.evaluate(() => window.krabkaLab.world.setPaused(false));
-    await waitFor(page, `(() => { const r = ${nodeState(5)}; return r && JSON.parse(r).state.echoes > 0; })()`, 'the new pinger to ping');
+    await waitFor(page, `(() => { const r = ${nodeState(4)}; return r && JSON.parse(r).state.echoes > 0; })()`, 'the new pinger to ping');
     check('and it runs', true);
 
     errors.push(...pageErrors, ...page2Errors, ...page3Errors);
