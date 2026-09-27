@@ -19,6 +19,10 @@
 //! The runtime announces its descriptors through the environment:
 //! `KRABKA_LISTEN_FDS=<echo>,<upper>,<control>[,<spare>...]` and
 //! `KRABKA_DIAL_FD=<fd>`.
+//!
+//! With `KRABKA_NODE_ID` set, the guest runs in [`lab`] mode instead: it
+//! stands in for a real broker as a node of the Cluster Lab, following the
+//! lab's process contract.
 
 #[cfg(not(target_os = "wasi"))]
 compile_error!(
@@ -28,6 +32,7 @@ compile_error!(
 mod control;
 mod echo;
 mod fsuite;
+mod lab;
 mod net;
 
 use std::os::fd::RawFd;
@@ -55,6 +60,10 @@ pub struct Guest {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let started = Instant::now();
+    if std::env::var_os("KRABKA_NODE_ID").is_some() {
+        lab::run(started).await;
+        return;
+    }
     let fds = match net::Fds::from_env() {
         Ok(fds) if fds.listeners.len() >= 3 => fds,
         Ok(fds) => {
