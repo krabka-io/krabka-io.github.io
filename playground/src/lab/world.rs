@@ -553,6 +553,13 @@ impl World {
             return;
         };
         if !slot.alive {
+            // A killed process on a live host: its TCP stack refuses a new
+            // connection at once (a reset), so the client sees "connection
+            // refused" instead of waiting out a setup timeout. Anything else
+            // sent to it is lost.
+            if frame.payload == Payload::Open {
+                self.route(dst, Frame::close(frame.dst, frame.src, frame.conn));
+            }
             return;
         }
         *self.delivered.entry((frame.src.node, dst)).or_insert(0) += 1;
@@ -1207,6 +1214,24 @@ mod tests {
         w.run_for(100);
         assert!(w.snapshot(NodeId(3))["echoes"] == 0);
         assert!(w.snapshot(NodeId(3))["closes"] == 1);
+    }
+
+    #[test]
+    fn a_killed_node_refuses_new_connections_at_once() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(50);
+        // The kill resets the open connection: its close reaches the pinger
+        // at 60.
+        w.world_mut().fault(Fault::Kill { node: NodeId(1) });
+        w.run_for(15);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+        // At 100 the pinger opens a new connection; it reaches the dead node
+        // at 110 and the refusal travels back over the same 10 ms link.
+        w.run_for(50);
+        assert!(w.snapshot(NodeId(3))["closes"] == 1);
+        w.run_for(10);
+        assert!(w.snapshot(NodeId(3))["closes"] == 2);
+        assert!(w.snapshot(NodeId(3))["open"] == false);
     }
 
     #[test]

@@ -153,7 +153,8 @@ impl World {
 }
 
 pub enum Fault {
-    Kill(NodeId),                       // node stops; state kept (disk survives), connections closed
+    Kill(NodeId),                       // node stops; state kept (disk survives), connections closed;
+                                        // a new connection to it is refused at once (a reset)
     Restart(NodeId),                    // node starts again from its kept state
     Wipe(NodeId),                       // like Restart but from empty state (disk lost)
     Partition { a: NodeId, b: NodeId }, // cut the link both ways
@@ -265,15 +266,22 @@ impl KafkaClient {
     pub fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) -> Vec<ClientEvent>;
     /// Drive timers and retries; returns the next deadline to arm.
     pub fn on_tick(&mut self, ctx: &mut Ctx<'_>) -> (Vec<ClientEvent>, Option<Millis>);
-    /// Send a request to the leader of a partition, to the coordinator of a group, to a
-    /// specific broker, or to any bootstrap broker. Completion arrives as `ClientEvent::Response`.
-    pub fn send<R: ProtocolRequest>(&mut self, ctx: &mut Ctx<'_>, target: Target, req: R) -> RequestId;
+    /// Send a request to the leader of a partition, to the coordinator of a group, to the
+    /// active controller, to a specific broker, or to any bootstrap broker. Completion arrives
+    /// as `ClientEvent::Response`, whose result is `Err(ClientError::Timeout { .. })` when the
+    /// request timed out. `send` arms nothing: the node arms `next_deadline(now)` (or calls
+    /// `on_tick`) after it.
+    pub fn send<R: ProtocolRequest + 'static>(&mut self, ctx: &mut Ctx<'_>, target: Target, req: R) -> RequestId
+    where R::Response: 'static;
+    pub fn next_deadline(&self, now: Millis) -> Option<Millis>;
     pub fn metadata(&self) -> &MetadataCache;
     pub fn snapshot(&self) -> serde_json::Value;
 }
+
+pub enum Target { Any, Broker(i32), Controller, Leader { topic: String, partition: i32 }, Coordinator { key_type: CoordinatorType, key: String } }
 ```
 
-It negotiates `ApiVersions` on every new connection, picks the highest common version per api, keeps a metadata cache with leader/epoch per partition, refreshes on `NOT_LEADER_OR_FOLLOWER`/`UNKNOWN_TOPIC_OR_PARTITION`/`LEADER_NOT_AVAILABLE`, routes group requests through `FindCoordinator`, reconnects with backoff, and times out requests (`request_timeout_ms`, default 30 s logical).
+It negotiates `ApiVersions` on every new connection, picks the highest common version per api, keeps a metadata cache with leader/epoch per partition, refreshes on `NOT_LEADER_OR_FOLLOWER`/`UNKNOWN_TOPIC_OR_PARTITION`/`LEADER_NOT_AVAILABLE`, routes group requests through `FindCoordinator`, reconnects with backoff, times out a connection that never becomes ready after `connection_setup_timeout_ms` (10 s, doubling to 30 s, with jitter, as Kafka's `ClusterConnectionStates`), and times out requests (`request_timeout_ms`, default 30 s logical). A connection to a killed node is refused at once; one across a partition stays silent until the setup timeout, like a black-holed connection.
 
 On top of it: `Producer` (record accumulator per partition, `linger_ms`, `batch_size`, murmur2 default partitioner on the key like the JVM, sticky partitioner for null keys, idempotence with producer id and sequences, `acks` 0/1/-1, retries with the JVM's error classification) and `Consumer` (subscribe, classic `JoinGroup`/`SyncGroup` with the range assignor and the `ConsumerProtocolSubscription`/`Assignment` metadata bytes, or KIP-848 `ConsumerGroupHeartbeat`, fetch sessions off, `auto.offset.reset`, offset commit on interval, `max_poll_records`).
 
