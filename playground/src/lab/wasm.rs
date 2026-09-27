@@ -6,11 +6,23 @@
 
 use wasm_bindgen::prelude::*;
 
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
 use super::{
-    net::{Frame, NodeId, TimedFrame},
+    net::{DurableImage, DurableOp, Frame, NodeId, TimedFrame},
     scenario::{NodeSpec, Scenario},
     world::{Fault, World},
 };
+
+/// One durable op with the node it belongs to, as `drainDurable` returns it.
+#[derive(Serialize)]
+struct NodeDurableOp {
+    node: NodeId,
+    #[serde(flatten)]
+    op: DurableOp,
+}
 
 /// One lab world, as the page holds it.
 #[wasm_bindgen]
@@ -57,6 +69,49 @@ impl Lab {
         let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
         self.world = World::from_scenario_hosted(&scenario, &ids).map_err(js)?;
         Ok(())
+    }
+
+    /// Replace the world with one built from a scenario document, running only
+    /// the nodes in the JSON array of ids (an empty array runs all), and hand
+    /// each node listed in `images_json` (`{"<node id>": DurableImage}`) the
+    /// durable state the page restored from `IndexedDB` before it starts.
+    ///
+    /// # Errors
+    /// Returns the scenario error as a JavaScript error.
+    #[wasm_bindgen(js_name = loadScenarioWithState)]
+    pub fn load_scenario_with_state(
+        &mut self,
+        json: &str,
+        ids_json: &str,
+        images_json: &str,
+    ) -> Result<(), JsError> {
+        let scenario: Scenario = serde_json::from_str(json).map_err(js)?;
+        let ids: Vec<u32> = serde_json::from_str(ids_json).map_err(js)?;
+        let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
+        let images: BTreeMap<u32, DurableImage> = serde_json::from_str(images_json).map_err(js)?;
+        let images = images
+            .into_iter()
+            .map(|(id, image)| (NodeId(id), image))
+            .collect();
+        self.world = World::from_scenario_with_state(&scenario, &ids, images).map_err(js)?;
+        Ok(())
+    }
+
+    /// Durable-state ops recorded since the last drain, as a JSON array of
+    /// `{"node": id, "op": "append"|"truncate_before"|"truncate_from"|"put"|"delete"|"clear"|"clear_all", ...}`
+    /// objects, in order. The page writes them to `IndexedDB`.
+    ///
+    /// # Errors
+    /// Returns an error when the ops cannot be serialized.
+    #[wasm_bindgen(js_name = drainDurable)]
+    pub fn drain_durable(&mut self) -> Result<String, JsError> {
+        let ops: Vec<NodeDurableOp> = self
+            .world
+            .drain_durable()
+            .into_iter()
+            .map(|(node, op)| NodeDurableOp { node, op })
+            .collect();
+        serde_json::to_string(&ops).map_err(js)
     }
 
     /// The current scenario document, positions included.

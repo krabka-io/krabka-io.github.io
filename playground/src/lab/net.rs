@@ -12,6 +12,8 @@
 //! carry. Over an HTTP endpoint it is one complete HTTP/1.1 request or
 //! response.
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use derive_more::{Display, From, Into};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -131,6 +133,46 @@ impl Payload {
     }
 }
 
+/// Base64 for byte fields inside JSON.
+pub mod b64 {
+    use base64::Engine as _;
+    use bytes::Bytes;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    /// Encode `bytes` as standard base64.
+    #[must_use]
+    pub fn encode(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    /// Decode standard base64.
+    ///
+    /// # Errors
+    /// Returns the decoder's error on malformed input.
+    pub fn decode(text: &str) -> Result<Bytes, base64::DecodeError> {
+        base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map(Bytes::from)
+    }
+
+    /// `#[serde(with = "b64")]` for a `Bytes` field.
+    ///
+    /// # Errors
+    /// Returns the serializer's error.
+    pub fn serialize<S: Serializer>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&encode(bytes))
+    }
+
+    /// `#[serde(with = "b64")]` for a `Bytes` field.
+    ///
+    /// # Errors
+    /// Returns a deserialization error on malformed base64.
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Bytes, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        decode(&text).map_err(serde::de::Error::custom)
+    }
+}
+
 /// The JSON shape of a [`Payload`]: `{"kind":"open"}`, `{"kind":"close"}` or
 /// `{"kind":"data","data":"<base64>"}`.
 #[derive(Serialize, Deserialize)]
@@ -143,12 +185,11 @@ enum PayloadRepr {
 
 impl Serialize for Payload {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use base64::Engine as _;
         let repr = match self {
             Self::Open => PayloadRepr::Open,
             Self::Close => PayloadRepr::Close,
             Self::Data(bytes) => PayloadRepr::Data {
-                data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                data: b64::encode(bytes),
             },
         };
         repr.serialize(serializer)
@@ -157,16 +198,141 @@ impl Serialize for Payload {
 
 impl<'de> Deserialize<'de> for Payload {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use base64::Engine as _;
         Ok(match PayloadRepr::deserialize(deserializer)? {
             PayloadRepr::Open => Self::Open,
             PayloadRepr::Close => Self::Close,
-            PayloadRepr::Data { data } => Self::Data(Bytes::from(
-                base64::engine::general_purpose::STANDARD
-                    .decode(data)
-                    .map_err(serde::de::Error::custom)?,
-            )),
+            PayloadRepr::Data { data } => {
+                Self::Data(b64::decode(&data).map_err(serde::de::Error::custom)?)
+            }
         })
+    }
+}
+
+/// A change to a node's durable state, for the host to store.
+///
+/// A node has two kinds of durable store, each named by the node: an
+/// append-only **log** whose entries the node numbers itself (a partition log
+/// numbers its batches by base offset; the controller numbers its entries by
+/// log offset), and a **key-value** store. The host keeps every op in order,
+/// in the browser's `IndexedDB`, and hands the folded result back as a
+/// [`DurableImage`] when the node starts again after a page reload.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "op")]
+pub enum DurableOp {
+    /// Append one entry at `index` to the log `store`. Indexes grow within a
+    /// store; an entry appended at an existing index replaces it.
+    Append {
+        store: String,
+        index: u64,
+        #[serde(with = "b64")]
+        bytes: Bytes,
+    },
+    /// Drop every entry of the log `store` with an index below `index`.
+    TruncateBefore { store: String, index: u64 },
+    /// Drop every entry of the log `store` with an index at or above `index`.
+    TruncateFrom { store: String, index: u64 },
+    /// Set `key` of the key-value store `store`.
+    Put {
+        store: String,
+        key: String,
+        #[serde(with = "b64")]
+        value: Bytes,
+    },
+    /// Remove `key` of the key-value store `store`.
+    Delete { store: String, key: String },
+    /// Drop the store entirely, log or key-value.
+    Clear { store: String },
+    /// Drop every store of the node. The world emits this on a wipe.
+    ClearAll,
+}
+
+/// Bytes that serialize as a base64 string, for map values.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize, From, Into)]
+pub struct B64Bytes(#[serde(with = "b64")] pub Bytes);
+
+/// One log entry of a [`DurableImage`].
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct DurableEntry {
+    pub index: u64,
+    #[serde(with = "b64")]
+    pub bytes: Bytes,
+}
+
+/// A node's durable state, folded from its ops, as the host restores it.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct DurableImage {
+    /// Log stores, entries in ascending index order.
+    #[serde(default)]
+    pub logs: BTreeMap<String, Vec<DurableEntry>>,
+    /// Key-value stores.
+    #[serde(default)]
+    pub kv: BTreeMap<String, BTreeMap<String, B64Bytes>>,
+}
+
+impl DurableImage {
+    /// Fold `op` into the image, the way the host's store does.
+    pub fn apply(&mut self, op: DurableOp) {
+        match op {
+            DurableOp::Append {
+                store,
+                index,
+                bytes,
+            } => {
+                let log = self.logs.entry(store).or_default();
+                match log.binary_search_by_key(&index, |e| e.index) {
+                    Ok(at) => log[at].bytes = bytes,
+                    Err(at) => log.insert(at, DurableEntry { index, bytes }),
+                }
+            }
+            DurableOp::TruncateBefore { store, index } => {
+                if let Some(log) = self.logs.get_mut(&store) {
+                    log.retain(|e| e.index >= index);
+                }
+            }
+            DurableOp::TruncateFrom { store, index } => {
+                if let Some(log) = self.logs.get_mut(&store) {
+                    log.retain(|e| e.index < index);
+                }
+            }
+            DurableOp::Put { store, key, value } => {
+                self.kv
+                    .entry(store)
+                    .or_default()
+                    .insert(key, B64Bytes(value));
+            }
+            DurableOp::Delete { store, key } => {
+                if let Some(kv) = self.kv.get_mut(&store) {
+                    kv.remove(&key);
+                }
+            }
+            DurableOp::Clear { store } => {
+                self.logs.remove(&store);
+                self.kv.remove(&store);
+            }
+            DurableOp::ClearAll => {
+                self.logs.clear();
+                self.kv.clear();
+            }
+        }
+    }
+
+    /// Whether the image holds nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.logs.values().all(Vec::is_empty) && self.kv.values().all(BTreeMap::is_empty)
+    }
+
+    /// The bytes held, for the storage panel.
+    #[must_use]
+    pub fn size_bytes(&self) -> usize {
+        let logs: usize = self.logs.values().flatten().map(|e| e.bytes.len()).sum();
+        let kv: usize = self
+            .kv
+            .values()
+            .flatten()
+            .map(|(k, v)| k.len() + v.0.len())
+            .sum();
+        logs + kv
     }
 }
 
@@ -284,6 +450,7 @@ pub struct Ctx<'a> {
     outbox: &'a mut Vec<Frame>,
     timer: &'a mut Option<Millis>,
     events: &'a mut Vec<(&'static str, serde_json::Value)>,
+    durable: &'a mut Vec<DurableOp>,
     rng: &'a mut Rng,
 }
 
@@ -297,6 +464,7 @@ impl<'a> Ctx<'a> {
         outbox: &'a mut Vec<Frame>,
         timer: &'a mut Option<Millis>,
         events: &'a mut Vec<(&'static str, serde_json::Value)>,
+        durable: &'a mut Vec<DurableOp>,
         rng: &'a mut Rng,
     ) -> Self {
         Self {
@@ -305,6 +473,7 @@ impl<'a> Ctx<'a> {
             outbox,
             timer,
             events,
+            durable,
             rng,
         }
     }
@@ -346,6 +515,13 @@ impl<'a> Ctx<'a> {
     pub fn rand(&mut self, n: u64) -> u64 {
         self.rng.below(n)
     }
+
+    /// Record a change to the node's durable state. The host stores it in
+    /// `IndexedDB`; after a page reload the node gets the folded state back
+    /// through [`Node::load`] before it starts.
+    pub fn persist(&mut self, op: DurableOp) {
+        self.durable.push(op);
+    }
 }
 
 /// A simulated process: a broker, a schema registry, or a client application.
@@ -358,6 +534,14 @@ pub trait Node {
     /// The node kind, as it appears in the scenario: `"broker"`,
     /// `"schema-registry"`, `"producer"`, `"consumer"`, `"streams"`, ...
     fn kind(&self) -> &'static str;
+
+    /// Restore durable state the host kept from an earlier run. The world
+    /// calls this once, before the first [`Node::start`], and only when the
+    /// host had something stored for the node. A node that persists nothing
+    /// keeps the default, which ignores the image.
+    fn load(&mut self, image: DurableImage) {
+        drop(image);
+    }
 
     /// The node boots, or boots again after a [`Fault::Restart`]. Durable state
     /// (logs, schemas) survives; connections and in-memory session state do not.
@@ -460,6 +644,7 @@ mod tests {
         let mut outbox = Vec::new();
         let mut timer = None;
         let mut events = Vec::new();
+        let mut durable = Vec::new();
         let mut rng = Rng::new(1);
         let mut ctx = Ctx::new(
             100,
@@ -467,6 +652,7 @@ mod tests {
             &mut outbox,
             &mut timer,
             &mut events,
+            &mut durable,
             &mut rng,
         );
         assert!(ctx.now() == 100);
@@ -479,10 +665,94 @@ mod tests {
         ctx.arm(250);
         ctx.arm(300);
         ctx.event("test", serde_json::json!({"n": 1}));
+        ctx.persist(DurableOp::ClearAll);
         let r = ctx.rand(3);
         assert!(r < 3);
         assert!(outbox.len() == 1);
         assert!(timer == Some(300));
         assert!(events == vec![("test", serde_json::json!({"n": 1}))]);
+        assert!(durable == vec![DurableOp::ClearAll]);
+    }
+
+    #[test]
+    fn durable_image_folds_ops_like_the_host_store() {
+        let mut image = DurableImage::default();
+        let log = "log/a/0".to_string();
+        let ops = [
+            DurableOp::Append {
+                store: log.clone(),
+                index: 0,
+                bytes: Bytes::from_static(b"x"),
+            },
+            DurableOp::Append {
+                store: log.clone(),
+                index: 3,
+                bytes: Bytes::from_static(b"y"),
+            },
+            DurableOp::Append {
+                store: log.clone(),
+                index: 7,
+                bytes: Bytes::from_static(b"z"),
+            },
+            DurableOp::Append {
+                store: log.clone(),
+                index: 3,
+                bytes: Bytes::from_static(b"Y"),
+            },
+            DurableOp::TruncateBefore {
+                store: log.clone(),
+                index: 3,
+            },
+            DurableOp::TruncateFrom {
+                store: log.clone(),
+                index: 7,
+            },
+            DurableOp::Put {
+                store: "meta".into(),
+                key: "hwm".into(),
+                value: Bytes::from_static(b"3"),
+            },
+            DurableOp::Put {
+                store: "meta".into(),
+                key: "gone".into(),
+                value: Bytes::new(),
+            },
+            DurableOp::Delete {
+                store: "meta".into(),
+                key: "gone".into(),
+            },
+            DurableOp::Append {
+                store: "other".into(),
+                index: 0,
+                bytes: Bytes::from_static(b"o"),
+            },
+            DurableOp::Clear {
+                store: "other".into(),
+            },
+        ];
+        for op in ops {
+            // The JSON shape round-trips: the host stores exactly what it read.
+            let json = serde_json::to_string(&op).unwrap();
+            let back: DurableOp = serde_json::from_str(&json).unwrap();
+            assert!(back == op);
+            image.apply(op);
+        }
+        assert!(
+            image.logs[&log]
+                == vec![DurableEntry {
+                    index: 3,
+                    bytes: Bytes::from_static(b"Y")
+                }]
+        );
+        let expected_kv = BTreeMap::from([("hwm".to_string(), B64Bytes(Bytes::from_static(b"3")))]);
+        assert!(image.kv["meta"] == expected_kv);
+        assert!(!image.logs.contains_key("other"));
+        assert!(image.size_bytes() == 1 + 3 + 1);
+        let json = serde_json::to_value(&image).unwrap();
+        assert!(json["kv"]["meta"]["hwm"] == "Mw==");
+        let back: DurableImage = serde_json::from_value(json).unwrap();
+        assert!(back == image);
+        image.apply(DurableOp::ClearAll);
+        assert!(image.is_empty());
     }
 }

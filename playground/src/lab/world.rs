@@ -23,7 +23,8 @@ use super::{
     LabError, build_node,
     events::{Event, EventLog},
     net::{
-        ConnId, Ctx, Endpoint, Frame, KAFKA_PORT, Millis, Node, NodeId, Payload, Rng, TimedFrame,
+        ConnId, Ctx, DurableImage, DurableOp, Endpoint, Frame, KAFKA_PORT, Millis, Node, NodeId,
+        Payload, Rng, TimedFrame,
     },
     scenario::{LinkOverride, NodeSpec, Scenario, TopicSpec},
 };
@@ -175,6 +176,7 @@ pub struct WorldSnapshot {
 /// The simulator.
 pub struct World {
     seed: u64,
+    id: String,
     name: String,
     now: Millis,
     seq: u64,
@@ -191,6 +193,7 @@ pub struct World {
     last_delivery: BTreeMap<(Endpoint, ConnId, bool), Millis>,
     hosted: Option<BTreeSet<NodeId>>,
     egress: Vec<TimedFrame>,
+    durable: Vec<(NodeId, DurableOp)>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     topics: Vec<TopicSpec>,
@@ -203,6 +206,7 @@ impl World {
     pub fn new(seed: u64) -> Self {
         Self {
             seed,
+            id: String::new(),
             name: String::new(),
             now: 0,
             seq: 0,
@@ -214,6 +218,7 @@ impl World {
             last_delivery: BTreeMap::new(),
             hosted: None,
             egress: Vec::new(),
+            durable: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
             topics: Vec::new(),
@@ -238,6 +243,21 @@ impl World {
     /// Returns an error when a node kind is unknown, a node id repeats, or a
     /// node rejects its configuration.
     pub fn from_scenario_hosted(scenario: &Scenario, hosted: &[NodeId]) -> Result<Self, LabError> {
+        Self::from_scenario_with_state(scenario, hosted, BTreeMap::new())
+    }
+
+    /// Build a world from a scenario, hosting `hosted` (empty = all), and hand
+    /// each node in `images` its durable state before it starts. This is how
+    /// the page restores what `IndexedDB` kept across a reload.
+    ///
+    /// # Errors
+    /// Returns an error when a node kind is unknown, a node id repeats, or a
+    /// node rejects its configuration.
+    pub fn from_scenario_with_state(
+        scenario: &Scenario,
+        hosted: &[NodeId],
+        mut images: BTreeMap<NodeId, DurableImage>,
+    ) -> Result<Self, LabError> {
         if scenario.version != super::scenario::SCENARIO_VERSION {
             return Err(LabError::InvalidScenario(format!(
                 "unsupported scenario version {}",
@@ -245,6 +265,7 @@ impl World {
             )));
         }
         let mut world = Self::new(scenario.seed);
+        world.id.clone_from(&scenario.id);
         world.name.clone_from(&scenario.name);
         world.default_latency = scenario.links.default_latency_ms;
         world.topics.clone_from(&scenario.topics);
@@ -252,7 +273,8 @@ impl World {
             world.hosted = Some(hosted.iter().copied().collect());
         }
         for spec in &scenario.nodes {
-            world.add_node(spec.clone())?;
+            let image = images.remove(&spec.id).filter(|image| !image.is_empty());
+            world.add_node_with_state(spec.clone(), image)?;
         }
         for o in &scenario.link_overrides {
             world.apply_link_override(o);
@@ -298,7 +320,20 @@ impl World {
     /// # Errors
     /// Returns an error when the id is taken, the kind is unknown, or the node
     /// rejects its configuration.
-    pub fn add_node(&mut self, mut spec: NodeSpec) -> Result<NodeId, LabError> {
+    pub fn add_node(&mut self, spec: NodeSpec) -> Result<NodeId, LabError> {
+        self.add_node_with_state(spec, None)
+    }
+
+    /// Add a node, hand it `image` when there is one, and start it.
+    ///
+    /// # Errors
+    /// Returns an error when the id is taken, the kind is unknown, or the node
+    /// rejects its configuration.
+    pub fn add_node_with_state(
+        &mut self,
+        mut spec: NodeSpec,
+        image: Option<DurableImage>,
+    ) -> Result<NodeId, LabError> {
         if spec.id.0 == 0 {
             spec.id = self.next_free_id();
         }
@@ -311,7 +346,10 @@ impl World {
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
-        let node = build_node(&spec)?;
+        let mut node = build_node(&spec)?;
+        if let Some(image) = image {
+            node.load(image);
+        }
         let id = spec.id;
         let rng = Rng::new(self.seed ^ (u64::from(id.0) << 32) ^ u64::from(id.0));
         self.nodes.insert(
@@ -343,6 +381,7 @@ impl World {
         self.close_connections_of(id);
         self.nodes.remove(&id);
         self.links.retain(|(a, b), _| *a != id && *b != id);
+        self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_removed", serde_json::json!({}));
     }
 
@@ -366,6 +405,7 @@ impl World {
         slot.timer = None;
         self.purge_frames(|f| f.src.node == id || f.dst.node == id);
         self.close_connections_of(id);
+        self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_updated", serde_json::json!({}));
         if self.is_hosted(id) {
             self.call(id, |node, ctx| node.start(ctx));
@@ -385,6 +425,7 @@ impl World {
     #[must_use]
     pub fn scenario(&self) -> Scenario {
         let mut s = Scenario::empty(self.seed);
+        s.id.clone_from(&self.id);
         s.name.clone_from(&self.name);
         s.links.default_latency_ms = self.default_latency;
         s.nodes = self
@@ -523,14 +564,24 @@ impl World {
         let mut outbox = Vec::new();
         let mut timer = None;
         let mut events = Vec::new();
+        let mut durable = Vec::new();
         let now = self.now;
         {
-            let mut ctx = Ctx::new(now, id, &mut outbox, &mut timer, &mut events, &mut slot.rng);
+            let mut ctx = Ctx::new(
+                now,
+                id,
+                &mut outbox,
+                &mut timer,
+                &mut events,
+                &mut durable,
+                &mut slot.rng,
+            );
             f(slot.node.as_mut(), &mut ctx);
         }
         if let Some(at) = timer {
             self.arm(id, at);
         }
+        self.durable.extend(durable.into_iter().map(|op| (id, op)));
         for (kind, detail) in events {
             self.events.push(now, Some(id), kind, detail);
         }
@@ -923,6 +974,12 @@ impl World {
     /// Frames for nodes hosted elsewhere, queued since the last drain.
     pub fn drain_egress(&mut self) -> Vec<TimedFrame> {
         std::mem::take(&mut self.egress)
+    }
+
+    /// Durable-state ops recorded since the last drain, in order, for the
+    /// host to write to `IndexedDB`.
+    pub fn drain_durable(&mut self) -> Vec<(NodeId, DurableOp)> {
+        std::mem::take(&mut self.durable)
     }
 
     /// Frames that arrived from another peer. They deliver at the current
