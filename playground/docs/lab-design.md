@@ -177,6 +177,15 @@ A world can be **partial**: it holds the full scenario (all `NodeSpec`s) but run
 
 Faults on a link between a local and a remote node are applied locally on the sending side (a `cut` link drops frames before they reach egress) and mirrored by the page to the other tab, which applies the same fault.
 
+## External nodes (`lab::external`)
+
+A real `krabka-broker`, compiled for `wasm32-wasip1`, runs in a Web Worker behind the browser WASI runtime (`public/playground/wasi/`), not inside this crate. Its scenario node has kind `krabka-broker`; the world keeps an `ExternalNode` stand-in for it (`Node::external()` is true), so links, faults, events and snapshots treat it like any other node.
+
+- The world holds a frame for an external node for its link latency like any frame, then hands it to the page through `drainExternal()` (`[{deliver_at, frame}]`, each due now) instead of calling a `Node` method. The page gives it to the process: an `Open` to port 9092 or 9093 becomes a connection to that listener, `Data` bytes on it, `Close` its end.
+- Frames the process sends (bytes on an accepted connection, an outbound dial and what follows on it) come back through `routeExternal(frames)`, which routes each as sent by its node, through the link model, at the current time. Frames from a node that is not an external node this world hosts, or that is down, are dropped.
+- A killed external node refuses new connections at once, like a local one, and the page kills or restarts its process when it applies the fault. The page reports the process's state with `applyRemoteSnapshot`; until it does, the snapshot is `{"external": true}`.
+- Addresses: a process sees the lab network as IPv4, node `n` at `10.0.(n >> 8).(n & 255)` (`net::node_ip`, `net::node_for_ip`): Kafka on 9092, the KRaft controller on 9093, a registry on 8081. A broker advertises its virtual address, and the lab client maps it back to the node.
+
 ## Durable state (`lab::net::DurableOp`, `lab::net::DurableImage`)
 
 A node's durable state (a broker's partition logs and metadata, the controller's log, a registry's schemas) must survive a page reload, so the page keeps it in the browser's IndexedDB. The crate never touches storage itself: a node records every change through `Ctx::persist(DurableOp)`, the world collects the ops per node, and the page drains them with `drainDurable()` after every step and writes them to IndexedDB in order. When the page loads a scenario it read from storage, it folds the stored ops into one `DurableImage` per node (`DurableImage::apply` is the reference fold; the JavaScript store applies the same rules) and calls `loadScenarioWithState(scenario, hosted, images)`, which hands each image to `Node::load` before the node starts.
@@ -308,6 +317,9 @@ class Lab {
   control(id: number, json: string): string
   snapshot(): string                       // WorldSnapshot JSON
   eventsSince(index: number): string       // JSON array
+  // external nodes (real brokers in Workers)
+  drainExternal(): string                  // [{deliver_at, frame}] due at external nodes now
+  routeExternal(framesJson: string): void  // frames an external process sent, routed as its node
   // durable state
   loadScenarioWithState(json: string, idsJson: string, imagesJson: string): void   // images: {"<node id>": DurableImage}
   drainDurable(): string                   // JSON array of {node, op: "append"|..., ...}; bytes base64

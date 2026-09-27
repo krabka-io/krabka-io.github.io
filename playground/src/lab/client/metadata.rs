@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::lab::{
     codes,
-    net::{Endpoint, Millis, NodeId},
+    net::{Endpoint, Millis, NodeId, node_for_ip},
 };
 
 /// One broker of the cluster.
@@ -64,13 +64,15 @@ pub struct MetadataCache {
 }
 
 /// The lab endpoint of a broker that advertises `host`: `node-<id>` names
-/// the node directly; any other host falls back to the broker id as the node
-/// id.
+/// the node directly, as does a virtual address `10.0.x.y` (a real broker
+/// the page runs in a Worker advertises one); any other host falls back to
+/// the broker id as the node id.
 #[must_use]
 pub fn endpoint_for_host(host: &str, node_id: i32) -> Endpoint {
     let node = host
         .strip_prefix("node-")
         .and_then(|rest| rest.parse::<u32>().ok())
+        .or_else(|| host.parse().ok().and_then(node_for_ip).map(|node| node.0))
         .or_else(|| u32::try_from(node_id).ok())
         .unwrap_or(0);
     Endpoint::kafka(NodeId(node))
@@ -372,6 +374,9 @@ mod tests {
         let cases = [
             ("node-3", 7, 3),
             ("node-12", 1, 12),
+            ("10.0.0.5", 9, 5),
+            ("10.0.1.2", 9, 258),
+            ("10.1.0.5", 9, 9),
             ("broker-3.example", 4, 4),
             ("", 9, 9),
             ("node-x", 2, 2),

@@ -93,8 +93,11 @@ struct Slot {
     timer: Option<Millis>,
     timer_gen: u64,
     rng: Rng,
-    /// The last snapshot a remote host sent for a node this world does not run.
+    /// The last snapshot a remote host sent for a node this world does not
+    /// run, or the page reported for an external node it runs.
     remote_snapshot: Option<serde_json::Value>,
+    /// The node runs outside the world, in a process the page hosts.
+    external: bool,
 }
 
 enum Item {
@@ -197,6 +200,9 @@ pub struct World {
     admin: Option<(NodeId, NodeId)>,
     egress: Vec<TimedFrame>,
     durable: Vec<(NodeId, DurableOp)>,
+    /// Frames due at external nodes this world hosts, for the page to hand
+    /// to their processes.
+    external_out: Vec<TimedFrame>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     topics: Vec<TopicSpec>,
@@ -223,6 +229,7 @@ impl World {
             admin: None,
             egress: Vec::new(),
             durable: Vec::new(),
+            external_out: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
             topics: Vec::new(),
@@ -369,6 +376,7 @@ impl World {
             node.load(image);
         }
         let id = spec.id;
+        let external = node.external();
         let rng = Rng::new(self.seed ^ (u64::from(id.0) << 32) ^ u64::from(id.0));
         self.nodes.insert(
             id,
@@ -381,6 +389,7 @@ impl World {
                 timer_gen: 0,
                 rng,
                 remote_snapshot: None,
+                external,
             },
         );
         self.record(Some(id), "node_added", serde_json::json!({}));
@@ -562,9 +571,17 @@ impl World {
             }
             return;
         }
+        let external = slot.external;
         *self.delivered.entry((frame.src.node, dst)).or_insert(0) += 1;
         if matches!(frame.payload, Payload::Close) {
             self.forget_conn(frame.conn_key());
+        }
+        if external {
+            self.external_out.push(TimedFrame {
+                deliver_at: self.now,
+                frame,
+            });
+            return;
         }
         self.call(dst, |node, ctx| node.on_frame(ctx, frame));
     }
@@ -720,8 +737,10 @@ impl World {
             })
             .collect();
         self.queue = kept.into_iter().collect();
-        // Frames waiting for another host are on the same wire.
+        // Frames waiting for another host, or for an external process, are
+        // on the same wire.
         self.egress.retain(|t| !pred(&t.frame));
+        self.external_out.retain(|t| !pred(&t.frame));
     }
 
     /// Forget a connection and the delivery floors that kept its frames in
@@ -898,8 +917,12 @@ impl World {
     #[must_use]
     pub fn node_snapshot(&self, id: NodeId) -> Option<serde_json::Value> {
         let slot = self.nodes.get(&id)?;
-        Some(if self.is_hosted(id) {
+        Some(if self.is_hosted(id) && !slot.external {
             slot.node.snapshot()
+        } else if slot.external {
+            slot.remote_snapshot
+                .clone()
+                .unwrap_or_else(|| slot.node.snapshot())
         } else {
             slot.remote_snapshot
                 .clone()
@@ -1040,6 +1063,30 @@ impl World {
     /// host to write to `IndexedDB`.
     pub fn drain_durable(&mut self) -> Vec<(NodeId, DurableOp)> {
         std::mem::take(&mut self.durable)
+    }
+
+    /// Frames that reached external nodes this world hosts since the last
+    /// drain, in delivery order. Each is due now: the world held it for its
+    /// link latency, so the page hands it to the process at once.
+    pub fn drain_external(&mut self) -> Vec<TimedFrame> {
+        std::mem::take(&mut self.external_out)
+    }
+
+    /// Route frames an external process sent, as its node, through the link
+    /// model at the current time. Frames from a node that is not an external
+    /// node this world hosts, or that is down, are dropped.
+    pub fn route_external(&mut self, frames: Vec<Frame>) {
+        for frame in frames {
+            let src = frame.src.node;
+            let sends = self.is_hosted(src)
+                && self
+                    .nodes
+                    .get(&src)
+                    .is_some_and(|slot| slot.external && slot.alive);
+            if sends {
+                self.route(src, frame);
+            }
+        }
     }
 
     /// Frames that arrived from another peer. They deliver at the current
@@ -1276,6 +1323,110 @@ mod tests {
         ]);
         world.step_until(2);
         assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 2);
+    }
+
+    /// A scenario with an external node 1 (a real broker the page runs) and a
+    /// pinger that pings it.
+    fn external_scenario() -> Scenario {
+        serde_json::from_value(serde_json::json!({
+            "version": 1, "seed": 7, "links": { "default_latency_ms": 10 },
+            "nodes": [
+                { "id": 1, "kind": "krabka-broker" },
+                { "id": 3, "kind": "pinger", "config": { "target": 1, "period_ms": 100 } }
+            ]
+        }))
+        .unwrap()
+    }
+
+    /// Play the page's part for external node 1: take what is due for it and
+    /// echo every data frame back through the link model, as the real process
+    /// behind it would answer on the same connection.
+    fn echo_externally(world: &mut World) -> Vec<TimedFrame> {
+        let due = world.drain_external();
+        let replies = due
+            .iter()
+            .filter_map(|t| {
+                let bytes = t.frame.payload.data()?;
+                Some(Frame::data(
+                    t.frame.dst,
+                    t.frame.src,
+                    t.frame.conn,
+                    bytes.clone(),
+                ))
+            })
+            .collect();
+        world.route_external(replies);
+        due
+    }
+
+    #[test]
+    fn an_external_node_gets_its_frames_when_due_and_answers_through_the_links() {
+        let mut world = World::from_scenario(&external_scenario()).unwrap();
+        let mut seen = Vec::new();
+        for until in (5..=320).step_by(5) {
+            world.step_until(until);
+            for timed in echo_externally(&mut world) {
+                assert!(timed.deliver_at == until, "{timed:?}");
+                seen.push((timed.deliver_at, timed.frame.payload.clone()));
+            }
+        }
+        // The open and each ping arrive after the 10 ms link latency.
+        assert!(seen[0] == (10, Payload::Open));
+        assert!(seen[1].0 == 110);
+        let pinger = world.node_snapshot(NodeId(3)).unwrap();
+        assert!(pinger["echoes"] == 3);
+        assert!(pinger["mean_rtt_ms"] == 20);
+        assert!(world.node_snapshot(NodeId(1)).unwrap()["external"] == true);
+    }
+
+    #[test]
+    fn a_killed_external_node_refuses_and_sends_nothing() {
+        let mut world = World::from_scenario(&external_scenario()).unwrap();
+        world.step_until(50);
+        echo_externally(&mut world);
+        world.fault(Fault::Kill { node: NodeId(1) });
+        world.step_until(400);
+        assert!(echo_externally(&mut world).is_empty());
+        // Its process's late words are dropped too.
+        world.route_external(vec![Frame::data(
+            Endpoint::kafka(NodeId(1)),
+            Endpoint::client(NodeId(3)),
+            ConnId(1),
+            Bytes::from_static(b"late"),
+        )]);
+        world.step_until(500);
+        let pinger = world.node_snapshot(NodeId(3)).unwrap();
+        assert!(pinger["echoes"] == 0);
+        assert!(pinger["closes"].as_u64().unwrap() >= 2);
+    }
+
+    #[test]
+    fn only_external_nodes_route_external_frames() {
+        let mut world = World::from_scenario(&scenario()).unwrap();
+        world.step_until(5);
+        // Node 3 is an ordinary pinger: the page cannot speak for it.
+        world.route_external(vec![Frame::open(
+            Endpoint::client(NodeId(3)),
+            Endpoint::kafka(NodeId(2)),
+            ConnId(99),
+        )]);
+        world.step_until(50);
+        assert!(world.node_snapshot(NodeId(2)).unwrap()["frames"] == 0);
+    }
+
+    #[test]
+    fn virtual_addresses_name_nodes_both_ways() {
+        for (node, ip) in [(1, "10.0.0.1"), (254, "10.0.0.254"), (258, "10.0.1.2")] {
+            let ip: std::net::Ipv4Addr = ip.parse().unwrap();
+            assert!(crate::lab::net::node_ip(NodeId(node)) == ip);
+            assert!(crate::lab::net::node_for_ip(ip) == Some(NodeId(node)));
+        }
+        for ip in ["10.0.0.0", "10.1.0.1", "192.168.0.1"] {
+            assert!(
+                crate::lab::net::node_for_ip(ip.parse().unwrap()).is_none(),
+                "{ip}"
+            );
+        }
     }
 
     #[test]
