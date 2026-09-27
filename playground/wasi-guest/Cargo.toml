@@ -1,0 +1,39 @@
+[package]
+name = "krabka-wasi-guest"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+authors = ["The Krabka Authors"]
+publish = false
+description = "Test guest for the Cluster Lab's browser WASI runtime: echo servers, dials, timers and a file-system suite on wasm32-wasip1"
+repository = "https://github.com/krabka-io/krabka-io.github.io"
+
+[workspace]
+# Its own workspace root, so the crate stays out of the `krabka-playground`
+# build next door. `scripts/check-wasi.mjs` builds it for `wasm32-wasip1`.
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[dependencies]
+# The broker's runtime: a current-thread tokio over mio's wasip1 backend.
+# `.cargo/config.toml` sets `--cfg tokio_unstable`, which tokio's `net`
+# feature needs on wasm32-wasip1.
+tokio = { version = "1.53", features = ["rt", "net", "io-util", "time", "macros", "sync"] }
+# Positional reads and writes, the way `krabka-log` does them on wasi (std's
+# wasi `FileExt` is unstable).
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+# The preview-1 calls std does not expose (`fd_advise`, `fd_allocate`,
+# `fd_renumber`, `fd_tell`, `path_filestat_set_times`, the symlink calls).
+wasi = "0.11"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+panic = "abort"
