@@ -44,7 +44,7 @@ const VIEWS = {
   streams: renderStreams,
   echo: renderCounters,
   pinger: renderCounters,
-  admin: renderCounters,
+  admin: renderAdmin,
 };
 
 // ---- broker -----------------------------------------------------------------------
@@ -807,7 +807,36 @@ function listText(v) {
   return v.join(", ");
 }
 
-// ---- echo, pinger, admin, unknown kinds ---------------------------------------------------
+// ---- the scenario's admin ------------------------------------------------------------------
+
+// The hidden admin node (`lab::apps::admin`): the scenario's topics and how
+// far their `CreateTopics` got.
+function renderAdmin(root, s, used, ctx) {
+  const topics = take(s, used, "topics");
+  if (Array.isArray(topics)) {
+    root.appendChild(
+      section(
+        `Topics (${topics.length})`,
+        table(
+          [
+            { key: "name", label: "topic" },
+            { key: "partitions", label: "p" },
+            { key: "replication_factor", label: "rf" },
+            { key: "status", label: "status" },
+            { key: "error", label: "error", render: (v) => (v == null ? "–" : String(v)) },
+          ],
+          topics,
+          { rowKey: (t) => t.name },
+        ),
+      ),
+    );
+  }
+  const client = take(s, used, "client");
+  if (client && typeof client === "object") root.appendChild(section("Client", jsonTree(client, ctx), { open: false }));
+  renderCounters(root, s, used, ctx);
+}
+
+// ---- echo, pinger, unknown kinds ------------------------------------------------------------
 
 function renderCounters(root, s, used, ctx) {
   const rows = [];
