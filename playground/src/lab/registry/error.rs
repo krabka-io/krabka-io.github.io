@@ -102,6 +102,14 @@ pub enum RegistryError {
     /// `RestSchemaRegistryStoreException`.
     #[error("{0}")]
     Store(String),
+    /// A secondary could not forward a write to the primary: Confluent's
+    /// `RestRequestForwardingException`.
+    #[error("{0}")]
+    RequestForwarding(String),
+    /// No instance is known to be the primary: Confluent's
+    /// `RestUnknownLeaderException`.
+    #[error("{0}")]
+    UnknownLeader(String),
     /// Any other failure on the server: Confluent's
     /// `RestSchemaRegistryException`, whose `error_code` is the HTTP status.
     #[error("{0}")]
@@ -134,6 +142,8 @@ impl RegistryError {
             Self::Internal(_) => 500,
             Self::Store(_) => 50001,
             Self::OperationTimeout(_) => 50002,
+            Self::RequestForwarding(_) => 50003,
+            Self::UnknownLeader(_) => 50004,
         }
     }
 
@@ -162,7 +172,11 @@ impl RegistryError {
             | Self::OperationNotPermitted(_)
             | Self::SchemaIdConflict(_)
             | Self::ReferencedByOthers(_) => 422,
-            Self::OperationTimeout(_) | Self::Store(_) | Self::Internal(_) => 500,
+            Self::OperationTimeout(_)
+            | Self::Store(_)
+            | Self::RequestForwarding(_)
+            | Self::UnknownLeader(_)
+            | Self::Internal(_) => 500,
         }
     }
 
@@ -235,6 +249,8 @@ mod tests {
             (RegistryError::Internal("x".into()), 500, 500),
             (RegistryError::Store("x".into()), 50001, 500),
             (RegistryError::OperationTimeout("x".into()), 50002, 500),
+            (RegistryError::RequestForwarding("x".into()), 50003, 500),
+            (RegistryError::UnknownLeader("x".into()), 50004, 500),
         ] {
             assert!(error.error_code() == code, "{error:?}");
             assert!(error.status() == status, "{error:?}");

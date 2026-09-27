@@ -98,6 +98,50 @@ impl WriteOp {
             Self::DeleteMode => RegistryError::Store("Failed to delete mode".to_string()),
         }
     }
+
+    /// The error the REST resource answers when no primary is known:
+    /// Confluent's `UnknownLeaderException`, which a subject delete reports
+    /// as a plain 500.
+    #[must_use]
+    pub fn unknown_leader(&self) -> RegistryError {
+        let message = match self {
+            Self::Register | Self::DeleteVersion => "Leader not known.",
+            Self::DeleteSubject { subject } => {
+                return RegistryError::Internal(format!(
+                    "Error while deleting the subject {subject}"
+                ));
+            }
+            Self::UpdateConfig => "Failed to update compatibility level",
+            Self::DeleteConfig => "Failed to delete compatibility level",
+            Self::UpdateMode => "Failed to update mode",
+            Self::DeleteMode => "Failed to delete mode",
+        };
+        RegistryError::UnknownLeader(message.to_string())
+    }
+
+    /// The error the REST resource answers when a secondary gets no answer
+    /// from the primary: Confluent's
+    /// `SchemaRegistryRequestForwardingException`, which a subject delete
+    /// reports as a plain 500.
+    #[must_use]
+    pub fn forwarding_failed(&self) -> RegistryError {
+        let request = match self {
+            Self::Register => "register schema",
+            Self::DeleteVersion => "delete schema version",
+            Self::DeleteSubject { subject } => {
+                return RegistryError::Internal(format!(
+                    "Error while deleting the subject {subject}"
+                ));
+            }
+            Self::UpdateConfig => "update config",
+            Self::DeleteConfig => "delete config",
+            Self::UpdateMode => "update mode",
+            Self::DeleteMode => "delete mode",
+        };
+        RegistryError::RequestForwarding(format!(
+            "Error while forwarding {request} request to the leader"
+        ))
+    }
 }
 
 /// The operation a request performs when it may write, or `None` for a
@@ -555,17 +599,30 @@ fn register(
     Ok(Outcome::after(WriteOp::Register, written, response))
 }
 
-/// The answer to a registration of a schema the subject already holds,
-/// which writes nothing: Confluent's `registerOrForward` looks the schema up
-/// before it takes the write lock, so this answer never waits for another
-/// write. `None` for any other request.
+/// What a registration answers before it takes the write lock, on the
+/// primary and a secondary alike. Confluent's `registerOrForward` looks the
+/// schema up first, which parses it: a schema that does not parse fails at
+/// once, and one the subject already holds is answered at once, without a
+/// write. `None` for any other request, and for a registration that goes
+/// on to the lock.
 #[must_use]
-pub fn registered_already(service: &RegistryService, req: &HttpRequest) -> Option<HttpResponse> {
+pub fn before_lock(service: &RegistryService, req: &HttpRequest) -> Option<HttpResponse> {
     if write_op(req) != Some(WriteOp::Register) {
         return None;
     }
+    if let Err(error) = parse_registration(service.state(), req) {
+        return Some(error.to_response());
+    }
     let outcome = handle(service, req);
     (outcome.write.is_none() && outcome.response.status == 200).then_some(outcome.response)
+}
+
+/// Parse the schema of a registration, as Confluent's lookup does.
+fn parse_registration(state: &StoreState, req: &HttpRequest) -> Result<(), RegistryError> {
+    let body = SchemaBody::parse(req)?;
+    let schema = effective_schema(state, &body, req.flag("normalize"))?;
+    let refs = state.resolve_closure(&body.references)?;
+    format::parse(body.ty, &schema, &refs).map(|_| ())
 }
 
 fn find_version(
@@ -1415,7 +1472,79 @@ mod tests {
     }
 
     #[test]
-    fn a_registration_the_subject_holds_is_answered_without_a_write() {
+    fn a_missing_or_unreachable_primary_is_worded_as_each_resource_words_it() {
+        let subject_delete = (500, "Error while deleting the subject orders");
+        for (op, unknown, unreachable) in [
+            (
+                WriteOp::Register,
+                (50004, "Leader not known."),
+                (
+                    50003,
+                    "Error while forwarding register schema request to the leader",
+                ),
+            ),
+            (
+                WriteOp::DeleteVersion,
+                (50004, "Leader not known."),
+                (
+                    50003,
+                    "Error while forwarding delete schema version request to the leader",
+                ),
+            ),
+            (
+                WriteOp::DeleteSubject {
+                    subject: "orders".into(),
+                },
+                subject_delete,
+                subject_delete,
+            ),
+            (
+                WriteOp::UpdateConfig,
+                (50004, "Failed to update compatibility level"),
+                (
+                    50003,
+                    "Error while forwarding update config request to the leader",
+                ),
+            ),
+            (
+                WriteOp::DeleteConfig,
+                (50004, "Failed to delete compatibility level"),
+                (
+                    50003,
+                    "Error while forwarding delete config request to the leader",
+                ),
+            ),
+            (
+                WriteOp::UpdateMode,
+                (50004, "Failed to update mode"),
+                (
+                    50003,
+                    "Error while forwarding update mode request to the leader",
+                ),
+            ),
+            (
+                WriteOp::DeleteMode,
+                (50004, "Failed to delete mode"),
+                (
+                    50003,
+                    "Error while forwarding delete mode request to the leader",
+                ),
+            ),
+        ] {
+            let answers = (
+                op.unknown_leader().to_response(),
+                op.forwarding_failed().to_response(),
+            );
+            let expected = (
+                HttpResponse::error(500, unknown.0, unknown.1),
+                HttpResponse::error(500, unreachable.0, unreachable.1),
+            );
+            assert!(answers == expected, "{op:?}");
+        }
+    }
+
+    #[test]
+    fn a_registration_is_answered_before_the_lock_when_held_or_unparseable() {
         let mut s = registry();
         register(&mut s, "s", &av("A"));
         let again = parsed(
@@ -1423,23 +1552,28 @@ mod tests {
             "/subjects/s/versions",
             Some(json!({ "schema": av("A") })),
         );
-        assert!(registered_already(&s, &again) == Some(HttpResponse::ok(&json!({ "id": 1 }))));
+        assert!(before_lock(&s, &again) == Some(HttpResponse::ok(&json!({ "id": 1 }))));
+        // A schema that does not parse fails before the lock with the
+        // answer the whole request would give.
+        let broken = parsed(
+            "POST",
+            "/subjects/s/versions",
+            Some(json!({ "schema": "{" })),
+        );
+        let answer = handle(&s, &broken).response;
+        assert!(answer.status == 422);
+        assert!(before_lock(&s, &broken) == Some(answer));
         for (method, path, body) in [
             (
                 "POST",
                 "/subjects/s/versions",
                 Some(json!({ "schema": av("B") })),
             ),
-            (
-                "POST",
-                "/subjects/s/versions",
-                Some(json!({ "schema": "{" })),
-            ),
             ("POST", "/subjects/s", Some(json!({ "schema": av("A") }))),
             ("DELETE", "/subjects/s", None),
         ] {
             assert!(
-                registered_already(&s, &parsed(method, path, body)).is_none(),
+                before_lock(&s, &parsed(method, path, body)).is_none(),
                 "{method} {path}"
             );
         }

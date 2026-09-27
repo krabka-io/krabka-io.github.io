@@ -10,7 +10,8 @@
 //! The brokers form one `KRaft` cluster, as the world gives a scenario's
 //! brokers one controller quorum: the registry's `CreateTopics` is forwarded
 //! to the active controller, and a dead leader is fenced once its session
-//! expires and replaced from the ISR.
+//! expires and replaced from the ISR. Registries elect their primary in the
+//! brokers' `schema-registry` group.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +20,7 @@ use bytes::Bytes;
 use krabka_playground::lab::{
     Endpoint, Fault, NodeId, World,
     broker::test_support::{TestClient, decode_response},
+    events::Event,
     net::{ConnId, DurableOp, Frame, Millis, Payload},
     registry::http::{HttpRequest, HttpResponse},
     scenario::{NodeSpec, Scenario},
@@ -28,8 +30,12 @@ use krabka_protocol::{
     owned::{
         describe_configs_request::{DescribeConfigsRequest, DescribeConfigsResource},
         describe_configs_response::DescribeConfigsResponse,
+        describe_groups_request::DescribeGroupsRequest,
+        describe_groups_response::{DescribeGroupsResponse, DescribedGroup, DescribedGroupMember},
         fetch_request::{FetchPartition, FetchRequest, FetchTopic},
         fetch_response::FetchResponse,
+        find_coordinator_request::FindCoordinatorRequest,
+        find_coordinator_response::FindCoordinatorResponse,
         metadata_request::{MetadataRequest, MetadataRequestTopic},
         metadata_response::{MetadataResponse, MetadataResponsePartition, MetadataResponseTopic},
     },
@@ -38,9 +44,15 @@ use krabka_protocol::{
 use serde_json::{Value, json};
 
 const REGISTRY: NodeId = NodeId(4);
+/// The second registry of the election tests.
+const SECOND: NodeId = NodeId(5);
 const HTTP_CLIENT: NodeId = NodeId(99);
 const KAFKA_CLIENT: u32 = 98;
 const TOPIC: &str = "_schemas";
+const GROUP: &str = "schema-registry";
+/// How often a wait on a snapshot looks at it: a snapshot costs more than
+/// a step.
+const POLL_MS: Millis = 50;
 
 /// A record of `_schemas` as the leader stores it: offset, key, value.
 type Stored = (i64, Option<Bytes>, Option<Bytes>);
@@ -99,7 +111,7 @@ fn write_failures(lab: &Lab) -> Vec<String> {
 /// Confluent's `StoreTimeoutException` when no acknowledgement came.
 const ACK_TIMEOUT: &str = "Put operation timed out while waiting for an ack from Kafka";
 
-/// A world of brokers and a registry, and the test's two clients.
+/// A world of brokers and registries, and the test's two clients.
 struct Lab {
     world: World,
     brokers: Vec<NodeId>,
@@ -129,7 +141,7 @@ impl Lab {
         .unwrap();
         let brokers: Vec<NodeId> = (1..=count).map(NodeId).collect();
         let mut hosted = brokers.clone();
-        hosted.push(REGISTRY);
+        hosted.extend([REGISTRY, SECOND]);
         let mut lab = Self {
             world: World::from_scenario_hosted(&scenario, &hosted).unwrap(),
             brokers,
@@ -137,7 +149,7 @@ impl Lab {
             next_http: 0,
             inbox: Vec::new(),
         };
-        let formed = lab.run_until(
+        let formed = lab.wait_for(
             |lab| {
                 lab.brokers.iter().all(|b| {
                     let snapshot = lab.snapshot(*b);
@@ -157,32 +169,66 @@ impl Lab {
         lab
     }
 
-    /// Add the registry with `config` (its `bootstrap` defaults to every
-    /// broker) and run until it serves.
-    fn with_registry(mut self, mut config: Value) -> Self {
+    /// Add the registry with `config` and run until it serves.
+    fn with_registry(mut self, config: Value) -> Self {
+        self.add_registry(REGISTRY, config);
+        self
+    }
+
+    /// Add a registry on `node` with `config` (its `bootstrap` defaults to
+    /// every broker) and run until it serves.
+    fn add_registry(&mut self, node: NodeId, mut config: Value) {
         if config.get("bootstrap").is_none() {
             config["bootstrap"] = json!(self.brokers);
         }
         self.world
             .add_node(NodeSpec::new(
-                REGISTRY.0,
+                node.0,
                 "schema-registry",
-                "registry",
+                &format!("registry-{}", node.0),
                 config,
             ))
             .unwrap();
-        self.await_ready();
-        self
+        self.await_serving(node);
     }
 
     /// Run until the registry serves.
     fn await_ready(&mut self) {
-        let ready = self.run_until(|lab| lab.snapshot(REGISTRY)["state"] == "ready", 60_000);
-        assert!(ready, "{}", self.snapshot(REGISTRY));
+        self.await_serving(REGISTRY);
+    }
+
+    /// Run until the registry on `node` serves.
+    fn await_serving(&mut self, node: NodeId) {
+        let ready = self.wait_for(|lab| lab.snapshot(node)["state"] == "ready", 60_000);
+        assert!(ready, "{}", self.snapshot(node));
     }
 
     fn snapshot(&self, node: NodeId) -> Value {
         self.world.node_snapshot(node).unwrap()
+    }
+
+    /// The events since the `mark`-th, of `node`'s `kind`.
+    fn events_of(&self, mark: usize, node: NodeId, kind: &str) -> Vec<Event> {
+        self.world
+            .events_since(mark)
+            .into_iter()
+            .filter(|e| e.node == Some(node) && e.kind == kind)
+            .collect()
+    }
+
+    /// The `step` details of `node`'s `election` events since the
+    /// `mark`-th, without their `level`.
+    fn election_steps(&self, mark: usize, node: NodeId) -> Vec<Value> {
+        self.events_of(mark, node, "election")
+            .into_iter()
+            .map(|e| {
+                let mut detail = e.detail;
+                if let Some(detail) = detail.as_object_mut() {
+                    detail.remove("level");
+                }
+                detail
+            })
+            .collect()
     }
 
     fn run(&mut self, ms: Millis) {
@@ -196,7 +242,8 @@ impl Lab {
             .extend(self.world.drain_egress().into_iter().map(|t| t.frame));
     }
 
-    /// Step until `pred` holds or `max_ms` passed; whether it held.
+    /// Step until `pred` holds or `max_ms` passed; whether it held. `pred`
+    /// runs after every step, so it sees the first moment it holds.
     fn run_until(&mut self, mut pred: impl FnMut(&mut Self) -> bool, max_ms: Millis) -> bool {
         let deadline = self.world.now() + max_ms;
         loop {
@@ -208,6 +255,24 @@ impl Lab {
                 self.collect();
                 return pred(self);
             }
+        }
+    }
+
+    /// Run until `pred` holds or `max_ms` passed, looking every
+    /// [`POLL_MS`]; whether it held. For predicates on snapshots, where the
+    /// moment does not matter.
+    fn wait_for(&mut self, mut pred: impl FnMut(&mut Self) -> bool, max_ms: Millis) -> bool {
+        let deadline = self.world.now() + max_ms;
+        loop {
+            self.collect();
+            if pred(self) {
+                return true;
+            }
+            let now = self.world.now();
+            if now >= deadline {
+                return false;
+            }
+            self.run(POLL_MS.min(deadline - now));
         }
     }
 
@@ -321,23 +386,57 @@ impl Lab {
             .unwrap()
     }
 
+    /// The `schema-registry` group as its coordinator describes it.
+    fn describe_group(&mut self) -> DescribedGroup {
+        let any = self.alive_broker();
+        let found: FindCoordinatorResponse = self.kafka_call(
+            any,
+            4,
+            &FindCoordinatorRequest {
+                key_type: 0,
+                coordinator_keys: vec![GROUP.to_string()],
+                ..FindCoordinatorRequest::default()
+            },
+        );
+        let coordinator = NodeId(u32::try_from(found.coordinators[0].node_id).unwrap());
+        let described: DescribeGroupsResponse = self.kafka_call(
+            coordinator,
+            5,
+            &DescribeGroupsRequest {
+                groups: vec![GROUP.to_string()],
+                ..DescribeGroupsRequest::default()
+            },
+        );
+        described.groups[0].clone()
+    }
+
     // ---- the HTTP client ----------------------------------------------------------
 
     fn http_open(&mut self) -> ConnId {
+        self.http_open_to(REGISTRY)
+    }
+
+    /// Open a connection to the registry on `node`. Connection ids are
+    /// unique across registries, so a reply names its connection alone.
+    fn http_open_to(&mut self, node: NodeId) -> ConnId {
         self.next_http += 1;
         let conn = ConnId(self.next_http);
         self.world.push_ingress(vec![Frame::open(
             Endpoint::client(HTTP_CLIENT),
-            Endpoint::http(REGISTRY),
+            Endpoint::http(node),
             conn,
         )]);
         conn
     }
 
     fn http_send(&mut self, conn: ConnId, request: &HttpRequest) {
+        self.http_send_to(REGISTRY, conn, request);
+    }
+
+    fn http_send_to(&mut self, node: NodeId, conn: ConnId, request: &HttpRequest) {
         self.world.push_ingress(vec![Frame::data(
             Endpoint::client(HTTP_CLIENT),
-            Endpoint::http(REGISTRY),
+            Endpoint::http(node),
             conn,
             request.encode(),
         )]);
@@ -358,14 +457,25 @@ impl Lab {
             .any(|f| f.dst == Endpoint::client(HTTP_CLIENT) && f.conn == conn)
     }
 
-    /// Send one request on a new connection, with `Connection: close`, and
-    /// wait for the answer.
+    /// Send one request to the registry on a new connection, with
+    /// `Connection: close`, and wait for the answer.
     fn call(&mut self, method: &str, path: &str, body: Option<Value>) -> HttpResponse {
-        let conn = self.http_open();
+        self.call_on(REGISTRY, method, path, body)
+    }
+
+    /// [`Lab::call`] to the registry on `node`.
+    fn call_on(
+        &mut self,
+        node: NodeId,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> HttpResponse {
+        let conn = self.http_open_to(node);
         let mut request = request(method, path, body);
         request.close = true;
-        self.http_send(conn, &request);
-        let answered = self.run_until(|lab| lab.has_http_reply(conn), 60_000);
+        self.http_send_to(node, conn, &request);
+        let answered = self.run_until(|lab| lab.has_http_reply(conn), 120_000);
         assert!(answered, "{method} {path} was not answered");
         let replies = self.http_replies(conn);
         assert!(
@@ -376,7 +486,12 @@ impl Lab {
     }
 
     fn register(&mut self, subject: &str, schema: &str) -> HttpResponse {
-        self.call(
+        self.register_on(REGISTRY, subject, schema)
+    }
+
+    fn register_on(&mut self, node: NodeId, subject: &str, schema: &str) -> HttpResponse {
+        self.call_on(
+            node,
             "POST",
             &format!("/subjects/{subject}/versions"),
             Some(json!({ "schema": schema })),
@@ -622,7 +737,7 @@ fn a_write_the_reader_does_not_read_back_in_time_times_out_after_its_ack() {
     );
     // The record is on the topic all the same: once the reader reads it,
     // the schema is registered.
-    assert!(lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 5_000));
+    assert!(lab.wait_for(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 5_000));
     assert!(lab.register("s", &av("A")) == ok(&json!({ "id": 1 })));
 }
 
@@ -649,7 +764,7 @@ fn with_the_leaders_link_cut_a_registration_times_out_and_lands_after_the_heal()
         a: REGISTRY,
         b: leader,
     });
-    let landed = lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 2, 60_000);
+    let landed = lab.wait_for(|lab| lab.snapshot(REGISTRY)["schemas"] == 2, 60_000);
     assert!(landed, "{}", lab.snapshot(REGISTRY));
     assert!(lab.register("s", &av("B")) == ok(&json!({ "id": 2 })));
     // The next write first learns the end of the topic with a noop.
@@ -745,7 +860,7 @@ fn killing_the_leader_before_a_registration_loses_and_duplicates_nothing() {
     assert!(write_failures(&lab) == vec![ACK_TIMEOUT.to_string()]);
     // The producer retries the record until the controller has fenced the
     // dead broker and a new leader takes it.
-    let landed = lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 2, 60_000);
+    let landed = lab.wait_for(|lab| lab.snapshot(REGISTRY)["schemas"] == 2, 60_000);
     assert!(landed, "{}", lab.snapshot(REGISTRY));
     assert!(lab.leader() != leader);
     assert!(lab.register("s", &av("B")) == ok(&json!({ "id": 2 })));
@@ -796,7 +911,7 @@ fn killing_the_leader_before_it_acknowledges_a_committed_record_duplicates_nothi
     assert!(write_failures(&lab) == vec![ACK_TIMEOUT.to_string()]);
     // The producer's retry is a duplicate the new leader recognises: the
     // record is there once.
-    let landed = lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 60_000);
+    let landed = lab.wait_for(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 60_000);
     assert!(landed, "{}", lab.snapshot(REGISTRY));
     assert!(lab.register("s", &av("A")) == ok(&json!({ "id": 1 })));
     assert!(lab.register("s", &av("B")) == ok(&json!({ "id": 2 })));
@@ -903,7 +1018,7 @@ fn http_commands_answer_reads_and_queue_writes() {
         )
         .unwrap();
     assert!(queued == json!({ "queued": 2 }));
-    let done = lab.run_until(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 5_000);
+    let done = lab.wait_for(|lab| lab.snapshot(REGISTRY)["schemas"] == 1, 5_000);
     assert!(done);
     let answers: Vec<Value> = lab
         .world
@@ -1000,7 +1115,7 @@ fn a_schemas_topic_unfit_for_the_store_fails_the_startup() {
                 json!({ "bootstrap": [1] }),
             ))
             .unwrap();
-        let failed = lab.run_until(|lab| lab.snapshot(REGISTRY)["state"] == "failed", 5_000);
+        let failed = lab.wait_for(|lab| lab.snapshot(REGISTRY)["state"] == "failed", 5_000);
         assert!(failed, "{}", lab.snapshot(REGISTRY));
         assert!(lab.snapshot(REGISTRY)["store"]["error"] == error);
         let failures: Vec<Value> = lab
@@ -1020,4 +1135,267 @@ fn a_schemas_topic_unfit_for_the_store_fails_the_startup() {
                 == Err(format!("the schema registry failed to start: {error}"))
         );
     }
+}
+
+/// The metadata a lab registry on `node` joins the group with: Confluent's
+/// `SchemaRegistryIdentity` as its Jackson mapper writes it.
+fn identity_json(node: u32) -> String {
+    format!(
+        r#"{{"host":"node-{node}","port":8081,"master_eligibility":true,"scheme":"http","version":1,"leader":false}}"#
+    )
+}
+
+#[test]
+fn two_registries_elect_the_smallest_url_and_the_secondary_forwards_writes() {
+    let mut lab = Lab::new(3, json!({}));
+    let mark = lab.world.event_count();
+    lab.add_registry(SECOND, json!({}));
+    // The eligible member with the smallest URL leads. Node 4 left its
+    // generation when node 5 joined, and was elected again.
+    let primary = json!("http://node-4:8081");
+    assert!(
+        lab.election_steps(mark, REGISTRY)
+            == vec![
+                json!({ "step": "revoked" }),
+                json!({ "step": "assigned", "generation": 2, "leader": primary, "is_leader": true }),
+            ]
+    );
+    assert!(
+        lab.election_steps(mark, SECOND)
+            == vec![
+                json!({ "step": "assigned", "generation": 2, "leader": primary, "is_leader": false })
+            ]
+    );
+    // The coordinator holds both members with their identities, and the
+    // assignment every member received names node 4's member.
+    let mut group = lab.describe_group();
+    group.members.sort_by(|a, b| a.member_id.cmp(&b.member_id));
+    let member_of = |node: u32| {
+        group
+            .members
+            .iter()
+            .find(|m| m.member_metadata == identity_json(node).as_bytes())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let assignment = format!(
+        r#"{{"error":0,"master":"{}","master_identity":{},"version":1}}"#,
+        member_of(4).member_id,
+        identity_json(4)
+    );
+    let mut members: Vec<DescribedGroupMember> = [4, 5]
+        .into_iter()
+        .map(|node| {
+            let actual = member_of(node);
+            DescribedGroupMember {
+                member_id: actual.member_id,
+                group_instance_id: None,
+                client_id: "sr-1".to_string(),
+                client_host: actual.client_host,
+                member_metadata: Bytes::from(identity_json(node)),
+                member_assignment: Bytes::from(assignment.clone()),
+                ..DescribedGroupMember::default()
+            }
+        })
+        .collect();
+    members.sort_by(|a, b| a.member_id.cmp(&b.member_id));
+    assert!(
+        group
+            == DescribedGroup {
+                error_code: 0,
+                group_id: GROUP.to_string(),
+                group_state: "Stable".to_string(),
+                protocol_type: "sr".to_string(),
+                protocol_data: "v0".to_string(),
+                members,
+                ..DescribedGroup::default()
+            }
+    );
+
+    // A write through the secondary is forwarded; the primary writes it.
+    assert!(lab.register_on(SECOND, "s", &av("A")) == ok(&json!({ "id": 1 })));
+    // Node 4's startup noops, node 5's, and node 4's catch-up as the
+    // primary of the new generation, then the schema.
+    assert!(
+        lab.schemas_records()
+            == vec![
+                noop(0),
+                noop(1),
+                noop(2),
+                noop(3),
+                schema_record(4, "s", 1, 1, &av("A"), false),
+            ]
+    );
+    let work = |lab: &Lab, node: NodeId| {
+        let snapshot = lab.snapshot(node);
+        json!({
+            "noops": snapshot["store"]["noops"],
+            "puts": snapshot["store"]["puts"],
+            "forwarded": snapshot["forwarder"]["forwarded"],
+        })
+    };
+    assert!(work(&lab, REGISTRY) == json!({ "noops": 3, "puts": 1, "forwarded": 0 }));
+    assert!(work(&lab, SECOND) == json!({ "noops": 1, "puts": 0, "forwarded": 1 }));
+    // The secondary serves the schema once its own reader has read it.
+    assert!(lab.wait_for(|lab| lab.snapshot(SECOND)["schemas"] == 1, 5_000));
+    assert!(lab.call_on(SECOND, "GET", "/subjects/s/versions", None) == ok(&json!([1])));
+    // An error of the primary's comes back as Confluent's `RestService`
+    // reports it, with its code in the message.
+    let incompatible = r#"{"type":"record","name":"U","fields":[{"name":"X","type":"int"}]}"#;
+    let direct = lab.register_on(REGISTRY, "s", incompatible);
+    let message = direct.body_json().unwrap()["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(direct == HttpResponse::error(409, 409, &message));
+    assert!(
+        lab.register_on(SECOND, "s", incompatible)
+            == HttpResponse::error(409, 409, format!("{message}; error code: 409"))
+    );
+    // A schema that does not parse fails on the secondary itself: Confluent
+    // looks the schema up, which parses it, before the lock.
+    let broken = lab.register_on(REGISTRY, "s", "{");
+    assert!(broken.status == 422);
+    assert!(lab.register_on(SECOND, "s", "{") == broken);
+    assert!(lab.snapshot(SECOND)["forwarder"]["forwarded"] == 2);
+}
+
+#[test]
+fn when_the_primary_dies_the_secondary_takes_over_once_its_session_expires() {
+    let mut lab = Lab::new(3, json!({}));
+    lab.add_registry(SECOND, json!({}));
+    assert!(lab.register("s", &av("A")) == ok(&json!({ "id": 1 })));
+    let mark = lab.world.event_count();
+    lab.world.fault(Fault::Kill { node: REGISTRY });
+    // The dead primary refuses the forwarded write.
+    assert!(
+        lab.register_on(SECOND, "s", &av("B"))
+            == HttpResponse::error(
+                500,
+                50003,
+                "Error while forwarding register schema request to the leader"
+            )
+    );
+    // The coordinator expires the dead member after its session, and the
+    // secondary joins a new generation. Until it is assigned, no primary is
+    // known.
+    let revoked = lab.run_until(
+        |lab| {
+            lab.events_of(mark, SECOND, "election")
+                .iter()
+                .any(|e| e.detail["step"] == "revoked")
+        },
+        30_000,
+    );
+    assert!(revoked);
+    let queued = lab
+        .world
+        .control(
+            SECOND,
+            json!({ "cmd": "http", "method": "POST", "path": "/subjects/s/versions",
+                    "body": { "schema": av("C") } }),
+        )
+        .unwrap();
+    let answers: Vec<Value> = lab
+        .events_of(mark, SECOND, "registry")
+        .into_iter()
+        .map(|e| e.detail)
+        .collect();
+    assert!(
+        answers
+            == vec![
+                json!({
+                    "method": "POST", "path": "/subjects/s/versions", "status": 500,
+                    "level": "warn",
+                    "message": "Error while forwarding register schema request to the leader",
+                }),
+                json!({
+                    "method": "POST", "path": "/subjects/s/versions", "status": 500,
+                    "request": queued["queued"], "level": "warn",
+                    "message": "Leader not known.",
+                }),
+            ]
+    );
+    // The secondary becomes the primary, catches up with a noop, and takes
+    // the write.
+    let promoted = lab.wait_for(
+        |lab| lab.snapshot(SECOND)["election"]["is_leader"] == true,
+        30_000,
+    );
+    assert!(promoted, "{}", lab.snapshot(SECOND));
+    assert!(lab.register_on(SECOND, "s", &av("B")) == ok(&json!({ "id": 2 })));
+    assert!(
+        lab.election_steps(mark, SECOND)
+            == vec![
+                json!({
+                    "step": "forward_failed", "op": "register", "path": "/subjects/s/versions",
+                    "leader": "http://node-4:8081",
+                    "message": "the primary refused or closed the connection",
+                }),
+                json!({ "step": "revoked" }),
+                json!({ "step": "assigned", "generation": 3, "leader": "http://node-5:8081", "is_leader": true }),
+            ]
+    );
+    assert!(
+        lab.schemas_records()
+            == vec![
+                noop(0),
+                noop(1),
+                noop(2),
+                noop(3),
+                schema_record(4, "s", 1, 1, &av("A"), false),
+                noop(5),
+                schema_record(6, "s", 2, 2, &av("B"), false),
+            ]
+    );
+}
+
+#[test]
+fn a_registry_that_may_not_lead_serves_reads_and_answers_writes_that_no_leader_is_known() {
+    let mut lab = Lab::brokers(3);
+    let mark = lab.world.event_count();
+    lab.add_registry(REGISTRY, json!({ "leader.eligibility": false }));
+    assert!(
+        lab.election_steps(mark, REGISTRY)
+            == vec![
+                json!({ "step": "assigned", "generation": 1, "leader": null, "is_leader": false }),
+                json!({
+                    "step": "no_leader",
+                    "message": "No leader eligible schema registry instances joined the schema registry group. Rebalancing was successful and this instance can serve reads, but no writes can be processed.",
+                }),
+            ]
+    );
+    assert!(lab.call("GET", "/subjects", None) == ok(&json!([])));
+    assert!(lab.register("s", &av("A")) == HttpResponse::error(500, 50004, "Leader not known."));
+    assert!(
+        lab.call("PUT", "/config", Some(json!({ "compatibility": "NONE" })))
+            == HttpResponse::error(500, 50004, "Failed to update compatibility level")
+    );
+    // Only the store's own noop is on the topic: no primary caught up.
+    assert!(lab.schemas_records() == vec![noop(0)]);
+}
+
+#[test]
+fn a_group_not_joined_within_the_init_timeout_fails_the_startup() {
+    let mut lab = Lab::brokers(1);
+    // The coordinator holds the first join of an empty group for its
+    // initial rebalance delay of 3 s.
+    lab.world
+        .add_node(NodeSpec::new(
+            REGISTRY.0,
+            "schema-registry",
+            "registry",
+            json!({ "bootstrap": [1], "kafkastore.init.timeout.ms": 2000 }),
+        ))
+        .unwrap();
+    let failed = lab.wait_for(|lab| lab.snapshot(REGISTRY)["state"] == "failed", 10_000);
+    assert!(failed, "{}", lab.snapshot(REGISTRY));
+    let message = "Timed out waiting for join group to complete";
+    assert!(lab.snapshot(REGISTRY)["error"] == message);
+    assert!(
+        lab.election_steps(0, REGISTRY) == vec![json!({ "step": "failed", "message": message })]
+    );
+    let conn = lab.http_open();
+    assert!(lab.run_until(|lab| lab.has_http_reply(conn), 1_000));
+    assert!(lab.http_replies(conn) == vec![Payload::Close]);
 }

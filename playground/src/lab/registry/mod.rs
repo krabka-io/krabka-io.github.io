@@ -1,34 +1,48 @@
 //! The simulated schema registry: Confluent Schema Registry over the lab's
 //! frames, with its state in the `_schemas` topic on the scenario's brokers.
 //!
-//! [`RegistryNode`] listens on [`HTTP_PORT`](super::net::HTTP_PORT) and serves the Confluent REST
-//! API. Its state is the replay of `_schemas`, which the
-//! [`KafkaStore`] sets up, reads and writes on the
-//! brokers as Confluent's `KafkaStore` does. The node keeps nothing of its
-//! own: every start, a wipe included, replays the topic from its beginning.
+//! [`RegistryNode`] listens on [`HTTP_PORT`] and serves the Confluent REST
+//! API. Its state is the replay of `_schemas`, which the [`KafkaStore`] sets
+//! up, reads and writes on the brokers as Confluent's `KafkaStore` does. The
+//! node keeps nothing of its own: every start, a wipe included, replays the
+//! topic from its beginning.
 //!
 //! # Startup
 //!
 //! On every start the store runs Confluent's startup (see [`kafkastore`]).
-//! Until it is done the registry does not listen, as Confluent's REST server
-//! starts only once the store has caught up: a new connection is refused with
-//! a `Close`, and the `http` command fails. A startup that fails leaves the
-//! registry refusing until it restarts.
+//! The instance then joins the `schema-registry` group, whose members elect
+//! the primary as Confluent's `KafkaGroupLeaderElector` does: the
+//! leader-eligible member with the smallest URL (`http://node-<id>:8081`).
+//! The instance that becomes the primary catches up once more
+//! ([`KafkaStore::begin_leader_catch_up`]). Until the first assignment is
+//! applied the registry does not listen, as Confluent's REST server starts
+//! only after `init`: a new connection is refused with a `Close`, and the
+//! `http` command fails. A store startup that fails, and a group that is
+//! not joined within `kafkastore.init.timeout.ms`, leave the registry
+//! refusing until it restarts.
 //!
 //! # Requests
 //!
-//! Reads are served from the replayed state at once. A request that may
-//! write (a registration, a delete, a level, a mode) takes Confluent's write
-//! lock: writes run one at a time, in arrival order. Each first waits until
-//! the reader reaches the last written offset
-//! (`waitUntilKafkaReaderReachesLastOffset`), then decides on the state as
-//! it is then, then writes its records one `KafkaStore.put` at a time. Its
-//! response goes out only once the reader has read its last record back; a
-//! write that fails answers the operation's Confluent error instead (see
-//! [`rest::WriteOp::failure`]). A registration of a schema the subject
-//! already has is answered at once, since Confluent looks it up before it
-//! takes the lock. The requests of one connection are answered in order: the
-//! requests behind one that waits for the store wait with it.
+//! Reads are served from the replayed state at once, on every instance. A
+//! request that may write (a registration, a delete, a level, a mode) takes
+//! Confluent's write lock: writes run one at a time, in arrival order. On
+//! the primary each first waits until the reader reaches the last written
+//! offset (`waitUntilKafkaReaderReachesLastOffset`), then decides on the
+//! state as it is then, then writes its records one `KafkaStore.put` at a
+//! time. Its response goes out only once the reader has read its last
+//! record back; a write that fails answers the operation's Confluent error
+//! instead (see [`rest::WriteOp::failure`]). A secondary forwards the write
+//! to the primary's REST listener and answers with the primary's answer, an
+//! error with `; error code: <code>` appended to its message, as Confluent's
+//! `RestService` does; no answer within `leader.read.timeout.ms` answers
+//! 50003, and a write while no primary is known answers 50004 (see
+//! [`rest::WriteOp::forwarding_failed`] and
+//! [`rest::WriteOp::unknown_leader`]). A registration of a schema the subject
+//! already has, or of one that does not parse, is answered at once on any
+//! instance, since Confluent looks the schema up before it takes the lock
+//! (see [`rest::before_lock`]). The requests of one connection are answered
+//! in order: the requests behind one that waits for the store or the
+//! primary wait with it.
 //!
 //! # Config
 //!
@@ -36,32 +50,36 @@
 //! { "bootstrap": [1, 2, 3], "compatibility": "BACKWARD", "mode": "READWRITE",
 //!   "kafkastore.topic": "_schemas", "kafkastore.timeout.ms": 500,
 //!   "kafkastore.init.timeout.ms": 60000,
-//!   "kafkastore.topic.replication.factor": 3 }
+//!   "kafkastore.topic.replication.factor": 3,
+//!   "leader.eligibility": true, "schema.registry.group.id": "schema-registry",
+//!   "kafkagroup.session.timeout.ms": 10000,
+//!   "kafkagroup.heartbeat.interval.ms": 3000,
+//!   "kafkagroup.rebalance.timeout.ms": 300000,
+//!   "leader.read.timeout.ms": 60000 }
 //! ```
 //!
 //! `bootstrap` names the brokers, Confluent's `kafkastore.bootstrap.servers`;
 //! it is required and names at least one. `compatibility` and `mode` are the
 //! global defaults that apply until a `CONFIG` or `MODE` record sets them.
-//! The `kafkastore.*` keys are Confluent's, with its defaults; see
-//! [`StoreConfig`]. Any other key is an error.
+//! The other keys are Confluent's, with its defaults; see [`StoreConfig`]
+//! for the `kafkastore.*` ones. Any other key is an error.
 //!
 //! # Control commands
 //!
 //! `{"cmd": "http", "method": "POST", "path": "/subjects/s/versions",
 //! "body": {...}?}` serves one REST request from the page. A read, and a
-//! registration the subject already has, returns `{"status": 200, "body":
-//! <JSON or text>}`. A request that may write joins the write queue and
+//! registration answered before the lock, returns `{"status": <code>,
+//! "body": <JSON or text>}`. A request that may write joins the write queue and
 //! returns `{"queued": <n>}`; its answer is the `registry` event that carries
 //! `"request": <n>`. The command fails while the registry does not serve.
 //!
 //! # Snapshot
 //!
 //! ```json
-//! { "state": "stopped" | "loading" | "ready" | "failed", "started": 1,
-//!   "bootstrap": [1, 2, 3],
-//!   "config": { "kafkastore.topic": "_schemas", "kafkastore.timeout.ms": 500,
-//!               "kafkastore.init.timeout.ms": 60000,
-//!               "kafkastore.topic.replication.factor": 3 },
+//! { "state": "stopped" | "loading" | "ready" | "failed", "error": null,
+//!   "started": 1, "bootstrap": [1, 2, 3],
+//!   "config": { "kafkastore.topic": "_schemas", ...every key above but
+//!               `bootstrap`, `compatibility` and `mode`... },
 //!   "compatibility": "BACKWARD", "mode": "READWRITE",
 //!   "subjects": [{ "subject": "s", "versions": [{ "version": 1, "id": 1,
 //!                  "deleted": false }], "compatibility": null, "mode": null }],
@@ -69,31 +87,47 @@
 //!   "unknown_records": 0, "undecodable_records": 0,
 //!   "connections": 1, "refused": 0, "requests": 4, "errors": 0,
 //!   "writes": { "queued": 0, "active": null },
+//!   "election": { "url": "http://node-4:8081", "eligible": true,
+//!                 "joined": true, "leader": "http://node-4:8081",
+//!                 "is_leader": true, "member": { ... } },
+//!   "forwarder": { "active": null, "forwarded": 0, "failed": 0 },
 //!   "store": { ...the store's snapshot... } }
 //! ```
 //!
-//! `state` is the store's, or `stopped` while the node is down, when
-//! `store` is `null`. `records` counts the records the reader applied and
-//! `applied` is the offset after the last one. `writes.active` is
-//! `{"op", "path", "stage": "catch_up" | "write"}` while a write holds the
-//! lock. `store` is [`KafkaStore::snapshot`]: the startup step, the topic,
-//! the reader's `offset` and `end_offset`, the running task, and the admin,
-//! reader and producer clients with their connections.
+//! `state` is `stopped` while the node is down, when `store`, `member` and
+//! `forwarder` are `null`; `error` is why a startup failed. `records` counts
+//! the records the reader applied and `applied` is the offset after the
+//! last one. `writes.active` is `{"op", "path", "stage": "catch_up" |
+//! "write" | "forward"}` while a write holds the lock, or `{"stage":
+//! "leader_catch_up"}` while a new primary catches up. `election.leader` is
+//! the primary the last assignment named, `null` while a rebalance runs or
+//! when no member may lead; `member` is the group member: its state, member
+//! id, generation, assignment and client. `store` is
+//! [`KafkaStore::snapshot`]: the startup step, the topic, the reader's
+//! `offset` and `end_offset`, the running task, and the admin, reader and
+//! producer clients with their connections.
 //!
 //! # Events
 //!
 //! `registry` for every write and every error answer; `kafkastore` for the
 //! store's startup, its warnings and its failure, and for the reason of a
 //! write the store failed (`{"step": "write_failed", "op", "path",
-//! "message"}`).
+//! "message"}`); `election` for each assignment (`{"step": "assigned",
+//! "generation", "leader", "is_leader"}`), each rebalance that begins
+//! (`revoked`), a group without an eligible member (`no_leader`), an
+//! assignment Confluent rejects (`assignment_failed`), a write the primary
+//! did not answer (`forward_failed`), a catch-up of a new primary that
+//! failed (`set_leader_failed`), and a group not joined in time (`failed`).
 //!
 //! # Durable state
 //!
 //! None: like Confluent's, the registry's state lives in `_schemas`.
 
 pub mod compat;
+mod election;
 pub mod error;
 pub mod format;
+mod forward;
 pub mod http;
 pub mod ids;
 pub mod kafkastore;
@@ -109,21 +143,26 @@ use bytes::BytesMut;
 use serde_json::{Value, json};
 
 use self::{
+    election::{ElectionEvent, Elector, ElectorConfig, Identity},
+    forward::{Forwarded, Forwarder},
     http::{HttpError, HttpRequest, HttpResponse},
     ids::LogOffset,
     kafkastore::{KafkaStore, StoreConfig},
+    lane::Lane,
     record::RawRecord,
     rest::WriteOp,
     service::RegistryService,
 };
 use super::{
-    LabError, config_field, config_field_or,
-    net::{ConnId, Ctx, Endpoint, Frame, Node, NodeId, Payload},
+    LabError,
+    client::{ClientOptions, KafkaClient},
+    config_field, config_field_or,
+    net::{ConnId, Ctx, Endpoint, Frame, HTTP_PORT, Millis, Node, NodeId, Payload},
     scenario::NodeSpec,
 };
 
 /// The config keys of a registry node.
-const CONFIG_KEYS: [&str; 7] = [
+const CONFIG_KEYS: [&str; 13] = [
     "bootstrap",
     "compatibility",
     "mode",
@@ -131,7 +170,17 @@ const CONFIG_KEYS: [&str; 7] = [
     "kafkastore.timeout.ms",
     "kafkastore.init.timeout.ms",
     "kafkastore.topic.replication.factor",
+    "leader.eligibility",
+    "schema.registry.group.id",
+    "kafkagroup.session.timeout.ms",
+    "kafkagroup.heartbeat.interval.ms",
+    "kafkagroup.rebalance.timeout.ms",
+    "leader.read.timeout.ms",
 ];
+
+/// The failure of a group that was not joined within
+/// `kafkastore.init.timeout.ms`: Confluent's `SchemaRegistryTimeoutException`.
+const JOIN_TIMEOUT: &str = "Timed out waiting for join group to complete";
 
 /// Where a request came from, and where its answer goes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -149,9 +198,12 @@ struct Pending {
     op: WriteOp,
 }
 
-/// The write that holds the lock.
+/// What holds the write lock.
 enum Writer {
     Idle,
+    /// A new primary catches up before it takes a write: Confluent's
+    /// `setLeader`.
+    LeaderCatchUp,
     /// The store catches up before the request is decided.
     CatchingUp(Pending),
     /// The request's records are being written; `response` goes out when
@@ -160,6 +212,8 @@ enum Writer {
         pending: Pending,
         response: HttpResponse,
     },
+    /// A secondary waits for the primary's answer.
+    Forwarding(Pending),
 }
 
 /// One open HTTP connection.
@@ -179,6 +233,26 @@ struct Settings {
     compatibility: String,
     mode: String,
     store: StoreConfig,
+    /// `leader.eligibility`.
+    eligible: bool,
+    elector: ElectorConfig,
+    /// `leader.read.timeout.ms`: how long a secondary waits for the
+    /// primary's answer.
+    leader_read_timeout_ms: Millis,
+}
+
+/// The election as the node applies it: Confluent's `leaderIdentity` and
+/// `joinedLatch`.
+#[derive(Default)]
+struct Leadership {
+    /// The primary the last assignment named.
+    leader: Option<Identity>,
+    /// The first assignment was applied, so the registry serves.
+    joined: bool,
+    /// When the group must be joined by.
+    join_deadline: Option<Millis>,
+    /// This instance just became the primary and catches up first.
+    catch_up_due: bool,
 }
 
 /// A schema registry node. See the module documentation.
@@ -187,6 +261,12 @@ pub struct RegistryNode {
     settings: Settings,
     service: RegistryService,
     store: Option<KafkaStore>,
+    elector: Option<Elector>,
+    forwarder: Option<Lane<Forwarder>>,
+    leadership: Leadership,
+    /// Why the startup failed outside the store: the group was not joined.
+    failure: Option<String>,
+    generation: u32,
     connections: BTreeMap<(Endpoint, ConnId), Connection>,
     queue: VecDeque<Pending>,
     writer: Writer,
@@ -201,7 +281,7 @@ impl RegistryNode {
     /// # Errors
     /// Returns a configuration error for an unknown key, a missing or empty
     /// `bootstrap`, a field of the wrong shape, an unknown level or mode, an
-    /// empty topic name, or a replication factor below 1.
+    /// empty topic or group name, or a replication factor below 1.
     pub fn from_spec(spec: &NodeSpec) -> Result<Self, LabError> {
         if let Some(key) = spec
             .config
@@ -234,41 +314,25 @@ impl RegistryNode {
         if !service::MODES.contains(&mode.as_str()) {
             return Err(LabError::config(spec, format!("unknown mode `{mode}`")));
         }
-        let defaults = StoreConfig::default();
-        let store = StoreConfig {
-            topic: config_field_or(spec, "kafkastore.topic", defaults.topic)?,
-            timeout_ms: config_field_or(spec, "kafkastore.timeout.ms", defaults.timeout_ms)?,
-            init_timeout_ms: config_field_or(
-                spec,
-                "kafkastore.init.timeout.ms",
-                defaults.init_timeout_ms,
-            )?,
-            replication_factor: config_field_or(
-                spec,
-                "kafkastore.topic.replication.factor",
-                defaults.replication_factor,
-            )?,
-        };
-        if store.topic.is_empty() {
-            return Err(LabError::config(spec, "`kafkastore.topic` is empty"));
-        }
-        if store.replication_factor < 1 {
-            return Err(LabError::config(
-                spec,
-                "`kafkastore.topic.replication.factor` must be at least 1",
-            ));
-        }
         let settings = Settings {
             bootstrap,
             compatibility: level.as_str().to_string(),
             mode,
-            store,
+            store: store_config(spec)?,
+            eligible: config_field_or(spec, "leader.eligibility", true)?,
+            elector: elector_config(spec)?,
+            leader_read_timeout_ms: config_field_or(spec, "leader.read.timeout.ms", 60_000)?,
         };
         Ok(Self {
             id: spec.id,
             service: RegistryService::new(&settings.compatibility, &settings.mode),
             settings,
             store: None,
+            elector: None,
+            forwarder: None,
+            leadership: Leadership::default(),
+            failure: None,
+            generation: 0,
             connections: BTreeMap::new(),
             queue: VecDeque::new(),
             writer: Writer::Idle,
@@ -286,14 +350,35 @@ impl RegistryNode {
         &self.service
     }
 
-    /// Whether the registry serves: its store finished the startup.
+    /// Whether the registry serves: its store finished the startup and the
+    /// first assignment of the election was applied.
     #[must_use]
     pub fn serving(&self) -> bool {
-        self.store.as_ref().is_some_and(KafkaStore::is_ready)
+        self.failure.is_none()
+            && self.leadership.joined
+            && self.store.as_ref().is_some_and(KafkaStore::is_ready)
+    }
+
+    /// Whether this instance is the primary.
+    #[must_use]
+    pub fn is_leader(&self) -> bool {
+        self.leadership.leader.as_ref() == Some(&self.identity())
+    }
+
+    /// How this instance advertises itself to the group.
+    fn identity(&self) -> Identity {
+        Identity::of_node(self.id, HTTP_PORT, self.settings.eligible)
+    }
+
+    /// Why the startup failed, once it did.
+    fn startup_failure(&self) -> Option<&str> {
+        self.failure
+            .as_deref()
+            .or_else(|| self.store.as_ref().and_then(KafkaStore::failure))
     }
 
     fn not_serving(&self) -> String {
-        match self.store.as_ref().and_then(KafkaStore::failure) {
+        match self.startup_failure() {
             Some(failure) => format!("the schema registry failed to start: {failure}"),
             None => "the schema registry is loading its store and does not serve yet".to_string(),
         }
@@ -306,38 +391,228 @@ impl RegistryNode {
         }
     }
 
-    /// The tail of every call: run the writes that can run, and arm the
-    /// timer for the store.
+    /// The tail of every call: join the group once the store is ready, fail
+    /// a startup whose group was not joined in time, run the writes that
+    /// can run, and arm the timer. A failed startup drives nothing more.
     fn settle(&mut self, ctx: &mut Ctx<'_>) {
-        self.pump_writes(ctx);
-        if let Some(at) = self
-            .store
-            .as_ref()
-            .and_then(|store| store.next_deadline(ctx.now()))
+        if self.failure.is_some() {
+            return;
+        }
+        if self.elector.is_none() && self.store.as_ref().is_some_and(KafkaStore::is_ready) {
+            self.join_group(ctx);
+        }
+        if !self.leadership.joined
+            && self
+                .leadership
+                .join_deadline
+                .is_some_and(|at| ctx.now() >= at)
         {
+            self.fail_startup(ctx, JOIN_TIMEOUT.to_string());
+            return;
+        }
+        self.pump_writes(ctx);
+        let now = ctx.now();
+        let deadlines = [
+            self.store.as_ref().and_then(|s| s.next_deadline(now)),
+            self.elector.as_ref().and_then(|e| e.next_deadline(now)),
+            self.forwarder
+                .as_ref()
+                .and_then(|f| f.get().next_deadline())
+                .map(|at| at.max(now)),
+            self.leadership
+                .join_deadline
+                .filter(|_| !self.leadership.joined)
+                .map(|at| at.max(now)),
+        ];
+        if let Some(at) = deadlines.into_iter().flatten().min() {
             ctx.arm(at);
         }
+    }
+
+    /// Confluent's `electLeader`: the group member and the forwarding client
+    /// start, and the startup waits for the first assignment.
+    fn join_group(&mut self, ctx: &mut Ctx<'_>) {
+        let endpoints = self
+            .settings
+            .bootstrap
+            .iter()
+            .map(|n| Endpoint::kafka(*n))
+            .collect();
+        let client = KafkaClient::new(endpoints, "sr-1", ClientOptions::default());
+        let lane = Lane::new(
+            client,
+            lane::index(self.generation, lane::ELECTOR),
+            ctx.rand(u64::MAX),
+        );
+        self.elector = Some(Elector::new(
+            lane,
+            self.settings.elector.clone(),
+            self.identity(),
+        ));
+        self.forwarder = Some(Lane::new(
+            Forwarder::default(),
+            lane::index(self.generation, lane::FORWARDER),
+            ctx.rand(u64::MAX),
+        ));
+        self.leadership.join_deadline = Some(ctx.now() + self.settings.store.init_timeout_ms);
+    }
+
+    /// The startup failed for good: every client closes, as Confluent's
+    /// process exits.
+    fn fail_startup(&mut self, ctx: &mut Ctx<'_>, message: String) {
+        self.close_clients(ctx);
+        ctx.event(
+            "election",
+            json!({ "step": "failed", "message": message, "level": "error" }),
+        );
+        self.failure = Some(message);
+    }
+
+    fn close_clients(&mut self, ctx: &mut Ctx<'_>) {
+        if let Some(store) = &mut self.store {
+            store.close(ctx);
+        }
+        if let Some(elector) = &mut self.elector {
+            elector.close(ctx);
+        }
+        if let Some(forwarder) = &mut self.forwarder {
+            forwarder.run(ctx, Forwarder::abort);
+        }
+    }
+
+    /// Apply what the group member reports: Confluent's `onRevoked` and
+    /// `onAssigned`, which call `setLeader`.
+    fn on_election(&mut self, ctx: &mut Ctx<'_>, events: Vec<ElectionEvent>) {
+        for event in events {
+            match event {
+                ElectionEvent::Revoked => {
+                    self.leadership.leader = None;
+                    ctx.event("election", json!({ "step": "revoked", "level": "info" }));
+                }
+                ElectionEvent::Assigned {
+                    generation,
+                    assignment,
+                } => {
+                    if assignment.error != 0 {
+                        // Confluent's `onAssigned` throws before `setLeader`.
+                        ctx.event(
+                            "election",
+                            json!({
+                                "step": "assignment_failed",
+                                "error": assignment.error,
+                                "message": "The schema registry group contained multiple members advertising the same URL.",
+                                "level": "error",
+                            }),
+                        );
+                        continue;
+                    }
+                    let changed = assignment.leader_identity.is_some()
+                        && assignment.leader_identity != self.leadership.leader;
+                    self.leadership.leader = assignment.leader_identity;
+                    let is_leader = self.is_leader();
+                    ctx.event(
+                        "election",
+                        json!({
+                            "step": "assigned",
+                            "generation": generation,
+                            "leader": self.leadership.leader.as_ref().map(Identity::url),
+                            "is_leader": is_leader,
+                            "level": "info",
+                        }),
+                    );
+                    if self.leadership.leader.is_none() {
+                        ctx.event(
+                            "election",
+                            json!({
+                                "step": "no_leader",
+                                "message": "No leader eligible schema registry instances joined the schema registry group. Rebalancing was successful and this instance can serve reads, but no writes can be processed.",
+                                "level": "warn",
+                            }),
+                        );
+                    }
+                    if changed && is_leader {
+                        // `setLeader` catches up before `joinedLatch` counts
+                        // down.
+                        self.leadership.catch_up_due = true;
+                    } else {
+                        self.leadership.joined = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The primary answered a forwarded write, or did not.
+    fn on_forwarded(&mut self, ctx: &mut Ctx<'_>, outcome: Forwarded) {
+        let writer = std::mem::replace(&mut self.writer, Writer::Idle);
+        let Writer::Forwarding(pending) = writer else {
+            self.writer = writer;
+            return;
+        };
+        let response = match outcome {
+            Forwarded::Answered(response) => forward::relay(response),
+            Forwarded::Failed(reason) => {
+                ctx.event(
+                    "election",
+                    json!({
+                        "step": "forward_failed",
+                        "op": pending.op.name(),
+                        "path": pending.request.path,
+                        "leader": self.leadership.leader.as_ref().map(Identity::url),
+                        "message": reason,
+                        "level": "warn",
+                    }),
+                );
+                pending.op.forwarding_failed().to_response()
+            }
+        };
+        self.finish(ctx, &pending, &response);
     }
 
     fn take_outcome(&mut self) -> Option<Result<(), kafkastore::StoreError>> {
         self.store.as_mut().and_then(KafkaStore::take_outcome)
     }
 
-    /// Run the write queue as far as the store lets it: the lock's holder
-    /// catches up, is decided, writes, and answers; then the next one.
+    /// Run the write queue as far as the store and the primary let it: a
+    /// new primary catches up first; then the lock's holder catches up, is
+    /// decided, writes and answers on the primary, or is forwarded on a
+    /// secondary; then the next one.
     fn pump_writes(&mut self, ctx: &mut Ctx<'_>) {
         loop {
             match std::mem::replace(&mut self.writer, Writer::Idle) {
                 Writer::Idle => {
+                    if self.failure.is_some() {
+                        return;
+                    }
                     let Some(store) = self.store.as_mut().filter(|s| s.is_ready()) else {
                         return;
                     };
+                    if self.leadership.catch_up_due {
+                        self.leadership.catch_up_due = false;
+                        store.begin_leader_catch_up(ctx);
+                        self.writer = Writer::LeaderCatchUp;
+                        continue;
+                    }
                     let Some(pending) = self.queue.pop_front() else {
                         return;
                     };
-                    store.begin_catch_up(ctx);
-                    self.writer = Writer::CatchingUp(pending);
+                    self.begin(ctx, pending);
                 }
+                Writer::LeaderCatchUp => match self.take_outcome() {
+                    None => {
+                        self.writer = Writer::LeaderCatchUp;
+                        return;
+                    }
+                    Some(Ok(())) => self.leadership.joined = true,
+                    Some(Err(error)) => ctx.event(
+                        "election",
+                        json!({
+                            "step": "set_leader_failed",
+                            "message": format!("Exception getting latest offset: {error}"),
+                            "level": "error",
+                        }),
+                    ),
+                },
                 Writer::CatchingUp(pending) => match self.take_outcome() {
                     None => {
                         self.writer = Writer::CatchingUp(pending);
@@ -374,7 +649,37 @@ impl RegistryNode {
                         self.finish(ctx, &pending, &response);
                     }
                 },
+                Writer::Forwarding(pending) => {
+                    self.writer = Writer::Forwarding(pending);
+                    return;
+                }
             }
+        }
+    }
+
+    /// Take the lock for `pending`: catch up on the primary, forward on a
+    /// secondary, or answer that no primary is known.
+    fn begin(&mut self, ctx: &mut Ctx<'_>, pending: Pending) {
+        if self.is_leader() {
+            if let Some(store) = self.store.as_mut() {
+                store.begin_catch_up(ctx);
+            }
+            self.writer = Writer::CatchingUp(pending);
+            return;
+        }
+        let Some(leader) = &self.leadership.leader else {
+            let response = pending.op.unknown_leader().to_response();
+            self.finish(ctx, &pending, &response);
+            return;
+        };
+        let timeout = self.settings.leader_read_timeout_ms;
+        if let (Some(node), Some(forwarder)) = (leader.node(), self.forwarder.as_mut()) {
+            forwarder.run(ctx, |f, ctx| f.send(ctx, node, &pending.request, timeout));
+            self.writer = Writer::Forwarding(pending);
+        } else {
+            // A primary whose host names no lab node cannot be reached.
+            let response = pending.op.forwarding_failed().to_response();
+            self.finish(ctx, &pending, &response);
         }
     }
 
@@ -493,7 +798,7 @@ impl RegistryNode {
             let response = rest::handle(&self.service, &request).response;
             return Admitted::Answered(request, response);
         };
-        if let Some(response) = rest::registered_already(&self.service, &request) {
+        if let Some(response) = rest::before_lock(&self.service, &request) {
             return Admitted::Answered(request, response);
         }
         self.queue.push_back(Pending {
@@ -563,6 +868,27 @@ impl RegistryNode {
         }
     }
 
+    /// A frame for one of the node's clients: the forwarder, the group
+    /// member, or the store's.
+    fn on_client_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) {
+        if let Some(forwarder) = &mut self.forwarder
+            && forwarder.owns(frame.conn)
+        {
+            let frame = forwarder.inbound(frame);
+            if let Some(outcome) = forwarder.get_mut().on_frame(&frame) {
+                self.on_forwarded(ctx, outcome);
+            }
+        } else if let Some(elector) = &mut self.elector
+            && elector.lane().owns(frame.conn)
+        {
+            let events = elector.on_frame(ctx, frame);
+            self.on_election(ctx, events);
+        } else if let Some(store) = &mut self.store {
+            let read = store.on_frame(ctx, frame);
+            self.apply(read);
+        }
+    }
+
     fn run_http_command(&mut self, ctx: &mut Ctx<'_>, command: &Value) -> Result<Value, String> {
         if !self.serving() {
             return Err(self.not_serving());
@@ -597,21 +923,91 @@ impl RegistryNode {
     }
 
     fn writes_snapshot(&self) -> Value {
+        let holder = |pending: &Pending, stage: &str| {
+            json!({
+                "op": pending.op.name(),
+                "path": pending.request.path,
+                "stage": stage,
+            })
+        };
         let active = match &self.writer {
             Writer::Idle => Value::Null,
-            Writer::CatchingUp(pending) => json!({
-                "op": pending.op.name(),
-                "path": pending.request.path,
-                "stage": "catch_up",
-            }),
-            Writer::Writing { pending, .. } => json!({
-                "op": pending.op.name(),
-                "path": pending.request.path,
-                "stage": "write",
-            }),
+            Writer::LeaderCatchUp => json!({ "stage": "leader_catch_up" }),
+            Writer::CatchingUp(pending) => holder(pending, "catch_up"),
+            Writer::Writing { pending, .. } => holder(pending, "write"),
+            Writer::Forwarding(pending) => holder(pending, "forward"),
         };
         json!({ "queued": self.queue.len(), "active": active })
     }
+
+    fn state_name(&self) -> &'static str {
+        match &self.store {
+            None => "stopped",
+            Some(_) if self.startup_failure().is_some() => "failed",
+            Some(_) if self.serving() => "ready",
+            Some(_) => "loading",
+        }
+    }
+}
+
+/// The `kafkastore.*` keys of a registry's config.
+fn store_config(spec: &NodeSpec) -> Result<StoreConfig, LabError> {
+    let defaults = StoreConfig::default();
+    let store = StoreConfig {
+        topic: config_field_or(spec, "kafkastore.topic", defaults.topic)?,
+        timeout_ms: config_field_or(spec, "kafkastore.timeout.ms", defaults.timeout_ms)?,
+        init_timeout_ms: config_field_or(
+            spec,
+            "kafkastore.init.timeout.ms",
+            defaults.init_timeout_ms,
+        )?,
+        replication_factor: config_field_or(
+            spec,
+            "kafkastore.topic.replication.factor",
+            defaults.replication_factor,
+        )?,
+    };
+    if store.topic.is_empty() {
+        return Err(LabError::config(spec, "`kafkastore.topic` is empty"));
+    }
+    if store.replication_factor < 1 {
+        return Err(LabError::config(
+            spec,
+            "`kafkastore.topic.replication.factor` must be at least 1",
+        ));
+    }
+    Ok(store)
+}
+
+/// The group keys of a registry's config: `schema.registry.group.id` and
+/// `kafkagroup.*`.
+fn elector_config(spec: &NodeSpec) -> Result<ElectorConfig, LabError> {
+    let defaults = ElectorConfig::default();
+    let elector = ElectorConfig {
+        group_id: config_field_or(spec, "schema.registry.group.id", defaults.group_id)?,
+        session_timeout_ms: config_field_or(
+            spec,
+            "kafkagroup.session.timeout.ms",
+            defaults.session_timeout_ms,
+        )?,
+        heartbeat_interval_ms: config_field_or(
+            spec,
+            "kafkagroup.heartbeat.interval.ms",
+            defaults.heartbeat_interval_ms,
+        )?,
+        rebalance_timeout_ms: config_field_or(
+            spec,
+            "kafkagroup.rebalance.timeout.ms",
+            defaults.rebalance_timeout_ms,
+        )?,
+    };
+    if elector.group_id.is_empty() {
+        return Err(LabError::config(
+            spec,
+            "`schema.registry.group.id` is empty",
+        ));
+    }
+    Ok(elector)
 }
 
 /// What [`RegistryNode::admit`] did with a request.
@@ -630,22 +1026,24 @@ impl Node for RegistryNode {
     fn start(&mut self, ctx: &mut Ctx<'_>) {
         // A restart of a live node resets what the process before it had
         // open.
-        if let Some(mut store) = self.store.take() {
-            store.close(ctx);
-        }
+        self.close_clients(ctx);
         let me = Endpoint::http(self.id);
         for (peer, conn) in std::mem::take(&mut self.connections).into_keys() {
             ctx.send(Frame::close(me, peer, conn));
         }
         self.started += 1;
+        self.generation = u32::try_from(self.started % u64::from(u32::MAX)).unwrap_or(0);
         self.service = RegistryService::new(&self.settings.compatibility, &self.settings.mode);
         self.queue.clear();
         self.writer = Writer::Idle;
-        let generation = u32::try_from(self.started % u64::from(u32::MAX)).unwrap_or(0);
+        self.elector = None;
+        self.forwarder = None;
+        self.leadership = Leadership::default();
+        self.failure = None;
         self.store = Some(KafkaStore::start(
             self.settings.store.clone(),
             &self.settings.bootstrap,
-            generation,
+            self.generation,
             ctx,
         ));
         self.settle(ctx);
@@ -656,16 +1054,17 @@ impl Node for RegistryNode {
         self.queue.clear();
         self.writer = Writer::Idle;
         self.store = None;
+        self.elector = None;
+        self.forwarder = None;
+        self.leadership = Leadership::default();
+        self.failure = None;
     }
 
     fn on_frame(&mut self, ctx: &mut Ctx<'_>, frame: Frame) {
         if frame.dst == Endpoint::http(self.id) {
             self.on_http_frame(ctx, &frame);
-        } else if frame.dst == Endpoint::client(self.id)
-            && let Some(store) = &mut self.store
-        {
-            let read = store.on_frame(ctx, frame);
-            self.apply(read);
+        } else if frame.dst == Endpoint::client(self.id) {
+            self.on_client_frame(ctx, frame);
         }
         self.settle(ctx);
     }
@@ -674,6 +1073,17 @@ impl Node for RegistryNode {
         if let Some(store) = &mut self.store {
             let read = store.on_tick(ctx);
             self.apply(read);
+        }
+        if let Some(elector) = &mut self.elector {
+            let events = elector.on_tick(ctx);
+            self.on_election(ctx, events);
+        }
+        if let Some(outcome) = self
+            .forwarder
+            .as_mut()
+            .and_then(|f| f.run(ctx, Forwarder::on_tick))
+        {
+            self.on_forwarded(ctx, outcome);
         }
         self.settle(ctx);
     }
@@ -704,16 +1114,26 @@ impl Node for RegistryNode {
                 })
             })
             .collect();
-        let store = &self.settings.store;
+        let settings = &self.settings;
+        let store = &settings.store;
+        let group = &settings.elector;
+        let identity = self.identity();
         json!({
-            "state": self.store.as_ref().map_or("stopped", KafkaStore::state_name),
+            "state": self.state_name(),
+            "error": self.startup_failure(),
             "started": self.started,
-            "bootstrap": self.settings.bootstrap,
+            "bootstrap": settings.bootstrap,
             "config": {
                 "kafkastore.topic": store.topic,
                 "kafkastore.timeout.ms": store.timeout_ms,
                 "kafkastore.init.timeout.ms": store.init_timeout_ms,
                 "kafkastore.topic.replication.factor": store.replication_factor,
+                "leader.eligibility": settings.eligible,
+                "schema.registry.group.id": group.group_id,
+                "kafkagroup.session.timeout.ms": group.session_timeout_ms,
+                "kafkagroup.heartbeat.interval.ms": group.heartbeat_interval_ms,
+                "kafkagroup.rebalance.timeout.ms": group.rebalance_timeout_ms,
+                "leader.read.timeout.ms": settings.leader_read_timeout_ms,
             },
             "compatibility": state.global_compat(),
             "mode": state.global_mode(),
@@ -728,6 +1148,15 @@ impl Node for RegistryNode {
             "requests": self.requests,
             "errors": self.errors,
             "writes": self.writes_snapshot(),
+            "election": {
+                "url": identity.url(),
+                "eligible": identity.eligible,
+                "joined": self.leadership.joined,
+                "leader": self.leadership.leader.as_ref().map(Identity::url),
+                "is_leader": self.is_leader(),
+                "member": self.elector.as_ref().map(Elector::snapshot),
+            },
+            "forwarder": self.forwarder.as_ref().map(|f| f.get().snapshot()),
             "store": self.store.as_ref().map(KafkaStore::snapshot),
         })
     }
@@ -749,6 +1178,9 @@ mod tests {
         let node = RegistryNode::from_spec(&spec(json!({ "bootstrap": [1] }))).unwrap();
         assert!(node.service().state().global_compat() == "BACKWARD");
         assert!(node.settings.store == StoreConfig::default());
+        assert!(node.settings.elector == ElectorConfig::default());
+        assert!(node.settings.eligible);
+        assert!(node.settings.leader_read_timeout_ms == 60_000);
         let custom = RegistryNode::from_spec(&spec(json!({
             "bootstrap": [1, 2],
             "compatibility": "full",
@@ -757,6 +1189,12 @@ mod tests {
             "kafkastore.timeout.ms": 250,
             "kafkastore.init.timeout.ms": 5000,
             "kafkastore.topic.replication.factor": 1,
+            "leader.eligibility": false,
+            "schema.registry.group.id": "registries",
+            "kafkagroup.session.timeout.ms": 6000,
+            "kafkagroup.heartbeat.interval.ms": 2000,
+            "kafkagroup.rebalance.timeout.ms": 20000,
+            "leader.read.timeout.ms": 1000,
         })))
         .unwrap();
         assert!(custom.service().state().global_compat() == "FULL");
@@ -771,6 +1209,17 @@ mod tests {
                     replication_factor: 1,
                 }
         );
+        assert!(
+            custom.settings.elector
+                == ElectorConfig {
+                    group_id: "registries".to_string(),
+                    session_timeout_ms: 6000,
+                    heartbeat_interval_ms: 2000,
+                    rebalance_timeout_ms: 20000,
+                }
+        );
+        assert!(!custom.settings.eligible);
+        assert!(custom.settings.leader_read_timeout_ms == 1000);
         let refused = [
             (json!({}), "missing config field `bootstrap`"),
             (
@@ -800,6 +1249,14 @@ mod tests {
             (
                 json!({ "bootstrap": [1], "kafkastore.timeout.ms": -1 }),
                 "config field `kafkastore.timeout.ms`: invalid value",
+            ),
+            (
+                json!({ "bootstrap": [1], "schema.registry.group.id": "" }),
+                "`schema.registry.group.id` is empty",
+            ),
+            (
+                json!({ "bootstrap": [1], "leader.eligibility": "yes" }),
+                "config field `leader.eligibility`: invalid type",
             ),
             (
                 json!({ "bootstrap": [1], "kafkastore.connection.url": "x" }),
@@ -844,6 +1301,17 @@ mod tests {
         assert!(snapshot["refused"] == 1);
         assert!(snapshot["connections"] == 0);
         assert!(snapshot["store"]["step"] == "cluster_id");
+        assert!(
+            snapshot["election"]
+                == json!({
+                    "url": "http://node-4:8081",
+                    "eligible": true,
+                    "joined": false,
+                    "leader": null,
+                    "is_leader": false,
+                    "member": null,
+                })
+        );
         assert!(
             buffers.with(5, |ctx| node.control(ctx, json!({ "cmd": "nope" })))
                 == Err("unknown registry command Some(\"nope\")".to_string())

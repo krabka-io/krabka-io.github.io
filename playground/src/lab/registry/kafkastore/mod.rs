@@ -27,13 +27,14 @@
 //! 3. `KafkaStore.init` waits until the reader reaches the last offset: the
 //!    store produces a `NOOP` record to learn where the end is (Confluent's
 //!    `getLatestOffset`) and waits until the reader has read it.
-//! 4. The lone instance becomes the primary. Confluent's `setLeader` marks
-//!    the last written offset unknown and waits the same way again, so a
-//!    second `NOOP` follows.
 //!
 //! Each step has `kafkastore.init.timeout.ms`. A step that fails or times
 //! out fails the startup for good: Confluent's process exits, and the lab's
-//! registry stays down and refuses connections until it restarts.
+//! registry stays down and refuses connections until it restarts. The store
+//! is then ready, and the registry elects its primary. The instance that
+//! becomes the primary does not trust its last written offset and catches
+//! up once more ([`KafkaStore::begin_leader_catch_up`], Confluent's
+//! `setLeader`), so a second `NOOP` follows.
 //!
 //! # Writes
 //!
@@ -72,7 +73,7 @@ use crate::lab::{
     net::{Ctx, Endpoint, Frame, Millis, NodeId},
     registry::{
         ids::LogOffset,
-        lane::Lane,
+        lane::{self, Lane},
         record::{self, RawRecord},
     },
 };
@@ -123,13 +124,6 @@ pub enum StoreError {
     Failed(String),
 }
 
-// The lanes of the store's clients within one generation of the node: the
-// admin client, the reader and the producer.
-const ADMIN_LANE: u32 = 0;
-const READER_LANE: u32 = 1;
-const PRODUCER_LANE: u32 = 2;
-const LANES_PER_GENERATION: u32 = 3;
-
 /// Where the startup is.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum State {
@@ -145,8 +139,6 @@ enum State {
     },
     /// `KafkaStore.init` waits until the reader reaches the last offset.
     CatchUp,
-    /// The primary waits the same way once more.
-    LeaderCatchUp,
     Ready,
     Failed(String),
 }
@@ -157,7 +149,6 @@ impl State {
             Self::Setup => "setup",
             Self::Locate { .. } => "locate",
             Self::CatchUp => "catch_up",
-            Self::LeaderCatchUp => "leader_catch_up",
             Self::Ready => "ready",
             Self::Failed(_) => "failed",
         }
@@ -216,13 +207,9 @@ impl KafkaStore {
         ctx: &mut Ctx<'_>,
     ) -> Self {
         let endpoints: Vec<Endpoint> = bootstrap.iter().map(|n| Endpoint::kafka(*n)).collect();
-        let lane = |role: u32, ctx: &mut Ctx<'_>| {
-            let index = generation
-                .wrapping_mul(LANES_PER_GENERATION)
-                .wrapping_add(role);
-            (index, ctx.rand(u64::MAX))
-        };
-        let (index, seed) = lane(ADMIN_LANE, ctx);
+        let lane =
+            |role: u32, ctx: &mut Ctx<'_>| (lane::index(generation, role), ctx.rand(u64::MAX));
+        let (index, seed) = lane(lane::ADMIN, ctx);
         let admin = KafkaClient::new(endpoints.clone(), "adminclient-1", ClientOptions::default());
         let setup = Setup::new(
             Lane::new(admin, index, seed),
@@ -231,14 +218,14 @@ impl KafkaStore {
             config.init_timeout_ms,
             ctx.now(),
         );
-        let (index, seed) = lane(READER_LANE, ctx);
+        let (index, seed) = lane(lane::READER, ctx);
         let reader_client = KafkaClient::new(
             endpoints.clone(),
             &format!("KafkaStore-reader-{}", config.topic),
             ClientOptions::default(),
         );
         let reader = Reader::new(Lane::new(reader_client, index, seed), &config.topic);
-        let (index, seed) = lane(PRODUCER_LANE, ctx);
+        let (index, seed) = lane(lane::PRODUCER, ctx);
         let producer_client = KafkaClient::new(endpoints, "producer-1", ClientOptions::default());
         let producer = Producer::new(
             producer_client,
@@ -465,38 +452,27 @@ impl KafkaStore {
         self.advance_startup(ctx);
     }
 
-    /// The catch-ups of the startup finish: the second follows the first,
-    /// and the store is ready after the second.
+    /// The catch-up of `KafkaStore.init` finishes: the store is ready, or
+    /// the startup failed.
     fn advance_startup(&mut self, ctx: &mut Ctx<'_>) {
-        let next = match (&self.state, &self.outcome) {
-            (State::CatchUp | State::LeaderCatchUp, Some(Err(error))) => {
-                let message = error.to_string();
-                self.outcome = None;
-                self.fail(ctx, message);
-                return;
+        if self.state != State::CatchUp {
+            return;
+        }
+        match self.outcome.take() {
+            None => {}
+            Some(Err(error)) => self.fail(ctx, error.to_string()),
+            Some(Ok(())) => {
+                ctx.event(
+                    "kafkastore",
+                    json!({
+                        "step": "ready",
+                        "topic": self.config.topic,
+                        "offset": self.reader.offset(),
+                        "level": "info",
+                    }),
+                );
+                self.state = State::Ready;
             }
-            (State::CatchUp, Some(Ok(()))) => State::LeaderCatchUp,
-            (State::LeaderCatchUp, Some(Ok(()))) => State::Ready,
-            _ => return,
-        };
-        self.outcome = None;
-        if next == State::LeaderCatchUp {
-            // `setLeader`: the new primary does not trust the last written
-            // offset, and catches up again.
-            self.last_written = None;
-            self.state = State::LeaderCatchUp;
-            self.begin_task(ctx, None, self.config.init_timeout_ms);
-        } else {
-            ctx.event(
-                "kafkastore",
-                json!({
-                    "step": "ready",
-                    "topic": self.config.topic,
-                    "offset": self.reader.offset(),
-                    "level": "info",
-                }),
-            );
-            self.state = State::Ready;
         }
     }
 
@@ -505,6 +481,16 @@ impl KafkaStore {
     /// [`KafkaStore::take_outcome`].
     pub fn begin_catch_up(&mut self, ctx: &mut Ctx<'_>) {
         self.begin_task(ctx, None, self.config.timeout_ms);
+    }
+
+    /// Start the catch-up of an instance that just became the primary,
+    /// Confluent's `setLeader`: the last written offset is marked unknown,
+    /// so a `NOOP` learns the end of the topic, and the reader must reach
+    /// it within `kafkastore.init.timeout.ms`. The outcome comes from
+    /// [`KafkaStore::take_outcome`].
+    pub fn begin_leader_catch_up(&mut self, ctx: &mut Ctx<'_>) {
+        self.last_written = None;
+        self.begin_task(ctx, None, self.config.init_timeout_ms);
     }
 
     /// Start `KafkaStore.put` of each of `records`, in order. The outcome

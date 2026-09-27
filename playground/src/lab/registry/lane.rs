@@ -1,15 +1,17 @@
-//! Several Kafka clients in one node.
+//! Several clients in one node.
 //!
 //! A [`KafkaClient`](crate::lab::client::KafkaClient) numbers the
 //! connections it opens from 1 on its node's client endpoint, so two clients
 //! in one node would open the same `(client endpoint, connection)` pair, and
 //! the world and the brokers would take the two for one connection. The
-//! registry runs three clients, as Confluent's does: the admin client that
-//! sets up `_schemas`, the producer, and the reader. A [`Lane`] gives each a
-//! range of connection ids of its own. It runs the client behind a context
-//! of its own, adds the lane's base to the id of every frame the client
-//! sends, and takes it off every frame it hands back. Everything else the
-//! client does through its context passes through unchanged.
+//! registry runs five clients, as Confluent's does: the admin client that
+//! sets up `_schemas`, the producer, the reader, the group member of the
+//! leader election, and the HTTP client that forwards writes to the primary.
+//! A [`Lane`] gives each a range of connection ids of its own. It runs the
+//! client behind a context of its own, adds the lane's base to the id of
+//! every frame the client sends, and takes it off every frame it hands back.
+//! Everything else the client does through its context passes through
+//! unchanged.
 
 use crate::lab::net::{ConnId, Ctx, Frame, Rng};
 
@@ -18,6 +20,27 @@ pub const LANE_SIZE: u32 = 1 << 20;
 
 /// How many lanes fit in the connection id space.
 pub const LANES: u32 = u32::MAX / LANE_SIZE + 1;
+
+/// The lane of the store's admin client.
+pub const ADMIN: u32 = 0;
+/// The lane of the store's reader.
+pub const READER: u32 = 1;
+/// The lane of the store's producer.
+pub const PRODUCER: u32 = 2;
+/// The lane of the leader election's group member.
+pub const ELECTOR: u32 = 3;
+/// The lane of the HTTP client that forwards writes to the primary.
+pub const FORWARDER: u32 = 4;
+/// The lanes of one start of the node.
+const ROLES: u32 = 5;
+
+/// The lane index of `role` in the node's `generation`-th start, so the
+/// clients of a restarted node open connections that no peer confuses with
+/// those of the start before.
+#[must_use]
+pub fn index(generation: u32, role: u32) -> u32 {
+    generation.wrapping_mul(ROLES).wrapping_add(role)
+}
 
 /// One client of a node, on a range of connection ids of its own.
 pub struct Lane<T> {
