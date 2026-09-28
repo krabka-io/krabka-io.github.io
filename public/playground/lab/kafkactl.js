@@ -55,14 +55,17 @@ export class KafkactlBridge {
         }
       };
       socket.onerror = () => {
-        if (!configured) reject(new Error("Cannot reach the local bridge. Start kafkactl lab bridge and allow local network access in the browser."));
+        if (this.socket !== socket) return;
+        const reason = "Cannot reach the local bridge. Start kafkactl lab bridge and allow local network access in the browser.";
+        this.status("error", reason);
+        if (!configured) reject(new Error(reason));
       };
       socket.onclose = () => {
         if (this.socket !== socket) return;
         for (const [conn, broker] of this.connections) this.route(broker, conn, "close");
         this.connections.clear();
         this.socket = null;
-        this.status("disconnected", "The local bridge stopped or the connection closed");
+        if (this.state !== "error") this.status("disconnected", "The local bridge stopped or the connection closed");
         if (!configured) reject(new Error(paired ? "The local bridge stopped during pairing." : "The local bridge rejected the connection. Check the token and page origin."));
       };
     });
