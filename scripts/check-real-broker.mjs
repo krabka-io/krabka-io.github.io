@@ -37,7 +37,7 @@
 // runs the lab at 5x, which the processes keep up with. Timings are printed
 // with the results.
 //
-// Usage:  npm run build && npm run check-real-broker [-- --headed] [--no-build]
+// Usage:  npm run build && npm run check-real-broker [-- --headed] [--no-build] [--kafkactl]
 // Needs what `npm run build:broker` needs (cargo, the wasm32-wasip1 target,
 // clang and a WASI sysroot), Playwright (`playwright` or `playwright-core`,
 // local or global) and a Chromium, found as `check-lab` finds it.
@@ -47,9 +47,10 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
 import path from 'path';
 import { createRequire } from 'module';
-import { execSync, spawnSync } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,7 @@ const STEP_TIMEOUT = 120_000;
 const FAULT_SPEED = 5;
 const TOPIC = 'orders';
 const PARTITIONS = 3;
+const KAFKACTL = path.join(ROOT, 'kafkactl-lab', process.platform === 'win32' ? 'kafkactl.exe' : 'kafkactl');
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/opt/pw-browsers';
 
 // ---- the scenarios ------------------------------------------------------------------------------
@@ -358,7 +360,7 @@ async function oneBroker(context, base, errors) {
   const boot = await stderrLine(page, 1, 'starting the broker on /data/log', 'the broker to start');
   check('it formats its volume and boots a fresh cluster', /bootstrap_mode=Bootstrap/.test(boot) && /voter=true/.test(boot), boot);
   const serving = await stderrLine(page, 1, 'krabka-broker serving on', 'the broker to serve', BOOT_TIMEOUT);
-  check(`it serves on its virtual address (${elapsed(since)})`, serving.endsWith('krabka-broker serving on 10.0.0.1:9092'), serving);
+  check(`it advertises its local bridge address (${elapsed(since)})`, serving.endsWith('krabka-broker serving on 127.0.0.1:9092'), serving);
   await page.close();
 }
 
@@ -381,6 +383,75 @@ async function createTopic(page) {
   return admin.state.topics[0];
 }
 
+async function checkKafkactl(page, base) {
+  if (!fs.existsSync(KAFKACTL)) throw new Error(`build ${KAFKACTL} before the kafkactl check`);
+  await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'pause' }));
+  const config = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-kafkactl-')), 'config.yml');
+  const command = (args, input = '', timeout = 15_000, until = '') => new Promise((resolve) => {
+    const child = spawn(KAFKACTL, ['--config', config, ...args]);
+    let output = '';
+    child.stdout.on('data', (data) => { output += data; if (until && output.includes(until)) child.kill(); });
+    child.stderr.on('data', (data) => { output += data; });
+    if (input) child.stdin.write(input);
+    child.stdin.end();
+    const timer = setTimeout(() => child.kill(), timeout);
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
+  });
+  const bridge = spawn(KAFKACTL, ['lab', 'bridge', '--origin', base]);
+  try {
+    const token = await new Promise((resolve, reject) => {
+      let output = '';
+      const timer = setTimeout(() => reject(new Error(`bridge token timed out: ${output}`)), 10_000);
+      bridge.stdout.on('data', (data) => {
+        output += data;
+        const found = output.match(/\b[0-9a-f]{48}\b/);
+        if (found) { clearTimeout(timer); resolve(found[0]); }
+      });
+      bridge.on('exit', (code) => { clearTimeout(timer); reject(new Error(`bridge exited ${code}: ${output}`)); });
+    });
+    await page.locator('#krabka-lab .lab-bridge summary').click();
+    await page.locator('#krabka-lab .lab-bridge input[type="password"]').fill(token);
+    await page.locator('#krabka-lab .lab-bridge button', { hasText: 'Connect' }).click();
+    await waitFor(page, `window.krabkaLab.bridge.state === 'connected'`, 'the browser to pair with kafkactl');
+    const clientId = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.kind === 'local-client').id);
+    check('the distributed kafkactl binary pairs with the browser', await page.evaluate(() => window.krabkaLab.bridge.state) === 'connected');
+    const setup = await command(['config', 'add', 'krabka-lab', '--broker', '127.0.0.1:9092']);
+    check('kafkactl adds the krabka-lab context', setup.code === 0, setup.output);
+    const brokers = await command(['--context', 'krabka-lab', 'get', 'brokers']);
+    check('kafkactl queries all three real brokers', brokers.code === 0 && [1, 2, 3].every((id) => brokers.output.includes(`127.0.0.1:${9091 + id}`)), brokers.output);
+    const topics = await command(['--context', 'krabka-lab', 'get', 'topics']);
+    check('kafkactl queries the orders topic', topics.code === 0 && topics.output.includes('orders'), topics.output);
+    const configText = fs.readFileSync(config, 'utf8');
+    if (!configText.includes('127.0.0.1:9092')) throw new Error('the kafkactl context has no expected bootstrap broker');
+    fs.writeFileSync(config, configText.replace('127.0.0.1:9092', '127.0.0.1:9093'));
+    const alternateTopics = await command(['--context', 'krabka-lab', 'get', 'topics']);
+    check('kafkactl uses the context broker for topics', alternateTopics.code === 0 && alternateTopics.output.includes('orders'), alternateTopics.output);
+    fs.writeFileSync(config, configText);
+    const produced = await command(['--context', 'krabka-lab', 'produce', 'orders'], 'bridge-check-record\n');
+    check('kafkactl produces to orders', produced.code === 0, produced.output);
+    const consumed = await command(['--context', 'krabka-lab', 'consume', 'orders', '--offset=oldest', '--output=raw'], '', 15_000, 'bridge-check-record');
+    check('kafkactl consumes its record', consumed.output.includes('bridge-check-record'), consumed.output.slice(-300));
+    for (const partition of [0, 1, 2]) {
+      const read = await command(['--context', 'krabka-lab', 'consume', 'orders', `--partition=${partition}`, '--offset=oldest', '--output=raw'], '', 8_000, '"id":');
+      check(`kafkactl fetches partition ${partition}`, read.output.includes('"id":'), read.output.slice(-300));
+    }
+    await page.evaluate((id) => window.krabkaLab.fault({ kind: 'partition', a: id, b: 1 }), clientId);
+    const cut = await command(['--context', 'krabka-lab', 'get', 'brokers'], '', 3_000);
+    check('the lab link cut blocks a new kafkactl request', cut.code !== 0, cut.output.slice(-500));
+    await page.evaluate((id) => window.krabkaLab.fault({ kind: 'heal', a: id, b: 1 }), clientId);
+    const healed = await command(['--context', 'krabka-lab', 'get', 'brokers']);
+    check('kafkactl works again after the link heals', healed.code === 0 && healed.output.includes('127.0.0.1:9094'), healed.output);
+    await page.evaluate((id) => window.krabkaLab.world.removeNode(id), clientId);
+    await waitFor(page, `window.krabkaLab.bridge.state === 'error'`, 'the bridge to deconfigure after client removal', 10_000);
+    const removed = await command(['--context', 'krabka-lab', 'get', 'brokers'], '', 3_000);
+    check('removing the local client closes the bridge listeners', removed.code !== 0, removed.output.slice(-500));
+  } finally {
+    bridge.kill();
+    await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'resume' }));
+    fs.rmSync(path.dirname(config), { recursive: true, force: true });
+  }
+}
+
 async function threeBrokers(context, base, errors) {
   console.log('Three real brokers, the lab clients, a fault and a reload');
   const page = await context.newPage();
@@ -398,9 +469,15 @@ async function threeBrokers(context, base, errors) {
   check('three voters, each with the same static quorum', envs.every((v) => v === '1@10.0.0.1:9093,2@10.0.0.2:9093,3@10.0.0.3:9093'), JSON.stringify(envs));
   const servingLines = [];
   for (const id of [1, 2, 3]) servingLines.push(await stderrLine(page, id, 'krabka-broker serving on', `broker ${id} to serve`, BOOT_TIMEOUT));
-  check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.endsWith(`serving on 10.0.0.${i + 1}:9092`)), servingLines.join(' | '));
+  check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.endsWith(`serving on 127.0.0.1:${9092 + i}`)), servingLines.join(' | '));
   const topic = await createTopic(page);
   check(`the lab's admin node creates "${TOPIC}" with three replicas on the real brokers (${elapsed(since)})`, topic.status === 'created', JSON.stringify(topic));
+  if (args.has('--kafkactl') || args.has('--kafkactl-only')) {
+    await node(page, 4, '(n) => n.state && n.state.acked >= 30', 'the producer to ack 30 records before the kafkactl check');
+    await metadata(page, `(m) => m.topics?.${TOPIC}?.partitions?.length === 3 && m.topics.${TOPIC}.partitions.every((p) => p.isr.length === 3)`, 'all three topic replicas to be in sync');
+    await checkKafkactl(page, base);
+  }
+  if (args.has('--kafkactl-only')) { await page.close(); return; }
 
   // The lab's clients produce and consume through the real brokers.
   const produced = await node(page, 4, '(n) => n.state && n.state.acked >= 30', 'the producer to have 30 records acknowledged');
@@ -437,8 +514,8 @@ async function threeBrokers(context, base, errors) {
   const meta = await metadata(page, `(m) => (m.brokers || []).length === 3 && ${JSON.stringify(TOPIC)} in (m.topics || {}) && m.topics[${JSON.stringify(TOPIC)}].partitions.every((p) => p.isr.length === 3)`, 'metadata with three brokers and a full ISR');
   const brokers = meta.brokers.map((b) => ({ id: b.id, host: b.host, port: b.port, node: b.node })).sort((a, b) => a.id - b.id);
   check(
-    'the metadata names the three real brokers at their virtual addresses',
-    canonical(brokers) === canonical([1, 2, 3].map((id) => ({ id, host: `10.0.0.${id}`, port: 9092, node: id }))),
+    'the metadata names the three real brokers at their bridge addresses',
+    canonical(brokers) === canonical([1, 2, 3].map((id) => ({ id, host: '127.0.0.1', port: 9091 + id, node: id }))),
     JSON.stringify(brokers),
   );
   check('and the scenario\'s cluster id and a controller among them', meta.cluster_id === clusterId && [1, 2, 3].includes(meta.controller), `cluster ${meta.cluster_id}, controller ${meta.controller}`);
@@ -454,7 +531,7 @@ async function threeBrokers(context, base, errors) {
   const shown = JSON.parse(raw).state.client.metadata;
   check(
     "the inspector shows the real brokers' metadata",
-    shown.cluster_id === clusterId && canonical(shown.brokers.map((b) => b.host).sort()) === canonical(['10.0.0.1', '10.0.0.2', '10.0.0.3']) && partitionsOf(shown).length === PARTITIONS,
+    shown.cluster_id === clusterId && canonical(shown.brokers.map((b) => b.port).sort()) === canonical([9092, 9093, 9094]) && partitionsOf(shown).length === PARTITIONS,
     `${shown.brokers.map((b) => `${b.id}@${b.host}:${b.port}`).join(', ')}; ${partitionsOf(shown).map((p) => `p${p.partition} leader ${p.leader} isr [${p.isr}]`).join(', ')}`,
   );
   await page.locator('#krabka-lab .lab-inspector #lab-tab-state').click();
@@ -637,7 +714,7 @@ async function main() {
   const browserStart = Date.now();
   try {
     const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
-    await oneBroker(context, base, errors);
+    if (!args.has('--kafkactl-only')) await oneBroker(context, base, errors);
     await threeBrokers(context, base, errors);
     await context.close();
   } catch (err) {

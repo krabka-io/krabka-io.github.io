@@ -920,7 +920,9 @@ export class ExternalHost {
   dial(node, gen, host, port, dial) {
     if (gen !== node.gen) return null;
     this.activity(node);
-    const target = nodeForIp(host);
+    const advertised = host === "127.0.0.1" && port >= 9092 && port <= 19091;
+    const target = advertised ? port - 9091 : nodeForIp(host);
+    if (advertised) port = KAFKA_PORT;
     const world = target == null ? null : this.hooks.world();
     const peer = world ? world.nodes.find((n) => n.id === target && n.kind !== "admin") : null;
     if (!peer) {

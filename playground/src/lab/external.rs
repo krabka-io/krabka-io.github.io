@@ -22,6 +22,8 @@ use crate::lab::{
 
 /// The node kind of a real broker the page runs in a Worker.
 pub const REAL_BROKER_KIND: &str = "krabka-broker";
+/// A browser-owned endpoint for local TCP clients connected through kafkactl.
+pub const LOCAL_CLIENT_KIND: &str = "local-client";
 
 /// The world's stand-in for a process the page hosts.
 #[derive(Debug)]
@@ -37,9 +39,8 @@ impl ExternalNode {
     /// Returns an error for a kind that is not an external kind.
     pub fn from_spec(spec: &NodeSpec) -> Result<Self, LabError> {
         match spec.kind.as_str() {
-            REAL_BROKER_KIND => Ok(Self {
-                kind: REAL_BROKER_KIND,
-            }),
+            REAL_BROKER_KIND => Ok(Self { kind: REAL_BROKER_KIND }),
+            LOCAL_CLIENT_KIND => Ok(Self { kind: LOCAL_CLIENT_KIND }),
             other => Err(LabError::UnknownNodeKind(other.to_string())),
         }
     }

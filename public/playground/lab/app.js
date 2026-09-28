@@ -27,6 +27,7 @@ import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
 import { ExternalHost, REAL_BROKER_KIND, hasRealBroker, volumeName } from "./external.js";
+import { KafkactlBridge, LOCAL_CLIENT_KIND } from "./kafkactl.js";
 
 const ROOT_ID = "krabka-lab";
 const AUTOSAVE_MS = 800;
@@ -78,6 +79,12 @@ class LabApp {
       event: (id, kind, detail) => this.processEvent(id, kind, detail),
       exited: (id, exit) => this.processExited(id, exit),
     });
+    this.bridge = new KafkactlBridge({
+      route: (frames) => this.world.routeExternal(frames),
+      publish: (id, state) => this.world.applyRemoteSnapshot(id, state),
+      world: () => this.world.liveSnapshot(),
+      status: (state, reason) => this.renderBridgeStatus(state, reason),
+    });
     this.world = new LabWorld(Lab, {
       onError: (err, ctx) => this.toasts.error(err, ctx),
       onSnapshot: (snap) => this.onSnapshot(snap),
@@ -90,6 +97,7 @@ class LabApp {
       onClock: () => this.renderClock(),
     });
     this.world.attachExternal(this.external);
+    this.world.attachBridge(this.bridge);
     this.availability = probeAvailability(Lab);
 
     this.buildLayout();
@@ -99,6 +107,7 @@ class LabApp {
       this.autosave.cancel();
       this.saveNow();
       this.session.leave();
+      this.bridge.disconnect();
     });
   }
 
@@ -134,6 +143,7 @@ class LabApp {
       onClear: () => this.newScenario(),
       listSaved: () => this.storage.listScenarios(),
     });
+    this.buildBridgePanel(left);
 
     this.canvas = new Canvas(center, {
       onSelect: (id, { additive }) => this.select(id, additive),
@@ -221,6 +231,7 @@ class LabApp {
       this.storagePanel.root,
       this.sessionDetails,
       this.timeline.root,
+      this.bridgePanel,
       ...this.root.querySelectorAll(".lab-pal-section"),
     ];
     for (const panel of panels) {
@@ -266,6 +277,80 @@ class LabApp {
     control.setAttribute("aria-expanded", "false");
     this.expandedPanel = null;
     control.focus();
+  }
+
+  buildBridgePanel(container) {
+    const executable = /Win/i.test(navigator.userAgentData?.platform || navigator.platform) ? ".\\kafkactl.exe" : "./kafkactl";
+    const panel = el("details", "lab-side-section lab-bridge");
+    panel.appendChild(el("summary", "lab-panel-title", "Connect with kafkactl"));
+    const body = el("div", "lab-side-body");
+    const downloads = el("p", "lab-small");
+    downloads.append("1. Download the krabka build of kafkactl: ");
+    for (const [label, asset] of [
+      ["Windows", "kafkactl-lab-windows-amd64.zip"],
+      ["macOS Intel", "kafkactl-lab-darwin-amd64.tar.gz"],
+      ["macOS Apple silicon", "kafkactl-lab-darwin-arm64.tar.gz"],
+      ["Linux x64", "kafkactl-lab-linux-amd64.tar.gz"],
+      ["Linux ARM64", "kafkactl-lab-linux-arm64.tar.gz"],
+    ]) {
+      const link = el("a", "", label);
+      link.href = `https://github.com/krabka-io/krabka-io.github.io/releases/download/kafkactl-lab-v0.1.0/${asset}`;
+      link.rel = "noopener noreferrer";
+      downloads.append(link, " ");
+    }
+    const checksums = el("a", "", "SHA-256 checksums");
+    checksums.href = "https://github.com/krabka-io/krabka-io.github.io/releases/download/kafkactl-lab-v0.1.0/checksums.txt";
+    downloads.append(checksums);
+    body.appendChild(downloads);
+    const command = (label, value) => {
+      const row = el("div", "lab-bridge-command");
+      const code = el("code", "lab-code", value);
+      row.append(code, button("Copy", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(value)) ? `${label} copied` : "Copy failed; select the command")));
+      body.appendChild(row);
+    };
+    body.appendChild(el("p", "lab-small", "2. Extract it and open a terminal in the extracted folder. Start the bridge there:"));
+    command("Bridge command", `${executable} lab bridge`);
+    body.appendChild(el("p", "lab-small", "3. Enter the token the bridge prints. Allow this site to access the local network if your browser asks."));
+    const token = el("input", "lab-input");
+    token.type = "password";
+    token.placeholder = "Pairing token";
+    token.autocomplete = "off";
+    const connect = button("Connect", "lab-btn-sm lab-primary", async () => {
+      if (this.session.role === "spoke") return this.toasts.warn("Connect from the host tab that runs the real brokers.");
+      if (!this.world.scenario().nodes.some((n) => n.kind === LOCAL_CLIENT_KIND)) {
+        const ids = this.world.liveSnapshot()?.nodes.map((n) => n.id) || this.world.scenario().nodes.map((n) => n.id);
+        const id = Math.max(0, ...ids) + 1;
+        if (this.world.addNode({ id, kind: LOCAL_CLIENT_KIND, name: "local kafkactl", x: 140, y: 480, config: {} }) == null) return;
+      }
+      this.bridge.sync();
+      try {
+        await this.bridge.connect(token.value.trim());
+        token.value = "";
+      } catch (err) {
+        this.renderBridgeStatus("error", err.message);
+      }
+    });
+    body.append(token, connect);
+    this.bridgeStatus = el("p", "lab-muted lab-small", "Bridge disconnected");
+    this.bridgeStatus.setAttribute("role", "status");
+    body.appendChild(this.bridgeStatus);
+    body.appendChild(el("p", "lab-small", "4. Open a second terminal. Add a context, then inspect, write, and read the orders topic:"));
+    command("Context command", `${executable} config add krabka-lab --broker 127.0.0.1:9092`);
+    command("Broker command", `${executable} --context krabka-lab get brokers`);
+    command("Topic command", `${executable} --context krabka-lab get topics`);
+    command("Produce command", `echo hello-from-kafkactl | ${executable} --context krabka-lab produce orders`);
+    command("Consume command", `${executable} --context krabka-lab consume orders --offset=oldest --output=raw`);
+    body.appendChild(el("p", "lab-muted lab-small", "Press Ctrl+C to stop consuming."));
+    body.appendChild(el("p", "lab-muted lab-small", "Keep this tab and the bridge running. If a port is in use, stop the other local Kafka service; if a command waits, check that the lab clock is playing and the bridge is connected."));
+    panel.appendChild(body);
+    container.appendChild(panel);
+    this.bridgePanel = panel;
+  }
+
+  renderBridgeStatus(state, reason = "") {
+    if (!this.bridgeStatus) return;
+    this.bridgeStatus.textContent = `${state === "connected" ? "Connected" : state === "connecting" ? "Connecting" : state === "error" ? "Bridge error" : "Bridge disconnected"}${reason ? `: ${reason}` : ""}`;
+    this.bridgeStatus.dataset.state = state;
   }
 
   buildToolbar() {
@@ -456,6 +541,7 @@ class LabApp {
   }
 
   onChange(opts = {}) {
+    this.bridge.sync();
     if (this.session.role === "hub") this.broadcast();
     if (this.session.role !== "spoke") this.autosave();
     if (!opts.positionOnly) this.pushPanels();

@@ -36,7 +36,7 @@ pub struct Listener {
 /// The environment of a real broker process, checked.
 #[derive(Debug, PartialEq)]
 pub struct Contract {
-    /// `KRABKA_NODE_ID`: the broker's `node.id`, never negative.
+    /// `KRABKA_NODE_ID`: the broker's `node.id`, 1 through 10000.
     pub node_id: i32,
     /// `KRABKA_HOST`: the node's virtual address, which it listens on and
     /// advertises.
@@ -142,11 +142,11 @@ impl Contract {
         )?;
 
         let node_id: i32 = one("KRABKA_NODE_ID", &required("KRABKA_NODE_ID")?)?;
-        if node_id < 0 {
+        if !(1..=10000).contains(&node_id) {
             return Err(ContractError::Invalid {
                 name: "KRABKA_NODE_ID",
                 value: node_id.to_string(),
-                reason: "a node id is never negative".to_owned(),
+                reason: "the lab node id must be between 1 and 10000".to_owned(),
             });
         }
         let host: IpAddr = one("KRABKA_HOST", &required("KRABKA_HOST")?)?;
@@ -478,7 +478,11 @@ mod tests {
             (
                 "KRABKA_NODE_ID",
                 "-1",
-                invalid("KRABKA_NODE_ID", "-1", "a node id is never negative"),
+                invalid(
+                    "KRABKA_NODE_ID",
+                    "-1",
+                    "the lab node id must be between 1 and 10000",
+                ),
             ),
             (
                 "KRABKA_NODE_ID",
