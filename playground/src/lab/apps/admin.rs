@@ -321,7 +321,8 @@ impl AdminNode {
                     && !deleting
                     && topic.from_config
                     && topic.spec.replication_factor > 0
-                    && topic.spec.replication_factor as usize <= self.bootstrap.len()
+                    && usize::try_from(topic.spec.replication_factor)
+                        .is_ok_and(|replicas| replicas <= self.bootstrap.len())
                     && u64::from(topic.attempts) * RETRY_MS <= ADMIN_TIMEOUT_MS as u64) =>
             {
                 self.client.note_error(code, &Target::Controller);

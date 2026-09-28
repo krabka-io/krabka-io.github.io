@@ -830,7 +830,7 @@ impl World {
             dst: frame.dst,
             conn: frame.conn,
             kind,
-            label: frame_label(&frame),
+            label: frame_label(frame),
             size,
             bytes,
         });
