@@ -19,18 +19,19 @@ import { Timeline } from "./timeline.js";
 import { FaultBar, FAULT, describeFault } from "./faults.js";
 import { Palette } from "./palette.js";
 import { StoragePanel } from "./storage-panel.js";
+import { NetworkPanel } from "./network-panel.js";
 import { LabStorage } from "./storage.js";
 import { Session, joinCodeFromUrl } from "./session.js";
 import { KINDS, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
 import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
-import { ExternalHost, REAL_BROKER_KIND, hasRealBroker } from "./external.js";
+import { ExternalHost, REAL_BROKER_KIND, hasRealBroker, volumeName } from "./external.js";
 
 const ROOT_ID = "krabka-lab";
 const AUTOSAVE_MS = 800;
 const BROADCAST_MS = 150;
-const DEFAULT_PRESET = "network-probe";
+const DEFAULT_PRESET = "single-broker";
 const COI_URL = new URL("../../docs/lab/coi.js", import.meta.url).href;
 // Set just before the isolation reload, so the reloaded page can say why.
 const RELOADED_KEY = "krabka-lab.isolation-reload";
@@ -145,16 +146,32 @@ class LabApp {
     });
     this.faultBar = new FaultBar(center, {
       onFault: (f) => this.fault(f),
+      onBrowseTraffic: () => this.networkPanel.open(),
+      nodeName: (id) => this.nodeName(id),
+    });
+    this.networkPanel = new NetworkPanel(root, {
+      frames: (a, b) => this.world.wireFrames(a, b),
       nodeName: (id) => this.nodeName(id),
     });
 
     this.inspector = new Inspector(right, {
-      onFault: (f) => this.fault(f),
       onCommand: (id, command) => this.command(id, command),
       onControl: (id, command) => this.control(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
       onTakeOver: (id) => this.session.requestTakeover(id),
       onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
+      onBrowseVolume: async (id) => {
+        this.storagePanel.root.open = true;
+        await this.storagePanel.refresh();
+        await this.storagePanel.browseVolume(volumeName(this.world.id, id));
+        const column = this.storagePanel.root.parentElement;
+        const target = this.storagePanel.volumeExplorer;
+        if (column.scrollHeight > column.clientHeight) {
+          column.scrollTop += target.getBoundingClientRect().top - column.getBoundingClientRect().top - 8;
+        } else {
+          target.scrollIntoView({ block: "start" });
+        }
+      },
       formCtx: () => ({ nodes: this.nodeList() }),
       peerName: (id) => this.session.peerName(id),
       nodeName: (id) => this.nodeName(id),
@@ -165,6 +182,8 @@ class LabApp {
       scenarioId: () => this.world.id,
       nodes: () => this.nodeList(),
       volumes: () => (hasRealBroker(this.world.scenario()) ? this.external.volumes(this.world.id) : Promise.resolve([])),
+      volumeFiles: (volume) => this.external.volumeFiles(volume),
+      volumeFileRange: (volume, path, offset, length) => this.external.volumeFileRange(volume, path, offset, length),
       onForgetVolume: (volume) => this.forgetVolume(volume),
       onForgetNode: (id) => this.forgetNode(id),
       onForgetScenario: () => this.forgetScenario(),
@@ -360,6 +379,7 @@ class LabApp {
     if (snap) this.canvas.animate(snap.now);
     this.inspector.update({ snapshot: snap, scenario, session });
     this.faultBar.update({ snapshot: snap, selection: this.selection });
+    this.networkPanel.update(this.selection);
     this.timeline.setNodes(this.nodeList());
     this.palette.update({ scenario, availability: this.availability, role: this.session.role, saveState: this.saveState });
     this.renderClock(snap);
@@ -436,7 +456,7 @@ class LabApp {
 
   // A broker id as the inspector shows it: the node that carries it.
   nodeLabelForBroker(brokerId) {
-    const n = this.world.scenario().nodes.find((s) => s.kind === "broker" && Number(s.config?.broker_id) === Number(brokerId));
+    const n = this.world.scenario().nodes.find((s) => (s.kind === REAL_BROKER_KIND && Number(s.id) === Number(brokerId)) || (s.kind === "broker" && Number(s.config?.broker_id) === Number(brokerId)));
     return n ? `${n.name} (broker ${brokerId})` : `broker ${brokerId}`;
   }
 

@@ -25,7 +25,7 @@ export class Palette {
     container.appendChild(this.root);
 
     // Add node.
-    this.addSection = this.section("Add node", true);
+    this.addSection = this.section("Add node", false);
     this.kindButtons = {};
     const grid = el("div", "lab-kind-grid");
     for (const kind of KIND_ORDER) {
@@ -50,14 +50,14 @@ export class Palette {
     this.addSection.body.appendChild(this.roleNote);
 
     // Topics.
-    this.topicSection = this.section("Topics", true);
+    this.topicSection = this.section("Topics", false);
     this.topicList = el("ul", "lab-topic-list");
     this.topicSection.body.appendChild(this.topicList);
     this.topicAdd = button("+ Add topic", "lab-btn-sm", () => hooks.onAddTopic());
     this.topicSection.body.appendChild(this.topicAdd);
 
     // Presets.
-    this.presetSection = this.section("Presets", true);
+    this.presetSection = this.section("Presets", false);
     this.presetButtons = [];
     for (const p of hooks.presets) {
       const b = el("button", "lab-preset-btn");
@@ -82,7 +82,7 @@ export class Palette {
     });
 
     // Scenario.
-    this.scenarioSection = this.section("Scenario", true);
+    this.scenarioSection = this.section("Scenario", false);
     this.scenarioName = el("div", "lab-scenario-name");
     this.scenarioMeta = el("div", "lab-muted lab-small");
     this.scenarioSection.body.append(this.scenarioName, this.scenarioMeta);

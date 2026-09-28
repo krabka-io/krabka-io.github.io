@@ -1237,6 +1237,14 @@ export class ExternalHost {
     );
   }
 
+  async volumeFiles(volume) {
+    return (await runtime()).listVolumeFiles(volume);
+  }
+
+  async volumeFileRange(volume, path, offset, length) {
+    return (await runtime()).readVolumeFileRange(volume, path, offset, length);
+  }
+
   /** Forgets one volume; a process that runs on it keeps it. */
   async forgetVolume(volume) {
     const wasi = await runtime();

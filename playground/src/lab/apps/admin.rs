@@ -6,8 +6,9 @@
 //! connects at start and sends one `CreateTopics` per topic to the controller
 //! the metadata names, with `timeout_ms` 30 000, as `kafka-topics --create`
 //! does. `NOT_CONTROLLER`, `COORDINATOR_NOT_AVAILABLE`, the other retriable
-//! codes and a lost connection make it try again 500 ms later, until every
-//! topic exists or the broker answers `TOPIC_ALREADY_EXISTS`.
+//! codes and a lost connection make it try again 500 ms later. A scenario
+//! topic whose replica count fits its bootstrap brokers also retries an early
+//! `INVALID_REPLICATION_FACTOR` while those brokers register.
 //!
 //! Commands: `{"cmd":"create_topic","name":..,"partitions":..,"replication_factor":..}`
 //! and `{"cmd":"delete_topic","name":..}` queue the work and answer at once;
@@ -314,7 +315,15 @@ impl AdminNode {
                 topic.error = None;
                 ctx.event("topic_deleted", json!({ "topic": name, "existed": false }));
             }
-            code if error_class(code).is_retriable() || code == codes::NOT_CONTROLLER => {
+            code if error_class(code).is_retriable()
+                || code == codes::NOT_CONTROLLER
+                || (code == codes::INVALID_REPLICATION_FACTOR
+                    && !deleting
+                    && topic.from_config
+                    && topic.spec.replication_factor > 0
+                    && topic.spec.replication_factor as usize <= self.bootstrap.len()
+                    && u64::from(topic.attempts) * RETRY_MS <= ADMIN_TIMEOUT_MS as u64) =>
+            {
                 self.client.note_error(code, &Target::Controller);
                 topic.retry_at = now + RETRY_MS;
                 topic.error = Some(code);
@@ -743,6 +752,17 @@ mod tests {
         );
         // A topic failed for good, so the scenario's topics never all exist.
         assert!(remote.events("topics_created").is_empty());
+
+        // A preset can ask for three replicas before all three real brokers
+        // have registered. Retry that startup answer, then create the topic.
+        let mut remote = Remote::new(json!({
+            "bootstrap": [1, 2, 3],
+            "topics": [{ "name": "orders", "partitions": 3, "replication_factor": 3 }],
+        }));
+        remote.state.borrow_mut().knobs.create_topics_errors =
+            [codes::INVALID_REPLICATION_FACTOR].into();
+        remote.run_for(2_000);
+        assert!(remote.statuses() == vec![status("orders", "created", Value::Null, 2)]);
     }
 
     #[test]

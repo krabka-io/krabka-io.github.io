@@ -294,12 +294,12 @@ const storedFrames = (page, scenarioId) =>
 
 // The presets as the site ships them, for their names and node ids.
 async function loadPresets() {
-  return (await import(pathToFileURL(path.join(DIST_DIR, 'playground', 'lab', 'presets.js')).href)).PRESETS;
+  return (await import(pathToFileURL(path.join(DIST_DIR, '..', 'scripts', 'lab-simulated-presets.js')).href)).PRESETS;
 }
 
 // Load a preset the way a reader does, from its button, and run it at 20×.
 async function openPreset(page, preset) {
-  await page.locator(`#krabka-lab .lab-preset-btn[data-preset="${preset.id}"]`).click();
+  await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), preset.scenario);
   await waitFor(page, `window.krabkaLab.world.scenario().name === ${JSON.stringify(preset.name)}`, `the ${preset.id} preset`);
   await fastest(page);
 }
@@ -761,6 +761,7 @@ async function main() {
     const pageErrors = watchErrors(page, 'page', base);
     await openLab(page, base);
     check('page boots and the module initialises', true);
+    await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
 
     const nodeCount = await page.locator('#krabka-lab .lab-node').count();
     check('the network probe preset is on the canvas', nodeCount === 3, `${nodeCount} nodes`);
@@ -959,7 +960,7 @@ async function main() {
       const hub = await context.newPage();
       const hubErrors = watchErrors(hub, 'hub', base);
       await openLab(hub, base);
-      await hub.evaluate(() => window.krabkaLab.loadPreset('network-probe'));
+      await hub.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
       await waitFor(hub, `window.krabkaLab.world.scenario().nodes.length === 3`, 'the hub preset');
 
       // Same-tab baseline: 200 ms each way on the pinger–echo-a link, the

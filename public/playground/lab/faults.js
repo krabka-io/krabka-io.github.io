@@ -86,7 +86,8 @@ export class FaultBar {
     this.lossInput.setAttribute("aria-label", "Link loss in percent");
     this.lossBtn = button("Loss %", "lab-btn-sm", () => this.link("loss"), { title: "Drop this share of the data frames on the link" });
     this.resetBtn = button("Reset link", "lab-btn-sm", () => this.resetLink(), { title: "Heal, no loss, default latency" });
-    g.append(this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn);
+    this.bytesBtn = button("Network bytes", "lab-btn-sm", () => this.hooks.onBrowseTraffic(), { title: "Inspect recent frames and payload bytes between these nodes" });
+    g.append(this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn, this.bytesBtn);
   }
 
   update({ snapshot, selection }) {
@@ -97,6 +98,9 @@ export class FaultBar {
     const nodeSnap = (id) => snapshot?.nodes?.find((n) => n.id === id);
     const one = a != null;
     const two = a != null && b != null;
+    this.root.hidden = !one;
+    this.nodeGroup.hidden = !one || two;
+    this.linkGroup.hidden = !two;
     for (const btn of [this.killBtn, this.restartBtn, this.wipeBtn, this.isolateBtn, this.reconnectBtn]) btn.disabled = !one;
     if (one) {
       const s = nodeSnap(a);
@@ -121,9 +125,9 @@ export class FaultBar {
       } else if (snapshot) bits.push(`${snapshot.default_latency_ms} ms`);
       this.info.textContent = bits.join(" · ");
     } else if (one) {
-      this.info.textContent = `${name(a)} — Shift+click another node for link faults`;
+      this.info.textContent = `${name(a)} — Shift+click another node for link controls and bytes`;
     } else {
-      this.info.textContent = "Select a node; Shift+click a second one for link faults";
+      this.info.textContent = "Select a node; Shift+click a second one for link controls and bytes";
     }
   }
 

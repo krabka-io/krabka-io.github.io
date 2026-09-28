@@ -24,8 +24,10 @@ export {
   exportVolume,
   forget,
   importVolume,
+  listVolumeFiles,
   listVolumes,
   readVolumeFile,
+  readVolumeFileRange,
   storageAvailable,
   usage,
 } from "./volumes.js";

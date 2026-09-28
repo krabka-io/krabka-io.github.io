@@ -14,7 +14,7 @@
 
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet, BinaryHeap},
+    collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque},
 };
 
 use serde::{Deserialize, Serialize};
@@ -138,6 +138,19 @@ pub struct InFlight {
     pub label: String,
 }
 
+/// A bounded view of one frame sent across a link.
+#[derive(Clone, Serialize)]
+pub struct WireFrame {
+    pub at: Millis,
+    pub src: Endpoint,
+    pub dst: Endpoint,
+    pub conn: ConnId,
+    pub kind: &'static str,
+    pub label: String,
+    pub size: usize,
+    pub bytes: String,
+}
+
 /// One node as the page sees it.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct NodeSnapshot {
@@ -206,6 +219,7 @@ pub struct World {
     external_out: Vec<TimedFrame>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
+    wire: BTreeMap<(NodeId, NodeId), VecDeque<WireFrame>>,
     topics: Vec<TopicSpec>,
     /// The ids of the controller quorum's voters: fixed when the scenario
     /// loads, as a static `KRaft` quorum is fixed when its cluster starts.
@@ -236,6 +250,7 @@ impl World {
             external_out: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
+            wire: BTreeMap::new(),
             topics: Vec::new(),
             quorum_voters: Vec::new(),
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
@@ -485,6 +500,7 @@ impl World {
         self.close_connections_of(id, false);
         self.nodes.remove(&id);
         self.links.retain(|(a, b), _| *a != id && *b != id);
+        self.wire.retain(|(a, b), _| *a != id && *b != id);
         self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_removed", serde_json::json!({}));
     }
@@ -775,6 +791,7 @@ impl World {
             .unwrap_or(0);
         let at = (self.now + latency).max(floor);
         self.last_delivery.insert((key.0, key.1, direction), at);
+        self.record_wire(&frame);
         if self.is_hosted(b) {
             self.schedule(at, Item::Deliver(frame));
         } else {
@@ -790,8 +807,45 @@ impl World {
         }
     }
 
+    fn record_wire(&mut self, frame: &Frame) {
+        let (kind, size, bytes) = match &frame.payload {
+            Payload::Open => ("open", 0, String::new()),
+            Payload::Close => ("close", 0, String::new()),
+            Payload::Data(data) => (
+                "data",
+                data.len(),
+                super::net::b64::encode(&data[..data.len().min(16_384)]),
+            ),
+        };
+        let history = self
+            .wire
+            .entry(pair(frame.src.node, frame.dst.node))
+            .or_default();
+        if history.len() == 40 {
+            history.pop_front();
+        }
+        history.push_back(WireFrame {
+            at: self.now,
+            src: frame.src,
+            dst: frame.dst,
+            conn: frame.conn,
+            kind,
+            label: frame_label(&frame),
+            size,
+            bytes,
+        });
+    }
+
     fn link(&self, a: NodeId, b: NodeId) -> Link {
         self.links.get(&pair(a, b)).copied().unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn wire_frames(&self, a: NodeId, b: NodeId) -> Vec<WireFrame> {
+        self.wire
+            .get(&pair(a, b))
+            .map(|frames| frames.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn link_mut(&mut self, a: NodeId, b: NodeId) -> &mut Link {
@@ -1195,6 +1249,7 @@ impl World {
                 }
             }
             let now = self.now;
+            self.record_wire(&frame);
             self.schedule(now, Item::Deliver(frame));
         }
     }
@@ -1410,6 +1465,25 @@ mod tests {
     }
 
     #[test]
+    fn wire_history_is_pair_scoped_and_bounded() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(5_000);
+        let frames = w.world().wire_frames(NodeId(1), NodeId(3));
+        assert!(frames.len() == 40);
+        assert!(
+            frames
+                .iter()
+                .any(|f| f.kind == "data" && !f.bytes.is_empty())
+        );
+        assert!(
+            frames
+                .iter()
+                .all(|f| f.src.node == NodeId(1) || f.src.node == NodeId(3))
+        );
+        assert!(w.world().wire_frames(NodeId(1), NodeId(2)).is_empty());
+    }
+
+    #[test]
     fn step_once_advances_the_clock_when_idle() {
         let mut w = TestWorld::from_scenario(&scenario());
         let mut world = w.take();
@@ -1515,18 +1589,28 @@ mod tests {
         let mut world = World::from_scenario_hosted(&scenario(), &[NodeId(1)]).unwrap();
         let client = Endpoint::client(NodeId(3));
         let server = Endpoint::kafka(NodeId(1));
+        let before = world.wire_frames(NodeId(1), NodeId(3)).len();
         world.push_ingress(vec![
             Frame::data(client, server, ConnId(7), Bytes::from_static(b"stray")),
             Frame::close(client, server, ConnId(7)),
         ]);
         world.step_until(1);
         assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 0);
+        assert!(world.wire_frames(NodeId(1), NodeId(3)).len() == before);
         world.push_ingress(vec![
             Frame::open(client, server, ConnId(8)),
             Frame::data(client, server, ConnId(8), Bytes::from_static(b"hello")),
         ]);
         world.step_until(2);
         assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 2);
+        assert!(
+            world
+                .wire_frames(NodeId(1), NodeId(3))
+                .iter()
+                .filter(|f| f.src == client && f.conn == ConnId(8))
+                .count()
+                == 2
+        );
     }
 
     /// A scenario with an external node 1 (a real broker the page runs) and a
