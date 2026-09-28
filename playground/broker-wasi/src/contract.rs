@@ -478,7 +478,11 @@ mod tests {
             (
                 "KRABKA_NODE_ID",
                 "-1",
-                invalid("KRABKA_NODE_ID", "-1", "the lab node id must be between 1 and 10000"),
+                invalid(
+                    "KRABKA_NODE_ID",
+                    "-1",
+                    "the lab node id must be between 1 and 10000",
+                ),
             ),
             (
                 "KRABKA_NODE_ID",
