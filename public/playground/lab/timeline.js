@@ -126,7 +126,7 @@ export class Timeline {
     }
     while (this.list.children.length > MAX_ROWS) this.list.firstChild.remove();
     this.count.textContent = `${this.events.length} events`;
-    this.summary.textContent = `Timeline · ${this.events.length} events`;
+    this.summary.firstChild.textContent = `Timeline · ${this.events.length} events`;
     if (this.follow) this.scrollToEnd();
   }
 
@@ -134,7 +134,7 @@ export class Timeline {
     this.events = [];
     this.list.innerHTML = "";
     this.count.textContent = "0 events";
-    this.summary.textContent = "Timeline · 0 events";
+    this.summary.firstChild.textContent = "Timeline · 0 events";
   }
 
   refreshKinds() {

@@ -201,6 +201,8 @@ class LabApp {
       nodeName: (id) => this.nodeName(id),
     });
 
+    this.addExpandControls();
+
     root.addEventListener("keydown", (e) => {
       if (e.target.closest("input, textarea, select, dialog")) return;
       if (e.key === " " && e.target.closest(".lab-canvas")) {
@@ -209,6 +211,61 @@ class LabApp {
       } else if (e.key === "f" || e.key === "F") this.canvas.fit();
       else if (e.key === "Escape") this.select(null);
     });
+  }
+
+  addExpandControls() {
+    const panels = [
+      this.canvas.wrap,
+      this.inspector.root,
+      this.networkPanel.root,
+      this.storagePanel.root,
+      this.sessionDetails,
+      this.timeline.root,
+      ...this.root.querySelectorAll(".lab-pal-section"),
+    ];
+    for (const panel of panels) {
+      const name = panel.getAttribute("aria-label") || panel.querySelector("summary, .lab-panel-title")?.firstChild?.textContent || "canvas";
+      const control = button("Expand", "lab-btn-sm lab-expand", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.expandedPanel === panel) {
+          this.collapsePanel();
+          return;
+        }
+        this.collapsePanel();
+        this.expandedPanel = panel;
+        panel.classList.add("lab-expanded");
+        if (panel.tagName === "DETAILS") panel.open = true;
+        control.textContent = "Close expanded view";
+        control.setAttribute("aria-label", `Close expanded ${name}`);
+        control.setAttribute("aria-expanded", "true");
+        control.focus();
+      }, { ariaLabel: `Expand ${name}` });
+      control.setAttribute("aria-expanded", "false");
+      if (panel === this.canvas.wrap) this.canvas.tools.appendChild(control);
+      else if (panel.tagName === "DETAILS") panel.querySelector("summary").appendChild(control);
+      else panel.appendChild(control);
+      panel._expandControl = control;
+      panel._expandName = name;
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !this.expandedPanel || document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.collapsePanel();
+    }, true);
+  }
+
+  collapsePanel() {
+    const panel = this.expandedPanel;
+    if (!panel) return;
+    panel.classList.remove("lab-expanded");
+    const control = panel._expandControl;
+    control.textContent = "Expand";
+    control.setAttribute("aria-label", `Expand ${panel._expandName}`);
+    control.setAttribute("aria-expanded", "false");
+    this.expandedPanel = null;
+    control.focus();
   }
 
   buildToolbar() {
@@ -380,6 +437,7 @@ class LabApp {
     this.inspector.update({ snapshot: snap, scenario, session });
     this.faultBar.update({ snapshot: snap, selection: this.selection });
     this.networkPanel.update(this.selection);
+    if (this.expandedPanel?.hidden) this.collapsePanel();
     this.timeline.setNodes(this.nodeList());
     this.palette.update({ scenario, availability: this.availability, role: this.session.role, saveState: this.saveState });
     this.renderClock(snap);

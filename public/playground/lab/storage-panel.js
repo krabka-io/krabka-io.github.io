@@ -7,10 +7,11 @@
 // each is the disk of one process, kept by the WASI runtime in its own
 // database whatever the toggle says.
 
-import { el, button, fmtBytes, fmtNum } from "./dom.js";
+import { el, button, select, fmtBytes, fmtNum } from "./dom.js";
 
 const REFRESH_MS = 2500;
 const HEX_PAGE_BYTES = 256;
+const MAX_ANNOTATED_BYTES = 65536;
 
 export function hexDump(bytes, offset) {
   const lines = [];
@@ -39,6 +40,64 @@ export function recordBatchHeader(bytes, fileSize) {
     firstTimestamp: String(data.getBigInt64(27)),
     maxTimestamp: String(data.getBigInt64(35)),
   };
+}
+
+export function recordBatchFields(bytes, fileSize) {
+  const fields = [];
+  const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let start = 0; start + 61 <= bytes.length;) {
+    const length = data.getInt32(start + 8);
+    const end = start + 12 + length;
+    if (bytes[start + 16] !== 2 || length < 49 || end > fileSize) break;
+    const base = data.getBigInt64(start);
+    const crc = data.getUint32(start + 17).toString(16).padStart(8, "0");
+    const header = [
+      [0, 8, "Base offset", String(base)], [8, 12, "Batch length", String(length)],
+      [12, 16, "Leader epoch", String(data.getInt32(start + 12))], [16, 17, "Format version", "2"],
+      [17, 21, "CRC-32C", `0x${crc}`], [21, 23, "Attributes", `0x${data.getUint16(start + 21).toString(16)}`],
+      [23, 27, "Last offset delta", String(data.getInt32(start + 23))],
+      [27, 35, "Base timestamp (ms)", String(data.getBigInt64(start + 27))],
+      [35, 43, "Max timestamp (ms)", String(data.getBigInt64(start + 35))],
+      [43, 51, "Producer ID", String(data.getBigInt64(start + 43))],
+      [51, 53, "Producer epoch", String(data.getInt16(start + 51))],
+      [53, 57, "Base sequence", String(data.getInt32(start + 53))],
+      [57, 61, "Record count", String(data.getInt32(start + 57))],
+    ];
+    for (const [from, to, name, value] of header) fields.push({ start: start + from, end: start + to, label: `${name}: ${value}` });
+    if (end > start + 61) fields.push({ start: start + 61, end, label: `Encoded records in batch at offset ${base}` });
+    start = end;
+  }
+  return fields;
+}
+
+function annotatedHexDump(pre, bytes, offset, fields) {
+  pre.replaceChildren();
+  const appendBytes = (row, rowOffset, ascii) => {
+    for (let i = 0; i < row.length;) {
+      const field = fields.find((f) => rowOffset + i >= f.start && rowOffset + i < f.end);
+      let j = i + 1;
+      while (j < row.length && fields.find((f) => rowOffset + j >= f.start && rowOffset + j < f.end) === field) j++;
+      const value = Array.from(row.subarray(i, j), (b, k) =>
+        ascii ? (b >= 32 && b <= 126 ? String.fromCharCode(b) : ".") : `${b.toString(16).padStart(2, "0")}${i + k < row.length - 1 ? " " : ""}`,
+      ).join("");
+      if (field) {
+        const span = el("span", "lab-hex-field", value);
+        span.title = field.label;
+        if (!ascii) { span.tabIndex = 0; span.setAttribute("aria-label", field.label); }
+        pre.appendChild(span);
+      } else pre.append(value);
+      i = j;
+    }
+  };
+  for (let i = 0; i < bytes.length; i += 16) {
+    const row = bytes.subarray(i, i + 16);
+    const rowOffset = offset + i;
+    pre.append(`${(offset + i).toString(16).padStart(8, "0")}  `);
+    appendBytes(row, rowOffset, false);
+    pre.append(`${" ".repeat(47 - (row.length * 3 - 1))}  |`);
+    appendBytes(row, rowOffset, true);
+    pre.append(i + 16 < bytes.length ? "|\n" : "|");
+  }
 }
 
 export class StoragePanel {
@@ -120,9 +179,12 @@ export class StoragePanel {
       return;
     }
     const t = usage.total;
-    this.summaryLine.textContent = `Scenario ${id.slice(0, 8)}: ${fmtBytes(t.bytes)} in ${fmtNum(t.logEntries)} log entries and ${fmtNum(t.kvEntries)} keys${
-      this.hooks.storage.persist ? "" : " · persistence off, new changes are dropped"
-    }`;
+    const value = (text) => el("strong", "lab-storage-value", text);
+    this.summaryLine.replaceChildren(
+      "Scenario ", value(id.slice(0, 8)), ": ", value(fmtBytes(t.bytes)),
+      " in ", value(fmtNum(t.logEntries)), " log entries and ", value(fmtNum(t.kvEntries)), " keys",
+      this.hooks.storage.persist ? "" : " · persistence off, new changes are dropped",
+    );
     this.table.innerHTML = "";
     const thead = el("thead");
     const hr = el("tr");
@@ -231,6 +293,13 @@ export class StoragePanel {
     filter.placeholder = "Filter file paths";
     filter.setAttribute("aria-label", "Filter broker files");
     this.volumeExplorer.appendChild(filter);
+    const sort = select([
+      { value: "name-asc", label: "Name A–Z" }, { value: "name-desc", label: "Name Z–A" },
+      { value: "size-desc", label: "Largest first" }, { value: "size-asc", label: "Smallest first" },
+    ], "name-asc");
+    sort.setAttribute("aria-label", "Sort broker files");
+    sort.classList.add("lab-file-sort");
+    this.volumeExplorer.appendChild(sort);
     const count = el("span", "lab-muted lab-small");
     this.volumeExplorer.appendChild(count);
     const list = el("div", "lab-file-list", "Loading files…");
@@ -244,7 +313,7 @@ export class StoragePanel {
         return;
       }
       const entries = [];
-      for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
+      for (const file of files) {
         const detail = el("details", "lab-file");
         detail.appendChild(el("summary", null, `${file.path} · ${fmtBytes(file.size)}`));
         const contents = el("div", "lab-file-contents");
@@ -253,18 +322,22 @@ export class StoragePanel {
           if (detail.open) this.showFile(volume, file.path, detail, contents);
         });
         list.appendChild(detail);
-        entries.push([file.path.toLowerCase(), detail]);
+        entries.push({ path: file.path.toLowerCase(), size: file.size, detail });
       }
       const applyFilter = () => {
         const query = filter.value.trim().toLowerCase();
         let shown = 0;
-        for (const [path, detail] of entries) {
-          detail.hidden = !path.includes(query);
-          if (!detail.hidden) shown++;
+        const direction = sort.value.endsWith("desc") ? -1 : 1;
+        entries.sort((a, b) => direction * (sort.value.startsWith("size") ? a.size - b.size || a.path.localeCompare(b.path) : a.path.localeCompare(b.path)));
+        for (const entry of entries) {
+          entry.detail.hidden = !entry.path.includes(query);
+          if (!entry.detail.hidden) shown++;
+          list.appendChild(entry.detail);
         }
         count.textContent = `${shown} of ${entries.length} files`;
       };
       filter.addEventListener("input", applyFilter);
+      sort.addEventListener("change", applyFilter);
       applyFilter();
     } catch (err) {
       if (version === this.browseVersion) list.textContent = `Files unavailable: ${err.message}`;
@@ -283,8 +356,28 @@ export class StoragePanel {
     input.setAttribute("aria-label", `Byte offset in ${path}`);
     const pre = el("pre", "lab-hex-view", "Loading bytes…");
     const header = el("div", "lab-file-header");
+    const hint = el("p", "lab-muted lab-small lab-byte-hint", "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded.");
+    pre.addEventListener("pointerover", (event) => {
+      hint.textContent = event.target.closest(".lab-hex-field")?.title || "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded.";
+    });
+    pre.addEventListener("pointerleave", () => { hint.textContent = "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded."; });
+    pre.addEventListener("focusin", (event) => { hint.textContent = event.target.title || hint.textContent; });
     let offset = 0;
     let request = 0;
+    let annotationBytes = new Uint8Array(0);
+    const fieldsThrough = async (end, fileSize) => {
+      // ponytail: cap header scanning at 64 KiB; index batches on disk if deep-file inspection becomes useful.
+      const target = Math.min(fileSize, MAX_ANNOTATED_BYTES, end + 61);
+      while (annotationBytes.length < target) {
+        const chunk = await this.hooks.volumeFileRange(volume, path, annotationBytes.length, Math.min(4096, target - annotationBytes.length));
+        if (!chunk?.bytes.length) break;
+        const joined = new Uint8Array(annotationBytes.length + chunk.bytes.length);
+        joined.set(annotationBytes);
+        joined.set(chunk.bytes, annotationBytes.length);
+        annotationBytes = joined;
+      }
+      return recordBatchFields(annotationBytes, fileSize);
+    };
     const read = async (at) => {
       const mine = ++request;
       pre.textContent = "Loading bytes…";
@@ -302,6 +395,13 @@ export class StoragePanel {
         previous.disabled = offset === 0;
         next.disabled = offset + file.bytes.length >= file.size;
         pre.textContent = file.bytes.length ? hexDump(file.bytes, offset) : "End of file";
+        if (path.endsWith(".log") && file.bytes.length && at < MAX_ANNOTATED_BYTES) {
+          try {
+            const fields = await fieldsThrough(at + file.bytes.length, file.size);
+            if (mine !== request || !detail.open || this.activeVolume !== volume) return;
+            if (fields.length) annotatedHexDump(pre, file.bytes, offset, fields);
+          } catch { /* Keep the plain hex dump when labels cannot be loaded. */ }
+        }
         if (at === 0 && path.endsWith(".log")) {
           header.innerHTML = "";
           const batch = recordBatchHeader(file.bytes, file.size);
@@ -331,6 +431,7 @@ export class StoragePanel {
     offsetLabel.appendChild(input);
     nav.append(previous, next, offsetLabel, go, info);
     contents.append(nav, header, pre);
+    if (path.endsWith(".log")) contents.appendChild(hint);
     read(0);
   }
 }

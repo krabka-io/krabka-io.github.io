@@ -46,8 +46,7 @@ const controls = [
       <p>
         The brokers speak the Kafka wire protocol to the clients. Their partition logs and KRaft metadata are kept in this
         browser's IndexedDB, so a reload reopens the cluster where you left it. The
-        schema registry keeps its schemas where Confluent's does, in the <code class="font-mono text-krab-300">_schemas</code>
-        topic on the brokers, and replays it on every start. Several tabs, on one machine or across the internet, can each host a
+        schema registry keeps its schemas where Confluent's does, in the <code class="font-mono text-krab-300">_schemas</code> topic on the brokers, and replays it on every start. Several tabs, on one machine or across the internet, can each host a
         share of the nodes over WebRTC data channels.
       </p>
     </div>
@@ -67,8 +66,7 @@ const controls = [
         The producer's records flow through replicated partitions to two KIP-848 consumers that share them. Select a broker:
         its inspector shows process logs and runtime activity, and <strong class="text-white">Browse disk</strong> opens its stored files. Select the
         leader of a partition and <strong class="text-white">Kill</strong> it: once its 9 s session runs out, the controller
-        fences it and moves the leadership to another replica in the ISR, and the consumers keep reading.
-        <strong class="text-white">Restart</strong> it and it catches up and rejoins the ISR.
+        fences it and moves the leadership to another replica in the ISR, and the consumers keep reading. <strong class="text-white">Restart</strong> it and it catches up and rejoins the ISR.
       </p>
       <p>
         <strong class="text-white">Schema registry with an Avro producer and a decoding consumer</strong> starts a registry that
@@ -103,9 +101,7 @@ const controls = [
       <p>
         The scenario autosaves to this browser; the <strong class="text-white">Saved</strong> list reopens it with its durable
         state. In <strong class="text-white">Storage</strong>, open a real broker volume, then a file, to inspect its
-        committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request.
-        <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong>
-        puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
+        committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
       </p>
       <p>
         <strong class="text-white">Invite a tab</strong> in the Session panel makes a link that another tab or another machine
@@ -116,9 +112,7 @@ const controls = [
 
       <h2 class="text-xl font-bold text-white pt-2">Real brokers</h2>
       <p>
-        <strong class="text-white">Krabka broker (real)</strong> in the palette adds the real
-        <code class="font-mono text-krab-300">krabka-broker</code>, compiled for
-        <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
+        <strong class="text-white">Krabka broker (real)</strong> in the palette adds the real <code class="font-mono text-krab-300">krabka-broker</code>, compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
         WASI runtime: its listeners, its dials to other nodes and its clock are the lab's, so links, faults, pause and speed
         apply to it like to any node, and its disk is a volume in this browser's IndexedDB. The runtime needs a
         cross-origin isolated page, so the first time a scenario with one runs here the page reloads once, and reopens the
