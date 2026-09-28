@@ -380,7 +380,7 @@ function renderRealBroker(root, s, used, ctx) {
   }
   for (const stream of ["stdout", "stderr"]) {
     const lines = take(s, used, stream);
-    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${lines.length} lines)`, logBlock(lines, stream)));
+    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${lines.length} lines)`, logBlock(lines, stream), { open: false }));
   }
   const runtime = take(s, used, "runtime");
   if (runtime && typeof runtime === "object") {

@@ -201,6 +201,15 @@ impl Lab {
         serde_json::to_string(&self.world.snapshot()).map_err(js)
     }
 
+    /// Recent frames on one link, with at most 16 KiB from each payload.
+    ///
+    /// # Errors
+    /// Returns an error when the frames cannot be serialized.
+    #[wasm_bindgen(js_name = wireFrames)]
+    pub fn wire_frames(&self, a: u32, b: u32) -> Result<String, JsError> {
+        serde_json::to_string(&self.world.wire_frames(NodeId(a), NodeId(b))).map_err(js)
+    }
+
     /// The events with an index of at least `index`, as a JSON array.
     ///
     /// # Errors

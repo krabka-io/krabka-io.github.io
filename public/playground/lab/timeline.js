@@ -39,10 +39,12 @@ export class Timeline {
     this.nodeOptions = [];
     this.renderQueued = false;
 
-    this.root = el("section", "lab-timeline");
+    this.root = el("details", "lab-timeline");
     this.root.setAttribute("aria-label", "Event timeline");
+    this.summary = el("summary", "lab-panel-title lab-timeline-summary", "Timeline · 0 events");
+    this.root.appendChild(this.summary);
+    const body = el("div", "lab-timeline-body");
     const bar = el("div", "lab-timeline-bar");
-    bar.appendChild(el("span", "lab-panel-title", "Timeline"));
     this.nodeSel = select([{ value: "", label: "all nodes" }], "", (v) => {
       this.nodeFilter = v;
       this.rerender();
@@ -81,7 +83,8 @@ export class Timeline {
         this.followBox.checked = atEnd;
       }
     });
-    this.root.append(bar, this.list);
+    body.append(bar, this.list);
+    this.root.appendChild(body);
     container.appendChild(this.root);
   }
 
@@ -123,6 +126,7 @@ export class Timeline {
     }
     while (this.list.children.length > MAX_ROWS) this.list.firstChild.remove();
     this.count.textContent = `${this.events.length} events`;
+    this.summary.textContent = `Timeline · ${this.events.length} events`;
     if (this.follow) this.scrollToEnd();
   }
 
@@ -130,6 +134,7 @@ export class Timeline {
     this.events = [];
     this.list.innerHTML = "";
     this.count.textContent = "0 events";
+    this.summary.textContent = "Timeline · 0 events";
   }
 
   refreshKinds() {
@@ -185,9 +190,14 @@ export class Timeline {
       kind.style.color = style.color;
       kind.title = e.kind;
     }
-    const detail = el("span", "lab-ev-detail", shortJson(e.detail, 120));
-    detail.title = typeof e.detail === "object" ? JSON.stringify(e.detail) : String(e.detail ?? "");
-    li.append(time, node, kind, detail);
+    li.append(time, node, kind);
+    const preview = shortJson(e.detail, 120);
+    if (preview) {
+      const detail = el("details", "lab-ev-detail");
+      detail.appendChild(el("summary", null, preview));
+      detail.appendChild(el("pre", null, typeof e.detail === "object" ? JSON.stringify(e.detail, null, 2) : String(e.detail)));
+      li.appendChild(detail);
+    }
     return li;
   }
 

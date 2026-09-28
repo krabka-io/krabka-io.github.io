@@ -1,6 +1,6 @@
 // The inspector: the side panel for the selected node.
 //
-// Header (kind, id, name, alive, hosted by), fault buttons, the node's
+// Header (kind, id, name, alive, hosted by), the node's
 // control commands (send, rate, pause, query, ...; `commands` in `kinds.js`),
 // then three tabs: the kind-specific view of the snapshot's `state` (from
 // `views.js`), the config form (the same form the palette uses to add a
@@ -13,15 +13,14 @@
 import { el, button, select } from "./dom.js";
 import { kindOf, renderState, commandObject } from "./kinds.js";
 import { buildForm } from "./forms.js";
-import { FAULT } from "./faults.js";
 
 const STATE_INTERVAL_MS = 250;
 const RAW_INTERVAL_MS = 500;
 
 export class Inspector {
-  // hooks: onFault(fault), onCommand(id, command), onControl(id, command) →
+  // hooks: onCommand(id, command), onControl(id, command) →
   // { ok, answer | error }, onHostChange(id, peerId), onTakeOver(id),
-  // onUpdateNode(id, spec) → boolean, formCtx() → { nodes }, peerName(peerId),
+  // onUpdateNode(id, spec) → boolean, onBrowseVolume(id), formCtx() → { nodes }, peerName(peerId),
   // nodeName(id), nodeLabelForBroker(brokerId)
   constructor(container, hooks) {
     this.hooks = hooks;
@@ -211,12 +210,9 @@ export class Inspector {
     }
 
     this.actions.innerHTML = "";
-    const fault = (f, label, title, disabled) => this.actions.appendChild(button(label, "lab-btn-sm", () => this.hooks.onFault(f), { title, disabled }));
-    if (n.alive) fault(FAULT.kill(n.id), "Kill", "Halt the node; its disk survives");
-    else fault(FAULT.restart(n.id), "Restart", "Boot again from the kept state");
-    fault(FAULT.wipe(n.id), "Wipe", "Boot again from nothing");
-    if (n.isolated) fault(FAULT.reconnect(n.id), "Reconnect", "Restore every link");
-    else fault(FAULT.isolate(n.id), "Isolate", "Cut every link");
+    if (n.kind === "krabka-broker" && n.hosted) {
+      this.actions.appendChild(button("Browse disk", "lab-btn-sm", () => this.hooks.onBrowseVolume(n.id)));
+    }
     if (!k.hidden && session?.role === "spoke") {
       this.actions.appendChild(el("span", "lab-muted lab-small", "The host edits and removes nodes."));
     } else if (!k.hidden) {

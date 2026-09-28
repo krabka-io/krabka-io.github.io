@@ -10,14 +10,46 @@
 import { el, button, fmtBytes, fmtNum } from "./dom.js";
 
 const REFRESH_MS = 2500;
+const HEX_PAGE_BYTES = 256;
+
+export function hexDump(bytes, offset) {
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const row = bytes.subarray(i, i + 16);
+    const hex = Array.from(row, (b) => b.toString(16).padStart(2, "0")).join(" ").padEnd(47);
+    const ascii = Array.from(row, (b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : ".")).join("");
+    lines.push(`${(offset + i).toString(16).padStart(8, "0")}  ${hex}  |${ascii}|`);
+  }
+  return lines.join("\n");
+}
+
+export function recordBatchHeader(bytes, fileSize) {
+  if (bytes.length < 61 || bytes[16] !== 2) return null;
+  const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const length = data.getInt32(8);
+  if (length < 49 || length + 12 > fileSize) return null;
+  const baseOffset = data.getBigInt64(0);
+  return {
+    baseOffset: String(baseOffset),
+    lastOffset: String(baseOffset + BigInt(data.getInt32(23))),
+    bytes: length + 12,
+    leaderEpoch: data.getInt32(12),
+    records: data.getInt32(57),
+    crc: data.getUint32(17).toString(16).padStart(8, "0"),
+    firstTimestamp: String(data.getBigInt64(27)),
+    maxTimestamp: String(data.getBigInt64(35)),
+  };
+}
 
 export class StoragePanel {
   // hooks: storage (LabStorage), scenarioId() → string, nodes() → [{ id, name }],
   // volumes() → Promise<[{ node, volume, bytes, files, inUse }]>,
+  // volumeFiles(volume), volumeFileRange(volume, path, offset, length),
   // onForgetVolume(volume), onForgetNode(id), onForgetScenario(),
   // onPersistChange(on), onToast(msg)
   constructor(container, hooks) {
     this.hooks = hooks;
+    this.browseVersion = 0;
     this.root = el("details", "lab-storage lab-side-section");
     this.root.open = false;
     const summary = el("summary", "lab-panel-title", "Storage");
@@ -51,6 +83,8 @@ export class StoragePanel {
     body.appendChild(this.table);
     this.volumeBox = el("div", "lab-storage-volumes");
     body.appendChild(this.volumeBox);
+    this.volumeExplorer = el("div", "lab-volume-explorer");
+    body.appendChild(this.volumeExplorer);
     this.actions = el("div", "lab-form-actions");
     this.actions.appendChild(
       button("Forget stored data", "lab-btn-sm lab-danger", () => hooks.onForgetScenario(), { title: "Drop every stored log and key of this scenario" }),
@@ -74,8 +108,10 @@ export class StoragePanel {
     if (!id) {
       this.summaryLine.textContent = "Nothing stored yet: this scenario has no saved identity.";
       this.table.innerHTML = "";
+      this.closeVolumeExplorer();
       return;
     }
+    if (this.activeVolume && !this.activeVolume.startsWith(`${id}/`)) this.closeVolumeExplorer();
     let usage;
     try {
       usage = await this.hooks.storage.usage(id);
@@ -137,6 +173,7 @@ export class StoragePanel {
       return;
     }
     this.volumeBox.innerHTML = "";
+    if (this.activeVolume && !volumes.some((v) => v.volume === this.activeVolume)) this.closeVolumeExplorer();
     if (!volumes.length) return;
     this.volumeBox.appendChild(
       el("p", "lab-storage-total", "Real broker volumes: each process's disk, kept by the WASI runtime in this browser whatever the toggle says. A wipe or removing the node forgets it."),
@@ -159,6 +196,7 @@ export class StoragePanel {
       tr.appendChild(bytes);
       tr.appendChild(el("td", null, fmtNum(v.files)));
       const td = el("td");
+      td.appendChild(button("Browse", "lab-btn-sm", () => this.browseVolume(v.volume), { title: "List the broker's stored files" }));
       td.appendChild(
         button("Forget", "lab-btn-sm", () => this.hooks.onForgetVolume(v.volume), {
           title: v.inUse ? "Its process runs on it: kill or wipe the node first" : "Delete this volume",
@@ -170,5 +208,129 @@ export class StoragePanel {
     }
     table.append(thead, tbody);
     this.volumeBox.appendChild(table);
+  }
+
+  closeVolumeExplorer() {
+    this.browseVersion++;
+    this.activeVolume = null;
+    this.volumeExplorer.innerHTML = "";
+  }
+
+  async browseVolume(volume) {
+    const version = ++this.browseVersion;
+    this.activeVolume = volume;
+    this.volumeExplorer.innerHTML = "";
+    const head = el("div", "lab-file-head");
+    head.append(el("strong", null, `Broker disk · ${volume}`));
+    head.appendChild(button("Refresh files", "lab-btn-sm", () => this.browseVolume(volume)));
+    head.appendChild(button("Close", "lab-btn-sm", () => this.closeVolumeExplorer()));
+    this.volumeExplorer.appendChild(head);
+    this.volumeExplorer.appendChild(el("p", "lab-muted lab-small", "Files and bytes are the last committed IndexedDB state. Refresh to see newer writes."));
+    const filter = el("input", "lab-input lab-file-filter");
+    filter.type = "search";
+    filter.placeholder = "Filter file paths";
+    filter.setAttribute("aria-label", "Filter broker files");
+    this.volumeExplorer.appendChild(filter);
+    const count = el("span", "lab-muted lab-small");
+    this.volumeExplorer.appendChild(count);
+    const list = el("div", "lab-file-list", "Loading files…");
+    this.volumeExplorer.appendChild(list);
+    try {
+      const files = await this.hooks.volumeFiles(volume);
+      if (version !== this.browseVersion) return;
+      list.innerHTML = "";
+      if (!files.length) {
+        list.textContent = "No files stored yet.";
+        return;
+      }
+      const entries = [];
+      for (const file of files.sort((a, b) => a.path.localeCompare(b.path))) {
+        const detail = el("details", "lab-file");
+        detail.appendChild(el("summary", null, `${file.path} · ${fmtBytes(file.size)}`));
+        const contents = el("div", "lab-file-contents");
+        detail.appendChild(contents);
+        detail.addEventListener("toggle", () => {
+          if (detail.open) this.showFile(volume, file.path, detail, contents);
+        });
+        list.appendChild(detail);
+        entries.push([file.path.toLowerCase(), detail]);
+      }
+      const applyFilter = () => {
+        const query = filter.value.trim().toLowerCase();
+        let shown = 0;
+        for (const [path, detail] of entries) {
+          detail.hidden = !path.includes(query);
+          if (!detail.hidden) shown++;
+        }
+        count.textContent = `${shown} of ${entries.length} files`;
+      };
+      filter.addEventListener("input", applyFilter);
+      applyFilter();
+    } catch (err) {
+      if (version === this.browseVersion) list.textContent = `Files unavailable: ${err.message}`;
+    }
+  }
+
+  showFile(volume, path, detail, contents) {
+    contents.innerHTML = "";
+    const nav = el("div", "lab-file-nav");
+    const info = el("span", "lab-muted lab-small");
+    const input = el("input", "lab-input lab-input-sm");
+    input.type = "number";
+    input.min = "0";
+    input.step = String(HEX_PAGE_BYTES);
+    input.value = "0";
+    input.setAttribute("aria-label", `Byte offset in ${path}`);
+    const pre = el("pre", "lab-hex-view", "Loading bytes…");
+    const header = el("div", "lab-file-header");
+    let offset = 0;
+    let request = 0;
+    const read = async (at) => {
+      const mine = ++request;
+      pre.textContent = "Loading bytes…";
+      try {
+        const file = await this.hooks.volumeFileRange(volume, path, at, HEX_PAGE_BYTES);
+        if (mine !== request || !detail.open || this.activeVolume !== volume) return;
+        if (!file) {
+          pre.textContent = "File no longer exists. Refresh files.";
+          return;
+        }
+        offset = at;
+        input.value = String(offset);
+        input.max = String(Math.max(0, file.size - 1));
+        info.textContent = `${fmtNum(offset)}–${fmtNum(offset + file.bytes.length)} of ${fmtNum(file.size)} bytes`;
+        previous.disabled = offset === 0;
+        next.disabled = offset + file.bytes.length >= file.size;
+        pre.textContent = file.bytes.length ? hexDump(file.bytes, offset) : "End of file";
+        if (at === 0 && path.endsWith(".log")) {
+          header.innerHTML = "";
+          const batch = recordBatchHeader(file.bytes, file.size);
+          if (batch) {
+            header.appendChild(el("strong", null, "First Kafka RecordBatch v2"));
+            const fields = el("dl", "lab-kv");
+            for (const [label, value] of [
+              ["base offset", batch.baseOffset], ["last offset", batch.lastOffset],
+              ["batch bytes", batch.bytes], ["records", batch.records],
+              ["leader epoch", batch.leaderEpoch], ["CRC-32C", batch.crc],
+              ["first time (ms)", batch.firstTimestamp], ["max time (ms)", batch.maxTimestamp],
+            ]) fields.append(el("dt", null, label), el("dd", null, String(value)));
+            header.appendChild(fields);
+          }
+        }
+      } catch (err) {
+        if (mine === request) pre.textContent = `Bytes unavailable: ${err.message}`;
+      }
+    };
+    const previous = button("Previous", "lab-btn-sm", () => read(Math.max(0, offset - HEX_PAGE_BYTES)));
+    const next = button("Next", "lab-btn-sm", () => read(offset + HEX_PAGE_BYTES));
+    const go = button("Go", "lab-btn-sm", () => {
+      const at = Number(input.value);
+      if (Number.isSafeInteger(at) && at >= 0) read(Math.floor(at / HEX_PAGE_BYTES) * HEX_PAGE_BYTES);
+    });
+    const offsetLabel = el("label", "lab-muted lab-small", "Byte offset");
+    offsetLabel.appendChild(input);
+    nav.append(previous, next, offsetLabel, go, info);
+    contents.append(nav, header, pre);
+    read(0);
   }
 }

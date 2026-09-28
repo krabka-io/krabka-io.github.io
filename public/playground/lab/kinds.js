@@ -509,7 +509,7 @@ export const KINDS = {
 };
 
 // The kinds the palette offers, in order.
-export const KIND_ORDER = ["broker", REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "echo", "pinger"];
+export const KIND_ORDER = [REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "echo", "pinger"];
 
 const UNKNOWN = {
   kind: "?",

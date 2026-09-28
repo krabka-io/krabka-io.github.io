@@ -181,6 +181,44 @@ export async function readVolumeFile(volume, path) {
   return assemble(node.size, keys.map((k, i) => ({ index: k[2], bytes: values[i] })));
 }
 
+/** File metadata from one broker volume, without loading any file contents. */
+export async function listVolumeFiles(volume) {
+  checkVolume(volume);
+  const db = await openDb();
+  const store = db.transaction(NODES, "readonly").objectStore(NODES);
+  const range = volumeRange(volume);
+  const [keys, values] = await Promise.all([result(store.getAllKeys(range)), result(store.getAll(range))]);
+  return keys.map((key, i) => ({ path: key[1], ...values[i] })).filter((n) => n.type === "file");
+}
+
+/** A bounded view of a stored file. Missing sparse chunks read as zero bytes. */
+export async function readVolumeFileRange(volume, path, offset, length) {
+  checkVolume(volume);
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 4096) {
+    throw new RangeError("file range must use a non-negative offset and 1–4096 bytes");
+  }
+  const key = path.replace(/^\/+|\/+$/g, "");
+  const db = await openDb();
+  const tx = db.transaction([NODES, CHUNKS], "readonly");
+  const node = await result(tx.objectStore(NODES).get([volume, key]));
+  if (!node || node.type !== "file") return null;
+  const count = Math.min(length, Math.max(0, node.size - offset));
+  const bytes = new Uint8Array(count);
+  if (!count) return { size: node.size, offset, bytes };
+  const first = Math.floor(offset / PAGE_SIZE);
+  const last = Math.floor((offset + count - 1) / PAGE_SIZE);
+  const range = IDBKeyRange.bound([volume, node.ino, first], [volume, node.ino, last]);
+  const chunks = tx.objectStore(CHUNKS);
+  const [keys, values] = await Promise.all([result(chunks.getAllKeys(range)), result(chunks.getAll(range))]);
+  keys.forEach((k, i) => {
+    const pageStart = k[2] * PAGE_SIZE;
+    const from = Math.max(offset, pageStart);
+    const to = Math.min(offset + count, pageStart + values[i].length);
+    if (to > from) bytes.set(values[i].subarray(from - pageStart, to - pageStart), from - offset);
+  });
+  return { size: node.size, offset, bytes };
+}
+
 /** The volumes this origin stores: `[{ id, nextIno, created, updated }]`. */
 export async function listVolumes() {
   const db = await openDb();

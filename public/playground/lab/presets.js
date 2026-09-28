@@ -1,13 +1,10 @@
 // The preset scenarios of the palette. Every document follows the scenario
 // format in `playground/docs/lab-design.md`; positions are canvas pixels.
 //
-// `Network probe` runs on the diagnostic `echo` and `pinger` kinds. The
-// others are KRaft clusters in combined mode: the world gives a scenario's
-// brokers one static controller quorum (every broker whose `voter` is not
-// false votes), the scenario's admin node creates its topics through the
-// active controller, and the apps are wired to them. The page's demo values,
-// where they differ from the nodes' own defaults (KIP-848 consumers that
-// read from the earliest offset and take a little time per record, keyed
+// Each preset runs the real krabka-broker process. The scenario's admin node
+// creates topics through the active controller. The page's demo values,
+// where they differ from the nodes' own defaults (consumers that read from
+// the earliest offset and take a little time per record, keyed
 // records), are written into each config.
 
 const ORDER_SCHEMA = {
@@ -23,11 +20,11 @@ const ORDER_SCHEMA = {
 
 const broker = (id, x, y, rack) => ({
   id,
-  kind: "broker",
+  kind: "krabka-broker",
   name: `broker-${id}`,
   x,
   y,
-  config: { broker_id: id, rack },
+  config: { rack },
 });
 
 // A KIP-848 member that reads from the earliest offset and spends `process_ms`
@@ -45,28 +42,27 @@ const ORDERS = { format: "json", template: { id: "{seq}", total: "{rand 1 500}" 
 
 export const PRESETS = [
   {
-    id: "network-probe",
-    name: "Network probe",
-    description:
-      "Two echo nodes and a pinger. The pinger opens a connection and pings every 100 ms; watch the round trip on the canvas and the RTT in the inspector.",
+    id: "single-broker",
+    name: "Single broker quickstart",
+    description: "One real broker, one topic, a producer and a consumer. Start here to watch a record move from write to read.",
     scenario: {
       version: 1,
       seed: 7,
-      name: "Network probe",
-      links: { default_latency_ms: 10 },
+      name: "Single broker quickstart",
+      links: { default_latency_ms: 5 },
       nodes: [
-        { id: 1, kind: "echo", name: "echo-a", x: 140, y: 120, config: {} },
-        { id: 2, kind: "echo", name: "echo-b", x: 140, y: 300, config: {} },
-        { id: 3, kind: "pinger", name: "pinger", x: 460, y: 210, config: { target: 1, period_ms: 100 } },
+        broker(1, 400, 80, "a"),
+        { id: 2, kind: "producer", name: "orders-producer", x: 160, y: 310, config: { bootstrap: [1], topic: "orders", rate_per_sec: 2, value: ORDERS } },
+        consumer(3, "billing", 640, 310, [1], "billing", ["orders"]),
       ],
-      topics: [],
+      topics: [{ name: "orders", partitions: 1, replication_factor: 1 }],
     },
   },
   {
     id: "three-brokers",
     name: "Three brokers, a producer and a consumer group",
     description:
-      "Three brokers form the KRaft quorum; the controller creates orders with three partitions replicated three times. A producer writes five records a second, and two KIP-848 consumers of one group share the partitions. Kill the leader of a partition and watch the leadership move while the group keeps consuming.",
+      "Three real brokers form the KRaft quorum and serve a three-partition topic with three replicas. A producer writes five records a second, and two consumers share the partitions. Kill a partition leader and watch leadership move.",
     scenario: {
       version: 1,
       seed: 42,
@@ -100,7 +96,7 @@ export const PRESETS = [
     id: "schema-registry",
     name: "Schema registry with an Avro producer and a decoding consumer",
     description:
-      "Three brokers and a schema registry that keeps its schemas in the _schemas topic on them. The producer registers an Avro schema before its first record and frames every value with the schema id; the consumer fetches the schema by id and decodes each value.",
+      "Three real brokers and a schema registry that keeps its schemas in the _schemas topic. The producer registers an Avro schema before its first record; the consumer fetches and decodes it.",
     scenario: {
       version: 1,
       seed: 11,
@@ -138,7 +134,7 @@ export const PRESETS = [
     id: "streams-word-count",
     name: "Kafka Streams word count",
     description:
-      "A producer writes one record per word, keyed by the word and tagged with a language. A krabka-client-streams app keeps the English ones and counts each word in its counts store, whose changelog topic the streams group creates; every new count goes to word-counts, where a consumer reads it.",
+      "Three real brokers serve a word stream. A streams app counts English words in a state store and writes updates to word-counts for a consumer to read.",
     scenario: {
       version: 1,
       seed: 23,
@@ -190,10 +186,89 @@ export const PRESETS = [
     },
   },
   {
+    id: "two-consumer-groups",
+    name: "Two independent consumer groups",
+    description: "Two groups read the same orders topic from three real brokers. Compare their assignments and offsets while the producer runs.",
+    scenario: {
+      version: 1, seed: 31, name: "Two independent consumer groups",
+      links: { default_latency_ms: 5 },
+      nodes: [
+        broker(1, 120, 80, "a"), broker(2, 400, 80, "b"), broker(3, 680, 80, "c"),
+        { id: 4, kind: "producer", name: "orders-producer", x: 120, y: 330, config: { bootstrap: [1, 2, 3], topic: "orders", rate_per_sec: 4, value: ORDERS } },
+        consumer(5, "billing", 420, 330, [1, 2, 3], "billing", ["orders"], { protocol: "classic" }),
+        consumer(6, "analytics", 700, 330, [1, 2, 3], "analytics", ["orders"], { protocol: "classic" }),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
+    id: "observer-broker",
+    name: "Two voters and a broker observer",
+    description: "Brokers 1 and 2 vote in the controller quorum. Broker 3 serves data without a controller vote. Compare their process state and topic replicas.",
+    scenario: {
+      version: 1, seed: 32, name: "Two voters and a broker observer",
+      links: { default_latency_ms: 5 },
+      nodes: [
+        broker(1, 120, 80, "a"), broker(2, 400, 80, "b"),
+        { ...broker(3, 680, 80, "c"), config: { voter: false, rack: "c" } },
+        { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2, 3], topic: "orders", rate_per_sec: 3, value: ORDERS } },
+        consumer(5, "billing", 620, 330, [1, 2, 3], "billing", ["orders"], { protocol: "classic" }),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
+    id: "min-isr",
+    name: "Minimum in-sync replicas",
+    description: "Three real brokers require two in-sync replicas for writes. Kill replicas one at a time and inspect the producer's acknowledgements.",
+    scenario: {
+      version: 1, seed: 33, name: "Minimum in-sync replicas",
+      links: { default_latency_ms: 5 },
+      nodes: [
+        ...[broker(1, 120, 80, "a"), broker(2, 400, 80, "b"), broker(3, 680, 80, "c")].map((n) => ({ ...n, config: { ...n.config, min_insync_replicas: 2 } })),
+        { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2, 3], topic: "orders", rate_per_sec: 3, acks: -1, value: ORDERS } },
+        consumer(5, "billing", 620, 330, [1, 2, 3], "billing", ["orders"], { protocol: "classic" }),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
+    id: "slow-replica",
+    name: "Slow broker link",
+    description: "Broker 3 has slower links to the other two real brokers. Compare replication and client activity, then change the link latency.",
+    scenario: {
+      version: 1, seed: 34, name: "Slow broker link",
+      links: { default_latency_ms: 5 },
+      link_overrides: [{ a: 1, b: 3, latency_ms: 200 }, { a: 2, b: 3, latency_ms: 200 }],
+      nodes: [
+        broker(1, 120, 80, "a"), broker(2, 400, 80, "b"), broker(3, 680, 80, "c"),
+        { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2], topic: "orders", rate_per_sec: 3, value: ORDERS } },
+        consumer(5, "billing", 620, 330, [1, 2], "billing", ["orders"], { protocol: "classic" }),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
+    id: "rack-split",
+    name: "Two racks, one broker cut off",
+    description: "Three real brokers span two racks. Broker 3 starts isolated; heal its links and inspect the quorum and replica state.",
+    scenario: {
+      version: 1, seed: 35, name: "Two racks, one broker cut off",
+      links: { default_latency_ms: 5 },
+      link_overrides: [{ a: 1, b: 3, cut: true }, { a: 2, b: 3, cut: true }],
+      nodes: [
+        broker(1, 120, 80, "a"), broker(2, 400, 80, "a"), broker(3, 680, 80, "b"),
+        { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2], topic: "orders", rate_per_sec: 3, value: ORDERS } },
+        consumer(5, "billing", 620, 330, [1, 2], "billing", ["orders"], { protocol: "classic" }),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
     id: "five-brokers-partition",
     name: "Five brokers under partition",
     description:
-      "Five voters, with brokers 4 and 5 cut off from 1, 2 and 3 from the start. The majority elects the controller, registers and serves the topic; the minority cannot register and stays fenced. Heal the links and watch 4 and 5 catch up with the metadata log and join.",
+      "Five real voters, with brokers 4 and 5 cut off from 1, 2 and 3. The majority can elect a controller; the minority cannot. Heal the links and watch the brokers rejoin.",
     scenario: {
       version: 1,
       seed: 5,
@@ -227,7 +302,7 @@ export const PRESETS = [
             value: ORDERS,
           },
         },
-        consumer(7, "billing", 620, 440, [1, 2, 3, 4, 5], "billing", ["orders"]),
+        consumer(7, "billing", 620, 440, [1, 2, 3, 4, 5], "billing", ["orders"], { protocol: "classic" }),
       ],
       topics: [{ name: "orders", partitions: 5, replication_factor: 3 }],
     },

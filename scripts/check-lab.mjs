@@ -294,12 +294,12 @@ const storedFrames = (page, scenarioId) =>
 
 // The presets as the site ships them, for their names and node ids.
 async function loadPresets() {
-  return (await import(pathToFileURL(path.join(DIST_DIR, 'playground', 'lab', 'presets.js')).href)).PRESETS;
+  return (await import(pathToFileURL(path.join(DIST_DIR, '..', 'scripts', 'lab-simulated-presets.js')).href)).PRESETS;
 }
 
 // Load a preset the way a reader does, from its button, and run it at 20×.
 async function openPreset(page, preset) {
-  await page.locator(`#krabka-lab .lab-preset-btn[data-preset="${preset.id}"]`).click();
+  await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), preset.scenario);
   await waitFor(page, `window.krabkaLab.world.scenario().name === ${JSON.stringify(preset.name)}`, `the ${preset.id} preset`);
   await fastest(page);
 }
@@ -500,11 +500,14 @@ async function checkThreeBrokers(page, preset) {
 
   await checkReload(page);
 
-  // A broker added to the running scenario observes the quorum, and says why.
-  await page.locator('#krabka-lab .lab-kind-btn[data-kind="broker"]').click();
-  await page.waitForSelector('#krabka-lab dialog[open]');
-  await page.locator('#krabka-lab dialog button[type="submit"]').click();
-  const added = await waitFor(page, `(() => { const n = window.krabkaLab.world.scenario().nodes.find((x) => x.kind === 'broker' && x.id > 3); return n ? n.id : null; })()`, 'the added broker');
+  // Legacy simulated scenarios still support a joining observer, although
+  // the palette now offers only real brokers.
+  const added = await page.evaluate(() => {
+    const world = window.krabkaLab.world;
+    const id = Math.max(...world.snapshot().nodes.map((node) => node.id)) + 1;
+    return world.addNode({ id, kind: 'broker', name: `broker-${id}`, x: 820, y: 80, config: { broker_id: id } });
+  });
+  check('a legacy broker can still join a running scenario', added != null, String(added));
   await fit(page);
   await inspect(page, added, `broker-${added}`);
   await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_votes"]')?.textContent === 'no: an observer'`, 'the added broker to observe', 60_000);
@@ -628,6 +631,7 @@ async function checkRegistryPreset(page, preset) {
   // A second registry joins the group. The eligible instance with the
   // smallest URL, node 4, stays the primary; the new one is a secondary that
   // forwards the writes it takes to the primary.
+  await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Add node' }).click();
   await page.locator('#krabka-lab .lab-kind-btn[data-kind="schema-registry"]').click();
   await page.waitForSelector('#krabka-lab dialog[open]');
   await page.locator('#krabka-lab dialog button[type="submit"]').click();
@@ -761,6 +765,7 @@ async function main() {
     const pageErrors = watchErrors(page, 'page', base);
     await openLab(page, base);
     check('page boots and the module initialises', true);
+    await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
 
     const nodeCount = await page.locator('#krabka-lab .lab-node').count();
     check('the network probe preset is on the canvas', nodeCount === 3, `${nodeCount} nodes`);
@@ -840,6 +845,7 @@ async function main() {
     check('the echo counter continues from the stored value after reload', restored.state.frames >= framesAtPause, `${restored.state.frames} < ${framesAtPause}`);
 
     // Move away, then reopen the saved scenario from the Saved list.
+    await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Scenario' }).click();
     await page.locator('#krabka-lab button', { hasText: 'New (empty)' }).click();
     await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 0`, 'an empty scenario');
     await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Saved' }).click();
@@ -938,6 +944,7 @@ async function main() {
     await page3.close();
 
     // Add a node through the palette dialog.
+    await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Add node' }).click();
     await page.locator('#krabka-lab .lab-kind-btn[data-kind="pinger"]').click();
     await page.waitForSelector('#krabka-lab dialog[open]');
     await page.locator('#krabka-lab dialog select').first().selectOption('2');
@@ -959,7 +966,7 @@ async function main() {
       const hub = await context.newPage();
       const hubErrors = watchErrors(hub, 'hub', base);
       await openLab(hub, base);
-      await hub.evaluate(() => window.krabkaLab.loadPreset('network-probe'));
+      await hub.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
       await waitFor(hub, `window.krabkaLab.world.scenario().nodes.length === 3`, 'the hub preset');
 
       // Same-tab baseline: 200 ms each way on the pinger–echo-a link, the

@@ -154,7 +154,7 @@ export class Canvas {
       const spec = this.scenario?.nodes?.find((s) => s.id === n.id);
       const target = spec?.config?.bootstrap?.[0];
       const anchor = target != null ? this.positions.get(Number(target)) : null;
-      const brokers = nodes.filter((b) => b.kind === "broker");
+      const brokers = nodes.filter((b) => b.kind === "broker" || b.kind === "krabka-broker");
       const base = anchor || (brokers.length ? this.positions.get(brokers[0].id) : null) || { x: 60, y: 60 };
       this.positions.set(n.id, { x: base.x - 40, y: base.y + 96 });
     }
@@ -247,6 +247,12 @@ export class Canvas {
     if (remote) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
     if (st) bits.push(st);
     g.setAttribute("aria-label", bits.join(", "));
+    let title = g.querySelector(":scope > title");
+    if (!title) {
+      title = svg("title");
+      g.prepend(title);
+    }
+    title.textContent = bits.join(", ");
     // Badges, right-aligned from the card's top-right corner.
     entry.badges.innerHTML = "";
     const badges = [];

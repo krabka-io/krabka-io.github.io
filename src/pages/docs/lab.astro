@@ -4,7 +4,7 @@ import { getPath } from '../../utils/paths';
 import '../../styles/lab.css';
 
 const real = [
-  { piece: 'Kafka wire codec, every request and response, byte-exact', crate: 'krabka-protocol', use: 'every frame a simulated broker or client handles' },
+  { piece: 'Kafka wire codec, every request and response, byte-exact', crate: 'krabka-protocol', use: 'every frame a broker or client handles' },
   { piece: 'RecordBatch v2 codec with CRC-32C', crate: 'krabka-protocol::records', use: 'every partition log' },
   { piece: 'KRaft state machine (KIP-595, KIP-996)', crate: 'krabka-kraft-core', use: 'the controller quorum between brokers' },
   { piece: 'Metadata records and the immutable metadata image', crate: 'krabka-metadata', use: "the controller log and every broker's view of the cluster" },
@@ -15,18 +15,18 @@ const real = [
 const controls = [
   { control: 'Play / Pause, +10 ms, +100 ms, +1 s, Settle, speed', effect: 'The page owns the clock. Nothing moves until it advances simulated time; Settle runs until nothing is due.' },
   { control: 'Drag a card', effect: 'Moves the node. Positions are saved with the scenario and shared with the link.' },
-  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables the link faults for that pair.' },
+  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables link controls and Network bytes for that pair. Open a frame for its hex and ASCII bytes; hover a decoded field for its byte key.' },
   { control: 'Kill / Restart / Wipe', effect: 'Halts a node with its state kept, boots it again from that state, or boots it from nothing.' },
   { control: 'Isolate / Reconnect, Partition / Heal, Latency, Loss', effect: 'Cuts or restores every link of a node or one link between two, or sets that link’s latency and loss rate.' },
   { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command as JSON, faults, remove.' },
-  { control: 'Inspector tabs', effect: 'State shows what the node reports: a broker’s lifecycle, its part in the KRaft quorum, its channels to the controller, pending ISR changes, producer-id blocks, the groups it coordinates and its partitions; a client’s assignment, positions, commits and lag; a streams app’s tasks, stores and topology. Config edits the node and restarts it; Raw JSON is the snapshot.' },
+  { control: 'Inspector tabs', effect: 'State shows a real broker’s process, log and network activity; a client’s assignment, positions, commits and lag; or a streams app’s tasks, stores and topology. Config edits the node and restarts it; Raw JSON is the snapshot.' },
   { control: 'Command bar', effect: 'The selected node’s control commands: a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
 ];
 ---
 
 <DocsLayout
   title="Cluster Lab"
-  description="Build a Krabka cluster in your browser: brokers, a schema registry, producers, consumers and streams apps in WebAssembly, with faults and multi-tab hosting."
+  description="Run real krabka brokers in your browser with a schema registry, producers, consumers and streams apps, plus network faults and multi-tab hosting."
   currentSlug="/docs/lab"
   wide
 >
@@ -34,20 +34,18 @@ const controls = [
     <div class="border-b border-white/10 pb-4">
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Cluster Lab</h1>
       <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
-        A distributed-systems playground. Place brokers, clients and apps on a canvas, run the cluster, break it, and watch it recover. No backend, no install.
+        A distributed-systems playground. Run real krabka brokers with clients and apps, break their links, and watch them recover. No backend, no install.
       </p>
     </div>
 
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
       <p>
-        Every node on the canvas is a synchronous state machine compiled to <strong class="text-white">WebAssembly</strong>.
-        It receives frames and timer ticks and emits frames; nothing in the module opens a socket, reads a clock or touches a
-        file. The page owns the clock and the virtual network, so a scenario replays exactly from its seed, and every fault is a
-        deliberate act, not an accident of timing.
+        The real brokers run as WebAssembly processes in Workers. Clients and apps run as state machines in the lab module.
+        The page owns their clock and virtual network, so you can pause time, change link latency and cut connections.
       </p>
       <p>
-        The brokers speak the real Kafka wire protocol to the real clients, and their durable state (partition logs and their
-        copy of the KRaft metadata log) is kept in this browser's IndexedDB, so a reload reopens the cluster where you left it. The
+        The brokers speak the Kafka wire protocol to the clients. Their partition logs and KRaft metadata are kept in this
+        browser's IndexedDB, so a reload reopens the cluster where you left it. The
         schema registry keeps its schemas where Confluent's does, in the <code class="font-mono text-krab-300">_schemas</code>
         topic on the brokers, and replays it on every start. Several tabs, on one machine or across the internet, can each host a
         share of the nodes over WebRTC data channels.
@@ -65,13 +63,12 @@ const controls = [
       <p>
         Load <strong class="text-white">Three brokers, a producer and a consumer group</strong> from the presets and set the
         speed to 5×. The three brokers form one KRaft quorum; its leader becomes the active controller, registers the brokers,
-        unfences them once they have caught up with the metadata log, and creates <code class="font-mono text-krab-300">orders</code>.
+        unfences them once they have caught up with the metadata log. The scenario admin creates <code class="font-mono text-krab-300">orders</code>.
         The producer's records flow through replicated partitions to two KIP-848 consumers that share them. Select a broker:
-        its inspector shows its role in the quorum, the active controller, and which broker leads each partition. Select the
+        its inspector shows process logs and runtime activity, and <strong class="text-white">Browse disk</strong> opens its stored files. Select the
         leader of a partition and <strong class="text-white">Kill</strong> it: once its 9 s session runs out, the controller
         fences it and moves the leadership to another replica in the ISR, and the consumers keep reading.
-        <strong class="text-white">Restart</strong> it and it catches up and rejoins the ISR. Add a broker to the running
-        cluster: a KRaft quorum without KIP-853 is static, so the new broker observes it, and its inspector says why.
+        <strong class="text-white">Restart</strong> it and it catches up and rejoins the ISR.
       </p>
       <p>
         <strong class="text-white">Schema registry with an Avro producer and a decoding consumer</strong> starts a registry that
@@ -79,9 +76,8 @@ const controls = [
         before the first record, and the consumer decodes every value by its schema id. Add a second registry: the two elect a
         primary through their group, and the secondary forwards the writes it takes to the primary. <strong class="text-white">Kafka Streams word
         count</strong> joins a KIP-1071 streams group, counts words in a state store backed by the changelog topic the group
-        creates, and answers a store query from the command bar. <strong class="text-white">Network probe</strong> runs on two
-        diagnostic node kinds, an echo and a pinger, and needs nothing but the virtual network: set a latency or a loss on the
-        link and read the round trip in the inspector.
+        creates, and answers a store query from the command bar. Other presets cover independent consumer groups, a broker
+        observer, minimum in-sync replicas, slow links and a rack split. Every preset uses real brokers.
       </p>
 
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
@@ -106,7 +102,8 @@ const controls = [
       <h2 class="text-xl font-bold text-white pt-2">Saving, sharing, hosting</h2>
       <p>
         The scenario autosaves to this browser; the <strong class="text-white">Saved</strong> list reopens it with its durable
-        state, and the <strong class="text-white">Storage</strong> panel shows what is kept per node and forgets it on request.
+        state. In <strong class="text-white">Storage</strong>, open a real broker volume, then a file, to inspect its
+        committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request.
         <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong>
         puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
       </p>
@@ -131,8 +128,8 @@ const controls = [
 
       <h2 class="text-xl font-bold text-white pt-2">What is real</h2>
       <p>
-        The simulation is <em>sans-IO</em>: the transport and the clock are the page's, everything above them is the code that
-        runs in the broker and the clients, compiled unchanged for <code class="font-mono text-krab-300">wasm32-unknown-unknown</code>.
+        The brokers run the krabka-broker process compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>.
+        The page supplies their clock, network and disk. Clients and apps run in the lab's <code class="font-mono text-krab-300">wasm32-unknown-unknown</code> module.
       </p>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
         <table class="w-full text-xs">
@@ -166,7 +163,7 @@ const controls = [
         </a>
         <a href={getPath('/verification')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
           <div class="text-sm font-bold text-white">Correctness & Verification →</div>
-          <p class="text-xs text-gray-400 mt-1">How the broker you are simulating is proved and model-checked.</p>
+          <p class="text-xs text-gray-400 mt-1">How the broker running in the lab is proved and model-checked.</p>
         </a>
       </div>
     </div>

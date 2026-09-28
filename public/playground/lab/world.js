@@ -636,6 +636,12 @@ export class LabWorld {
     return this.snapshotCache;
   }
 
+  wireFrames(a, b) {
+    if (!this.lab || a == null || b == null) return [];
+    const raw = this.guard("read wire frames", () => this.lab.wireFrames(a, b));
+    return raw ? this.guard("parse wire frames", () => JSON.parse(raw)) || [] : [];
+  }
+
   // ---- faults and commands ------------------------------------------------------------
 
   fault(fault) {
