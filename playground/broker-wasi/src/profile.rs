@@ -170,7 +170,7 @@ mod tests {
             node_id: NodeId(u64::from(id)),
             roles,
             listen_addr: SocketAddr::new(host, 9092),
-            advertised_listener: format!("127.0.0.1:{}", 9091 + id),
+            advertised_listener: format!("127.0.0.1:{}", 9091 + u16::from(id)),
             controller_listen_addr: SocketAddr::new(host, 9093),
             controller_quorum_voters: voters(),
             log_dir: PathBuf::from("/data/log"),

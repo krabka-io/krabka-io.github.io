@@ -89,8 +89,9 @@ pub fn build_node(spec: &NodeSpec) -> Result<Box<dyn Node>, LabError> {
         "admin" => Box::new(apps::AdminNode::from_spec(spec)?),
         "echo" => Box::new(testing::EchoNode::from_spec(spec)?),
         "pinger" => Box::new(testing::PingerNode::from_spec(spec)?),
-        external::REAL_BROKER_KIND => Box::new(external::ExternalNode::from_spec(spec)?),
-        external::LOCAL_CLIENT_KIND => Box::new(external::ExternalNode::from_spec(spec)?),
+        external::REAL_BROKER_KIND | external::LOCAL_CLIENT_KIND => {
+            Box::new(external::ExternalNode::from_spec(spec)?)
+        }
         other => return Err(LabError::UnknownNodeKind(other.to_string())),
     })
 }
