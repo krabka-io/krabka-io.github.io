@@ -137,3 +137,91 @@ func TestConfigurePortConflictLeavesListenersClosed(t *testing.T) {
 		t.Fatal("staged listener leaked")
 	}
 }
+
+func TestReconnectGetsNewConnectionID(t *testing.T) {
+	const origin = "http://127.0.0.1:4321"
+	const broker uint16 = 9995
+	server := httptest.NewServer(bridgeHandler("secret", origin))
+	defer server.Close()
+	address := "ws" + strings.TrimPrefix(server.URL, "http") + "/bridge"
+	open := func() (uint32, *websocket.Conn) {
+		t.Helper()
+		ws, err := websocket.Dial(address, "", origin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err := websocket.JSON.Send(ws, packet{Type: "hello", Token: "secret"}); err != nil {
+			t.Fatal(err)
+		}
+		var reply packet
+		if err := websocket.JSON.Receive(ws, &reply); err != nil || reply.Type != "ready" {
+			t.Fatalf("ready: %#v %v", reply, err)
+		}
+		if err := websocket.JSON.Send(ws, packet{Type: "configure", Brokers: []uint16{broker}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := websocket.JSON.Receive(ws, &reply); err != nil || reply.Type != "configured" {
+			t.Fatalf("configured: %#v %v", reply, err)
+		}
+		conn, err := net.DialTimeout("tcp", brokerAddress(broker), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		if err := websocket.JSON.Receive(ws, &reply); err != nil || reply.Type != "open" {
+			t.Fatalf("open: %#v %v", reply, err)
+		}
+		return reply.Conn, ws
+	}
+	first, ws := open()
+	ws.Close()
+	second, ws := open()
+	defer ws.Close()
+	if first == second {
+		t.Fatal("connection ID reused across WebSocket sessions")
+	}
+	var reply packet
+	var peers []net.Conn
+	for range maxPeers - 1 {
+		conn, err := net.DialTimeout("tcp", brokerAddress(broker), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers = append(peers, conn)
+		if err := websocket.JSON.Receive(ws, &reply); err != nil || reply.Type != "open" {
+			t.Fatalf("peer open: %#v %v", reply, err)
+		}
+	}
+	defer func() {
+		for _, conn := range peers {
+			conn.Close()
+		}
+	}()
+	excess, err := net.DialTimeout("tcp", brokerAddress(broker), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excess.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := excess.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("excess peer was not rejected: %v", err)
+	}
+	excess.Close()
+	peers[0].Close()
+	for {
+		if err := websocket.JSON.Receive(ws, &reply); err != nil {
+			t.Fatal(err)
+		}
+		if reply.Type == "close" {
+			break
+		}
+	}
+	replacement, err := net.DialTimeout("tcp", brokerAddress(broker), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	if err := websocket.JSON.Receive(ws, &reply); err != nil || reply.Type != "open" {
+		t.Fatalf("peer listener did not recover: %#v %v", reply, err)
+	}
+}

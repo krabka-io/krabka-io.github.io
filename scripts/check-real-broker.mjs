@@ -421,6 +421,12 @@ async function checkKafkactl(page, base) {
     check('kafkactl queries all three real brokers', brokers.code === 0 && [1, 2, 3].every((id) => brokers.output.includes(`127.0.0.1:${9091 + id}`)), brokers.output);
     const topics = await command(['--context', 'krabka-lab', 'get', 'topics']);
     check('kafkactl queries the orders topic', topics.code === 0 && topics.output.includes('orders'), topics.output);
+    const configText = fs.readFileSync(config, 'utf8');
+    if (!configText.includes('127.0.0.1:9092')) throw new Error('the kafkactl context has no expected bootstrap broker');
+    fs.writeFileSync(config, configText.replace('127.0.0.1:9092', '127.0.0.1:9093'));
+    const alternateTopics = await command(['--context', 'krabka-lab', 'get', 'topics']);
+    check('kafkactl uses the context broker for topics', alternateTopics.code === 0 && alternateTopics.output.includes('orders'), alternateTopics.output);
+    fs.writeFileSync(config, configText);
     const produced = await command(['--context', 'krabka-lab', 'produce', 'orders'], 'bridge-check-record\n');
     check('kafkactl produces to orders', produced.code === 0, produced.output);
     const consumed = await command(['--context', 'krabka-lab', 'consume', 'orders', '--offset=oldest', '--output=raw'], '', 15_000, 'bridge-check-record');
@@ -435,6 +441,10 @@ async function checkKafkactl(page, base) {
     await page.evaluate((id) => window.krabkaLab.fault({ kind: 'heal', a: id, b: 1 }), clientId);
     const healed = await command(['--context', 'krabka-lab', 'get', 'brokers']);
     check('kafkactl works again after the link heals', healed.code === 0 && healed.output.includes('127.0.0.1:9094'), healed.output);
+    await page.evaluate((id) => window.krabkaLab.world.removeNode(id), clientId);
+    await waitFor(page, `window.krabkaLab.bridge.state === 'error'`, 'the bridge to deconfigure after client removal', 10_000);
+    const removed = await command(['--context', 'krabka-lab', 'get', 'brokers'], '', 3_000);
+    check('removing the local client closes the bridge listeners', removed.code !== 0, removed.output.slice(-500));
   } finally {
     bridge.kill();
     await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'resume' }));
@@ -462,7 +472,7 @@ async function threeBrokers(context, base, errors) {
   check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.endsWith(`serving on 127.0.0.1:${9092 + i}`)), servingLines.join(' | '));
   const topic = await createTopic(page);
   check(`the lab's admin node creates "${TOPIC}" with three replicas on the real brokers (${elapsed(since)})`, topic.status === 'created', JSON.stringify(topic));
-  if (args.has('--kafkactl')) {
+  if (args.has('--kafkactl') || args.has('--kafkactl-only')) {
     await node(page, 4, '(n) => n.state && n.state.acked >= 30', 'the producer to ack 30 records before the kafkactl check');
     await metadata(page, `(m) => m.topics?.${TOPIC}?.partitions?.length === 3 && m.topics.${TOPIC}.partitions.every((p) => p.isr.length === 3)`, 'all three topic replicas to be in sync');
     await checkKafkactl(page, base);

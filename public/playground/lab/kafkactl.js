@@ -10,6 +10,7 @@ export class KafkactlBridge {
     this.socket = null;
     this.connections = new Map();
     this.node = null;
+    this.invalidBroker = false;
     this.state = "disconnected";
     this.reason = "";
   }
@@ -40,8 +41,12 @@ export class KafkactlBridge {
           this.sync();
         } else if (message.type === "configured") {
           configured = true;
-          this.status("connected", `Listening for ${message.brokers.length} real broker${message.brokers.length === 1 ? "" : "s"}`);
-          resolve();
+          if (this.invalidBroker) this.status("error", "A real broker ID must be between 1 and 10000 to use the local bridge");
+          else if (this.node == null) this.status("error", "Add a local kafkactl client node to this lab scenario");
+          else if (message.brokers.length === 0) this.status("error", "Add a real broker to this lab scenario");
+          else this.status("connected", `Listening for ${message.brokers.length} real broker${message.brokers.length === 1 ? "" : "s"}`);
+          if (this.state === "error") reject(new Error(this.reason));
+          else resolve();
         } else if (message.type === "error") {
           this.status("error", message.message);
           if (!configured) reject(new Error(message.message));
@@ -86,12 +91,13 @@ export class KafkactlBridge {
     const world = this.hooks.world();
     const client = world?.nodes?.find((n) => n.kind === LOCAL_CLIENT_KIND && n.hosted);
     this.node = client?.id ?? null;
-    if (world?.nodes?.some((n) => n.kind === "krabka-broker" && (n.id < 1 || n.id > 10000))) {
+    const invalid = world?.nodes?.some((n) => n.kind === "krabka-broker" && (n.id < 1 || n.id > 10000));
+    this.invalidBroker = !!invalid;
+    if (invalid) {
       this.status("error", "A real broker ID must be between 1 and 10000 to use the local bridge");
-      return;
     }
-    const brokers = (world?.nodes || []).filter((n) => n.kind === "krabka-broker" && n.hosted && n.id > 0 && n.id <= 10000).map((n) => n.id);
-    if (this.socket?.readyState === WebSocket.OPEN && this.node != null) {
+    const brokers = this.node == null || invalid ? [] : (world?.nodes || []).filter((n) => n.kind === "krabka-broker" && n.hosted && n.id > 0 && n.id <= 10000).map((n) => n.id);
+    if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: "configure", brokers }));
     }
   }

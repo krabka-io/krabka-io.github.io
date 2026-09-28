@@ -19,14 +19,13 @@ func main() {
 	if topics, _, err := root.Find([]string{"get", "topics"}); err == nil {
 		upstream := topics.RunE
 		topics.RunE = func(command *cobra.Command, args []string) error {
-			context, _ := root.PersistentFlags().GetString("context")
-			if context != "krabka-lab" || len(args) != 0 {
+			if root.Configuration().CurrentContext != "krabka-lab" || len(args) != 0 {
 				return upstream(command, args)
 			}
 			config := sarama.NewConfig()
 			config.Version = sarama.V1_1_0_0
 			config.ClientID = "kafkactl"
-			client, err := sarama.NewClient([]string{"127.0.0.1:9092"}, config)
+			client, err := root.ConnectClient(config)
 			if err != nil {
 				return err
 			}

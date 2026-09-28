@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"golang.org/x/net/websocket"
@@ -44,7 +45,7 @@ type session struct {
 	mu        sync.Mutex
 	listeners map[uint16]net.Listener
 	peers     map[uint32]*peer
-	next      uint32
+	next      *atomic.Uint32
 	closed    bool
 }
 
@@ -126,15 +127,19 @@ func (s *session) accept(broker uint16, l net.Listener) {
 		}
 		s.mu.Lock()
 		if s.closed || len(s.peers) >= maxPeers {
+			closed := s.closed
 			s.mu.Unlock()
 			conn.Close()
-			return
+			if closed {
+				return
+			}
+			continue
 		}
-		s.next++
-		if s.next == 0 {
-			s.next++
+		id := s.next.Add(1)
+		if id == 0 {
+			id = s.next.Add(1)
 		}
-		p := &peer{id: s.next, broker: broker, conn: conn}
+		p := &peer{id: id, broker: broker, conn: conn}
 		s.peers[p.id] = p
 		s.mu.Unlock()
 		if err := s.send(packet{Type: "open", Conn: p.id, Broker: broker}); err != nil {
@@ -209,6 +214,7 @@ func (s *session) input(p packet) error {
 func bridgeHandler(token, origin string) http.Handler {
 	var active sync.Mutex
 	var current *session
+	var next atomic.Uint32
 	server := &websocket.Server{
 		Handshake: func(_ *websocket.Config, r *http.Request) error {
 			if r.Header.Get("Origin") != origin {
@@ -223,7 +229,7 @@ func bridgeHandler(token, origin string) http.Handler {
 			if websocket.JSON.Receive(ws, &hello) != nil || hello.Type != "hello" || subtle.ConstantTimeCompare([]byte(hello.Token), []byte(token)) != 1 {
 				return
 			}
-			s := &session{ws: ws, listeners: make(map[uint16]net.Listener), peers: make(map[uint32]*peer)}
+			s := &session{ws: ws, listeners: make(map[uint16]net.Listener), peers: make(map[uint32]*peer), next: &next}
 			active.Lock()
 			if current != nil {
 				current.close()
