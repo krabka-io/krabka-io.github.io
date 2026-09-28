@@ -49,6 +49,7 @@ import crypto from 'crypto';
 import { createRequire } from 'module';
 import { execSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { recordBatchFields } from '../public/playground/lab/storage-panel.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
@@ -116,6 +117,7 @@ async function launchChromium(pw) {
     return await pw.chromium.launch({ headless: HEADLESS });
   } catch (err) {
     const executablePath = installedChromium();
+    if (!executablePath && process.platform === 'win32') return pw.chromium.launch({ headless: HEADLESS, channel: 'msedge' });
     if (!executablePath) throw err;
     return pw.chromium.launch({ headless: HEADLESS, executablePath });
   }
@@ -741,6 +743,16 @@ async function main() {
     process.exit(1);
   }
   await checkInflate();
+  const batches = new Uint8Array(122);
+  const batchView = new DataView(batches.buffer);
+  for (const start of [0, 61]) {
+    batchView.setInt32(start + 8, 49);
+    batches[start + 16] = 2;
+  }
+  batchView.setBigInt64(61, 42n);
+  batchView.setInt32(61 + 57, 3);
+  const fields = recordBatchFields(batches, batches.length);
+  check('RecordBatch byte labels follow both batch boundaries', fields.some((f) => f.start === 61 && f.label === 'Base offset: 42') && fields.some((f) => f.start === 118 && f.label === 'Record count: 3'));
 
   const pw = await loadPlaywright();
   if (!pw) {
@@ -795,6 +807,36 @@ async function main() {
     const raw = await page.locator('#krabka-lab .lab-raw').textContent();
     check('the raw tab shows the snapshot JSON', raw.includes('"kind": "pinger"'));
     await page.locator('#krabka-lab .lab-tab#lab-tab-state').click();
+
+    for (const width of [1400, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const selector of ['.lab-canvas-wrap', '.lab-inspector', '.lab-storage', '.lab-session', '.lab-timeline', '.lab-pal-section']) {
+        const panel = page.locator(`#krabka-lab ${selector}`).first();
+        await panel.locator('.lab-expand').click();
+        const bounds = await panel.boundingBox();
+        check(`${selector} expands at ${width}px`, bounds.width >= width - 1 && bounds.height >= 843, JSON.stringify(bounds));
+        await page.keyboard.press('Escape');
+        check(`${selector} closes with Escape`, !(await panel.evaluate((el) => el.classList.contains('lab-expanded'))));
+      }
+    }
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await page.locator('#krabka-lab .lab-node[data-node-id="1"]').click({ modifiers: ['Shift'] });
+    const network = page.locator('#krabka-lab .lab-wire');
+    for (const width of [1400, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await network.locator('.lab-expand').click();
+      const bounds = await network.boundingBox();
+      check(`network bytes expands at ${width}px`, bounds.width >= width - 1 && bounds.height >= 843 && await network.evaluate((el) => el.open));
+      await network.locator('.lab-expand').click();
+      check('the close button restores network bytes', !(await network.evaluate((el) => el.classList.contains('lab-expanded'))));
+    }
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
+    if (args.has('--expand-only')) {
+      console.log(`\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
+      if (failures.length) process.exitCode = 1;
+      return;
+    }
 
     // Status line on the card.
     const status = await page.locator('#krabka-lab .lab-node[data-node-id="3"]').getAttribute('data-status');
