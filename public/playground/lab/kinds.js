@@ -62,6 +62,19 @@ const DEFAULT_VALUE = { format: "json", template: { id: "{seq}", total: "{rand 1
 const ORDER_SCHEMA = { type: "record", name: "Order", fields: [{ name: "id", type: "long" }, { name: "total", type: "double" }] };
 
 export const KINDS = {
+  "local-client": {
+    kind: "local-client",
+    label: "Local kafkactl",
+    glyph: "⌁",
+    color: "#8ed9e8",
+    pinned: true,
+    description: "The kafkactl bridge on this computer. Its traffic crosses the lab network like another client node.",
+    probe: {},
+    fields: [],
+    commands: [],
+    edges: () => [],
+    status: (s) => s?.connected ? "connected" : "waiting for kafkactl",
+  },
   broker: {
     kind: "broker",
     label: "Broker",

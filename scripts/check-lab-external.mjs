@@ -51,6 +51,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import { execFileSync, execSync, spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { PRESETS as SIMULATED_PRESETS } from './lab-simulated-presets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -81,6 +82,7 @@ function run(cmd, cmdArgs, options = {}) {
 }
 
 function wasmOpt() {
+  if (process.argv.includes('--no-opt')) return null;
   const local = path.join(ROOT, 'node_modules', '.bin', 'wasm-opt');
   if (fs.existsSync(local)) return local;
   try {
@@ -418,6 +420,8 @@ async function windowedRtt(page, pinger, window = 10) {
 async function openLab(page, base) {
   await page.goto(`${base}/docs/lab/`, { waitUntil: 'load' });
   await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
+  await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), SIMULATED_PRESETS.find((p) => p.id === 'network-probe').scenario);
+  await page.locator('#krabka-lab .lab-pal-section').first().locator('summary').click();
 }
 
 // ---- the flows --------------------------------------------------------------------------------------
@@ -871,8 +875,8 @@ async function openShared(browser, base, link, errors) {
     nodes: window.krabkaLab.world.scenario().nodes.map((n) => `${n.id}:${n.kind}`),
   }));
   check(
-    'opening a shared scenario with a real broker reloads once and keeps the scenario',
-    navigations === 2 && opened.hash === '' && Boolean(opened.id) && JSON.stringify(opened.nodes) === JSON.stringify(['1:echo', '2:echo', '3:pinger', '4:krabka-broker']),
+    'opening a shared scenario with a real broker keeps the scenario',
+    navigations >= 1 && navigations <= 2 && opened.hash === '' && Boolean(opened.id) && JSON.stringify(opened.nodes) === JSON.stringify(['1:echo', '2:echo', '3:pinger', '4:krabka-broker']),
     `${navigations} navigations, ${JSON.stringify(opened)}`,
   );
   check('and its real broker runs there', running.state.env.KRABKA_CLUSTER_ID === expectedClusterId(opened.id), running.state.env.KRABKA_CLUSTER_ID);

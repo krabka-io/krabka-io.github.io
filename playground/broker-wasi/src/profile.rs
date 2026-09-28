@@ -21,7 +21,7 @@ pub const LOG_DIR: &str = "/data/log";
 ///
 /// A voter is a combined controller and broker, `process.roles` =
 /// `controller,broker`; any other node is a broker alone. The broker listens
-/// on `KRABKA_HOST:9092` and advertises that address, a voter's controller
+/// on `KRABKA_HOST:9092` and advertises its loopback bridge address, a voter's controller
 /// on `KRABKA_HOST:9093`, and the controller quorum is the static
 /// `KRABKA_VOTERS`. The cluster and directory ids come from the volume's
 /// `meta.properties`. Everything that needs a network stack or a thread
@@ -48,7 +48,7 @@ pub fn broker_config(
             vec![NodeRole::Broker]
         },
         listen_addr,
-        advertised_listener: listen_addr.to_string(),
+        advertised_listener: format!("127.0.0.1:{}", 9091 + contract.node_id),
         controller_listen_addr: SocketAddr::new(contract.host, CONTROLLER_PORT),
         controller_quorum_voters: contract.voters.clone(),
         log_dir: PathBuf::from(LOG_DIR),
@@ -170,7 +170,7 @@ mod tests {
             node_id: NodeId(u64::from(id)),
             roles,
             listen_addr: SocketAddr::new(host, 9092),
-            advertised_listener: format!("10.0.0.{id}:9092"),
+            advertised_listener: format!("127.0.0.1:{}", 9091 + id),
             controller_listen_addr: SocketAddr::new(host, 9093),
             controller_quorum_voters: voters(),
             log_dir: PathBuf::from("/data/log"),

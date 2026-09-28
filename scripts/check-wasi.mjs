@@ -105,6 +105,7 @@ function ensureTools() {
 }
 
 function findWasmOpt() {
+  if (process.argv.includes('--no-opt')) return null;
   const local = path.join(root, "node_modules", ".bin", "wasm-opt");
   if (fs.existsSync(local)) return local;
   if (wasmOptOnPath()) return "wasm-opt";

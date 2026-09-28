@@ -166,6 +166,7 @@ export class LabWorld {
     // The real brokers this tab runs (`ExternalHost`), the lockstep run in
     // flight, and a counter that tells a run its world was replaced.
     this.external = null;
+    this.bridge = null;
     this.run = null;
     this.generation = 0;
   }
@@ -173,6 +174,10 @@ export class LabWorld {
   // Hosts the processes behind the world's external nodes.
   attachExternal(host) {
     this.external = host;
+  }
+
+  attachBridge(bridge) {
+    this.bridge = bridge;
   }
 
   // Whether the world steps in lockstep with real processes.
@@ -203,6 +208,7 @@ export class LabWorld {
     this.id = "";
     this.hostedIds = null;
     this.external?.reset();
+    this.bridge?.reset();
     this.hooks.onLoad?.(null, {});
     this.afterReset();
     return this.lab != null;
@@ -236,6 +242,7 @@ export class LabWorld {
     this.egress.clear();
     this.generation += 1;
     this.external?.reset();
+    this.bridge?.reset();
     this.hooks.onLoad?.(doc, images || {});
     this.afterReset();
     this.external?.sync();
@@ -544,7 +551,9 @@ export class LabWorld {
   handOver(now) {
     const raw = this.guard("drain external", () => this.lab.drainExternal());
     const frames = raw && raw.length > 2 ? this.guard("parse external", () => JSON.parse(raw)) || [] : [];
-    this.external.at(now, frames);
+    const client = frames.filter((t) => Number(t.frame?.dst?.node) === this.bridge?.node);
+    this.bridge?.deliver(client);
+    this.external.at(now, frames.filter((t) => Number(t.frame?.dst?.node) !== this.bridge?.node));
   }
 
   hasWorkBy(ms) {
