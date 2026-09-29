@@ -6,6 +6,11 @@ import wrapTables from './src/utils/satteri-wrap-tables.mjs';
 
 export default defineConfig({
   site: 'https://krabka.io',
+  // Astro's HTML compression drops the whitespace between an inline element
+  // and the text or element beside it when a line break separates them, which
+  // glued words together (`<strong>WebAssembly</strong>` + newline + `and`
+  // rendered as "WebAssemblyand").
+  compressHTML: false,
   // Pages that left this site. Benchmarks were retired in favor of the
   // verification story; observability and gres moved to their own repositories
   // as part of the broader Krabka ecosystem.
