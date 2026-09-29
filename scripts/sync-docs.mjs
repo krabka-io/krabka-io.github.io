@@ -258,7 +258,28 @@ const releaseRepos = {
   'streams-java': 'krabka-streams-java',
   broker: 'krabka-broker',
   cli: 'krabka-cli',
+  'streams-go': 'krabka-streams-go',
+  connect: 'krabka-connect',
+  'client-rs': 'krabka-client-rs',
+  protocol: 'krabka-protocol',
 };
+
+function semverParts(tag) {
+  const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function highestSemverTag(tags) {
+  let best = null;
+  for (const tag of tags) {
+    const parts = semverParts(tag);
+    if (!parts) continue;
+    if (!best || parts.some((n, i) => n !== best.parts[i] && n > best.parts[i] && parts.slice(0, i).every((v, j) => v === best.parts[j]))) {
+      best = { tag, parts };
+    }
+  }
+  return best?.tag ?? null;
+}
 
 async function latestReleaseTag(repoName) {
   const headers = { Accept: 'application/vnd.github+json' };
@@ -269,6 +290,14 @@ async function latestReleaseTag(repoName) {
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) return (await res.json()).tag_name ?? null;
+    if (res.status === 404) {
+      // Repositories that tag without publishing a GitHub Release.
+      const tags = await fetch(`https://api.github.com/repos/krabka-io/${repoName}/tags?per_page=100`, {
+        headers,
+        signal: AbortSignal.timeout(5000),
+      });
+      if (tags.ok) return highestSemverTag((await tags.json()).map((t) => t.name));
+    }
   } catch {
     // fall through to gh
   }
@@ -277,7 +306,16 @@ async function latestReleaseTag(repoName) {
       stdio: 'pipe',
       timeout: 5000,
     }).toString().trim();
-    return out || null;
+    if (out) return out;
+  } catch {
+    // `gh release view` only knows GitHub Releases; fall through to the tags.
+  }
+  try {
+    const out = execSync(`gh api "repos/krabka-io/${repoName}/tags?per_page=100" --jq '.[].name'`, {
+      stdio: 'pipe',
+      timeout: 5000,
+    }).toString();
+    return highestSemverTag(out.split('\n').filter(Boolean));
   } catch {
     return null;
   }

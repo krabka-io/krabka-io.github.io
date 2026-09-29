@@ -36,6 +36,26 @@ function resolveGitHubToken(): string | null {
   return null;
 }
 
+function highestSemverTag(tags: string[]): string | null {
+  let best: { tag: string; parts: number[] } | null = null;
+  for (const tag of tags) {
+    const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag);
+    if (!match) continue;
+    const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+    const newer =
+      !best ||
+      parts[0] > best.parts[0] ||
+      (parts[0] === best.parts[0] && (parts[1] > best.parts[1] || (parts[1] === best.parts[1] && parts[2] > best.parts[2])));
+    if (newer) best = { tag, parts };
+  }
+  return best?.tag ?? null;
+}
+
+function tagRelease(repo: string, tags: string[]): { tagName: string; url: string } | null {
+  const tagName = highestSemverTag(tags);
+  return tagName ? { tagName, url: `https://github.com/krabka-io/${repo}/releases/tag/${tagName}` } : null;
+}
+
 export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
   const token = resolveGitHubToken();
 
@@ -61,6 +81,11 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
                 tagName
                 url
                 publishedAt
+              }
+              tags: refs(refPrefix: "refs/tags/", first: 100) {
+                nodes {
+                  name
+                }
               }
               defaultBranchRef {
                 name
@@ -100,7 +125,11 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
     const resolved = await Promise.all(
       fallbackData.map(async (fallbackItem) => {
         const liveRepo = liveNodes.find((n: { name: string }) => n.name === fallbackItem.repo);
-        const release = liveRepo?.latestRelease;
+        // A repository can tag a version without publishing a GitHub Release.
+        // Fall back to its highest semver tag, so the page and `versions.json` agree.
+        const release =
+          liveRepo?.latestRelease ??
+          tagRelease(fallbackItem.repo, liveRepo?.tags?.nodes?.map((n: { name: string }) => n.name) ?? []);
         const mainSha = liveRepo?.defaultBranchRef?.target?.oid?.slice(0, 7) || fallbackItem.mainCommit;
 
         let aheadBy = fallbackItem.aheadBy;
