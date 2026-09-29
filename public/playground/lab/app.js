@@ -214,6 +214,7 @@ class LabApp {
       onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
       onSelect: (id) => this.select(id),
       onOpenTab: (tab) => this.palette.show(tab),
+      onTry: (key) => this.tryIt(key),
       onBrowseVolume: async (id) => {
         this.dock.show("storage");
         await this.storagePanel.refresh();
@@ -259,6 +260,27 @@ class LabApp {
     if (this.stacked.matches) this.setDockCollapsed(true);
 
     root.addEventListener("keydown", (e) => this.onKey(e));
+  }
+
+  // The inspector's "Try this" buttons: break the running cluster in a way the
+  // reader can watch.
+  tryIt(key) {
+    const nodes = this.world.scenario().nodes.filter((n) => !kindOf(n.kind).hidden);
+    const broker = nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
+    const client = nodes.find((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams");
+    if (key === "consumer") return this.addNodeDialog("consumer");
+    if (!broker) return this.toasts.warn("This scenario has no broker to break; load a preset from Scenarios.");
+    this.world.setPaused(false);
+    if (key === "kill") {
+      this.select(broker.id);
+      this.fault(FAULT.kill(broker.id));
+      return;
+    }
+    if (!client) return this.toasts.warn("This scenario has no client on the other end of a link.");
+    this.select(broker.id);
+    this.select(client.id, true);
+    this.fault(key === "partition" ? FAULT.partition(broker.id, client.id) : FAULT.latency(broker.id, client.id, 300));
+    return;
   }
 
   setDockCollapsed(collapsed) {

@@ -105,13 +105,6 @@
   align-items: start;
 }
 
-#krabka-proofs .px-layout:has(> .px-sidebar:not([open])) {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-#krabka-proofs .px-sidebar:not([open]) {
-  position: static;
-}
 
 @container (max-width: 48rem) {
   #krabka-proofs .px-layout {
@@ -136,6 +129,15 @@
   min-width: 0;
 }
 
+#krabka-proofs .px-sidebar-toggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+}
+
 #krabka-proofs .px-sidebar-toggle,
 #krabka-proofs .px-ob-source > summary {
   cursor: pointer;
@@ -151,13 +153,16 @@
   margin-right: 0.5rem;
 }
 
-#krabka-proofs details[open] > .px-sidebar-toggle::before,
+#krabka-proofs .px-sidebar:not(.px-folded) > .px-sidebar-toggle::before,
 #krabka-proofs details[open] > .px-group-title::before,
 #krabka-proofs .px-ob-source[open] > summary::before {
   content: '−';
 }
 
 @container (max-width: 48rem) {
+  #krabka-proofs .px-sidebar.px-folded > .px-sidebar-controls {
+    display: none;
+  }
   #krabka-proofs .px-sidebar {
     position: static;
   }
@@ -1120,6 +1125,7 @@
   width: 100%;
   min-height: 0;
   grid-template-columns: 22rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0.6rem;
   align-items: stretch;
 }
@@ -1129,6 +1135,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   padding: 0.7rem;
   border: 1px solid var(--px-border);
   border-radius: 10px;
@@ -1273,6 +1280,10 @@
   }
   #krabka-proofs.px-app .px-layout {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  #krabka-proofs.px-app .px-sidebar {
+    overflow: visible;
   }
   #krabka-proofs.px-app .px-sidebar-toggle {
     display: block;

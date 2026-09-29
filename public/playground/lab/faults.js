@@ -54,7 +54,7 @@ export class FaultBar {
     this.linkCap = el("span", "lab-faults-cap", "Link");
     this.nodeGroup.appendChild(this.nodeCap);
     this.linkGroup.appendChild(this.linkCap);
-    this.hint = el("span", "lab-faults-hint", "Shift+click a second card for link controls");
+    this.hint = el("span", "lab-faults-hint", "Shift+click: link controls");
     this.root.append(el("strong", "lab-faults-title", "Break things"), this.nodeGroup, this.hint, this.linkGroup);
     container.appendChild(this.root);
     this.buildNodeGroup();
@@ -82,7 +82,7 @@ export class FaultBar {
     this.latencyInput.step = "1";
     this.latencyInput.value = "50";
     this.latencyInput.setAttribute("aria-label", "Link latency in milliseconds");
-    this.latencyBtn = button("Latency ms", "lab-btn-sm", () => this.link("latency"), { title: "Set the one-way latency of the link" });
+    this.latencyBtn = button("Set", "lab-btn-sm", () => this.link("latency"), { title: "Set the one-way latency of the link" });
     this.lossInput = el("input", "lab-input lab-input-xs");
     this.lossInput.type = "number";
     this.lossInput.min = "0";
@@ -90,10 +90,14 @@ export class FaultBar {
     this.lossInput.step = "1";
     this.lossInput.value = "10";
     this.lossInput.setAttribute("aria-label", "Link loss in percent");
-    this.lossBtn = button("Loss %", "lab-btn-sm", () => this.link("loss"), { title: "Drop this share of the data frames on the link" });
-    this.resetBtn = button("Reset link", "lab-btn-sm", () => this.resetLink(), { title: "Heal, no loss, default latency" });
+    this.lossBtn = button("Set", "lab-btn-sm", () => this.link("loss"), { title: "Drop this share of the data frames on the link" });
+    this.resetBtn = button("Reset", "lab-btn-sm", () => this.resetLink(), { title: "Heal, no loss, default latency" });
     this.bytesBtn = button("Network bytes", "lab-btn-sm", () => this.hooks.onBrowseTraffic(), { title: "Inspect recent frames and payload bytes between these nodes" });
-    g.append(this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn, this.bytesBtn);
+    const latency = el("span", "lab-fault-num");
+    latency.append("Latency", this.latencyInput, "ms", this.latencyBtn);
+    const loss = el("span", "lab-fault-num");
+    loss.append("Loss", this.lossInput, "%", this.lossBtn);
+    g.append(this.partitionBtn, this.healBtn, latency, loss, this.resetBtn, this.bytesBtn);
   }
 
   update({ snapshot, selection }) {

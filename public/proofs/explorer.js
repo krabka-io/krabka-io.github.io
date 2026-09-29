@@ -245,8 +245,12 @@ function markActive() {
   }
   const active = listEl.querySelector(".px-item.px-active");
   if (active) active.closest("details").open = true;
-  if (active && typeof active.scrollIntoView === "function") {
-    active.scrollIntoView({ block: "nearest" });
+  if (active) {
+    // Scroll the list itself: scrollIntoView would move the page as well.
+    const list = listEl.getBoundingClientRect();
+    const row = active.getBoundingClientRect();
+    if (row.top < list.top) listEl.scrollTop -= list.top - row.top + 8;
+    else if (row.bottom > list.bottom) listEl.scrollTop += row.bottom - list.bottom + 8;
   }
 }
 
@@ -682,9 +686,17 @@ function buildShell() {
   root.replaceChildren();
   const layout = el("div", "px-layout");
 
-  const sidebar = el("details", "px-sidebar");
-  sidebar.open = true;
-  sidebar.appendChild(el("summary", "px-sidebar-toggle", "Browse sessions"));
+  const sidebar = el("div", "px-sidebar");
+  // In a narrow container the list folds behind this button; wide, it is
+  // always open and the button is hidden.
+  const toggle = el("button", "px-sidebar-toggle", "Browse sessions");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.addEventListener("click", () => {
+    const folded = sidebar.classList.toggle("px-folded");
+    toggle.setAttribute("aria-expanded", String(!folded));
+  });
+  sidebar.appendChild(toggle);
   const controls = el("div", "px-sidebar-controls");
   const filter = el("input", "px-input px-filter");
   filter.type = "search";

@@ -204,6 +204,26 @@ export class Inspector {
       list.appendChild(li);
     }
     box.appendChild(list);
+
+    // Things a reader can do to a cluster, each a button that does it.
+    box.appendChild(el("h3", "lab-rail-heading", "Try this"));
+    const tries = el("ul", "lab-try-list");
+    for (const [key, label, what] of [
+      ["kill", "Kill a broker", "Watch the controller fence it and move leadership."],
+      ["partition", "Cut a client off", "Partition a client from a broker and watch it retry."],
+      ["latency", "Slow a link to 300 ms", "See round trips and consumer lag grow."],
+      ["consumer", "Add a consumer", "Join the group and watch partitions rebalance."],
+    ]) {
+      const li = el("li");
+      const b = el("button", "lab-try");
+      b.type = "button";
+      b.dataset.try = key;
+      b.append(el("strong", null, label), el("span", null, what));
+      b.addEventListener("click", () => this.hooks.onTry?.(key));
+      li.appendChild(b);
+      tries.appendChild(li);
+    }
+    box.appendChild(tries);
   }
 
   renderHeader(n) {
