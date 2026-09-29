@@ -78,25 +78,40 @@ public class FraudDetectionApp {
     label: 'Kubernetes CRD',
     tag: 'krabka-operator',
     code: `apiVersion: krabka.io/v1alpha1
-kind: KrabkaCluster
+kind: Kafka
 metadata:
   name: production-cluster
   namespace: streaming
 spec:
+  kafkaVersion: "4.0.0"
+  tieredStorage:
+    type: S3
+    s3:
+      bucket: krabka-cold-storage
+      region: us-west-2
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: streaming
+  labels:
+    krabka.io/cluster: production-cluster
+spec:
+  roles: [Controller, Broker]
   replicas: 3
-  version: "1.0.0"
-  storage:
-    tiered:
-      enabled: true
-      bucket: "s3://krabka-cold-storage"
-      region: "us-west-2"
+  nodeIdStart: 0
   resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
     limits:
       cpu: "4"
-      memory: "2Gi"
-    requests:
-      cpu: "500m"
-      memory: "512Mi"`
+      memory: 2Gi
+  storage:
+    type: PersistentClaim
+    size: 100Gi
+    deleteClaim: false`
   }
 ];
 ---

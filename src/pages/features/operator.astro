@@ -89,7 +89,7 @@ spec:
           </div>
           <div class="bg-black/30 p-3 rounded-lg border border-white/5">
             <strong class="text-white font-mono font-bold">KafkaRebalance</strong>
-            <p class="text-gray-400 mt-1">Plans and executes automated partition migration to eliminate broker CPU and disk skew.</p>
+            <p class="text-gray-400 mt-1">Asks krabka-rebalancer for a partition movement plan in full, addBrokers or removeBrokers mode, and executes it once the proposal is approved.</p>
           </div>
           <div class="bg-black/30 p-3 rounded-lg border border-white/5">
             <strong class="text-white font-mono font-bold">KafkaConnector</strong>
@@ -114,7 +114,7 @@ spec:
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Rolling Upgrades & Automated Rebalancing</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          When upgrading versions or resizing node pools, the operator performs phased rolling restarts. It restarts one broker at a time and waits for it to rejoin before moving to the next, so partition leadership moves off a broker before its pod cycles.
+          Each node pool renders as a StatefulSet with the RollingUpdate strategy, so pods restart one at a time and each must become Ready before the next one cycles. A PodDisruptionBudget with maxUnavailable 1 guards each pool against voluntary disruption.
         </p>
       </div>
 
