@@ -4,13 +4,11 @@ import path from 'node:path';
 
 const ROOT_DIR = process.cwd();
 const CONTENT_DOCS_DIR = path.join(ROOT_DIR, 'src', 'content', 'docs');
-const PUBLIC_API_DIR = path.join(ROOT_DIR, 'public', 'api');
 
 console.log('🦀 [sync-docs] Starting documentation synchronization...');
 
 // 1. Ensure target directories exist
 fs.mkdirSync(CONTENT_DOCS_DIR, { recursive: true });
-fs.mkdirSync(PUBLIC_API_DIR, { recursive: true });
 
 // Component configurations
 const COMPONENTS = [
@@ -19,30 +17,18 @@ const COMPONENTS = [
     repo: 'krabka-streams-java',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-streams-java'),
     docsSubdir: 'streams-java',
-    assetName: 'javadoc-site.tar.gz',
-    apiOutputDir: path.join(PUBLIC_API_DIR, 'streams-java'),
-    localApiBuildDir: path.resolve(ROOT_DIR, '..', 'krabka-streams-java', 'bazel-bin', 'javadoc-site'),
-    docType: 'Javadoc',
   },
   {
     name: 'streams-go',
     repo: 'krabka-streams-go',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-streams-go'),
     docsSubdir: 'streams-go',
-    assetName: 'docsite-site.tar.gz',
-    apiOutputDir: path.join(PUBLIC_API_DIR, 'streams-go'),
-    localApiBuildDir: path.resolve(ROOT_DIR, '..', 'krabka-streams-go', 'bazel-bin', 'docsite-site'),
-    docType: 'Godoc',
   },
   {
     name: 'broker',
     repo: 'krabka-broker',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-broker'),
     docsSubdir: 'broker',
-    assetName: 'rustdoc-site.tar.gz',
-    apiOutputDir: path.join(PUBLIC_API_DIR, 'broker'),
-    localApiBuildDir: path.resolve(ROOT_DIR, '..', 'krabka-broker', 'target', 'doc'),
-    docType: 'Rustdoc',
   },
 ];
 
@@ -118,84 +104,6 @@ for (const comp of COMPONENTS) {
   } else {
     console.log(`  ℹ️ No markdown guides found for ${comp.name}.`);
   }
-
-  // --- Step B: Sync Compiled API Reference ---
-  const latestApiDir = path.join(comp.apiOutputDir, 'latest');
-  let apiSynced = false;
-
-  // 1. Try local Bazel build output if present
-  if (comp.localApiBuildDir && fs.existsSync(comp.localApiBuildDir)) {
-    console.log(`  ✓ Found local build output at ${comp.localApiBuildDir}`);
-    execSync(`rm -rf "${latestApiDir}" && mkdir -p "${latestApiDir}" && cp -RL "${comp.localApiBuildDir}/." "${latestApiDir}/" && chmod -R u+w "${latestApiDir}"`);
-    if (comp.name === 'broker' && !fs.existsSync(path.join(latestApiDir, 'index.html'))) {
-      fs.writeFileSync(
-        path.join(latestApiDir, 'index.html'),
-        '<!doctype html><html><head><meta http-equiv="refresh" content="0; url=krabka_broker/index.html"><title>Redirecting to krabka_broker</title></head><body><a href="krabka_broker/index.html">Redirecting to krabka_broker...</a></body></html>'
-      );
-    }
-    apiSynced = true;
-    console.log(`  ✓ Synced local API build to ${latestApiDir}`);
-  } else {
-    fs.mkdirSync(latestApiDir, { recursive: true });
-  }
-
-  // 2. Try downloading latest release asset via GitHub CLI
-  if (!apiSynced) {
-    const downloadDir = path.join('/tmp', `api-download-${comp.name}`);
-    fs.mkdirSync(downloadDir, { recursive: true });
-    try {
-      console.log(`  → Checking GitHub Releases for ${comp.assetName}...`);
-      execSync(`gh release download --repo krabka-io/${comp.repo} -p "${comp.assetName}" -D ${downloadDir} --clobber`, {
-        stdio: 'pipe',
-        timeout: 15000,
-      });
-      const archivePath = path.join(downloadDir, comp.assetName);
-      if (fs.existsSync(archivePath)) {
-        execSync(`tar -xzf ${archivePath} -C ${latestApiDir}`, { stdio: 'pipe' });
-        apiSynced = true;
-        console.log(`  ✓ Unpacked release API archive into ${latestApiDir}`);
-      }
-    } catch {
-      // Release asset not yet published or gh not available
-    }
-  }
-
-  // 3. Fallback placeholder if no build or release archive exists yet
-  if (!apiSynced && !fs.existsSync(path.join(latestApiDir, 'index.html'))) {
-    console.log(`  ℹ️ Creating initial placeholder at ${latestApiDir}/index.html`);
-    const placeholderHtml = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>${comp.name} ${comp.docType} Reference</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { background: #030712; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1.5rem; }
-    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.75rem; padding: 2rem; max-width: 480px; width: 100%; text-align: left; }
-    h1 { color: #f3f4f6; margin-top: 0; font-size: 1.25rem; font-weight: 700; }
-    p { color: #9ca3af; font-size: 0.875rem; line-height: 1.6; }
-    code { font-family: ui-monospace, monospace; color: #ff6a3d; background: rgba(255,255,255,0.05); padding: 0.15rem 0.35rem; border-radius: 0.25rem; }
-    .nav-links { margin-top: 1.5rem; pt-4; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 0.5rem; }
-    a { color: #ff6a3d; text-decoration: none; font-size: 0.875rem; font-weight: 600; }
-    a:hover { text-decoration: underline; color: #ff8c69; }
-    .muted { color: #6b7280; font-size: 0.75rem; margin-top: 1rem; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>${comp.name} · ${comp.docType} Reference</h1>
-    <p>The compiler-generated ${comp.docType} tree is published upon official release tagging (<code>v*</code>) and local builds.</p>
-    <div class="nav-links">
-      <a href="../../../docs/${comp.docsSubdir}">Return to ${comp.name} Overview & Guides</a>
-      <a href="../../../api">Browse All API References</a>
-      <a href="https://github.com/krabka-io/${comp.repo}" target="_blank" rel="noopener noreferrer">View Source Repository on GitHub</a>
-    </div>
-    <div class="muted">Krabka Documentation Hub</div>
-  </div>
-</body>
-</html>`;
-    fs.writeFileSync(path.join(latestApiDir, 'index.html'), placeholderHtml);
-  }
 }
 
 // --- Step C: Automatically Sync Versions from Source Repos ---
@@ -229,6 +137,8 @@ const cargoComponents = {
   protocol: 'krabka-protocol',
   operator: 'krabka-operator',
   connect: 'krabka-connect',
+  gateway: 'krabka-gateway',
+  rebalancer: 'krabka-rebalancer',
 };
 for (const [key, repoName] of Object.entries(cargoComponents)) {
   const cargoToml = path.resolve(ROOT_DIR, '..', repoName, 'Cargo.toml');
@@ -260,6 +170,8 @@ const releaseRepos = {
   cli: 'krabka-cli',
   'streams-go': 'krabka-streams-go',
   connect: 'krabka-connect',
+  gateway: 'krabka-gateway',
+  rebalancer: 'krabka-rebalancer',
   'client-rs': 'krabka-client-rs',
   protocol: 'krabka-protocol',
 };

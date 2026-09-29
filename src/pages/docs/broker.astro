@@ -1,6 +1,9 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
+import apiReference from '../../data/api-reference.json';
+
+const apiHref = (id: string) => new URL(apiReference.find((entry) => entry.id === id)!.apiPath, 'https://krabka.io').href;
 import versionsData from '../../data/versions.json';
 
 const activeRelease = `v${versionsData.broker?.version ?? '0.6.1'}`;
@@ -68,7 +71,7 @@ const brokerCrates = [
       </div>
 
       <a
-        href={getPath('/api/broker/latest/')}
+        href={apiHref('broker')}
         class="inline-flex items-center rounded-lg bg-krab-500/20 hover:bg-krab-500/30 border border-krab-500/40 px-4 py-2 text-xs font-semibold text-krab-300 hover:text-white transition-colors shrink-0"
       >
         Browse Rustdoc Reference
