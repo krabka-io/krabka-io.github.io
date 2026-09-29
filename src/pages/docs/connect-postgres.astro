@@ -2,22 +2,41 @@
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 
-const configSnippet = `[connector]
-name = "postgres-inventory-cdc"
-connector_class = "krabka_connect_postgres::PostgresWalSource"
-tasks_max = 1
+const workerSnippet = `# Each krabka-connect-worker process runs one connector. Every flag also has a
+# KRABKA_* environment variable; the connection URL is a secret, so pass it there.
+export KRABKA_POSTGRES_URL='postgres://cdc_user:change-me@db.internal:5432/inventory'
 
-[connector.config]
-database_url = "postgres://cdc_user:\${env:POSTGRES_CDC_PASSWORD}@db.internal:5432/inventory"
-schema_registry_url = "http://schema-registry:8081"
-slot_name = "krabka_inventory_slot"
-publication_name = "inventory_publication"
-schema = "public"
-tables = ["orders", "line_items", "customers"]
-max_messages_per_poll = 1000`;
+krabka-connect-worker \\
+  --connector-id postgres-inventory-cdc \\
+  --kafka-bootstrap kafka:9092 \\
+  --schema-registry-url http://schema-registry:8081 \\
+  --postgres-slot krabka_inventory_slot \\
+  --postgres-publication inventory_publication \\
+  --postgres-schema public \\
+  --postgres-tables orders,line_items,customers \\
+  --topic-prefix db`;
 
-const acceptanceTestSnippet = `# The Postgres CDC acceptance suite boots Postgres and Schema Registry containers,
-# runs a connector, restarts it, and verifies checkpoint resumption.
+const connectorCrSnippet = `apiVersion: krabka.io/v1alpha1
+kind: KafkaConnector
+metadata:
+  name: postgres-inventory-cdc
+  labels:
+    krabka.io/cluster: demo
+spec:
+  type: postgresSource
+  databaseUrl:
+    name: inventory-db
+    key: url
+  schemaRegistryUrl: http://schema-registry:8081
+  slot: krabka_inventory_slot
+  publication: inventory_publication
+  schema: public
+  tables: [orders, line_items, customers]
+  topicPrefix: db`;
+
+const acceptanceTestSnippet = `# The Postgres CDC acceptance suite needs Docker. It starts Postgres and a schema
+# registry in containers, runs the worker, force-kills it, restarts it, and checks
+# that the records still arrive after the restart, including across an ALTER TABLE.
 cargo test -p krabka-connect-worker --test postgres_cdc -- --ignored`;
 ---
 
@@ -40,11 +59,11 @@ cargo test -p krabka-connect-worker --test postgres_cdc -- --ignored`;
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
         <strong class="font-semibold text-amber-200">Developer Preview Notice:</strong>
-        The <code class="font-mono text-amber-200">krabka-connect</code> framework and its PostgreSQL CDC connector are currently in active development. Core WAL decoding and checkpoint resumption are verified in integration suites, while production cluster runtimes are being finalized.
+        The <code class="font-mono text-amber-200">krabka-connect</code> framework and its PostgreSQL CDC connector are currently in active development. Logical decoding and checkpoint resumption are exercised by a Docker-backed acceptance suite. The worker runs one connector per process.
       </div>
 
       <p>
-        <code class="font-mono text-krab-300">krabka-connect-postgres</code> captures row-level inserts, updates, and deletes directly from PostgreSQL write-ahead logs using the native <code class="font-mono text-xs text-gray-200">pgoutput</code> logical replication stream. It provides lock-free table snapshotting, exact transaction boundary propagation, and automatic schema registration without external JVM sidecars.
+        <code class="font-mono text-krab-300">krabka-connect-postgres</code> captures row-level inserts, updates, and deletes directly from PostgreSQL write-ahead logs using the native <code class="font-mono text-xs text-gray-200">pgoutput</code> logical replication stream. Each record carries the source LSN, transaction id, and commit timestamp, and DELETE events become tombstones. The connector registers its Protobuf key and value schemas with a Confluent-compatible Schema Registry at startup, and it needs no JVM sidecar. It does not take an initial snapshot: it emits only the changes that logical decoding makes available.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Connector Architecture</h2>
@@ -85,29 +104,43 @@ cargo test -p krabka-connect-worker --test postgres_cdc -- --ignored`;
         </table>
       </div>
 
-      <h2 class="text-xl font-bold text-white pt-2">Sample Connector Configuration</h2>
+      <h2 class="text-xl font-bold text-white pt-2">Running the Worker</h2>
       <p>
-        A typical CDC worker task configuration declaring the target publication, replication slot, and schema registry integration (typed via <code class="font-mono text-xs text-gray-200">PostgresSourceConfig</code>):
+        <code class="font-mono text-xs text-gray-200">krabka-connect-worker</code> is configured by flags or environment variables. It creates the replication slot, and the publication for the configured tables, when they are missing. Records go to <code class="font-mono text-xs text-gray-200">&lt;topic-prefix&gt;.&lt;schema&gt;.&lt;table&gt;</code>, for example <code class="font-mono text-xs text-gray-200">db.public.orders</code>. The library-level <code class="font-mono text-xs text-gray-200">PostgresSourceConfig</code> keys are <code class="font-mono text-xs text-gray-200">database_url</code>, <code class="font-mono text-xs text-gray-200">schema_registry_url</code>, <code class="font-mono text-xs text-gray-200">slot_name</code>, <code class="font-mono text-xs text-gray-200">publication_name</code>, <code class="font-mono text-xs text-gray-200">schema</code>, <code class="font-mono text-xs text-gray-200">tables</code>, and <code class="font-mono text-xs text-gray-200">max_messages_per_poll</code>:
       </p>
 
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
         <div class="flex items-center justify-between text-xs text-gray-400">
-          <span>Worker Task TOML Configuration:</span>
-          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={configSnippet}>
+          <span>Worker invocation:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={workerSnippet}>
             Copy
           </button>
         </div>
-        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{configSnippet}</code></pre>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{workerSnippet}</code></pre>
+      </div>
+
+      <p>
+        On Kubernetes, the operator runs the same worker from a <code class="font-mono text-xs text-gray-200">KafkaConnector</code> resource (the <code class="font-mono text-xs text-gray-200">krabka.io/cluster</code> label is required, and the database URL comes from a Secret key). The default worker image, <code class="font-mono text-xs text-gray-200">ghcr.io/krabka-io/krabka-connect-worker:v0.4.0</code>, is not published on ghcr.io yet, so set <code class="font-mono text-xs text-gray-200">spec.image</code> to a commit-SHA tag or your own build:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>KafkaConnector resource:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={connectorCrSnippet}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{connectorCrSnippet}</code></pre>
       </div>
 
       <h2 class="text-xl font-bold text-white pt-2">Checkpoint Resumption & Guarantees</h2>
       <p>
-        The worker runtime tracks committed Log Sequence Numbers (LSNs) in internal compacted offset topics. When a worker restarts or recovers from network disruption, it resumes streaming from the exact checkpointed LSN, ensuring records are neither skipped nor replayed out of sequence.
+        The worker writes with an idempotent producer and <code class="font-mono text-xs text-gray-200">acks=all</code>, and stores the acknowledged Log Sequence Number (LSN) in the compacted <code class="font-mono text-xs text-gray-200">__krabka_connect_offsets</code> topic. It advances the PostgreSQL slot only after both the Kafka write and the checkpoint are durable, so a restart resumes from the checkpoint and never skips a change. Delivery is at least once: a crash between the two writes can replay a batch of records.
       </p>
 
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
         <div class="flex items-center justify-between text-xs text-gray-400">
-          <span>Running the Docker Acceptance Suite:</span>
+          <span>Running the Docker acceptance suite:</span>
           <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={acceptanceTestSnippet}>
             Copy
           </button>
@@ -123,7 +156,7 @@ cargo test -p krabka-connect-worker --test postgres_cdc -- --ignored`;
         </a>
         <a href="https://github.com/krabka-io/gres" target="_blank" rel="noopener noreferrer" class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
           <div class="text-sm font-bold text-white">gres (broader Krabka ecosystem) →</div>
-          <p class="text-xs text-gray-400 mt-1">A Postgres-compatible compute tier built on Krabka topics. Documented in its own repository.</p>
+          <p class="text-xs text-gray-400 mt-1">A pure-Rust PostgreSQL-compatible SQL engine. Documented in its own repository.</p>
         </a>
       </div>
     </div>

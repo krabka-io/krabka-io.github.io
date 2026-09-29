@@ -225,6 +225,32 @@ invented to pad a one-row-per-integer table.
 | KIP-923 | Grace period on stream-table join | streams |
 | KIP-1024 | `statestore.cache.max.bytes` | streams record-caching spec |
 
+### Additional rows tracked by the broker's generated matrix
+
+The broker repository generates its own
+[KIP matrix](/docs/broker/kip_matrix) from the code and its tests. These KIPs
+are `Implemented` there.
+
+| KIP | Title | Grounding |
+|-----|-------|-----------|
+| KIP-107 | `DeleteRecords` admin request | generated matrix |
+| KIP-108 | Create-topic policy refusing a topic with `POLICY_VIOLATION` | generated matrix |
+| KIP-211 | Committed-offset retention measured from the group's last activity | generated matrix |
+| KIP-371 | `ssl.principal.mapping.rules` maps an mTLS Subject DN to a principal | generated matrix |
+| KIP-373 | Delegation tokens for other users (`USER` resource, `CREATE_TOKENS` / `DESCRIBE_TOKENS`) | generated matrix |
+| KIP-382 | MirrorMaker 2 replicates a Kafka cluster onto Krabka | stock `connect-mirror-maker.sh` of `apache/kafka:4.3.1` |
+| KIP-412 | Dynamic broker log levels through the `BROKER_LOGGER` resource | JVM-validated |
+| KIP-590 | Envelope: the controller listener serves a forwarded admin write | JVM role-separated admin test |
+| KIP-814 | Static leader rejoin keeps the current assignment (`skip_assignment`) | generated matrix |
+| KIP-860 | `AlterPartitionReassignments` refuses a replication-factor change unless allowed | generated matrix |
+| KIP-950 | Tiered storage disablement (`remote.log.copy.disable`, `remote.log.delete.on.disable`) | JVM-validated |
+| KIP-1038 | `ListTransactions` filters by an RE2J-compatible pattern | generated matrix |
+| KIP-1071 | Streams groups: `StreamsGroupHeartbeat` and `StreamsGroupDescribe` (broker side) | JVM Streams acceptance suites |
+| KIP-1186 | `kraft.version` upgrade and the last-voter check driven by the Kafka 4.3 quorum tools | JVM-validated |
+| KIP-1242 | `ApiVersions` v5 routing identity and `REBOOTSTRAP_REQUIRED` | generated matrix |
+| KIP-1276 | CIDR-range ACL hosts in `CreateAcls` and host matching | generated matrix |
+| KIP-1357 | `StreamsGroupDescribe` v1 names the group's task assignor | generated matrix |
+
 ---
 
 ## 2. Partially implemented (⚠️) — what is left
@@ -232,8 +258,10 @@ invented to pad a one-row-per-integer table.
 | KIP / area | Done | What's left for full parity |
 |------------|------|-----------------------------|
 | **KIP-778 / proposed KIP-1155** — KRaft upgrades and metadata-version downgrades | `metadata.version` level model (7–25), runtime enforcement, bootstrap/format, operator ordered roll + MV bump; Krabka-native safe/unsafe record-loss projection; all-node downgrade-capability and target-range checks; mandatory lower-version snapshot reload + log-prefix prune on every quorum node, with fail-closed retry and restart rediscovery; pre-KIP-1155 Kafka 4.0 nodes are rejected without changing cluster state | Successful mixed-JVM rolling software downgrade awaits an upstream Kafka release that assigns and advertises KIP-1155's promised capability metadata version. Kafka 4.0 correctly cannot be treated as downgrade-capable. Operator Admin RPCs over secured internal listeners still need TLS/SASL credential loading. |
-| **KIP-1071** — streams rebalance protocol | **Broker side fully done**: `StreamsGroupHeartbeat` / `StreamsGroupDescribe`, topology ingestion, internal repartition/changelog topic creation, active/standby/warmup assignment with changelog catch-up, `__consumer_offsets` persistence, `streams.version` gate. Rust client DSL/runtime/state-stores/joins/windows/suppress/IQv2/EOS are broad. Kafka supports only offline classic→streams migration. | Future accepted protocol revisions are tracked as bounded items; replacing the full JVM Kafka Streams library is outside this matrix's compatibility contract. |
 | **Geo-replication** | The native replicator runs selective topic flows, loop prevention, residency routing, offset-sync/checkpoint/heartbeat records, transactional output plus checkpoint recovery, and restart-safe supervision. | Schema-aware transforms/routing, secured standalone clients, an operator CRD, and the explicitly deferred audit/erasure/key-residency surfaces remain future slices. |
+| **KIP-1222** — share acquisition lock renewal | The `Renew` acknowledge type and `IsRenewAck` on `ShareFetch` / `ShareAcknowledge` v2. | `IncrementalAlterConfigs` does not accept `share.renew.acknowledge.enable` yet. |
+| **KIP-1251** — `OffsetCommit` with an older member epoch | Commits are fenced by Kafka's `validateOffsetCommit`. | Every older epoch is still refused: the epoch at which each partition was assigned is not recorded. |
+| **KIP-1331** — streams topology descriptions | `StreamsGroupHeartbeat` and `StreamsGroupDescribe` v1. | No topology description plugin: a describe that asks for the description answers `NOT_STORED`, and `StreamsGroupTopologyDescriptionUpdate` (93) is not served. `streams.rack.aware.assignment.tags` is unsupported. |
 
 ---
 
@@ -258,8 +286,11 @@ belongs in this section only when it has a bounded behavior and acceptance gate.
 
 | KIP(s) / area | Reason |
 |---------------|--------|
-| KIP-866 + all ZooKeeper-mode / ZK→KRaft migration KIPs (incl. KIP-590 controller forwarding) | **Krabka is KRaft-only.** An explicit non-goal. Greenfield, no production users, no migration burden. |
+| KIP-866 + all ZooKeeper-mode / ZK→KRaft migration KIPs | **Krabka is KRaft-only.** An explicit non-goal. Greenfield, no production users, no migration burden. |
 | Kafka **Connect** framework + connectors + EOS source + REST/offsets APIs (KIP-26, 145, 158, 208, 215, 238, 298, 305, 558, 610, 611, 618, 745, 875, 980, …) | Krabka provides its own Rust connector SPI, a managed Postgres CDC worker with durable Kafka-backed offsets, and a `KafkaConnector` operator CRD. JVM plugin loading, the distributed Connect worker protocol, the Connect REST API, multi-task execution, initial snapshots, and exactly-once source delivery remain out of scope for this first managed vertical slice. |
+| KIP-642 | Multi-node quorum reassignment in one operation. Voter changes go one node at a time through KIP-853, and a batch that adds or removes more than one voter is rejected. |
+| KIP-1101 | The `MetadataHash` tagged field on the group-metadata records. Consumer and share groups decide a rebalance from the metadata image and write the hash as 0. |
+| KIP-1263 | The `AssignmentTimestamp` tagged field on the target-assignment records. Krabka writes the default of 0. |
 | **Kafka Bridge** (HTTP) | Superseded in Krabka by the native gRPC / Connect-RPC + HTTP gateway; `KafkaBridge` CRD ❌. |
 | JVM-**client-library-internal** KIPs (e.g. KIP-235/302 DNS bootstrap, KIP-266 consumer block fix, KIP-289 default `group.id`, KIP-421 dynamic client config, KIP-580 client exponential backoff, KIP-91 producer `delivery.timeout.ms`) | Not applicable to a broker. Where relevant, equivalent behavior lives in Krabka's native Rust clients rather than as a tracked broker KIP. |
 

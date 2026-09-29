@@ -4,22 +4,35 @@ const snippets = [
     id: 'rust',
     label: 'Rust Client',
     tag: 'krabka-client-rs',
-    code: `use krabka_client::producer::{FutureProducer, ProducerRecord};
+    code: `// Cargo.toml:
+//   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs" }
+//   plus the [patch.crates-io] block from that repository's Cargo.toml (see /docs/streams-rs)
+//   bytes = "1"
+//   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+use bytes::Bytes;
+use krabka_client_producer::{Acks, Producer, ProducerRecord};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let producer = FutureProducer::builder()
-        .bootstrap_servers("localhost:9092")
-        .build()?;
+    let producer = Producer::builder()
+        .bootstrap("localhost:9092")
+        .acks(Acks::All)
+        .build()
+        .await?;
 
-    // Zero-allocation async produce
-    let delivery = producer.send(
-        ProducerRecord::to("telemetry")
-            .key("sensor-042")
-            .payload(b"{\\"temp\\": 23.4, \\"status\\": \\"nominal\\"}"),
-    ).await?;
+    let metadata = producer
+        .send(ProducerRecord {
+            topic: "quickstart-events".into(),
+            key: Some(Bytes::from("user-1")),
+            value: Some(Bytes::from("Hello Krabka from Rust!")),
+            ..Default::default()
+        })
+        .await
+        .await??;
 
-    println!("Acked at partition {} offset {}", delivery.partition, delivery.offset);
+    producer.flush().await?;
+    producer.close().await?;
+    println!("Delivered to partition {} at offset {}.", metadata.partition, metadata.offset);
     Ok(())
 }`
   },
@@ -30,73 +43,117 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     code: `package main
 
 import (
-	"context"
-	"github.com/krabka-io/krabka-streams-go/streams"
-	"github.com/apache/arrow/go/v17/arrow"
+	"log"
+
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+
+	"github.com/krabka-io/krabka-streams-go/columnar"
 )
 
 func main() {
-	builder := streams.NewTopologyBuilder()
-	
-	// Stream processing with Zero-Copy Apache Arrow record batches
-	builder.Stream("events").
-		Filter(func(record arrow.Record) bool {
-			return record.NumRows() > 0
-		}).
-		To("aggregated-events")
+	mem := memory.NewGoAllocator()
+	codec := columnar.NewBlobCodec(mem)
+	topology := columnar.NewTopology(mem)
 
-	app := streams.NewApplication(builder.Build(), streams.Config{
-		BootstrapServers: []string{"localhost:9092"},
-	})
-	app.Run(context.Background())
+	source, err := topology.AddSource("source", []string{"transactions"}, codec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Records carry Arrow IPC streams; column 1 of the payload is an int64 amount.
+	large, err := topology.AddOperator("large",
+		columnar.Filter(mem, func(batch arrow.Record, row int) bool {
+			return batch.Column(1).(*array.Int64).Value(row) > 4
+		}), source)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := topology.AddSink("archive", "large-transactions", codec, large); err != nil {
+		log.Fatal(err)
+	}
+
+	built, err := topology.Build()
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = built
 }`
   },
   {
     id: 'java',
     label: 'Java Streams',
     tag: 'krabka-streams-java',
-    code: `import io.krabka.streams.KrabkaStreams;
-import io.krabka.streams.StreamsBuilder;
-import io.krabka.streams.kstream.KStream;
+    code: `import io.krabka.streams.KrabkaStreamsConfig;
+import java.util.Map;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.Produced;
 
-public class FraudDetectionApp {
+public class OrderCounterApp {
     public static void main(String[] args) {
         StreamsBuilder builder = new StreamsBuilder();
-        KStream<String, Transaction> transactions = builder.stream("transactions");
+        builder.stream("orders", Consumed.with(Serdes.String(), Serdes.String()))
+            .filter((key, value) -> value.startsWith("keep"))
+            .groupByKey()
+            .count(Materialized.as("counts"))
+            .toStream()
+            .to("order-counts", Produced.with(Serdes.String(), Serdes.Long()));
 
-        transactions
-            .filter((key, tx) -> tx.getAmount() > 10000.0)
-            .to("flagged-transactions");
+        Map<String, Object> settings = Map.of(
+            StreamsConfig.APPLICATION_ID_CONFIG, "order-counter",
+            StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
 
-        KrabkaStreams streams = new KrabkaStreams(builder.build(), "localhost:9092");
+        KafkaStreams streams = new KafkaStreams(builder.build(), KrabkaStreamsConfig.withDefaults(settings));
         streams.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
-}`
+}
+`
   },
   {
     id: 'k8s',
     label: 'Kubernetes CRD',
     tag: 'krabka-operator',
     code: `apiVersion: krabka.io/v1alpha1
-kind: KrabkaCluster
+kind: Kafka
 metadata:
   name: production-cluster
   namespace: streaming
 spec:
+  kafkaVersion: "4.0.0"
+  tieredStorage:
+    type: S3
+    s3:
+      bucket: krabka-cold-storage
+      region: us-west-2
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: streaming
+  labels:
+    krabka.io/cluster: production-cluster
+spec:
+  roles: [Controller, Broker]
   replicas: 3
-  version: "1.0.0"
-  storage:
-    tiered:
-      enabled: true
-      bucket: "s3://krabka-cold-storage"
-      region: "us-west-2"
+  nodeIdStart: 0
   resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
     limits:
       cpu: "4"
-      memory: "2Gi"
-    requests:
-      cpu: "500m"
-      memory: "512Mi"`
+      memory: 2Gi
+  storage:
+    type: PersistentClaim
+    size: 100Gi
+    deleteClaim: false`
   }
 ];
 ---

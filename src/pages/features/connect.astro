@@ -2,27 +2,23 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 
-const cdcConfig = `# krabka-connect.toml - PostgreSQL CDC Source Connector
-[[connectors]]
-name = "postgres-orders-cdc"
-type = "io.krabka.connect.postgres.PostgresSourceConnector"
-tasks_max = 4
+const cdcConfig = `# Each krabka-connect-worker process runs one connector. Every flag also has a
+# KRABKA_* environment variable; the connection URL is a secret, so pass it there.
+export KRABKA_POSTGRES_URL='postgres://cdc_user:change-me@db.internal:5432/inventory'
 
-[connectors.config]
-database_hostname = "db-prod.internal"
-database_port = 5432
-database_user = "krabka_cdc"
-database_dbname = "ecommerce"
-plugin_name = "pgoutput"
-publication_name = "krabka_orders_pub"
-slot_name = "krabka_orders_slot"
-topic_prefix = "cdc.postgres"
-tombstones_on_delete = true`;
+krabka-connect-worker \\
+  --connector-id postgres-inventory-cdc \\
+  --kafka-bootstrap kafka:9092 \\
+  --schema-registry-url http://schema-registry:8081 \\
+  --postgres-slot krabka_inventory_slot \\
+  --postgres-publication inventory_publication \\
+  --postgres-schema public \\
+  --postgres-tables orders,line_items,customers`;
 ---
 
 <BaseLayout
   title="Krabka Connect & Postgres CDC | Krabka"
-  description="Native database change data capture (CDC), PostgreSQL logical decoding replication, and distributed connector runtime in Krabka."
+  description="Native database change data capture (CDC), PostgreSQL logical decoding replication, and a connector worker runtime in Krabka."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
@@ -33,7 +29,7 @@ tombstones_on_delete = true`;
         Krabka Connect & Postgres CDC
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Stream real-time PostgreSQL database mutations directly into Krabka topics with guaranteed ordering, snapshotting, and transaction boundary preservation without running a separate Kafka Connect cluster.
+        Stream real-time PostgreSQL database mutations directly into Krabka topics with checkpointed, at-least-once delivery and no separate Kafka Connect cluster. Each change is keyed by the row's primary key, so changes to one row stay in order.
       </p>
     </div>
 
@@ -48,15 +44,15 @@ tombstones_on_delete = true`;
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
             <strong class="text-white font-bold">Source Trait</strong>
-            <p class="text-gray-400 leading-relaxed">Polls external systems, producing typed change envelopes with precise transaction metadata and LSN offsets.</p>
+            <p class="text-gray-400 leading-relaxed">Polls external systems, producing typed change records and a checkpointable read position such as a PostgreSQL LSN.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
             <strong class="text-white font-bold">Sink Trait</strong>
-            <p class="text-gray-400 leading-relaxed">Consumes batches from Kafka topics, mapping them to downstream databases or data lakes with idempotent writes.</p>
+            <p class="text-gray-400 leading-relaxed">Pushes records into an external system in batches, with an optional transactional write gate for exactly-once delivery.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
             <strong class="text-white font-bold">Worker Runtime</strong>
-            <p class="text-gray-400 leading-relaxed">Drives tasks via <code class="font-mono text-krab-300">krabka-connect-worker</code>, checkpointing progress and resuming without event loss.</p>
+            <p class="text-gray-400 leading-relaxed">Runs one PostgreSQL source connector per process via <code class="font-mono text-krab-300">krabka-connect-worker</code>, checkpointing progress in a compacted Kafka topic and resuming after a restart.</p>
           </div>
         </div>
       </div>
@@ -68,9 +64,9 @@ tombstones_on_delete = true`;
           The PostgreSQL connector interfaces directly with PostgreSQL logical replication streams using the standard <code class="font-mono text-xs text-gray-200">pgoutput</code> decoding plugin:
         </p>
         <ul class="list-disc list-inside text-sm text-gray-400 space-y-2 font-sans pl-2">
-          <li><strong>Lock-Free Consistent Snapshot:</strong> Performs initial table export without taking table locks that disrupt production queries.</li>
-          <li><strong>Transaction Boundary Preservation:</strong> Propagates transaction commit timestamps, commit LSNs, and transaction IDs in Kafka record headers.</li>
-          <li><strong>Automatic Schema Evolution:</strong> Maps PostgreSQL table DDL changes directly to Confluent Schema Registry schemas.</li>
+          <li><strong>Changes Only:</strong> There is no initial snapshot. The connector emits the changes that logical decoding makes available from its replication slot.</li>
+          <li><strong>Transaction Metadata:</strong> Every record value carries the source LSN, transaction ID, and commit timestamp. Deletes are emitted as tombstones.</li>
+          <li><strong>Schema Registry Framing:</strong> Keys and values are Protobuf, framed with schema IDs from a Confluent-compatible registry. The connector registers one shared change-record schema at startup, and the acceptance suite adds a column mid-stream without interrupting the flow.</li>
         </ul>
 
         <div class="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans">
@@ -95,16 +91,16 @@ tombstones_on_delete = true`;
       <!-- Section C: Configuration -->
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-bold text-white font-sans">PostgreSQL CDC Connector Config</h2>
+          <h2 class="text-xl font-bold text-white font-sans">PostgreSQL CDC Worker Invocation</h2>
           <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={cdcConfig}>
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>Copy Config</span>
+            <span>Copy Command</span>
           </button>
         </div>
         <pre class="bg-black/50 p-4 rounded-xl font-mono text-xs text-krab-300 overflow-x-auto border border-white/5"><code>{cdcConfig}</code></pre>
       </div>
 
-      <!-- Section D: Cluster Replicator -->
+      <!-- Section D: Active-Active Replicator -->
       <div class="frosted-card rounded-2xl p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Active-Active Replicator (<code class="text-krab-400 font-mono text-xl">krabka-replicator</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
@@ -131,7 +127,7 @@ tombstones_on_delete = true`;
         if (span) {
           span.textContent = 'Copied!';
           setTimeout(() => {
-            span.textContent = 'Copy Config';
+            span.textContent = 'Copy Command';
           }, 2000);
         }
       }

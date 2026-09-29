@@ -5,7 +5,7 @@ import { getPath } from '../../utils/paths';
 const serdes = [
   { serde: 'StringSerde / I64Serde / BytesSerde', type: 'String / i64 / Bytes', feature: 'built in', use: 'Primitive keys and values.' },
   { serde: 'SchemaSerde<T, JsonSerde<T>>', type: 'any serde type that derives schemars::JsonSchema', feature: 'built in', use: 'Confluent JSON Schema.' },
-  { serde: 'SchemaSerde<T, ProtobufSerde<T>>', type: 'a prost Message', feature: 'built in', use: 'Confluent Protobuf, resolved through prost-reflect.' },
+  { serde: 'SchemaSerde<T, ProtobufSerde<T>>', type: 'a prost Message that also implements prost_reflect::ReflectMessage', feature: 'built in', use: 'Confluent Protobuf, resolved through prost-reflect.' },
   { serde: 'SchemaSerde<T, AvroSerde<T>>', type: 'apache_avro::AvroSchema', feature: 'built in', use: 'Confluent Avro.' },
   { serde: 'PolarsIpcSerde', type: 'polars::DataFrame', feature: 'polars', use: 'Columnar values as Arrow IPC.' },
   { serde: 'ArrowIpcSerde', type: 'arrow::RecordBatch', feature: 'arrow', use: 'Interchange with arrow-rs.' },
@@ -18,7 +18,7 @@ const models = [
 ];
 
 const cargo = `[dependencies]
-krabka-streams-rs = { version = "0.4", features = ["polars", "arrow"] }`;
+krabka-client-streams = { version = "0.4", features = ["polars", "arrow"] }`;
 ---
 
 <DocsLayout

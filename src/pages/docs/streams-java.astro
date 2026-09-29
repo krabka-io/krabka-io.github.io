@@ -6,22 +6,13 @@ import versionsData from '../../data/versions.json';
 const activeRelease = versionsData['streams-java']?.activeRelease || 'v1.1.0';
 const releaseNumber = activeRelease.replace(/^v/, '');
 
-const javaMaven = `<!-- Maven Central -->
-<dependency>
-    <groupId>io.krabka</groupId>
-    <artifactId>krabka-streams</artifactId>
-    <version>${releaseNumber}</version>
-</dependency>
-<dependency>
-    <groupId>io.krabka</groupId>
-    <artifactId>krabka-streams-columnar</artifactId>
-    <version>${releaseNumber}</version>
-</dependency>`;
-
 const javaGradle = `// Gradle Kotlin DSL
-implementation("io.krabka:krabka-streams:${releaseNumber}")
-implementation("io.krabka:krabka-streams-columnar:${releaseNumber}")
-implementation("io.krabka:krabka-streams-schema-serde:${releaseNumber}")`;
+dependencies {
+    implementation("io.krabka:krabka-streams:${releaseNumber}")
+    implementation("io.krabka:krabka-streams-schema-serde:${releaseNumber}")
+    implementation("io.krabka:krabka-streams-columnar:${releaseNumber}")
+    testImplementation("io.krabka:krabka-streams-test-utils:${releaseNumber}")
+}`;
 
 const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
 ---
@@ -54,7 +45,7 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
 
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <code>krabka-streams-java</code> is the Java client library for stream processing with Krabka. It exports the standard Kafka Streams API and adds native support for Confluent Schema Registry and Apache Arrow direct-memory processing. The library targets Java 17 bytecode and is tested on JDK 17 and JDK 21.
+        <code>krabka-streams-java</code> is the Java client library for stream processing with Krabka. It exports the standard Kafka Streams API and adds native support for Confluent Schema Registry and Apache Arrow direct-memory processing. The library targets Java 17 bytecode, and continuous integration compiles and tests it on JDK 17 and JDK 21.
       </p>
 
       <!-- Architecture & Engineering Guides -->
@@ -111,6 +102,10 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
         <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{javaGradle}</code></pre>
       </div>
 
+      <p class="text-sm text-gray-300">
+        Maven Central currently holds releases 1.0.0 and 1.1.0 of <code>krabka-streams</code>, <code>krabka-streams-schema-serde</code>, <code>krabka-streams-columnar</code>, and <code>krabka-streams-test-utils</code>. The repository source is at 1.4.0 and also builds the modules marked below. Publish it to a local repository with <code>./gradlew publishToMavenLocal</code> to use them before a release.
+      </p>
+
       <!-- Published Modules -->
       <h2 class="text-xl font-bold text-white pt-2">Published Modules</h2>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
@@ -122,12 +117,13 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
             </tr>
           </thead>
           <tbody class="divide-y divide-white/5">
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams</td><td class="py-2.5 px-4 text-gray-400">Kafka Streams 4.x API compatibility</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams</td><td class="py-2.5 px-4 text-gray-400">Apache Kafka Streams API and krabka defaults</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-schema-serde</td><td class="py-2.5 px-4 text-gray-400">Avro, Protobuf, and JSON Schema serdes</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar</td><td class="py-2.5 px-4 text-gray-400">Apache Arrow batch processing and zero-copy operators</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges (source only, not yet on Maven Central)</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-coordination</td><td class="py-2.5 px-4 text-gray-400">Leader election, leases, and fencing tokens (source only, not yet on Maven Central)</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-test-utils</td><td class="py-2.5 px-4 text-gray-400">ColumnarTestDriver and SchemaRegistryStub helpers</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4 text-gray-400">Bill of Materials dependency constraints</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4 text-gray-400">Bill of Materials dependency constraints (source only, not yet on Maven Central)</td></tr>
           </tbody>
         </table>
       </div>
@@ -135,7 +131,7 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
       <!-- JVM Requirements -->
       <h2 class="text-xl font-bold text-white pt-2">Direct Buffer JVM Requirement</h2>
       <p class="text-sm text-gray-300">
-        When accessing off-heap Apache Arrow buffers on JDK 17+, supply this JVM flag:
+        Arrow 19 needs this JVM option when it uses direct buffers:
       </p>
       <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between">
         <span>{jvmFlag}</span>
@@ -158,8 +154,8 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
           <tbody class="divide-y divide-white/5 text-gray-300">
             <tr>
               <td class="py-2 px-4 font-medium text-white">Java Bytecode</td>
-              <td class="py-2 px-4">JDK 17, JDK 21, JDK 25</td>
-              <td class="py-2 px-4 text-gray-400">Compiled with JDK 17 source/target compatibility</td>
+              <td class="py-2 px-4">Java 17 or later (CI: JDK 17, JDK 21)</td>
+              <td class="py-2 px-4 text-gray-400">Compiled with a Java 17 toolchain; JDK 25 runs only the Javadoc tool</td>
             </tr>
             <tr>
               <td class="py-2 px-4 font-medium text-white">Kafka Wire Protocol</td>
@@ -173,8 +169,8 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
             </tr>
             <tr>
               <td class="py-2 px-4 font-medium text-white">Krabka Broker</td>
-              <td class="py-2 px-4">0.5.4 or Apache Kafka 4.3.1</td>
-              <td class="py-2 px-4 text-gray-400">Requires streams.version=1 finalized</td>
+              <td class="py-2 px-4">Apache Kafka 4.3.1 or a Krabka broker</td>
+              <td class="py-2 px-4 text-gray-400">The streams group protocol must be enabled and streams.version=1 finalized</td>
             </tr>
           </tbody>
         </table>
