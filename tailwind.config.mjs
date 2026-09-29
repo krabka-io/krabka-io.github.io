@@ -14,7 +14,7 @@ export default {
           300: '#ffb39e',
           400: '#ff8466',
           500: '#ff4d2e', // Cooked Dungeness Vermilion
-          600: '#f03211',
+          600: '#e0300f', // primary button fill: white text on it clears 4.5:1
           700: '#c82408',
           800: '#a4210b',
           900: '#872110',

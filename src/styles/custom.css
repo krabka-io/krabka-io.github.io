@@ -29,6 +29,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Headings and short blocks break evenly instead of stranding a single word on
+ * their last line; body copy avoids a one-word last line too. */
+h1, h2, h3, h4 {
+  text-wrap: balance;
+}
+
+p, li, dd, blockquote {
+  text-wrap: pretty;
+}
+
 /* Frosted glass card with subtle cool blueish tint */
 .frosted-card {
   background: rgba(15, 23, 42, 0.72);
@@ -39,6 +49,22 @@ body {
 
 .frosted-card:hover {
   border-color: rgba(255, 77, 46, 0.4);
+}
+
+/* A card that holds a bare table scrolls it sideways on a narrow page. Without
+ * this, the card's overflow-hidden cut the right-hand columns off on a phone. */
+:is(.frosted-card, .overflow-hidden):has(> table) {
+  overflow-x: auto;
+}
+
+:is(.frosted-card, .overflow-hidden):has(> table) > table :is(th, td) {
+  min-width: 7.5rem;
+}
+
+/* A copy button keeps its label on one line however narrow its header gets. */
+.copy-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* Custom scrollbars */
@@ -163,31 +189,33 @@ summary {
   table-layout: auto;
 }
 
-/* Cells may break anywhere, so the layout algorithm sees a tiny minimum per
- * column and hands the width to the long columns; this floor keeps a short
- * column, such as the proof-session links, wide enough for whole words. */
+/* Plain words in a cell stay whole: a column is never narrower than its
+ * longest word, and the table scrolls sideways rather than split "Implemented"
+ * in two. Inline code may still break anywhere, so a long identifier gives up
+ * width to the columns beside it. The floor keeps a short column, such as the
+ * proof-session links, wide enough for whole words. */
 .markdown-body th,
 .markdown-body td {
   min-width: 5.5rem;
 }
 
 .markdown-body .table-wrap[data-cols="3"] table {
-  min-width: 34rem;
+  min-width: 30rem;
 }
 
 .markdown-body .table-wrap[data-cols="4"] table {
-  min-width: 46rem;
+  min-width: 38rem;
 }
 
 .markdown-body .table-wrap[data-cols="5"] table,
 .markdown-body .table-wrap[data-cols="6"] table {
-  min-width: 56rem;
+  min-width: 44rem;
 }
 
 .markdown-body .table-wrap[data-cols="7"] table,
 .markdown-body .table-wrap[data-cols="8"] table,
 .markdown-body .table-wrap[data-cols="9"] table {
-  min-width: 64rem;
+  min-width: 56rem;
 }
 
 .markdown-body thead {
@@ -204,7 +232,7 @@ summary {
   color: #9ca3af;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   vertical-align: bottom;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .markdown-body td {
@@ -214,12 +242,19 @@ summary {
   font-size: 0.8125rem;
   vertical-align: top;
   line-height: 1.5;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .markdown-body td:first-child {
   font-weight: 500;
   color: #f3f4f6;
+}
+
+/* The key column of a reference table holds identifiers. They stay whole, and
+ * the wide description column absorbs the wrapping. */
+.markdown-body td:first-child code {
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .markdown-body td:last-child {
@@ -293,6 +328,11 @@ summary {
   padding: 1.25rem !important;
   overflow-x: auto;
   margin: 1.5rem 0 !important;
+}
+
+/* Shiki's github-dark comment grey is a shade too dim on this page background. */
+.markdown-body pre span[style*="#6A737D"] {
+  color: #8b949e !important;
 }
 
 .markdown-body pre code {

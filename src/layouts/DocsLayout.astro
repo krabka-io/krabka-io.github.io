@@ -21,17 +21,9 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
 const hasToc = toc.length > 0;
 
 // An .astro page styles its own body. A markdown page has no classes of its
-// own, so the typography plugin styles it here.
-const proseClass = frontmatter
-  ? `prose prose-invert prose-sm max-w-none
-     prose-headings:text-white prose-headings:font-bold
-     prose-a:text-krab-400 hover:prose-a:text-krab-300 prose-a:no-underline
-     prose-strong:text-white
-     prose-code:text-krab-300 prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
-     prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-xl
-     prose-table:text-xs prose-th:text-gray-400 prose-th:uppercase prose-th:tracking-wider
-     prose-td:align-top prose-hr:border-white/10`
-  : '';
+// own, so it takes the same `markdown-body` styling as the synced guides,
+// including the scroll container around each table.
+const proseClass = frontmatter ? 'markdown-body' : '';
 
 const docSections = [
   {
@@ -179,7 +171,16 @@ const breadcrumbData = {
       
       <!-- Sticky Left Sidebar -->
       <aside class:list={[!Astro.props.wide && 'lg:col-span-3']}>
-        <div class="sticky top-24 space-y-4 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3">
+        <!-- Below lg the whole menu folds behind one summary, so the page starts
+             at its content. From lg up the script below keeps it open. -->
+        <details id="docs-nav" open class="lg:contents">
+          <summary class="flex cursor-pointer select-none items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-sm font-semibold text-gray-100 lg:hidden">
+            <span>Documentation menu</span>
+            <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+          </summary>
+        <div class="sticky top-24 mt-3 space-y-4 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3 lg:mt-0">
           <div class="pb-2 border-b border-white/10 flex items-center justify-between">
             <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">
               Documentation
@@ -198,7 +199,7 @@ const breadcrumbData = {
                 </svg>
                 <span>API Reference Directory</span>
               </div>
-              <span class="text-[10px] text-gray-400 font-mono">/api</span>
+              <span class="text-[11px] text-gray-400 font-mono">/api</span>
             </a>
           </div>
 
@@ -234,7 +235,7 @@ const breadcrumbData = {
 
                           {activeItem && hasToc && (
                             <div class="my-2 ml-2 pl-2.5 border-l border-krab-500/30 space-y-1">
-                              <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block pt-0.5 pb-1">
+                              <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block pt-0.5 pb-1">
                                 On This Page
                               </span>
                               <ul class="space-y-1">
@@ -281,6 +282,15 @@ const breadcrumbData = {
             </div>
           )}
         </div>
+        </details>
+        <script is:inline>
+          (function () {
+            var nav = document.getElementById('docs-nav');
+            var wide = window.matchMedia('(min-width: 1024px)');
+            if (!wide.matches) nav.open = false;
+            wide.addEventListener('change', function (e) { nav.open = e.matches; });
+          })();
+        </script>
       </aside>
 
       <!-- Main Docs Content (Takes full remaining 9 columns) -->
@@ -290,13 +300,17 @@ const breadcrumbData = {
           <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
           <span>/</span>
           <a href={getPath('/docs')} class="hover:text-white transition-colors">Docs</a>
-          <span>/</span>
-          <span class="text-gray-400">{activeCategory}</span>
+          {activeCategory !== 'Docs' && (
+            <>
+              <span>/</span>
+              <span class="text-gray-400">{activeCategory}</span>
+            </>
+          )}
           <span>/</span>
           <span class="text-gray-200 font-medium">{title}</span>
         </nav>
 
-        <div class:list={['frosted-card rounded-2xl border border-white/10 space-y-6', Astro.props.wide ? 'p-4 sm:p-6' : 'p-8 lg:p-10']}>
+        <div class:list={['frosted-card rounded-2xl border border-white/10 space-y-6', Astro.props.wide ? 'p-4 sm:p-6' : 'p-4 sm:p-8 lg:p-10']}>
           <!-- Active Development Notice -->
           <div class="rounded-lg border border-krab-500/20 bg-krab-500/5 px-4 py-3 text-xs text-gray-400 flex items-start gap-3">
             <svg class="h-4 w-4 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -308,12 +322,14 @@ const breadcrumbData = {
           </div>
 
           {frontmatter ? (
-            <div class={proseClass}>
-              <div class="border-b border-white/10 pb-4 mb-6">
+            <>
+              <div class="border-b border-white/10 pb-4">
                 <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
               </div>
-              <slot />
-            </div>
+              <div class={proseClass}>
+                <slot />
+              </div>
+            </>
           ) : (
             <slot />
           )}
