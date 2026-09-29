@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // Send record asynchronously with broker sequence deduplication
-    let metadata = producer
+    producer
         .send(ProducerRecord {
             topic: "events".into(),
             value: Some(Bytes::from("hello krabka")),
@@ -49,23 +49,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let records = consumer.poll(millis(500)).await?;
-        for record in records {
-            // Process record batch
+        for _record in records {
+            // Process each record
         }
         consumer.commit_sync().await?;
     }
 }`;
 
-const shareConsumerCode = `use krabka_client_consumer::{ShareAckMode, ShareConsumer};
+const shareConsumerCode = `use krabka_client_consumer::{ShareAckMode, ShareAckType, ShareConsumer};
+use krabka_units::secs;
 
-// KIP-932 Share-group consumption without partition assignment locks
-let mut consumer = ShareConsumer::builder()
-    .bootstrap("localhost:9092")
-    .group_id("share-workers")
-    .subscribe(["jobs".to_string()])
-    .ack_mode(ShareAckMode::Explicit)
-    .build()
-    .await?;`;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // KIP-932 share group: records are acquired per consumer, with no partition assignment
+    let mut consumer = ShareConsumer::builder()
+        .bootstrap("localhost:9092")
+        .group_id("share-workers")
+        .subscribe(["jobs".to_string()])
+        .ack_mode(ShareAckMode::Explicit)
+        .build()
+        .await?;
+
+    loop {
+        let records = consumer.poll(secs(1)).await?;
+        for record in &records {
+            consumer.acknowledge(record, ShareAckType::Accept)?;
+        }
+        consumer.commit().await?;
+    }
+}`;
+
+const streamsCode = `use krabka_client_streams::{
+    NodeHandle, Record, StringSerde, Topology, TopologyTestDriver, impl_processor,
+};
+
+struct Upper;
+impl_processor! {
+    impl Upper: (String, String) -> (String, String) {
+        async fn process(&mut self, ctx, r) {
+            ctx.forward(Record::new(r.key, r.value.to_uppercase(), r.timestamp));
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut topo = Topology::new();
+    let src: NodeHandle<String, String> = topo.add_source("src", ["in"]);
+    let up = topo.add_processor("up", || Upper, [&src]);
+    topo.add_sink("out", "out", [&up]);
+    let built = topo.build("my-app")?;
+
+    // Broker-free test driver: runs the same topology in process
+    let mut driver = TopologyTestDriver::new(&built)?;
+    driver.pipe_input("in", (StringSerde, StringSerde), Some("k".to_string()), "hello".to_string(), 0);
+    let out = driver.read_output("out", (StringSerde, StringSerde));
+    assert_eq!(out, Some((Some("k".to_string()), "HELLO".to_string())));
+    Ok(())
+}`;
 ---
 
 <DocsLayout
@@ -91,7 +131,7 @@ let mut consumer = ShareConsumer::builder()
       </div>
 
       <p>
-        The Rust client ecosystem is decoupled from the broker binary, depending exclusively on <code class="font-mono text-krab-300 text-xs">krabka-protocol</code> for wire serialization. It provides clean-room, memory-safe implementations of Kafka producers, consumers, admin tools, and streaming topologies without relying on librdkafka C-bindings.
+        The Rust client ecosystem is decoupled from the broker binary, depending on <code class="font-mono text-krab-300 text-xs">krabka-protocol</code> for wire serialization. It provides memory-safe implementations of Kafka producers, consumers, admin tools, and streaming topologies without relying on librdkafka C-bindings. The client crates live in <a class="text-krab-300 hover:underline" href="https://github.com/krabka-io/krabka-client-rs">krabka-client-rs</a>; the streams crate lives in <a class="text-krab-300 hover:underline" href="https://github.com/krabka-io/krabka-streams-rs">krabka-streams-rs</a>.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Crate Architecture</h2>
@@ -106,7 +146,7 @@ let mut consumer = ShareConsumer::builder()
           <tbody class="divide-y divide-white/5 font-sans">
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-core</td>
-              <td class="py-3 px-4 text-gray-300">Connection pools, async TCP dispatch, retry backoff, SASL/TLS authentication handshake.</td>
+              <td class="py-3 px-4 text-gray-300">Broker connection pool, API version negotiation, typed request dispatch, retry backoff, SASL/TLS authentication.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-producer</td>
@@ -118,19 +158,28 @@ let mut consumer = ShareConsumer::builder()
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-admin</td>
-              <td class="py-3 px-4 text-gray-300">Administrative client for topic creation, partition reassignments, ACLs, and dynamic cluster configs.</td>
+              <td class="py-3 px-4 text-gray-300">Administrative client for topic CRUD, partition reassignments, ACLs, configs, quotas, SCRAM credentials, and group management.</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-coordination</td>
+              <td class="py-3 px-4 text-gray-300">Leader election, leases, and fencing tokens as a Kafka client API.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-streams</td>
-              <td class="py-3 px-4 text-gray-300">Stateful streaming topology DSL, windowing operators, RocksDB state stores, and interactive queries.</td>
+              <td class="py-3 px-4 text-gray-300">KIP-1071 streams-group membership, typed Processor API, KStream/KTable DSL with windowing, Turso-backed state stores, and interactive queries. Lives in <code class="font-mono text-xs">krabka-streams-rs</code>.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-schema-serde</td>
-              <td class="py-3 px-4 text-gray-300">Schema Registry serialization (Avro, JSON Schema, Protobuf) and Apache Arrow IPC formats.</td>
+              <td class="py-3 px-4 text-gray-300">Schema Registry serialization (Avro, JSON Schema, Protobuf). Lives in <code class="font-mono text-xs">krabka-schema-registry</code>.</td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Adding the Crates</h2>
+      <p>
+        These repositories do not publish to crates.io, and the <code class="font-mono text-xs">krabka-*</code> names there still belong to an older repository. Depend on them by git revision, and copy the <code class="font-mono text-xs">[patch.crates-io]</code> block from the <code class="font-mono text-xs">Cargo.toml</code> at the root of the repository you depend on, so that <code class="font-mono text-xs">krabka-protocol</code> and <code class="font-mono text-xs">krabka-units</code> resolve to one copy. The examples below need Rust 1.97.1 or newer, <code class="font-mono text-xs">tokio</code> with the <code class="font-mono text-xs">macros</code> and <code class="font-mono text-xs">rt-multi-thread</code> features, <code class="font-mono text-xs">bytes</code> for the producer, and <code class="font-mono text-xs">krabka-units</code> for the consumers.
+      </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Async Producer Example</h2>
       <p>
@@ -172,6 +221,21 @@ let mut consumer = ShareConsumer::builder()
           </div>
           <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{shareConsumerCode}</code></pre>
         </div>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Streams Topology</h2>
+      <p>
+        The Processor API wires nodes by typed handle, so a mismatched edge fails at compile time. <code class="font-mono text-xs">TopologyTestDriver</code> runs the built topology in process, with no broker:
+      </p>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Processor API with the test driver:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={streamsCode}>
+            Copy
+          </button>
+        </div>
+        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{streamsCode}</code></pre>
       </div>
 
       <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>

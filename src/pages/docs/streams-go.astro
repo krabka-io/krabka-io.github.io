@@ -10,27 +10,40 @@ const goInstallCode = `go get github.com/krabka-io/krabka-streams-go`;
 const goCode = `package main
 
 import (
+	"log"
+
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+
 	"github.com/krabka-io/krabka-streams-go/columnar"
-	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 )
 
 func main() {
 	mem := memory.NewGoAllocator()
 	codec := columnar.NewBlobCodec(mem)
 	topology := columnar.NewTopology(mem)
-	
-	source, _ := topology.AddSource("source", []string{"transactions"}, codec)
-	large, _ := topology.AddOperator("large",
+
+	source, err := topology.AddSource("source", []string{"transactions"}, codec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Records carry Arrow IPC streams; column 1 of the payload is an int64 amount.
+	large, err := topology.AddOperator("large",
 		columnar.Filter(mem, func(batch arrow.Record, row int) bool {
 			return batch.Column(1).(*array.Int64).Value(row) > 4
 		}), source)
-	topology.AddSink("archive", "large-transactions", codec, large)
-	
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := topology.AddSink("archive", "large-transactions", codec, large); err != nil {
+		log.Fatal(err)
+	}
+
 	built, err := topology.Build()
-	if err != nil { panic(err) }
-	
+	if err != nil {
+		log.Fatal(err)
+	}
 	_ = built
 }`;
 ---
@@ -91,7 +104,7 @@ func main() {
             <a href={getPath('/docs/streams-go/barriers')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Barrier Cuts:</a> Snapshot alignment, state checkpoints, and non-blocking barriers.
           </li>
           <li>
-            <a href={getPath('/docs/streams-go/coordination')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Coordination Primitives:</a> Work assignment, leader elections, and cooperative rebalance.
+            <a href={getPath('/docs/streams-go/coordination')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Coordination Primitives:</a> Leader election, leases, and fencing tokens.
           </li>
           <li>
             <a href={getPath('/docs/streams-go/testing')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Testing:</a> In-memory pipeline testing and deterministic record assertions.
@@ -127,6 +140,7 @@ func main() {
           <tbody class="divide-y divide-white/5">
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">columnar</td><td class="py-2.5 px-4 text-gray-400">Apache Arrow batch processing, topologies, and barrier cuts</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">schema</td><td class="py-2.5 px-4 text-gray-400">Registry client, cache, and Avro/Protobuf/JSON Schema serdes</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">coordination</td><td class="py-2.5 px-4 text-gray-400">Leader election, leases, and fencing tokens</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">columnarschema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges</td></tr>
           </tbody>
         </table>
@@ -159,16 +173,16 @@ func main() {
             <tr>
               <td class="py-2 px-4 font-medium text-white">Go Runtime</td>
               <td class="py-2 px-4">Go 1.26+</td>
-              <td class="py-2 px-4 text-gray-400">Targeting Go 1.26 toolchain</td>
+              <td class="py-2 px-4 text-gray-400">go.mod declares go 1.26.5</td>
             </tr>
             <tr>
               <td class="py-2 px-4 font-medium text-white">Apache Arrow Go</td>
-              <td class="py-2 px-4">v17.0.0</td>
+              <td class="py-2 px-4">arrow-go v18.7.0</td>
               <td class="py-2 px-4 text-gray-400">Native Go allocator and Record batches</td>
             </tr>
             <tr>
               <td class="py-2 px-4 font-medium text-white">Krabka Broker</td>
-              <td class="py-2 px-4">0.5.4 or Apache Kafka 4.3.1</td>
+              <td class="py-2 px-4">Apache Kafka 4.x or a Krabka broker</td>
               <td class="py-2 px-4 text-gray-400">Wire-protocol compatibility</td>
             </tr>
           </tbody>

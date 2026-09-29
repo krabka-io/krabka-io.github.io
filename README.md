@@ -1,6 +1,6 @@
 # krabka-io.github.io
 
-The official website and unified documentation hub for the [Krabka](https://github.com/krabka-io) streaming ecosystem, built with [Astro 5](https://astro.build) and [Tailwind CSS](https://tailwindcss.com).
+The official website and unified documentation hub for the [Krabka](https://github.com/krabka-io) streaming ecosystem, built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com).
 
 Hosted live at [krabka.io](https://krabka.io) and [krabka-io.github.io](https://krabka-io.github.io).
 
@@ -11,9 +11,11 @@ The site also publishes two things the rest of the organisation depends on: the 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Node.js**: `>= 18.20.8` (Node 22 LTS recommended)
-- **npm**: `>= 10.0.0`
-- **Rust Toolchain**: Stable with `wasm32-unknown-unknown` target (only required if building the WebAssembly consensus playground)
+- **Node.js**: `>= 22.12.0` (the `engines` field in `package.json`; CI uses Node 24)
+- **npm**: the version that ships with Node
+- **Rust toolchain**: 1.97.1 or newer, with the `wasm32-unknown-unknown` target and `bash` and `curl` on the path. `npm run build` needs it, because it compiles the WebAssembly playground and Cluster Lab. `playground/build.sh` adds the target through `rustup` and downloads the matching `wasm-bindgen` CLI.
+- **`git`** and, for release tags, an authenticated **`gh`**: `npm run sync-docs` and `npm run sync-proofs` read the sibling repositories from `..` when they sit beside this one, and clone them from GitHub otherwise.
+- **Real broker for the Cluster Lab** (`npm run build:broker`, optional locally): the `wasm32-wasip1` target, `clang` and `llvm-ar`, and a WASI sysroot (the script downloads wasi-sdk 25 when `WASI_SYSROOT` is unset)
 
 ### Commands
 
@@ -21,26 +23,41 @@ The site also publishes two things the rest of the organisation depends on: the 
 # Install dependencies
 npm install
 
-# Start local development server (automatically syncs docs from sibling repos)
+# Sync docs and proof sessions from sibling repos, then start the dev server
 npm run dev
+
+# Start the dev server without syncing
+npm run start
 
 # Manually synchronize markdown guides and compiler API archives
 npm run sync-docs
 
-# Build the WASM playground, then the full static bundle in ./dist
+# Build the WASM playground, sync docs and proofs, then the full static bundle in ./dist
+# (the deploy workflow also runs build:broker and build:why3-web first)
 npm run build
 
 # Build pages only (skipping playground WASM rebuild)
 npm run build:site
 
-# Build the WASM playground only
+# Build the WASM playground and Cluster Lab module only
 npm run build:playground
 
-# Run internal link integrity audit (verifies all 6,000+ links resolve)
+# Build the real krabka-broker for wasm32-wasip1 and stage it for the Cluster Lab
+npm run build:broker
+
+# Run internal link integrity audit (run after `npm run build`; crawls `dist/`)
 npm run check-links
 
 # Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
 npm run check-seo
+
+# Cluster Lab checks: presets parse (no build needed), then the headless Chromium
+# suites, which need `npm run build` and Playwright with Chromium
+npm run check-lab-presets
+npm run check-lab
+npm run check-lab-external
+npm run check-real-broker
+npm run check-wasi
 
 # Sync the broker's proof sessions and Coma files for the proof explorer
 npm run sync-proofs
@@ -61,15 +78,15 @@ npm run preview
 
 ### 1. Decoupled Build + Unified Distribution Documentation
 - **Dynamic Content Collections:** Markdown guides authored inside language sub-repositories (`krabka-streams-java`, `krabka-streams-go`, `krabka-broker`) are ingested via `scripts/sync-docs.mjs` into `src/content/docs/`.
-- **Astro 5 Dynamic Routing:** `src/pages/docs/[...slug].astro` renders ingested guides with an automated right-hand **"On This Page" Table of Contents**, syntax highlighting, custom markdown typography, and GitHub source provenance footers.
+- **Dynamic Routing:** `src/pages/docs/[...slug].astro` renders ingested guides with an automated right-hand **"On This Page" Table of Contents**, syntax highlighting, custom markdown typography, and GitHub source provenance footers.
 - **Collapsible Symmetrical Navigation:** `src/layouts/DocsLayout.astro` groups ecosystem topics into collapsible accordions with automatic active-state expansion and breadcrumbs.
 
 ### 2. Central API Reference Hub (`/api`)
 - Hosts compiler-generated, interactive reference trees generated directly by native language compilers:
-  - **Core Broker Engine:** Multi-crate Rustdoc via Cargo/Aspect (`/api/broker/latest/`) covering all 19 workspace crates
+  - **Core Broker Engine:** Multi-crate Rustdoc via Cargo/Aspect (`/api/broker/latest/`) covering the broker workspace's crates
   - **Java Streams & Arrow:** Multi-module Javadoc via Bazel (`/api/streams-java/latest/`)
   - **Go Streams & Arrow:** Static Godoc via Bazel (`/api/streams-go/latest/`)
-- Dynamically pinned to active GitHub release tags (`v0.5.3`, `v1.1.0`, `v0.1.0-dev`) via `src/data/versions.json`.
+- Versions and active release tags come from `src/data/versions.json`, which `scripts/sync-docs.mjs` refreshes from the sibling repositories and `gh release view`.
 
 ### 3. Interactive WebAssembly Consensus Playground (`/docs/playground`)
 - `/docs/playground` runs Krabka's real KRaft consensus quorum directly in the browser.
@@ -85,11 +102,11 @@ npm run preview
 - With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo compiled to JavaScript discharges each leaf through Why3's SMT-LIB driver.
 
 ### 5. Cluster Lab (`/docs/lab`)
-- A distributed-systems playground: brokers, a schema registry, producers, consumers and `krabka-client-streams` apps placed on a canvas and run as one sans-IO simulation inside the same `playground/` crate (`playground/src/lab/`, contract in `playground/docs/lab-design.md`). The page owns the clock and the virtual network; faults (kill, restart, wipe, isolate, partition, latency, loss) are deliberate and replay under the seed.
-- The front-end is `public/playground/lab/` (hand-written ES modules, no bundler): `app.js` boots and wires the panels, `world.js` wraps the `Lab` wasm class and the animation-frame clock, `canvas.js` is the SVG canvas, `kinds.js` the node-kind catalogue (form fields with the nodes' defaults, the values a node added from the palette starts with, control commands, derived edges, status lines), `views.js` the kind-specific inspector views, and `inspector.js` the inspector with its command bar. Presets live in `presets.js`: three-broker KRaft clusters (a consumer group of two, a schema registry with an Avro producer and a decoding consumer, a Kafka Streams word count), five brokers under a network partition, and a network probe on two diagnostic node kinds. A preset that needs a node kind the loaded module does not carry is badged *full build*, decided by probing the module at boot.
+- A distributed-systems playground: real `krabka-broker` processes, a schema registry, producers, consumers and `krabka-client-streams` apps placed on a canvas. The brokers are the real broker compiled for `wasm32-wasip1` (`playground/broker-wasi`, staged by `npm run build:broker`, contract in `playground/docs/lab-real-broker.md`) and run in Web Workers on the browser WASI runtime in `public/playground/wasi/`. Clients and apps run as one sans-IO simulation inside the `playground/` crate (`playground/src/lab/`, contract in `playground/docs/lab-design.md`). The page owns the clock and the virtual network; faults (kill, restart, wipe, isolate, partition, latency, loss) are deliberate and replay under the seed.
+- The front-end is `public/playground/lab/` (hand-written ES modules, no bundler): `app.js` boots and wires the panels, `world.js` wraps the `Lab` wasm class and the animation-frame clock, `canvas.js` is the SVG canvas, `kinds.js` the node-kind catalogue (form fields with the nodes' defaults, the values a node added from the palette starts with, control commands, derived edges, status lines), `views.js` the kind-specific inspector views, and `inspector.js` the inspector with its command bar. Presets live in `presets.js`: ten scenarios, each on real brokers: a single-broker quickstart, three-broker KRaft clusters (a consumer group of two, a schema registry with an Avro producer and a decoding consumer, a Kafka Streams word count, two independent consumer groups), a broker observer, minimum in-sync replicas, a slow replica, a rack split, and five brokers under a network partition. `scripts/lab-simulated-presets.js` keeps the earlier presets on simulated brokers, which the end-to-end checks still drive. A preset that needs a node kind the loaded module does not carry is badged *full build*, decided by probing the module at boot.
 - Durable node state (the brokers' partition logs and KRaft metadata log, the echo node's counter; the schema registry keeps its schemas in the `_schemas` topic on the brokers and replays it on every start) is drained from the module after every step and written to IndexedDB (`storage.js`: database `krabka-lab`, stores `logs`, `kv`, `scenarios`), keyed by the scenario's `id`; reopening a saved scenario folds it back into `loadScenarioWithState`. Scenarios also export/import as JSON and travel whole inside a share link (`#s=`). `storage.js` also folds every op into an in-memory mirror of each node's image, whatever the persistence setting: turning "Persist to this browser" back on replaces the scenario's stored records with the mirror in one transaction, ahead of any later op, so the ops skipped while it was off leave no gap. A node whose stored data is forgotten while it runs is not written again until it restarts from nothing. Share codes decode without `DecompressionStream` through the raw-DEFLATE decoder in `inflate.js`.
 - Several tabs can host one cluster over WebRTC data channels (`session.js`): the hub makes a `?join=` invite link, the spoke shows an answer code to paste back, no signalling server. The hub assigns nodes to peers; frames for nodes hosted elsewhere leave through `drainEgress` and arrive through `pushIngress`. Each tab holds the frames it sends to another tab until its own clock reaches the frame's `deliver_at` (`EgressScheduler` in `world.js`), since the receiver delivers on arrival and tabs share no clock; that keeps link latency real across tabs. Only the host edits the scenario: a spoke's inspector shows node configuration read-only.
-- `scripts/check-lab.mjs` (`npm run check-lab`, after `npm run build`) drives the built page in headless Chromium: the preset runs, faults take effect, the echo counter survives a reload and a reopen from the Saved list, re-enabling persistence restores exactly the live state, Forget holds on a running node, a share link opens without `DecompressionStream` (and the decoder round-trips `CompressionStream` output past 64 KiB), a share link reproduces the scenario, and two pages host a cluster together over WebRTC with the cross-tab round trip matching the same-tab one and the spoke kept read-only (`--no-webrtc` skips that part). The cluster presets run at 20× in a browser context of their own (`--no-cluster` skips them). In the three-broker preset one KRaft quorum creates the topic and two consumers share it, every command of the command bars works, killing a partition's leader moves the leadership in the inspector while the group keeps consuming, a reload restores the brokers from IndexedDB and the group resumes from its committed offsets, and a broker added to the running scenario observes the quorum. In the registry preset the consumer decodes every value, schemas registered with persistence on and off come back after a reload from the brokers' `_schemas` log, and a second registry joins as a secondary and serves a write by forwarding it to the primary. The streams preset counts words into a store with its changelog topic and answers a query, and the five-broker preset serves from its majority and heals. It needs `playwright` or `playwright-core` (project-local or global) and a Chromium Playwright can find (`npx playwright install chromium`, or `PLAYWRIGHT_BROWSERS_PATH`); it exits 2 when either is missing.
+- `scripts/check-lab.mjs` (`npm run check-lab`, after `npm run build`) drives the built page in headless Chromium, on the simulated-broker presets of `scripts/lab-simulated-presets.js`: the preset runs, faults take effect, the echo counter survives a reload and a reopen from the Saved list, re-enabling persistence restores exactly the live state, Forget holds on a running node, a share link opens without `DecompressionStream` (and the decoder round-trips `CompressionStream` output past 64 KiB), a share link reproduces the scenario, and two pages host a cluster together over WebRTC with the cross-tab round trip matching the same-tab one and the spoke kept read-only (`--no-webrtc` skips that part). The cluster presets run at 20× in a browser context of their own (`--no-cluster` skips them). In the three-broker preset one KRaft quorum creates the topic and two consumers share it, every command of the command bars works, killing a partition's leader moves the leadership in the inspector while the group keeps consuming, a reload restores the brokers from IndexedDB and the group resumes from its committed offsets, and a broker added to the running scenario observes the quorum. In the registry preset the consumer decodes every value, schemas registered with persistence on and off come back after a reload from the brokers' `_schemas` log, and a second registry joins as a secondary and serves a write by forwarding it to the primary. The streams preset counts words into a store with its changelog topic and answers a query, and the five-broker preset serves from its majority and heals. It needs `playwright` or `playwright-core` (project-local or global) and a Chromium Playwright can find (`npx playwright install chromium`, or `PLAYWRIGHT_BROWSERS_PATH`); it exits 2 when either is missing.
 
 ### 6. Correctness & Verification (`/verification`)
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
@@ -105,7 +122,7 @@ helm repo add krabka https://krabka.io/charts
 helm repo update
 ```
 
-`scripts/build-helm-index.sh` walks the `krabka-io` organisation, takes every repository that holds a `charts/` directory, packages each chart, and writes one `index.yaml` over the whole set in `public/charts/`. The `helm-index.yml` workflow runs daily and commits the result.
+`scripts/build-helm-index.sh` walks the `krabka-io` organisation, takes every repository that holds a `charts/` directory, packages each chart (signing it when `HELM_GPG_KEY` is set), and writes one `index.yaml` over the whole set in `public/charts/`. It needs `helm`, an authenticated `gh` and `python3`. The `helm-index.yml` workflow runs daily and opens a pull request with the result, which a maintainer merges.
 
 A component repository can trigger an immediate index rebuild via repository dispatch:
 
@@ -126,7 +143,7 @@ The chart signing public key lives in [krabka-io/tooling](https://github.com/kra
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
 - **Code Stub Verifier (`scripts/verify-code-stubs.mjs`):** Parses and validates all code snippets across ingested markdown guides and Astro documentation pages.
-- **Cluster Lab End-to-End (`scripts/check-lab.mjs`):** Drives `/docs/lab` in headless Chromium, persistence and WebRTC hosting included.
+- **Cluster Lab End-to-End (`scripts/check-lab.mjs`):** Drives `/docs/lab` in headless Chromium, persistence and WebRTC hosting included. `check-lab-presets.mjs`, `check-lab-external.mjs`, `check-real-broker.mjs` and `check-wasi.mjs` cover the presets, the external-node contract, the real broker and the WASI runtime.
 - **Catalog Parse Check (`scripts/check-catalog.mjs`):** Runs the verification-catalog parser against the synced `docs/verification.md` and fails when the ledger table or the model paragraphs no longer parse, so a layout change in the broker's catalog cannot silently empty the site's ledger. The deploy workflow runs it after every build.
 
 ---
@@ -134,36 +151,59 @@ The chart signing public key lives in [krabka-io/tooling](https://github.com/kra
 ## 📁 Repository Structure
 
 ```
-krabka-website/
+krabka-io.github.io/
 ├── .github/workflows/
 │   ├── deploy.yml            # Builds the site and deploys to GitHub Pages
-│   ├── helm-index.yml        # Rebuilds the aggregated chart index
-│   └── playground.yml        # Playground build verification
-├── playground/               # krabka-playground: WASM consensus simulator (Rust)
+│   ├── helm-index.yml        # Rebuilds the aggregated chart index and opens a pull request
+│   ├── kafkactl-lab.yml      # Releases the kafkactl lab bridge binaries
+│   └── playground.yml        # Playground and WASI crates: tests, clippy, wasm builds
+├── kafkactl-lab/             # krabka build of fgrosse/kafkactl with the lab bridge command (Go)
+├── playground/               # krabka-playground: WASM consensus simulator, verified kernels, Cluster Lab (Rust)
 │   ├── src/lib.rs            # wasm-bindgen shim over krabka-kraft-core
+│   ├── src/kernels.rs        # run_kernel dispatcher over krabka-verified
+│   ├── src/lab/              # Cluster Lab world, nodes, network and scenarios
+│   ├── broker-wasi/          # The real krabka-broker for wasm32-wasip1
+│   ├── wasi-guest/           # Test guest for the browser WASI runtime
+│   ├── tests/                # Lab integration tests
+│   ├── docs/                 # lab-design.md and lab-real-broker.md
 │   └── build.sh              # Compiles to WebAssembly in public/playground/
+├── why3-web/                 # Why3 and Alt-Ergo compiled to JavaScript with Bazel, for the proof explorer
 ├── public/
 │   ├── api/                  # Synced compiler API references (gitignored, populated at build)
 │   ├── brand/                # Stable brand marks and lockups
 │   ├── charts/               # Aggregated Helm repository: index.yaml and tarballs
+│   ├── docs/lab/             # Cross-origin isolation service worker for the Cluster Lab
+│   ├── playground/           # Hand-written front-end: playground, verified kernels, lab/ and wasi/
+│   ├── proofs/               # Proof explorer front-end; coma/ is synced (gitignored)
 │   ├── quickstart/           # Downloadable manifests (docker-compose.yml, krabka-cluster.yaml, crds.yaml)
 │   ├── favicon.svg / .ico    # Geometric Dungeness crab icon suite
+│   ├── logo.png / logo.svg   # Chart icon and square mark
 │   ├── robots.txt            # Search engine crawler permissions & sitemap reference
 │   └── og-image.png          # Social preview image
 ├── scripts/
 │   ├── sync-docs.mjs         # Multi-repo documentation & release asset sync engine
+│   ├── sync-proofs.mjs       # Copies the broker's Why3find sessions and Coma files
 │   ├── check-links.mjs       # Internal link crawl and resolution validator
 │   ├── check-seo.mjs         # Production technical SEO audit suite
 │   ├── check-catalog.mjs     # Verification catalog parse check (ledger rows and model notes)
+│   ├── check-lab*.mjs        # Cluster Lab presets and headless Chromium end-to-end checks
+│   ├── check-real-broker.mjs # Real broker in the Cluster Lab
+│   ├── check-wasi.mjs        # Browser WASI runtime and cross-origin isolation
+│   ├── check-proof-readability.mjs # Obligation summaries in the proof explorer
+│   ├── lab-simulated-presets.js # Simulated-broker presets the checks drive
 │   ├── verify-code-stubs.mjs # Markdown and Astro code snippet syntax checker
 │   └── build-helm-index.sh   # Rebuilds public/charts from component repositories
 ├── src/
-│   ├── components/           # Reusable UI components (Navbar, Footer, VerificationBar, etc.)
-│   ├── content.config.ts     # Astro 5 Content Collections glob loader schema
+│   ├── components/           # Reusable UI components (Navbar, Footer, EvidenceLedger, VerificationBar, etc.)
+│   ├── content.config.ts     # Content Collections glob loader schema
 │   ├── content/docs/         # Ingested markdown guides (gitignored, populated by sync-docs)
 │   ├── data/
 │   │   ├── versions.json     # Live synchronized active release version mappings
-│   │   └── ecosystem-versions.json # Cached baseline release and commit status
+│   │   ├── ecosystem-versions.json # Cached baseline release and commit status
+│   │   ├── kafka-wire-matrix.json  # Wire protocol coverage matrix
+│   │   ├── verified-kernels.json   # Kernel explorer specs
+│   │   ├── stateright-models.json  # Stateright model entry points
+│   │   └── proof-sessions.json     # Synced proof sessions (gitignored)
 │   ├── layouts/
 │   │   ├── BaseLayout.astro  # HTML shell, OpenGraph tags, JSON-LD Schema.org metadata
 │   │   ├── DocsLayout.astro  # Documentation shell with collapsible sidebar & sticky TOC
@@ -182,13 +222,17 @@ krabka-website/
 │   │   ├── custom.css        # Ocean dark theme, custom scrollbars, markdown typography
 │   │   ├── evidence.css      # Expandable evidence ledger (verification page and playground)
 │   │   ├── kernels.css       # Verified kernel explorer styling
-│   │   └── playground.css    # Interactive consensus simulator styling
+│   │   ├── lab.css           # Cluster Lab styling
+│   │   ├── playground.css    # Interactive consensus simulator styling
+│   │   └── proofs.css        # Proof explorer styling
 │   └── utils/
 │       ├── paths.ts          # Base URL path resolution helper
+│       ├── satteri-wrap-tables.mjs # Markdown table wrapper plugin
 │       ├── verification-catalog.ts # Parser for the synced broker verification catalog
 │       ├── verification-data.ts    # Joins the catalog with src/data for the verification pages
 │       ├── verification-loader.ts  # Reads the synced catalog and data files at build time
 │       └── versions.ts       # GitHub GraphQL live release resolution
+├── BUILD.bazel / MODULE.bazel # Bazel build of the why3-web bundle
 ├── astro.config.mjs          # Astro static site configuration
 ├── tailwind.config.mjs       # Tailwind configuration with @tailwindcss/typography
 └── package.json              # Scripts and project dependencies
