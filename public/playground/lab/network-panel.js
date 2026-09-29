@@ -48,7 +48,9 @@ export class NetworkPanel {
     if (key !== this.key) {
       this.key = key;
       this.pair = key ? [a, b] : null;
-      this.root.open = false;
+      // The dock shows this panel as a tab, so it stays open while a link is
+      // selected; the frames load when the tab does.
+      this.root.open = Boolean(key);
       this.body.replaceChildren();
     }
   }

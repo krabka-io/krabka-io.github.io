@@ -73,13 +73,40 @@ export class Canvas {
       button("Fit", "lab-btn-sm", () => this.fit(), { title: "Fit every node in view (F)" }),
       button("−", "lab-btn-sm", () => this.zoomBy(1 / 1.25), { ariaLabel: "Zoom out" }),
       button("+", "lab-btn-sm", () => this.zoomBy(1.25), { ariaLabel: "Zoom in" }),
+      button("?", "lab-btn-sm lab-help-btn", () => hooks.onHelp?.(), { title: "Shortcuts and tips (?)", ariaLabel: "Shortcuts and tips" }),
     );
     this.wrap.appendChild(this.tools);
 
     this.empty = el("div", "lab-empty");
-    this.empty.innerHTML =
-      "<strong>Empty canvas.</strong> Add a node from the palette, or load a preset.<br><span>Drag cards to move them, wheel to zoom, drag the background to pan.</span>";
+    const card = el("div", "lab-empty-card");
+    card.append(
+      el("strong", null, "The canvas is empty"),
+      el("p", null, "Load a ready-made cluster, or build one node by node."),
+    );
+    const emptyActions = el("div", "lab-palette-actions");
+    emptyActions.append(
+      button("Load a preset", "lab-btn-sm lab-primary", () => hooks.onOpenTab?.("scenarios")),
+      button("Add a node", "lab-btn-sm", () => hooks.onOpenTab?.("build")),
+    );
+    card.appendChild(emptyActions);
+    this.empty.appendChild(card);
     this.wrap.appendChild(this.empty);
+
+    // The gestures a reader would not guess, always on screen.
+    this.hint = el("ul", "lab-canvas-hint");
+    this.hint.setAttribute("aria-label", "Canvas gestures");
+    for (const [keys, what] of [
+      ["Click", "inspect a node"],
+      ["Shift+click", "a second node for link controls"],
+      ["Drag", "move a card or pan"],
+      ["Right-click", "more actions"],
+      ["Wheel", "zoom"],
+    ]) {
+      const li = el("li");
+      li.append(el("kbd", null, keys), ` ${what}`);
+      this.hint.appendChild(li);
+    }
+    this.wrap.appendChild(this.hint);
 
     this.menu = el("div", "lab-menu");
     this.menu.setAttribute("role", "menu");
@@ -136,6 +163,7 @@ export class Canvas {
     this.layout();
     const visible = nodes.filter((n) => !kindOf(n.kind).hidden).length;
     this.empty.hidden = visible > 0;
+    this.hint.hidden = visible === 0;
     if (visible > 0 && !this.userMovedView && !this.fitted) {
       this.fit();
       this.fitted = true;

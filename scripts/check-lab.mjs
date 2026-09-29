@@ -59,6 +59,20 @@ const CLUSTER = !args.has('--no-cluster');
 const HEADLESS = !args.has('--headed');
 const STEP_TIMEOUT = 30_000;
 
+// A fresh browser context that has already seen the lab tour, which would
+// otherwise open over the canvas and take the checks' clicks.
+async function newLabContext(browser, viewport) {
+  const context = await browser.newContext({ viewport });
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('krabka-lab.tour', 'done');
+    } catch {
+      // No storage: the tour opens, and the check reports what it finds.
+    }
+  });
+  return context;
+}
+
 // ---- Playwright, project-local or global ----------------------------------------------------
 
 async function loadPlaywright() {
@@ -271,6 +285,7 @@ async function setPersistUI(page, on) {
   await page.evaluate(() => {
     document.querySelector('#krabka-lab .lab-storage').open = true;
   });
+  await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
   const box = page.locator('#krabka-lab .lab-storage input[type="checkbox"]');
   if ((await box.isChecked()) !== on) await box.click();
   await waitFor(page, `window.krabkaLab.storage.persist === ${on}`, `persistence ${on ? 'on' : 'off'}`);
@@ -360,7 +375,7 @@ async function checkClusters(browser, base, errors) {
   const presets = await loadPresets();
   const byId = (id) => presets.find((p) => p.id === id);
   // A context of its own: its IndexedDB and last scenario are the cluster's.
-  const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const context = await newLabContext(browser, { width: 1400, height: 1000 });
   const page = await context.newPage();
   const pageErrors = watchErrors(page, 'cluster page', base);
   await openLab(page, base);
@@ -633,7 +648,7 @@ async function checkRegistryPreset(page, preset) {
   // A second registry joins the group. The eligible instance with the
   // smallest URL, node 4, stays the primary; the new one is a secondary that
   // forwards the writes it takes to the primary.
-  await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Add node' }).click();
+  await page.locator('#krabka-lab .lab-dtab[data-tab="build"]').click();
   await page.locator('#krabka-lab .lab-kind-btn[data-kind="schema-registry"]').click();
   await page.waitForSelector('#krabka-lab dialog[open]');
   await page.locator('#krabka-lab dialog button[type="submit"]').click();
@@ -769,7 +784,7 @@ async function main() {
   }
   const { server, port } = await serve(DIST_DIR);
   const base = `http://127.0.0.1:${port}`;
-  const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const context = await newLabContext(browser, { width: 1400, height: 1000 });
   const errors = [];
   try {
     console.log('Cluster Lab: solo flow');
@@ -810,7 +825,7 @@ async function main() {
 
     for (const width of [1400, 390]) {
       await page.setViewportSize({ width, height: 844 });
-      for (const selector of ['.lab-canvas-wrap', '.lab-inspector', '.lab-storage', '.lab-session', '.lab-timeline', '.lab-pal-section']) {
+      for (const selector of ['.lab-canvas-wrap', '.lab-inspector', '.lab-dock']) {
         const panel = page.locator(`#krabka-lab ${selector}`).first();
         await panel.locator('.lab-expand').click();
         const bounds = await panel.boundingBox();
@@ -821,14 +836,16 @@ async function main() {
     }
     await page.setViewportSize({ width: 1400, height: 1000 });
     await page.locator('#krabka-lab .lab-node[data-node-id="1"]').click({ modifiers: ['Shift'] });
+    await page.locator('#krabka-lab .lab-dtab[data-tab="network"]').click();
+    const dock = page.locator('#krabka-lab .lab-dock');
     const network = page.locator('#krabka-lab .lab-wire');
     for (const width of [1400, 390]) {
       await page.setViewportSize({ width, height: 844 });
-      await network.locator('.lab-expand').click();
-      const bounds = await network.boundingBox();
+      await dock.locator('.lab-expand').click();
+      const bounds = await dock.boundingBox();
       check(`network bytes expands at ${width}px`, bounds.width >= width - 1 && bounds.height >= 843 && await network.evaluate((el) => el.open));
-      await network.locator('.lab-expand').click();
-      check('the close button restores network bytes', !(await network.evaluate((el) => el.classList.contains('lab-expanded'))));
+      await dock.locator('.lab-expand').click();
+      check('the close button restores network bytes', !(await dock.evaluate((el) => el.classList.contains('lab-expanded'))));
     }
     await page.setViewportSize({ width: 1400, height: 1000 });
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
@@ -875,7 +892,7 @@ async function main() {
     await page.evaluate(() => window.krabkaLab.storage.flush());
 
     // The storage panel reports it.
-    await page.locator('#krabka-lab .lab-storage summary').click();
+    await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
     await waitFor(page, `(() => { const td = document.querySelector('#krabka-lab tr[data-storage-node="1"] td[data-field="bytes"]'); return td && td.textContent !== '0 B'; })()`, 'the storage panel to list echo-a');
     check('the storage panel shows bytes kept for echo-a', true);
 
@@ -887,10 +904,9 @@ async function main() {
     check('the echo counter continues from the stored value after reload', restored.state.frames >= framesAtPause, `${restored.state.frames} < ${framesAtPause}`);
 
     // Move away, then reopen the saved scenario from the Saved list.
-    await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Scenario' }).click();
+    await page.locator('#krabka-lab .lab-dtab[data-tab="scenarios"]').click();
     await page.locator('#krabka-lab button', { hasText: 'New (empty)' }).click();
     await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 0`, 'an empty scenario');
-    await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Saved' }).click();
     await page.waitForSelector(`#krabka-lab [data-saved-open="${scenarioId}"]`, { timeout: STEP_TIMEOUT });
     await page.locator(`#krabka-lab [data-saved-open="${scenarioId}"]`).click();
     await waitFor(page, `window.krabkaLab.world.id === ${JSON.stringify(scenarioId)} && window.krabkaLab.world.scenario().nodes.length === 3`, 'the saved scenario to reopen');
@@ -986,7 +1002,7 @@ async function main() {
     await page3.close();
 
     // Add a node through the palette dialog.
-    await page.locator('#krabka-lab .lab-pal-section summary', { hasText: 'Add node' }).click();
+    await page.locator('#krabka-lab .lab-dtab[data-tab="build"]').click();
     await page.locator('#krabka-lab .lab-kind-btn[data-kind="pinger"]').click();
     await page.waitForSelector('#krabka-lab dialog[open]');
     await page.locator('#krabka-lab dialog select').first().selectOption('2');

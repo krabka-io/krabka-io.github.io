@@ -66,6 +66,20 @@ const BUILD = !args.has('--no-build');
 // cluster change waits for Kafka's timeouts in lab time.
 const BOOT_TIMEOUT = 180_000;
 const STEP_TIMEOUT = 120_000;
+
+// A fresh browser context that has already seen the lab tour, which would
+// otherwise open over the canvas and take the checks' clicks.
+async function newLabContext(browser, viewport) {
+  const context = await browser.newContext({ viewport });
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('krabka-lab.tour', 'done');
+    } catch {
+      // No storage: the tour opens, and the check reports what it finds.
+    }
+  });
+  return context;
+}
 // How fast the lab runs while the cluster rides out a fault.
 const FAULT_SPEED = 5;
 const TOPIC = 'orders';
@@ -409,6 +423,7 @@ async function checkKafkactl(page, base) {
       });
       bridge.on('exit', (code) => { clearTimeout(timer); reject(new Error(`bridge exited ${code}: ${output}`)); });
     });
+    await page.locator('#krabka-lab .lab-dtab[data-tab="connect"]').click();
     await page.locator('#krabka-lab .lab-bridge summary').click();
     await page.locator('#krabka-lab .lab-bridge input[type="password"]').fill(token);
     await page.locator('#krabka-lab .lab-bridge button', { hasText: 'Connect' }).click();
@@ -713,7 +728,7 @@ async function main() {
   const errors = [];
   const browserStart = Date.now();
   try {
-    const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+    const context = await newLabContext(browser, { width: 1400, height: 1000 });
     if (!args.has('--kafkactl-only')) await oneBroker(context, base, errors);
     await threeBrokers(context, base, errors);
     await context.close();

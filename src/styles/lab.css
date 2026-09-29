@@ -23,8 +23,7 @@
   --lab-wire: rgba(148, 163, 184, 0.35);
 
   position: relative;
-  margin: 1.5rem 0;
-  padding: 0.75rem;
+  padding: 0.6rem;
   border: 1px solid var(--lab-border);
   border-radius: 12px;
   background: var(--lab-bg);
@@ -33,8 +32,16 @@
   line-height: 1.35;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
   min-height: 640px;
+}
+
+/* The lab fills the window under the site header; the page text follows it. */
+#krabka-lab.lab-app {
+  height: max(640px, calc(100dvh - 8.5rem));
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
 }
 
 #krabka-lab *,
@@ -154,86 +161,155 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.4rem 0.5rem;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   border: 1px solid var(--lab-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--lab-panel);
 }
-#krabka-lab .lab-brand { font-weight: 800; letter-spacing: 0.02em; margin-right: 0.4rem; }
-#krabka-lab .lab-time { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.82rem; min-width: 6.5rem; text-align: right; padding-left: 0.5rem; }
-#krabka-lab .lab-stats { font-size: 0.74rem; }
-#krabka-lab .lab-role { font-size: 0.74rem; color: var(--lab-info); margin-left: auto; }
+#krabka-lab .lab-tb-brand { display: flex; flex-direction: column; min-width: 0; max-width: 16rem; line-height: 1.2; }
+#krabka-lab .lab-brand { font-weight: 800; letter-spacing: 0.02em; font-size: 0.95rem; }
+#krabka-lab .lab-tb-scenario { color: var(--lab-muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#krabka-lab .lab-tb-group { display: inline-flex; align-items: center; gap: 0.3rem; }
+#krabka-lab .lab-tb-cap { color: var(--lab-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.1rem; }
+#krabka-lab .lab-play { display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-width: 6.6rem; padding: 0.45rem 0.9rem; font-size: 0.9rem; }
+#krabka-lab .lab-play-glyph { font-size: 0.8rem; letter-spacing: -0.1em; }
+#krabka-lab .lab-play:not(.lab-paused) { background: var(--lab-panel-2); border-color: var(--lab-border-strong); font-weight: 600; }
+#krabka-lab .lab-play:not(.lab-paused):hover { background: #1c2740; border-color: var(--lab-accent); }
+#krabka-lab .lab-play.lab-paused { animation: lab-pulse 2.2s ease-out infinite; }
+#krabka-lab .lab-tb-clock { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+#krabka-lab .lab-time { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.05rem; font-weight: 600; }
+#krabka-lab .lab-stats { font-size: 0.72rem; }
+#krabka-lab .lab-tb-tools { margin-left: auto; }
+#krabka-lab .lab-role { font-size: 0.74rem; color: var(--lab-info); margin-right: 0.3rem; }
 #krabka-lab .lab-role-badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 999px; border: 1px solid var(--lab-border-strong); color: var(--lab-muted); }
+#krabka-lab .lab-tb-tools [aria-pressed="true"] { border-color: var(--lab-accent); color: var(--lab-accent); }
+@keyframes lab-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 77, 46, 0.55); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 77, 46, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 77, 46, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #krabka-lab .lab-play.lab-paused,
+  #krabka-lab .lab-tour-target { animation: none; }
+}
 
-/* ---- main columns ---- */
-#krabka-lab .lab-main {
+/* ---- workspace: rail | stage | inspector ---- */
+#krabka-lab .lab-workspace {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 330px;
-  gap: 0.6rem;
-  min-height: 460px;
+  grid-template-columns: 300px minmax(0, 1fr) 360px;
+  gap: 0.5rem;
 }
-#krabka-lab .lab-col { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-#krabka-lab .lab-col-left,
-#krabka-lab .lab-col-right { max-height: 620px; overflow-y: auto; overflow-x: hidden; }
-@media (max-width: 1100px) {
-  #krabka-lab .lab-main { grid-template-columns: 220px minmax(0, 1fr); }
-  #krabka-lab .lab-col-right { grid-column: 1 / -1; max-height: none; }
+#krabka-lab .lab-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+#krabka-lab .lab-col-rail,
+#krabka-lab .lab-col-side { overflow-y: auto; overflow-x: hidden; }
+#krabka-lab .lab-col-stage { overflow: hidden; position: relative; }
+@media (max-width: 1280px) {
+  #krabka-lab .lab-workspace { grid-template-columns: 270px minmax(0, 1fr) 320px; }
 }
-@media (max-width: 760px) {
-  #krabka-lab .lab-main { grid-template-columns: minmax(0, 1fr); }
-  #krabka-lab .lab-col-left,
-  #krabka-lab .lab-col-right { max-height: none; }
+@media (max-width: 1024px) {
+  #krabka-lab.lab-app { height: auto; }
+  #krabka-lab .lab-workspace { grid-template-columns: minmax(0, 1fr); }
+  #krabka-lab .lab-col-stage { order: -1; overflow: visible; }
+  #krabka-lab .lab-col-rail,
+  #krabka-lab .lab-col-side { overflow: visible; }
+  #krabka-lab .lab-canvas-wrap { min-height: 60vh; }
+  #krabka-lab .lab-dock { height: 320px; }
+  #krabka-lab .lab-tb-tools { margin-left: 0; }
 }
 
-/* ---- palette ---- */
-#krabka-lab .lab-palette { display: flex; flex-direction: column; gap: 0.4rem; }
-#krabka-lab .lab-pal-section,
-#krabka-lab .lab-side-section {
-  border: 1px solid var(--lab-border);
-  border-radius: 8px;
-  background: var(--lab-panel);
-  padding: 0.4rem 0.55rem;
+/* ---- tab sets: the rail and the dock ---- */
+#krabka-lab .lab-tabset { display: flex; flex-direction: column; min-height: 0; }
+#krabka-lab .lab-tabset-bar { display: flex; align-items: center; gap: 0.15rem; padding: 0 0.35rem; border-bottom: 1px solid var(--lab-border); flex: none; overflow-x: auto; scrollbar-width: thin; }
+#krabka-lab .lab-tabset-body { flex: 1; min-height: 0; overflow: auto; }
+#krabka-lab .lab-dpanel { padding: 0.6rem 0.7rem 0.9rem; min-width: 0; }
+#krabka-lab .lab-dtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--lab-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: -1px;
+  cursor: pointer;
+  white-space: nowrap;
 }
+#krabka-lab .lab-dtab:hover { color: var(--lab-text); }
+#krabka-lab .lab-dtab:focus-visible { outline: 2px solid var(--lab-accent); outline-offset: -2px; border-radius: 6px; }
+#krabka-lab .lab-dtab-active { color: var(--lab-text); border-bottom-color: var(--lab-accent); }
+#krabka-lab .lab-dtab-badge { font-size: 0.68rem; font-weight: 500; padding: 0 0.4rem; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--lab-muted); }
+
+/* ---- palette rail ---- */
+#krabka-lab .lab-palette {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--lab-border);
+  border-radius: 10px;
+  background: var(--lab-panel);
+  overflow: hidden;
+}
+#krabka-lab .lab-rail-tabs { flex: 1; }
+#krabka-lab .lab-rail-tabs .lab-dtab { flex: 1; justify-content: center; }
+#krabka-lab .lab-rail-heading { margin: 0.9rem 0 0.15rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--lab-muted); }
+#krabka-lab .lab-pal-section:first-child .lab-rail-heading { margin-top: 0.1rem; }
+#krabka-lab .lab-rail-help { margin: 0 0 0.45rem; font-size: 0.76rem; color: var(--lab-muted); }
 #krabka-lab .lab-pal-body,
-#krabka-lab .lab-side-body { padding-top: 0.4rem; }
-#krabka-lab .lab-bridge { margin-top: 0.4rem; }
+#krabka-lab .lab-side-body { padding-top: 0.25rem; }
+#krabka-lab .lab-side-section { border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel-2); padding: 0.45rem 0.6rem; margin-bottom: 0.5rem; }
 #krabka-lab .lab-bridge a { color: var(--lab-accent); text-decoration: underline; }
 #krabka-lab .lab-bridge-command { display: flex; align-items: start; gap: 0.3rem; margin: 0.35rem 0; }
 #krabka-lab .lab-bridge-command code { flex: 1; min-width: 0; font-size: 0.73rem; }
 #krabka-lab .lab-bridge input { margin: 0.25rem 0; }
 #krabka-lab .lab-bridge [data-state="error"] { color: var(--lab-err); }
-#krabka-lab .lab-kind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; }
+#krabka-lab .lab-kind-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
 #krabka-lab .lab-kind-btn,
 #krabka-lab .lab-preset-btn {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.6rem;
   width: 100%;
   text-align: left;
   border: 1px solid var(--lab-border);
   background: var(--lab-panel-2);
   color: var(--lab-text);
   border-radius: 8px;
-  padding: 0.35rem 0.45rem;
+  padding: 0.5rem 0.6rem;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   cursor: pointer;
 }
 #krabka-lab .lab-kind-btn:hover:not(:disabled),
-#krabka-lab .lab-preset-btn:hover:not(:disabled) { border-color: var(--lab-accent); }
+#krabka-lab .lab-preset-btn:hover:not(:disabled) { border-color: var(--lab-accent); background: #16213a; }
 #krabka-lab .lab-kind-btn:disabled,
 #krabka-lab .lab-preset-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-#krabka-lab .lab-preset-btn { margin-bottom: 0.3rem; flex-wrap: wrap; }
-#krabka-lab .lab-preset-name { flex: 1; overflow-wrap: anywhere; }
+#krabka-lab .lab-kind-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+#krabka-lab .lab-kind-label { font-weight: 600; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+#krabka-lab .lab-kind-sub { font-size: 0.72rem; color: var(--lab-muted); line-height: 1.3; }
+#krabka-lab .lab-kind-add { flex: none; width: 1.4rem; height: 1.4rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--lab-border-strong); color: var(--lab-muted); font-size: 1rem; line-height: 1; }
+#krabka-lab .lab-kind-btn:hover:not(:disabled) .lab-kind-add { color: #fff; background: #e0300f; border-color: #e0300f; }
+#krabka-lab .lab-preset-btn { flex-direction: column; align-items: stretch; gap: 0.2rem; margin-bottom: 0.4rem; }
+#krabka-lab .lab-preset-head { display: flex; align-items: flex-start; gap: 0.4rem; }
+#krabka-lab .lab-preset-name { flex: 1; font-weight: 600; font-size: 0.82rem; line-height: 1.3; }
+#krabka-lab .lab-preset-summary { font-size: 0.7rem; color: var(--lab-info); }
+#krabka-lab .lab-preset-desc { font-size: 0.72rem; color: var(--lab-muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+#krabka-lab .lab-preset-btn:hover .lab-preset-desc { -webkit-line-clamp: unset; }
+#krabka-lab .lab-preset-current { border-color: var(--lab-accent); box-shadow: inset 3px 0 0 var(--lab-accent); }
 #krabka-lab .lab-kind-glyph {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 1.4rem; height: 1.4rem; border-radius: 50%;
-  color: #0c1322; font-weight: 700; font-size: 0.8rem; flex: none;
+  width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  color: #0c1322; font-weight: 700; font-size: 0.9rem; flex: none;
 }
-#krabka-lab .lab-kind-label { flex: 1; }
 #krabka-lab .lab-kind-badge {
-  font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;
   color: var(--lab-warn); border: 1px solid rgba(247, 183, 58, 0.5);
   border-radius: 999px; padding: 0 0.35rem;
 }
@@ -244,13 +320,13 @@
 #krabka-lab .lab-topic-row,
 #krabka-lab .lab-saved-row,
 #krabka-lab .lab-peer { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
-#krabka-lab .lab-topic-row-name { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.76rem; flex: 1; }
+#krabka-lab .lab-topic-row-name { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.76rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #krabka-lab .lab-saved-open {
-  flex: 1; text-align: left; background: none; border: none; color: var(--lab-text);
-  font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0.1rem 0; text-decoration: underline dotted;
+  flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--lab-text);
+  font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0.1rem 0; text-decoration: underline dotted; overflow-wrap: anywhere;
 }
 #krabka-lab .lab-saved-open:hover { color: var(--lab-accent); }
-#krabka-lab .lab-scenario-name { font-weight: 700; }
+#krabka-lab .lab-scenario-name { font-weight: 700; overflow-wrap: anywhere; }
 #krabka-lab .lab-palette-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
 #krabka-lab .lab-peer-name { flex: 1; }
 #krabka-lab .lab-peer-connected .lab-peer-name::before { content: "●"; color: var(--lab-ok); margin-right: 0.3rem; }
@@ -263,22 +339,31 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 380px;
+  min-height: 240px;
   border: 1px solid var(--lab-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background:
     radial-gradient(circle, rgba(255, 255, 255, 0.06) 1px, transparent 1px) 0 0 / 22px 22px,
     var(--lab-panel);
   overflow: hidden;
 }
-#krabka-lab .lab-canvas { width: 100%; height: 100%; min-height: 380px; display: block; flex: 1; touch-action: none; cursor: grab; outline: none; }
+#krabka-lab .lab-canvas { width: 100%; height: 100%; min-height: 0; display: block; flex: 1; touch-action: none; cursor: grab; outline: none; }
 #krabka-lab .lab-canvas:active { cursor: grabbing; }
 #krabka-lab .lab-canvas-tools { order: -1; display: flex; justify-content: flex-end; gap: 0.25rem; padding: 0.4rem; border-bottom: 1px solid var(--lab-border); }
 #krabka-lab .lab-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; color: var(--lab-muted); pointer-events: none; font-size: 0.9rem; padding: 1rem;
 }
-#krabka-lab .lab-empty span { font-size: 0.78rem; }
+#krabka-lab .lab-empty-card { pointer-events: auto; max-width: 22rem; padding: 1rem 1.2rem; border: 1px dashed var(--lab-border-strong); border-radius: 12px; background: rgba(15, 23, 42, 0.85); }
+#krabka-lab .lab-empty-card strong { color: var(--lab-text); font-size: 1rem; }
+#krabka-lab .lab-empty-card .lab-palette-actions { justify-content: center; }
+#krabka-lab .lab-canvas-hint {
+  position: absolute; left: 0.6rem; right: 0.6rem; bottom: 0.6rem; margin: 0; padding: 0.3rem 0.6rem;
+  display: flex; flex-wrap: wrap; gap: 0.15rem 0.9rem; list-style: none; width: fit-content; max-width: calc(100% - 1.2rem);
+  font-size: 0.72rem; color: var(--lab-muted); background: rgba(12, 19, 34, 0.86); border: 1px solid var(--lab-border); border-radius: 8px; pointer-events: none;
+}
+#krabka-lab .lab-canvas-hint kbd { font: inherit; font-weight: 600; color: var(--lab-text); padding: 0 0.3rem; border: 1px solid var(--lab-border-strong); border-radius: 4px; background: rgba(255, 255, 255, 0.05); }
+@media (max-width: 640px) { #krabka-lab .lab-canvas-hint { display: none; } }
 
 #krabka-lab .lab-node { cursor: pointer; outline: none; }
 #krabka-lab .lab-card { fill: var(--lab-panel-2); stroke-width: 1.5; }
@@ -353,36 +438,61 @@
 #krabka-lab .lab-menu-danger { color: var(--lab-err); }
 #krabka-lab .lab-menu-sep { height: 1px; background: var(--lab-border); margin: 0.2rem 0.3rem; }
 
-/* ---- fault bar ---- */
+/* ---- fault bar: always on screen, above the canvas ---- */
 #krabka-lab .lab-faults {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
-  padding: 0.35rem 0.5rem; border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.9rem;
+  padding: 0.4rem 0.65rem; border: 1px solid var(--lab-border); border-radius: 10px; background: var(--lab-panel);
+  flex: none;
 }
-#krabka-lab .lab-faults-info { font-size: 0.76rem; color: var(--lab-muted); flex-basis: 100%; }
-#krabka-lab .lab-faults-group { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
-#krabka-lab .lab-faults-group + .lab-faults-group { border-left: 1px solid var(--lab-border); padding-left: 0.5rem; margin-left: 0.2rem; }
+#krabka-lab .lab-faults-title { color: var(--lab-err); font-size: 0.78rem; letter-spacing: 0.02em; white-space: nowrap; }
+#krabka-lab .lab-faults-title::before { content: "⚡ "; }
+
+#krabka-lab .lab-faults-group { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; padding: 0.15rem 0.45rem; border-radius: 8px; border: 1px solid transparent; opacity: 0.6; transition: opacity 0.15s ease, border-color 0.15s ease; }
+#krabka-lab .lab-faults-group[data-active="true"] { opacity: 1; border-color: var(--lab-border-strong); background: rgba(255, 255, 255, 0.03); }
+#krabka-lab .lab-faults-hint { flex: 1 1 6rem; min-width: 0; font-size: 0.74rem; color: var(--lab-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#krabka-lab .lab-faults [hidden] { display: none; }
+#krabka-lab .lab-faults-cap { color: var(--lab-muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.15rem; }
 
 /* ---- selected link bytes ---- */
-#krabka-lab .lab-wire { border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel); min-width: 0; scroll-margin-top: 5rem; }
+#krabka-lab .lab-wire { border: 0; border-radius: 0; background: none; min-width: 0; scroll-margin-top: 5rem; }
 #krabka-lab .lab-wire[hidden] { display: none; }
-#krabka-lab .lab-wire > summary { padding: 0.45rem 0.55rem; cursor: pointer; }
-#krabka-lab .lab-wire-body { padding: 0 0.55rem 0.55rem; min-width: 0; }
+#krabka-lab .lab-wire > summary { display: none; }
+#krabka-lab .lab-wire-body { min-width: 0; }
 #krabka-lab .lab-wire-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 #krabka-lab .lab-wire-head strong { flex: 1; overflow-wrap: anywhere; }
-#krabka-lab .lab-wire-list { max-height: 25rem; overflow: auto; }
+#krabka-lab .lab-wire-list { max-height: none; overflow: visible; }
 #krabka-lab .lab-wire-frame { border-top: 1px solid var(--lab-border); padding: 0.3rem 0; }
 #krabka-lab .lab-wire-frame summary { cursor: pointer; overflow-wrap: anywhere; font-size: 0.78rem; }
 #krabka-lab .lab-wire-content { padding-left: 0.5rem; min-width: 0; }
 #krabka-lab .lab-wire-key { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 #krabka-lab .lab-wire-field { padding: 0.15rem 0.3rem; border: 1px solid var(--lab-border); border-radius: 4px; font-size: 0.74rem; cursor: help; }
 #krabka-lab .lab-wire-field:focus-visible { outline: 2px solid var(--lab-accent); }
+#krabka-lab .lab-dock-empty { margin: 0; padding: 0.6rem 0.2rem; color: var(--lab-muted); font-size: 0.8rem; }
+#krabka-lab .lab-dock-empty[hidden] { display: none; }
 
 /* ---- inspector ---- */
 #krabka-lab .lab-inspector {
-  border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel); padding: 0.4rem 0.55rem;
-  display: flex; flex-direction: column;
+  border: 1px solid var(--lab-border); border-radius: 10px; background: var(--lab-panel); padding: 0.6rem 0.75rem;
+  display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative;
 }
+#krabka-lab .lab-inspector > .lab-panel-title-row { padding-right: 5.5rem; }
+#krabka-lab .lab-col-side .lab-tabpanel { max-height: none; overflow: visible; }
 #krabka-lab .lab-insp-empty { padding: 0.5rem 0; }
+#krabka-lab .lab-overview .lab-rail-heading { margin-top: 0.2rem; }
+#krabka-lab .lab-overview-list { list-style: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+#krabka-lab .lab-overview-node {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; padding: 0.45rem 0.55rem;
+  border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel-2); color: var(--lab-text); font: inherit; cursor: pointer;
+}
+#krabka-lab .lab-overview-node:hover { border-color: var(--lab-accent); background: #16213a; }
+#krabka-lab .lab-overview-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+#krabka-lab .lab-overview-name { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; font-size: 0.82rem; overflow-wrap: anywhere; }
+#krabka-lab .lab-overview-sub { font-size: 0.72rem; color: var(--lab-muted); overflow-wrap: anywhere; }
+#krabka-lab .lab-overview-chips { display: inline-flex; gap: 0.25rem; }
+#krabka-lab .lab-chip { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 0.4rem; border-radius: 999px; border: 1px solid var(--lab-border-strong); color: var(--lab-muted); }
+#krabka-lab .lab-chip-ok { color: var(--lab-ok); border-color: rgba(69, 193, 120, 0.5); }
+#krabka-lab .lab-chip-err { color: var(--lab-err); border-color: rgba(255, 107, 90, 0.55); }
+#krabka-lab .lab-chip-warn { color: var(--lab-warn); border-color: rgba(247, 183, 58, 0.55); }
 #krabka-lab .lab-insp-head { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
 #krabka-lab .lab-insp-glyph {
   display: inline-flex; align-items: center; justify-content: center; width: 1.8rem; height: 1.8rem;
@@ -473,15 +583,35 @@
 #krabka-lab .lab-hex-field:focus-visible { color: var(--lab-bg); background: var(--lab-warn); outline: 1px solid var(--lab-warn); }
 #krabka-lab .lab-reload-note { border-left: 3px solid var(--lab-warn); padding-left: 0.5rem; margin: 0.5rem 0; }
 
-/* ---- timeline ---- */
-#krabka-lab .lab-timeline { border: 1px solid var(--lab-border); border-radius: 8px; background: var(--lab-panel); }
-#krabka-lab .lab-timeline:not([open]) > .lab-timeline-body { display: none; }
-#krabka-lab .lab-timeline-summary { padding: 0.55rem; }
-#krabka-lab .lab-timeline-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--lab-border); }
+/* ---- dock: events, network bytes and storage under the canvas ---- */
+#krabka-lab .lab-dock {
+  flex: none;
+  height: clamp(150px, 21vh, 230px);
+  border: 1px solid var(--lab-border);
+  border-radius: 10px;
+  background: var(--lab-panel);
+  overflow: hidden;
+}
+#krabka-lab .lab-dock .lab-tabset-bar > .lab-expand { margin-left: auto; }
+#krabka-lab .lab-dock .lab-dpanel { padding: 0; height: 100%; }
+#krabka-lab .lab-dock .lab-dpanel[data-panel="network"],
+#krabka-lab .lab-dock .lab-dpanel[data-panel="storage"] { padding: 0.6rem 0.75rem 0.9rem; height: auto; }
+#krabka-lab .lab-dock .lab-dpanel[data-panel="events"] { display: flex; flex-direction: column; }
+#krabka-lab .lab-dock.lab-dock-collapsed { height: auto; }
+#krabka-lab .lab-dock-collapsed .lab-tabset-body { display: none; }
+#krabka-lab .lab-dock-collapsed .lab-tabset-bar { border-bottom: 0; }
+#krabka-lab .lab-dock-toggle { margin-left: 0.3rem; }
+#krabka-lab .lab-dock .lab-dpanel > details > summary { display: none; }
+#krabka-lab .lab-storage { border: 0; background: none; padding: 0; margin: 0; }
+
+/* ---- timeline (the dock's Events tab) ---- */
+#krabka-lab .lab-timeline { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; background: none; }
+#krabka-lab .lab-timeline-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#krabka-lab .lab-timeline-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--lab-border); flex: none; }
 #krabka-lab .lab-timeline-count { font-size: 0.74rem; color: var(--lab-muted); margin-left: auto; }
 #krabka-lab .lab-follow { font-size: 0.76rem; margin: 0; }
-#krabka-lab .lab-timeline-list { list-style: none; margin: 0; padding: 0.2rem 0; height: 190px; overflow: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.72rem; }
-#krabka-lab .lab-ev { display: grid; grid-template-columns: 5.5rem minmax(0, 8rem) minmax(0, 9rem) minmax(0, 1fr); gap: 0.5rem; padding: 0.15rem 0.5rem; border-left: 3px solid transparent; }
+#krabka-lab .lab-timeline-list { list-style: none; margin: 0; padding: 0.2rem 0; flex: 1; min-height: 0; height: auto; overflow: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.72rem; }
+#krabka-lab .lab-ev { display: grid; grid-template-columns: 5.5rem minmax(0, 9rem) minmax(0, 10rem) minmax(0, 1fr); gap: 0.5rem; padding: 0.15rem 0.6rem; border-left: 3px solid transparent; }
 #krabka-lab .lab-ev:hover { background: rgba(255, 255, 255, 0.04); }
 #krabka-lab .lab-ev-warn { border-left-color: var(--lab-warn); }
 #krabka-lab .lab-ev-error { border-left-color: var(--lab-err); background: rgba(255, 107, 90, 0.06); }
@@ -498,10 +628,38 @@
   #krabka-lab .lab-ev-detail { grid-column: 1 / -1; }
 }
 
+/* ---- tour ---- */
+#krabka-lab .lab-tour {
+  position: absolute; right: 0.6rem; bottom: 0.6rem; z-index: 15; width: min(23rem, calc(100% - 1.2rem));
+  padding: 0.75rem 0.9rem 0.8rem; border: 1px solid var(--lab-accent); border-radius: 12px; background: var(--lab-panel-2);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+}
+#krabka-lab .lab-tour[hidden] { display: none; }
+#krabka-lab .lab-tour-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+#krabka-lab .lab-tour-step { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--lab-accent); font-weight: 700; }
+#krabka-lab .lab-tour-skip { border-color: transparent; background: none; color: var(--lab-muted); }
+#krabka-lab .lab-tour-title { margin: 0.3rem 0 0.15rem; font-size: 1rem; font-weight: 700; }
+#krabka-lab .lab-tour-text { margin: 0 0 0.6rem; font-size: 0.82rem; color: #cbd5e1; line-height: 1.45; }
+#krabka-lab .lab-tour-action { margin-bottom: 0.6rem; border-color: var(--lab-accent); color: var(--lab-accent); }
+#krabka-lab .lab-tour-nav { display: flex; justify-content: flex-end; gap: 0.4rem; }
+#krabka-lab .lab-tour-target { outline: 2px solid var(--lab-accent); outline-offset: 3px; animation: lab-outline 1.8s ease-in-out infinite; }
+@keyframes lab-outline {
+  0%, 100% { outline-color: rgba(255, 77, 46, 0.95); }
+  50% { outline-color: rgba(255, 77, 46, 0.35); }
+}
+
+/* ---- help ---- */
+#krabka-lab .lab-help-list { display: grid; grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr); gap: 0.35rem 1rem; margin: 0.6rem 0; }
+#krabka-lab .lab-help-list dt { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.76rem; color: #ffb39e; }
+#krabka-lab .lab-legend { list-style: none; margin: 0.4rem 0 0.6rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+#krabka-lab .lab-legend li { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: #cbd5e1; }
+#krabka-lab .lab-help h4 { margin: 0.9rem 0 0; }
+#krabka-lab .lab-help-list dd { margin: 0; font-size: 0.8rem; color: #cbd5e1; }
+
 /* ---- dialogs ---- */
 #krabka-lab .lab-dialog {
   background: var(--lab-panel); color: var(--lab-text); border: 1px solid var(--lab-border-strong); border-radius: 12px;
-  padding: 0; width: min(92vw, 460px); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  padding: 0; margin: auto; width: min(92vw, 460px); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 }
 #krabka-lab .lab-dialog-wide { width: min(92vw, 640px); }
 #krabka-lab .lab-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
@@ -527,22 +685,20 @@
   background: var(--lab-panel);
 }
 #krabka-lab .lab-expand { z-index: 1; }
-#krabka-lab summary > .lab-expand { float: right; margin: -0.1rem 0 0 0.5rem; }
-#krabka-lab .lab-inspector:not(.lab-expanded) { position: relative; }
-#krabka-lab .lab-inspector > .lab-expand { position: absolute; top: 0.35rem; right: 0.45rem; }
+#krabka-lab .lab-inspector > .lab-expand { position: absolute; top: 0.5rem; right: 0.6rem; }
 #krabka-lab .lab-expanded .lab-tabpanel,
 #krabka-lab .lab-expanded .lab-log,
 #krabka-lab .lab-expanded .lab-wire-list,
 #krabka-lab .lab-expanded .lab-file-list { max-height: none; }
-#krabka-lab .lab-expanded .lab-timeline-list { height: calc(100dvh - 9rem); min-height: 10rem; }
+#krabka-lab .lab-dock.lab-expanded { display: flex; flex-direction: column; padding: 0; }
 #krabka-lab .lab-canvas-wrap.lab-expanded { overflow: hidden; }
 #krabka-lab .lab-canvas-wrap.lab-expanded .lab-canvas { min-height: 0; }
 
-/* ---- toasts ---- */
-#krabka-lab .lab-toasts { order: -1; display: flex; flex-direction: column; gap: 0.3rem; }
+/* ---- toasts float over the canvas corner ---- */
+#krabka-lab .lab-toasts { position: absolute; left: 1rem; bottom: 1rem; z-index: 30; display: flex; flex-direction: column; gap: 0.3rem; width: min(24rem, calc(100% - 2rem)); pointer-events: none; }
 #krabka-lab .lab-toasts:empty { display: none; }
 #krabka-lab .lab-toast {
-  display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 8px;
+  display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 8px; pointer-events: auto;
   background: var(--lab-panel-2); border: 1px solid var(--lab-border-strong); font-size: 0.78rem;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }

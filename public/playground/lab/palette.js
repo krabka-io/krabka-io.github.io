@@ -1,16 +1,43 @@
-// The palette: the left column of the lab.
+// The palette: the left rail of the lab.
 //
-// "Add node" offers one button per kind; "Topics" edits the scenario's
-// topics; "Presets" loads a canned scenario; "Saved" lists the scenarios
-// this browser keeps (with their durable state); "Scenario" holds the
-// settings and the export / import / share / save buttons. The forms
-// themselves come from `forms.js`; the palette only asks the app to open
-// them.
+// Three tabs. "Build" adds nodes and edits the scenario's topics. "Scenarios"
+// starts from a canned preset, reopens a saved scenario, and holds the file,
+// share and settings actions. "Connect" hosts what reaches outside the tab:
+// the multi-tab session and the kafkactl bridge, which the app builds and
+// mounts through `connectBody`. The forms themselves come from `forms.js`; the
+// palette only asks the app to open them.
 
 import { el, button } from "./dom.js";
-import { KINDS, KIND_ORDER, kindOf } from "./kinds.js";
+import { KINDS, kindOf } from "./kinds.js";
+import { TabSet } from "./tabs.js";
 
 const FULL_BUILD_NOTE = "needs the full build: this kind is not in the loaded module yet";
+
+// The kinds the Build tab offers, grouped by what a reader is adding.
+const GROUPS = [
+  { title: "The cluster", help: "The servers that store and replicate records.", kinds: ["krabka-broker", "schema-registry"] },
+  { title: "Clients and apps", help: "What writes to and reads from the cluster.", kinds: ["producer", "consumer", "streams"] },
+  { title: "Network probes", help: "Cheap nodes for watching latency and cuts.", kinds: ["echo", "pinger"] },
+];
+
+// The first sentence of a kind's description: the one-line subtitle of its card.
+function firstSentence(text) {
+  const m = /^.*?[.!?](?=\s|$)/.exec(text || "");
+  return m ? m[0] : text || "";
+}
+
+// "3 brokers · 1 producer · 2 consumers" for a preset's document.
+function summarize(scenario) {
+  const counts = new Map();
+  for (const n of scenario.nodes) {
+    const k = kindOf(n.kind);
+    if (k.hidden) continue;
+    const label = k.label.replace(/ \(real\)$/, "").replace(/^Krabka /, "").toLowerCase();
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  const plural = (label) => (/y$/.test(label) ? `${label.slice(0, -1)}ies` : `${label}s`);
+  return [...counts].map(([label, n]) => `${n} ${n > 1 ? plural(label) : label}`).join(" · ");
+}
 
 export class Palette {
   // hooks: onAddNode(kind), onAddTopic(), onEditTopic(name), onRemoveTopic(name),
@@ -24,98 +51,130 @@ export class Palette {
     this.root.setAttribute("aria-label", "Palette");
     container.appendChild(this.root);
 
-    // Add node.
-    this.addSection = this.section("Add node", false);
+    this.tabs = new TabSet(this.root, {
+      label: "Cluster tools",
+      active: "build",
+      className: "lab-rail-tabs",
+      tabs: [
+        { id: "build", label: "Build", title: "Add nodes and topics to the cluster" },
+        { id: "scenarios", label: "Scenarios", title: "Load a preset, reopen a saved scenario, share or export" },
+        { id: "connect", label: "Connect", title: "Host nodes in other tabs, or drive the cluster from kafkactl" },
+      ],
+      hooks: { onShow: (id) => id === "scenarios" && this.refreshSaved() },
+    });
+    this.buildTab();
+    this.scenariosTab();
+    this.connectBody = this.tabs.panel("connect");
+  }
+
+  show(id) {
+    this.tabs.show(id);
+  }
+
+  // A titled block inside a tab. `.lab-pal-section` marks it for the checks.
+  block(panel, title, help) {
+    const section = el("section", "lab-pal-section");
+    section.dataset.section = title.toLowerCase().replace(/[^a-z]+/g, "-");
+    section.appendChild(el("h3", "lab-rail-heading", title));
+    if (help) section.appendChild(el("p", "lab-rail-help", help));
+    const body = el("div", "lab-pal-body");
+    section.appendChild(body);
+    panel.appendChild(section);
+    return body;
+  }
+
+  buildTab() {
+    const panel = this.tabs.panel("build");
     this.kindButtons = {};
-    const grid = el("div", "lab-kind-grid");
-    for (const kind of KIND_ORDER) {
-      const k = KINDS[kind];
-      const b = el("button", "lab-kind-btn");
-      b.type = "button";
-      b.dataset.kind = kind;
-      b.title = k.description;
-      const glyph = el("span", "lab-kind-glyph", k.glyph);
-      glyph.style.background = k.color;
-      const label = el("span", "lab-kind-label", k.label);
-      const badge = el("span", "lab-kind-badge", "full build");
-      badge.hidden = true;
-      b.append(glyph, label, badge);
-      b.addEventListener("click", () => hooks.onAddNode(kind));
-      this.kindButtons[kind] = { button: b, badge };
-      grid.appendChild(b);
-    }
-    this.addSection.body.appendChild(grid);
-    this.roleNote = el("p", "lab-muted lab-small");
+    this.roleNote = el("p", "lab-note lab-small", "You joined a session: the host edits the scenario.");
     this.roleNote.hidden = true;
-    this.addSection.body.appendChild(this.roleNote);
+    panel.appendChild(this.roleNote);
+    for (const group of GROUPS) {
+      const body = this.block(panel, group.title, group.help);
+      const grid = el("div", "lab-kind-grid");
+      for (const kind of group.kinds) {
+        const k = KINDS[kind];
+        const b = el("button", "lab-kind-btn");
+        b.type = "button";
+        b.dataset.kind = kind;
+        b.title = k.description;
+        const glyph = el("span", "lab-kind-glyph", k.glyph);
+        glyph.style.background = k.color;
+        const text = el("span", "lab-kind-text");
+        const head = el("span", "lab-kind-label", k.label);
+        const badge = el("span", "lab-kind-badge", "full build");
+        badge.hidden = true;
+        head.appendChild(badge);
+        text.append(head, el("span", "lab-kind-sub", firstSentence(k.description)));
+        b.append(glyph, text, el("span", "lab-kind-add", "+"));
+        b.addEventListener("click", () => this.hooks.onAddNode(kind));
+        this.kindButtons[kind] = { button: b, badge };
+        grid.appendChild(b);
+      }
+      body.appendChild(grid);
+    }
 
-    // Topics.
-    this.topicSection = this.section("Topics", false);
+    const topics = this.block(panel, "Topics", "Producers write to a topic and consumers read from it. Brokers need at least one.");
     this.topicList = el("ul", "lab-topic-list");
-    this.topicSection.body.appendChild(this.topicList);
-    this.topicAdd = button("+ Add topic", "lab-btn-sm", () => hooks.onAddTopic());
-    this.topicSection.body.appendChild(this.topicAdd);
+    topics.appendChild(this.topicList);
+    this.topicAdd = button("+ Add topic", "lab-btn-sm", () => this.hooks.onAddTopic());
+    topics.appendChild(this.topicAdd);
+  }
 
-    // Presets.
-    this.presetSection = this.section("Presets", false);
+  scenariosTab() {
+    const panel = this.tabs.panel("scenarios");
+
+    const current = this.block(panel, "This scenario");
+    this.scenarioName = el("div", "lab-scenario-name");
+    this.scenarioMeta = el("div", "lab-muted lab-small");
+    current.append(this.scenarioName, this.scenarioMeta);
+    const actions = el("div", "lab-palette-actions");
+    this.settingsBtn = button("Settings…", "lab-btn-sm", () => this.hooks.onSettings(), { title: "Name, seed and link latency (restarts the world)" });
+    this.saveBtn = button("Save", "lab-btn-sm", () => this.hooks.onSave(), { title: "Save to this browser now" });
+    this.clearBtn = button("New (empty)", "lab-btn-sm", () => this.hooks.onClear(), { title: "Start an empty scenario" });
+    actions.append(this.settingsBtn, this.saveBtn, this.clearBtn);
+    current.appendChild(actions);
+    this.saveState = el("p", "lab-muted lab-small");
+    current.appendChild(this.saveState);
+
+    const presets = this.block(panel, "Start from a preset", "Every preset runs real brokers. Pick one, press Play, then break something.");
     this.presetButtons = [];
-    for (const p of hooks.presets) {
+    for (const p of this.hooks.presets) {
       const b = el("button", "lab-preset-btn");
       b.type = "button";
       b.dataset.preset = p.id;
       b.title = p.description;
-      const name = el("span", "lab-preset-name", p.name);
+      const head = el("span", "lab-preset-head");
+      head.appendChild(el("span", "lab-preset-name", p.name));
       const badge = el("span", "lab-kind-badge", "full build");
       badge.hidden = true;
-      b.append(name, badge);
-      b.addEventListener("click", () => hooks.onPreset(p.id));
+      head.appendChild(badge);
+      b.append(head, el("span", "lab-preset-summary", summarize(p.scenario)), el("span", "lab-preset-desc", p.description));
+      b.addEventListener("click", () => this.hooks.onPreset(p.id));
       this.presetButtons.push({ button: b, badge, preset: p });
-      this.presetSection.body.appendChild(b);
+      presets.appendChild(b);
     }
 
-    // Saved scenarios.
-    this.savedSection = this.section("Saved", false);
+    const saved = this.block(panel, "Saved in this browser", "Autosaved scenarios reopen with their stored broker data.");
     this.savedList = el("ul", "lab-saved-list");
-    this.savedSection.body.appendChild(this.savedList);
-    this.savedSection.details.addEventListener("toggle", () => {
-      if (this.savedSection.details.open) this.refreshSaved();
-    });
+    saved.appendChild(this.savedList);
 
-    // Scenario.
-    this.scenarioSection = this.section("Scenario", false);
-    this.scenarioName = el("div", "lab-scenario-name");
-    this.scenarioMeta = el("div", "lab-muted lab-small");
-    this.scenarioSection.body.append(this.scenarioName, this.scenarioMeta);
-    const actions = el("div", "lab-palette-actions");
-    this.settingsBtn = button("Settings…", "lab-btn-sm", () => hooks.onSettings(), { title: "Name, seed and link latency (restarts the world)" });
-    this.saveBtn = button("Save", "lab-btn-sm", () => hooks.onSave(), { title: "Save to this browser now" });
-    this.exportBtn = button("Export JSON", "lab-btn-sm", () => hooks.onExport());
+    const files = this.block(panel, "Share and files");
+    const fileActions = el("div", "lab-palette-actions");
+    this.shareBtn = button("Copy link", "lab-btn-sm", () => this.hooks.onShare(), { title: "Copy a URL that carries this scenario" });
+    this.exportBtn = button("Export JSON", "lab-btn-sm", () => this.hooks.onExport());
     this.importInput = el("input");
     this.importInput.type = "file";
     this.importInput.accept = "application/json,.json";
     this.importInput.hidden = true;
     this.importInput.addEventListener("change", () => {
       const file = this.importInput.files && this.importInput.files[0];
-      if (file) hooks.onImport(file);
+      if (file) this.hooks.onImport(file);
       this.importInput.value = "";
     });
     this.importBtn = button("Import JSON", "lab-btn-sm", () => this.importInput.click());
-    this.shareBtn = button("Copy link", "lab-btn-sm", () => hooks.onShare(), { title: "Copy a URL that carries this scenario" });
-    this.clearBtn = button("New (empty)", "lab-btn-sm", () => hooks.onClear(), { title: "Start an empty scenario" });
-    actions.append(this.settingsBtn, this.saveBtn, this.exportBtn, this.importBtn, this.importInput, this.shareBtn, this.clearBtn);
-    this.scenarioSection.body.appendChild(actions);
-    this.saveState = el("p", "lab-muted lab-small");
-    this.scenarioSection.body.appendChild(this.saveState);
-  }
-
-  section(title, open) {
-    const details = el("details", "lab-pal-section");
-    details.open = open;
-    const summary = el("summary", "lab-panel-title", title);
-    const body = el("div", "lab-pal-body");
-    details.append(summary, body);
-    this.root.appendChild(details);
-    return { details, body };
+    fileActions.append(this.shareBtn, this.exportBtn, this.importBtn, this.importInput);
+    files.appendChild(fileActions);
   }
 
   // `data`: { scenario, availability, role, saveState }
@@ -132,7 +191,6 @@ export class Palette {
       b.disabled = !editable;
     }
     this.roleNote.hidden = editable;
-    this.roleNote.textContent = "You joined a session: the host edits the scenario.";
     for (const { button: b, badge, preset } of this.presetButtons) {
       const kinds = new Set(preset.scenario.nodes.map((n) => n.kind));
       const ok = [...kinds].every((k) => this.availability[k] !== false);
@@ -140,6 +198,7 @@ export class Palette {
       b.classList.toggle("lab-unavailable", !ok);
       b.title = ok ? preset.description : `${preset.description} (${FULL_BUILD_NOTE})`;
       b.disabled = !editable;
+      b.classList.toggle("lab-preset-current", scenario?.name === preset.scenario.name);
     }
     this.topicAdd.disabled = !editable;
     this.renderTopics(scenario, editable);
@@ -158,7 +217,7 @@ export class Palette {
     if (key === this.topicKey) return;
     this.topicKey = key;
     this.topicList.innerHTML = "";
-    if (!topics.length) this.topicList.appendChild(el("li", "lab-muted lab-small", "No topics. Brokers need at least one for producers to write to."));
+    if (!topics.length) this.topicList.appendChild(el("li", "lab-muted lab-small", "No topics yet."));
     for (const t of topics) {
       const li = el("li", "lab-topic-row");
       const name = el("span", "lab-topic-row-name", t.name);
@@ -170,6 +229,11 @@ export class Palette {
       }
       this.topicList.appendChild(li);
     }
+  }
+
+  // Whether the saved list is on screen, so a save can refresh it.
+  savedVisible() {
+    return this.tabs.active === "scenarios";
   }
 
   async refreshSaved() {
