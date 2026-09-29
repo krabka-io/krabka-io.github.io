@@ -743,6 +743,7 @@ async function realBroker(context, base, errors) {
   await page.evaluate(() => {
     document.querySelector('#krabka-lab .lab-storage').open = true;
   });
+  await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
   const volume = `${scenarioId}/4`;
   await waitFor(page, `(() => { const td = document.querySelector('#krabka-lab tr[data-storage-volume="${volume}"] td[data-field="volume-bytes"]'); return td && td.textContent !== '0 B'; })()`, 'the volume in the Storage panel');
   check('the Storage panel lists the real broker volume', true);

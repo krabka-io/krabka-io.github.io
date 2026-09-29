@@ -308,6 +308,7 @@ export function renderBlocks(lines: string[], options: InlineOptions = {}): stri
       continue;
     }
     if (line.startsWith('```')) {
+      const lang = line.slice(3).trim();
       const code: string[] = [];
       i += 1;
       while (i < lines.length && !lines[i].startsWith('```')) {
@@ -315,7 +316,8 @@ export function renderBlocks(lines: string[], options: InlineOptions = {}): stri
         i += 1;
       }
       i += 1; // closing fence
-      blocks.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+      const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
+      blocks.push(`<pre><code${cls}>${escapeHtml(code.join('\n'))}</code></pre>`);
       continue;
     }
     if (/^\s*[-*] /.test(line)) {
