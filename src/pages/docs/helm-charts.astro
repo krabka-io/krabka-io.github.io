@@ -31,7 +31,7 @@ helm install krabka-operator krabka/krabka-operator \\
 
 const charts = [
   { name: 'krabka-operator', repo: 'krabka-operator', purpose: 'The Kubernetes operator. It installs the CRDs from its <code>crds/</code> directory and reconciles Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaRebalance, KafkaConnector, KafkaGrpcGateway and SchemaRegistry resources.' },
-  { name: 'krabka-rebalancer', repo: 'krabka-rebalancer', purpose: 'The partition rebalancer. It answers KafkaRebalance requests with a partition assignment plan. It needs <code>--set bootstrapServers=host:port</code>. The chart defaults to image tag 0.4.0, which is not published on ghcr.io (only commit-SHA tags are), so pin a published image with <code>--set-string image.digest=sha256:...</code> as the quickstart does.' },
+  { name: 'krabka-rebalancer', repo: 'krabka-rebalancer', purpose: 'The partition rebalancer. It answers KafkaRebalance requests with a partition assignment plan. It needs <code>--set bootstrapServers=host:port</code>. The chart defaults to image tag 0.4.0, which is published on ghcr.io. To pin an exact build, set <code>--set-string image.digest=sha256:...</code>, as the quickstart does; a digest wins over the tag.' },
   { name: 'krabka-schema-registry', repo: 'krabka-schema-registry', purpose: 'The Confluent-API-compatible schema registry. It stores schemas in the compacted _schemas topic.' },
 ];
 ---
