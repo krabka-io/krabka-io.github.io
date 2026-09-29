@@ -8,12 +8,10 @@ const releaseNumber = activeRelease.replace(/^v/, '');
 
 const javaGradle = `// Gradle Kotlin DSL
 dependencies {
-    implementation(platform("io.krabka:krabka-streams-bom:${releaseNumber}"))
-    implementation("io.krabka:krabka-streams")
-    implementation("io.krabka:krabka-streams-schema-serde")
-    implementation("io.krabka:krabka-streams-columnar")
-    implementation("io.krabka:krabka-streams-coordination")
-    testImplementation("io.krabka:krabka-streams-test-utils")
+    implementation("io.krabka:krabka-streams:${releaseNumber}")
+    implementation("io.krabka:krabka-streams-schema-serde:${releaseNumber}")
+    implementation("io.krabka:krabka-streams-columnar:${releaseNumber}")
+    testImplementation("io.krabka:krabka-streams-test-utils:${releaseNumber}")
 }`;
 
 const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
@@ -104,6 +102,10 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
         <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{javaGradle}</code></pre>
       </div>
 
+      <p class="text-sm text-gray-300">
+        Maven Central currently holds releases 1.0.0 and 1.1.0 of <code>krabka-streams</code>, <code>krabka-streams-schema-serde</code>, <code>krabka-streams-columnar</code>, and <code>krabka-streams-test-utils</code>. The repository source is at 1.4.0 and also builds the modules marked below. Publish it to a local repository with <code>./gradlew publishToMavenLocal</code> to use them before a release.
+      </p>
+
       <!-- Published Modules -->
       <h2 class="text-xl font-bold text-white pt-2">Published Modules</h2>
       <div class="frosted-card rounded-xl overflow-hidden border border-white/10">
@@ -118,10 +120,10 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams</td><td class="py-2.5 px-4 text-gray-400">Apache Kafka Streams API and krabka defaults</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-schema-serde</td><td class="py-2.5 px-4 text-gray-400">Avro, Protobuf, and JSON Schema serdes</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar</td><td class="py-2.5 px-4 text-gray-400">Apache Arrow batch processing and zero-copy operators</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-coordination</td><td class="py-2.5 px-4 text-gray-400">Leader election, leases, and fencing tokens</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-columnar-schema</td><td class="py-2.5 px-4 text-gray-400">Avro and Protobuf Arrow memory bridges (source only, not yet on Maven Central)</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-coordination</td><td class="py-2.5 px-4 text-gray-400">Leader election, leases, and fencing tokens (source only, not yet on Maven Central)</td></tr>
             <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-test-utils</td><td class="py-2.5 px-4 text-gray-400">ColumnarTestDriver and SchemaRegistryStub helpers</td></tr>
-            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4 text-gray-400">Bill of Materials dependency constraints</td></tr>
+            <tr class="hover:bg-white/5"><td class="py-2.5 px-4 font-mono font-medium text-krab-300">io.krabka:krabka-streams-bom</td><td class="py-2.5 px-4 text-gray-400">Bill of Materials dependency constraints (source only, not yet on Maven Central)</td></tr>
           </tbody>
         </table>
       </div>

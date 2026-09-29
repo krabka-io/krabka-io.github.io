@@ -113,6 +113,11 @@ helm install krabka-operator krabka/krabka-operator --version 0.4.1 \\
         </table>
       </div>
 
+      <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
+        <strong class="font-semibold text-amber-200">Component images:</strong>
+        With no <code class="font-mono text-amber-200">spec.image</code>, a <code class="font-mono text-amber-200">KafkaConnector</code> runs <code class="font-mono text-amber-200">ghcr.io/krabka-io/krabka-connect-worker:v0.4.0</code> and a <code class="font-mono text-amber-200">KafkaGrpcGateway</code> runs <code class="font-mono text-amber-200">ghcr.io/krabka-io/krabka-gateway:v0.4.0</code>. Those release tags are not published on ghcr.io yet, which carries only commit-SHA tags for both. Set <code class="font-mono text-amber-200">spec.image</code> on the resource, or <code class="font-mono text-amber-200">connectorImage</code> and <code class="font-mono text-amber-200">gatewayImage</code> in the chart values, to a published image or a mirror. The <code class="font-mono text-amber-200">SchemaRegistry</code> default, <code class="font-mono text-amber-200">krabka-schema-registry:0.4.0</code>, is published.
+      </div>
+
       <h2 class="text-xl font-bold text-white pt-2">Scope & Architectural Boundaries</h2>
       <p>
         <code class="font-mono text-krab-300">krabka-operator</code> is scoped strictly to Kafka broker and cluster components. The Postgres-compatible compute substrate (<code class="font-mono text-xs text-gray-200">gres</code>) is managed separately from the CRDs listed above.
