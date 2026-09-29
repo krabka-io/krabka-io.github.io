@@ -306,7 +306,16 @@ async function latestReleaseTag(repoName) {
       stdio: 'pipe',
       timeout: 5000,
     }).toString().trim();
-    return out || null;
+    if (out) return out;
+  } catch {
+    // `gh release view` only knows GitHub Releases; fall through to the tags.
+  }
+  try {
+    const out = execSync(`gh api "repos/krabka-io/${repoName}/tags?per_page=100" --jq '.[].name'`, {
+      stdio: 'pipe',
+      timeout: 5000,
+    }).toString();
+    return highestSemverTag(out.split('\n').filter(Boolean));
   } catch {
     return null;
   }
