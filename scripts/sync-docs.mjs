@@ -137,6 +137,8 @@ const cargoComponents = {
   protocol: 'krabka-protocol',
   operator: 'krabka-operator',
   connect: 'krabka-connect',
+  gateway: 'krabka-gateway',
+  rebalancer: 'krabka-rebalancer',
 };
 for (const [key, repoName] of Object.entries(cargoComponents)) {
   const cargoToml = path.resolve(ROOT_DIR, '..', repoName, 'Cargo.toml');
@@ -168,6 +170,8 @@ const releaseRepos = {
   cli: 'krabka-cli',
   'streams-go': 'krabka-streams-go',
   connect: 'krabka-connect',
+  gateway: 'krabka-gateway',
+  rebalancer: 'krabka-rebalancer',
   'client-rs': 'krabka-client-rs',
   protocol: 'krabka-protocol',
 };

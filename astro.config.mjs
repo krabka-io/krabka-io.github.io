@@ -14,6 +14,11 @@ export default defineConfig({
     '/docs/benchmarks': '/verification',
     '/features/observability': 'https://github.com/krabka-io/krabka-o11y',
     '/docs/observability': 'https://github.com/krabka-io/krabka-o11y/blob/main/docs/observing_krabka_clusters.md',
+    // The API reference used to be built into this site; each project now
+    // publishes its own, so the old `latest` routes forward to those.
+    '/api/broker/latest': 'https://krabka.io/krabka-broker/',
+    '/api/streams-java/latest': 'https://krabka.io/krabka-streams-java/api/',
+    '/api/streams-go/latest': 'https://krabka.io/krabka-streams-go/',
     '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
   integrations: [sitemap()],
