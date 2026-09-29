@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
+import krabkaTheme from './src/utils/krabka-shiki-theme.mjs';
 
 export default defineConfig({
   site: 'https://krabka.io',
@@ -28,9 +29,11 @@ export default defineConfig({
   },
   integrations: [sitemap()],
   markdown: {
-    // Astro's default Sätteri pipeline, with one plugin: synced guides carry
-    // wide tables, and each gets its own scroll container.
+    // Astro's default Sätteri pipeline, with one plugin and the site's code
+    // theme: synced guides carry wide tables, and each gets its own scroll
+    // container.
     processor: satteri({ hastPlugins: [wrapTables] }),
+    shikiConfig: { theme: krabkaTheme },
   },
   vite: {
     plugins: [tailwindcss()],
