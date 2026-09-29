@@ -3,8 +3,8 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 import versionsData from '../../data/versions.json';
 
-const releaseNumber = versionsData['streams-java']?.version || '1.4.0';
-const activeRelease = `v${releaseNumber}`;
+const activeRelease = versionsData['streams-java']?.activeRelease || 'v1.1.0';
+const releaseNumber = activeRelease.replace(/^v/, '');
 
 const javaGradle = `// Gradle Kotlin DSL
 dependencies {

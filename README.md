@@ -13,7 +13,7 @@ The site also publishes two things the rest of the organisation depends on: the 
 ### Prerequisites
 - **Node.js**: `>= 22.12.0` (the `engines` field in `package.json`; CI uses Node 24)
 - **npm**: the version that ships with Node
-- **Rust toolchain**: 1.97.1 or newer, with the `wasm32-unknown-unknown` target and `bash` and `curl` on the path. `npm run build` needs it, because it compiles the WebAssembly playground and Cluster Lab. `playground/build.sh` adds the target through `rustup` and downloads the matching `wasm-bindgen` CLI.
+- **Rust toolchain**: 1.97.1 or newer (`npm run build:broker` needs 1.98.1, the `rust-version` of `playground/broker-wasi`), with the `wasm32-unknown-unknown` target and `bash` and `curl` on the path. `npm run build` needs it, because it compiles the WebAssembly playground and Cluster Lab. `playground/build.sh` adds the target through `rustup` and downloads the matching `wasm-bindgen` CLI.
 - **`git`** and, for release tags, an authenticated **`gh`**: `npm run sync-docs` and `npm run sync-proofs` read the sibling repositories from `..` when they sit beside this one, and clone them from GitHub otherwise.
 - **Real broker for the Cluster Lab** (`npm run build:broker`, optional locally): the `wasm32-wasip1` target, `clang` and `llvm-ar`, and a WASI sysroot (the script downloads wasi-sdk 25 when `WASI_SYSROOT` is unset)
 
