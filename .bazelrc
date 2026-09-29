@@ -12,6 +12,8 @@ build --verbose_failures
 
 try-import %workspace%/user.bazelrc
 
-# The Why3 web bundle takes half an hour to build; keep its outputs across
-# runs. CI restores this directory from the Actions cache.
+# The Why3 web bundle takes a long time to build; keep the outputs of the
+# cacheable actions across local runs. CI does not use this directory: the
+# bundle genrule is local and unsandboxed, so it is never answered from here,
+# and deploy.yml caches the unpacked bundle instead.
 build --disk_cache=~/.cache/bazel-disk

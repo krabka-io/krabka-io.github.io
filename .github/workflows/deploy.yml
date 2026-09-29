@@ -101,17 +101,25 @@ jobs:
 
       # The proof explorer's browser re-check needs Why3 and Alt-Ergo compiled
       # to JavaScript. Bazel builds that bundle inside a Docker container
-      # (see why3-web/); the runner supplies Docker and bazelisk. Its inputs
-      # rarely change, so the Bazel disk cache usually answers from the
-      # Actions cache instead of rebuilding OCaml.
+      # (see why3-web/) and the compile takes about nine minutes: the
+      # //why3-web:bundle genrule is unsandboxed and local, so Bazel's disk
+      # cache never answers for it and it reruns opam and js_of_ocaml on every
+      # build. So this caches the unpacked bundle itself, keyed on everything
+      # that goes into it, and runs the build only on a miss. Pull requests
+      # read the copy that main saved; the README is not an input.
       - name: Cache the Why3 web bundle
+        id: why3-web
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ~/.cache/bazel-disk
-          key: why3-web-${{ hashFiles('why3-web/**', 'MODULE.bazel', '.bazelversion', '.bazelrc') }}
+          path: public/why3-web
+          key: why3-web-bundle-v1-${{ hashFiles('why3-web/**', '!why3-web/README.md', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', '.bazelrc') }}
 
       - name: Build the Why3 web bundle
+        if: steps.why3-web.outputs.cache-hit != 'true'
         run: npm run build:why3-web
+
+      - name: Check the Why3 web bundle is in place
+        run: test -s public/why3-web/manifest.json
 
       - name: Build static website
         run: npm run build
