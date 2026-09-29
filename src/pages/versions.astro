@@ -5,16 +5,23 @@ import wireMatrix from '../data/kafka-wire-matrix.json';
 
 const ecosystemRepos = await getEcosystemVersions();
 
-const provenanceSnippet = `# Verify broker container image signature with Sigstore
+const provenanceSnippet = `# Verify the broker container image signature (Sigstore, keyless)
 cosign verify ghcr.io/krabka-io/krabka-broker:latest \\
-  --certificate-identity-regexp '^https://github.com/krabka-io/' \\
+  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-# Verify broker release binary SLSA Level 3 build provenance
-gh attestation verify krabka-broker-linux-amd64.tar.gz --repo krabka-io/krabka-broker
+# Verify the SLSA provenance attestation on the same image
+cosign verify-attestation --type slsaprovenance ghcr.io/krabka-io/krabka-broker:latest \\
+  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-# Verify Java client artifact signature
-gpg --verify krabka-streams-1.1.0.jar.asc krabka-streams-1.1.0.jar`;
+# Verify the CycloneDX SBOM attestation on the same image
+cosign verify-attestation --type cyclonedx ghcr.io/krabka-io/krabka-broker:latest \\
+  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Verify a Java client artifact signature
+gpg --verify <artifact>.jar.asc <artifact>.jar`;
 
 const pageSchema = {
   "@context": "https://schema.org",
@@ -251,7 +258,7 @@ const pageSchema = {
         <div>
           <h2 class="text-xl font-bold text-white mb-1">Release Artifact Provenance & Cryptographic Verification</h2>
           <p class="text-gray-400 text-sm">
-            Published release artifacts are signed and attested during CI: broker container images are signed keylessly with Sigstore (Cosign), release binaries carry SLSA Level 3 build provenance, and Java packages are signed for Maven Central.
+            Published release artifacts are signed and attested during CI: the broker container image is signed keylessly with Sigstore (Cosign) and carries CycloneDX SBOM and SLSA provenance attestations, and Java packages are signed for Maven Central.
           </p>
         </div>
         <button

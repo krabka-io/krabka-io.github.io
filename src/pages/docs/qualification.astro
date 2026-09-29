@@ -3,67 +3,43 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 
 const components = [
-  ['krabka-broker', '986cf6693eebf820c9088e4687a26e1934f50b9b', 'image sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0'],
-  ['krabka-protocol', 'b79bf4965075a96ab88f2612f0b7cb9c86d2097b', 'source'],
-  ['krabka-client-rs', 'f0c86c1ccdecd1776e32349764d7d2efe5dae347', 'source'],
-  ['krabka-schema-registry', 'd7cb5501ea57b0e8ee38953841a7b27762fedb77', 'source'],
+  ['krabka-broker', 'd7e46cfed8ecccac21f4fa3391fd4643dc03fcb6', 'image sha256:d904478424431650314950e390e00107aee089464747208f573206a95c8d0c24'],
+  ['krabka-protocol', '05e3e32d9a0b832453b0c0de144f138c3bab735b', 'source'],
+  ['krabka-client-rs', 'c4c113c74f0ef9774698734aee1ba90fc3785eca', 'source'],
+  ['krabka-schema-registry', '904490ad9242f59da78aa4a87bcda9b1436c4a59', 'source'],
   ['krabka-streams-rs', '375faae45e895ca2afc0622904994a8538fc3593', 'source'],
-  ['krabka-streams-java', 'd623cecec0fa59188390151110cb1c76c3a244af', 'source'],
+  ['krabka-streams-java', 'e3bd6ce69a6d7420dd80038e01127f474834868f', 'source'],
   ['krabka-streams-go', 'f4b7124fd3612c84fac87df805b3bd9356ee2883', 'source'],
   ['krabka-connect', '5cc1bfb806a5288afddc72c2da11510078acd262', 'source'],
-  ['krabka-operator', '0d08946add2ae2d4786f8b6b3ad91f0fb23cc588', 'chart sha256:bc7b1378be63676e546fa1e2c91e4633337176a69f9b0f6ac1909fb850aeff75; image sha256:861796f11b63798f07cd8cfbcb0fa41376259cb6fce07b1e80e15e93de3a377b'],
+  ['krabka-operator', '908e2763d8c3aa27766aabeedc9b98c298e7bb04', 'chart sha256:972d5a8f72a39ce26e42392a193566c918bd4f33cc5ad4e368555ef555ad1ee4; image sha256:01055e4e5a3336f9264abd37f3b08d1876a38d3fff0d47612816c33e9409b39f'],
   ['krabka-cli', '09edae1c0af58038c664b5d1d0fae9bd85f25257', 'binary sha256:c39d85bd62bdf51a34f38e8f7b48a75d42cad0bc01281013b3d2432245dd60c9'],
-  ['krabka-o11y', '12bce8a0093208a1e49f0258ad23b848c19e6a8b', 'image sha256:1f278b3e776feb246953ea6a4ed6474be11f392e4a3a3d41819a038b52b0b23a'],
-  ['krabka-o11y-demo', 'fadddcfb46da03a51792ab744cc8070e7fd8b779', 'compose sha256:50b7c328fccc1c71a74164a5c9df57bb6629168b08f7ef0a617abf777d37af13'],
-  ['krabka-rebalancer', 'f932eab4004349417806eefec738ef0b20ad26f4', 'chart sha256:6c924ea43772b77a92674a7825c71bb915d7621b9d15734f5eecaeb49e1ad700; image sha256:706b3b51a521d97d4166d98a1f39e045b5dfa1508b155bce174161c4bc009b11'],
+  ['krabka-o11y', 'f960dedf6bd71b85b32eeed912ad426da51baddd', 'image sha256:3032e3ba2c11a6c014e499edabd7fb6f8939f9d7d40ae659bd4dfbdad1051efa'],
+  ['krabka-o11y-demo', '5802b8bf572bf331b9e8808900a93ee9b71dcdae', 'compose sha256:9f8f726de617e833f7ff1dccf8ee4f069e9b918d69cec7de473750c1eb47de45; image sha256:3116d67f1d69e226a55a3ea8affc9a7fa99c481bce8163be59f28b687674a9a4'],
+  ['krabka-rebalancer', '2aecf3613c732f9648fa18dfffccf2c07f24a373', 'chart sha256:164de0a99e57263c4d8f421a86d6958df1620acaf2b2f307f9434543b8546544; image sha256:2e200aee4ce5411db615b8597593b16f56607ee54230bb55142debef48f5c8af'],
 ];
 
 const gates = [
-  {
-    name: 'Installation',
-    issue: 523,
-    evidence: [
-      ['Compose smoke test', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-compose-qualified.log'],
-      ['Helm smoke test', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-helm-qualified.tar.gz'],
-      ['Ecosystem compatibility', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-m19-final.tar.gz'],
-      ['Go Apache/Krabka reference matrix', 'https://github.com/krabka-io/krabka-streams-go/actions/runs/34361055012'],
-      ['Java Apache/Krabka reference matrix', 'https://github.com/krabka-io/krabka-streams-java/actions/runs/34361081564'],
-    ],
-  },
-  {
-    name: 'Operator lifecycle',
-    issue: 524,
-    evidence: [
-      ['Upgrade, disruption, evacuation, and certificate rotation', 'https://github.com/krabka-io/krabka-broker/releases/download/v0.5.4/milestone-20-operator-lifecycle.tar.gz'],
-    ],
-  },
-  {
-    name: 'CLI administration',
-    issue: 525,
-    evidence: [
-      ['Three-node administrative command matrix', 'https://github.com/krabka-io/krabka-cli/releases/download/v0.4.0/milestone-20-cli-admin-qualified.log'],
-    ],
-  },
-  {
-    name: 'Observability recovery',
-    issue: 526,
-    evidence: [
-      ['Recovery drill and telemetry bundle', 'https://github.com/krabka-io/krabka-o11y-demo/releases/download/m20-recovery-fadddcf/m20-observability-recovery-fadddcf.tar.gz'],
-    ],
-  },
+  { name: 'Installation', issue: 523, evidence: [['Evidence bundle (11 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/installation.tar.gz']] },
+  { name: 'Operator lifecycle', issue: 524, evidence: [['Evidence bundle (5 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/operator-lifecycle.tar.gz']] },
+  { name: 'CLI administration', issue: 525, evidence: [['Evidence bundle (3 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/cli-admin.tar.gz']] },
+  { name: 'Observability recovery', issue: 526, evidence: [['Evidence bundle (13 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/observability-recovery.tar.gz']] },
+  { name: 'Disaster recovery', issue: 555, evidence: [['Evidence bundle (31 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/disaster-recovery.tar.gz']] },
+  { name: 'Schema evolution', issue: 556, evidence: [['Evidence bundle (7 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/schema-evolution.tar.gz']] },
+  { name: 'Registry migration', issue: 557, evidence: [['Evidence bundle (5 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/registry-migration.tar.gz']] },
+  { name: 'Snapshot retention', issue: 558, evidence: [['Evidence bundle (5 executed checks)', 'https://github.com/krabka-io/krabka-broker/releases/download/qualification-36293960620/snapshot-retention.tar.gz']] },
 ];
 ---
 
 <DocsLayout
-  title="Milestone 20 Qualification"
-  description="Reproducible evidence for the qualified Krabka Milestone 20 ecosystem stack."
+  title="Milestone 23 Qualification"
+  description="Reproducible evidence for the qualified Krabka Milestone 23 ecosystem stack."
   currentSlug="/docs/qualification"
 >
   <div class="space-y-8 font-sans">
     <header class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Milestone 20 Qualification</h1>
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Milestone 23 Qualification</h1>
       <p class="mt-2 text-sm max-w-2xl leading-relaxed text-gray-400">
-        The immutable linux/amd64 stack passed installation, operator lifecycle, CLI administration, and observability recovery gates.
+        The immutable linux/amd64 stack (krabka-broker v0.6.1) passed all eight gates: installation, operator lifecycle, CLI administration, observability recovery, disaster recovery, schema evolution, registry migration, and snapshot retention.
       </p>
     </header>
 
@@ -72,7 +48,7 @@ const gates = [
       <p class="text-sm text-gray-400">Qualified for <code class="text-krab-300">linux/amd64</code>. Source-only rows are built into or exercised against the published artifacts.</p>
       <div class="overflow-hidden rounded-xl border border-white/10">
         <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm" aria-label="Milestone 20 immutable component set">
+          <table class="w-full text-left text-sm" aria-label="Milestone 23 immutable component set">
             <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
               <tr>
                 <th scope="col" class="px-5 py-3">Repository</th>
@@ -97,7 +73,7 @@ const gates = [
     </section>
 
     <div class="overflow-hidden rounded-xl border border-white/10">
-      <table class="w-full text-left text-sm" aria-label="Milestone 20 qualification gates">
+      <table class="w-full text-left text-sm" aria-label="Milestone 23 qualification gates">
         <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
           <tr>
             <th scope="col" class="px-5 py-3">Gate</th>
@@ -128,15 +104,15 @@ const gates = [
     </div>
 
     <p class="text-sm text-gray-300">
-      Revisions, image and package digests, and per-check SHA-256 values are recorded in the
-      <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/krabka-broker/blob/main/qualification/milestone-20.json">final qualification manifest</a>.
+      The gates ran in <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/krabka-broker/releases/tag/qualification-36293960620">qualification release 36293960620</a>. Revisions, image and package digests, and per-check SHA-256 values are recorded in the
+      <a class="text-krab-400 hover:text-krab-300" href="https://github.com/krabka-io/krabka-broker/blob/main/qualification/milestone-23.json">final qualification manifest</a>.
     </p>
 
     <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
       <a href={getPath('/docs/quickstart')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
         <div class="text-sm font-bold text-white">Quickstart Guide →</div>
-        <p class="text-xs text-gray-400 mt-1">Run the qualified Milestone 20 stack locally using Docker Compose or Helm.</p>
+        <p class="text-xs text-gray-400 mt-1">Run the qualified Milestone 23 stack locally using Docker Compose or Helm.</p>
       </a>
       <a href={getPath('/docs/broker/verification')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
         <div class="text-sm font-bold text-white">Verification Catalog →</div>

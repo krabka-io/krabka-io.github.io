@@ -5,48 +5,66 @@ import { getPath } from '../utils/paths';
 const deploySnippets = {
   docker: `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml
 docker compose up -d`,
-  helm: `helm repo add krabka https://krabka.io/charts
+  helm: `kubectl apply -f https://krabka.io/quickstart/crds.yaml
+helm repo add krabka https://krabka.io/charts
 helm repo update
-helm install krabka-operator krabka/krabka-operator --namespace krabka-system --create-namespace
-kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml`
+helm install krabka-operator krabka/krabka-operator --version 0.4.1 \\
+  --namespace krabka-system --create-namespace \\
+  --set-string image.digest=sha256:01055e4e5a3336f9264abd37f3b08d1876a38d3fff0d47612816c33e9409b39f
+kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
+kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
+kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m`
 };
 
 const clientSnippets = {
-  rust: `// Add to Cargo.toml: krabka-client = "1.0"
-use krabka_client::producer::{FutureProducer, ProducerRecord};
+  rust: `// Cargo.toml:
+//   krabka-client-producer = "0.4"
+//   bytes = "1"
+//   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+use bytes::Bytes;
+use krabka_client_producer::{Acks, Producer, ProducerRecord};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let producer = FutureProducer::builder()
-        .bootstrap_servers("localhost:9092")
-        .build()?;
+    let producer = Producer::builder()
+        .bootstrap("localhost:9092")
+        .acks(Acks::All)
+        .build()
+        .await?;
 
-    producer.send(
-        ProducerRecord::to("quickstart-events")
-            .key("user-1")
-            .payload(b"Hello Krabka from Rust!"),
-    ).await?;
+    let metadata = producer
+        .send(ProducerRecord {
+            topic: "quickstart-events".into(),
+            key: Some(Bytes::from("user-1")),
+            value: Some(Bytes::from("Hello Krabka from Rust!")),
+            ..Default::default()
+        })
+        .await
+        .await??;
 
-    println!("Record successfully delivered to Krabka cluster.");
+    producer.flush().await?;
+    producer.close().await?;
+    println!("Delivered to partition {} at offset {}.", metadata.partition, metadata.offset);
     Ok(())
 }`,
-  go: `// go get github.com/krabka-io/krabka-streams-go
+  go: `// go get github.com/twmb/franz-go/pkg/kgo
+// Any Kafka client library works unmodified; this one is franz-go.
 package main
 
 import (
     "context"
     "fmt"
-    "github.com/krabka-io/krabka-streams-go/client"
+
+    "github.com/twmb/franz-go/pkg/kgo"
 )
 
 func main() {
-    p, err := client.NewProducer(client.Config{
-        BootstrapServers: []string{"localhost:9092"},
-    })
+    cl, err := kgo.NewClient(kgo.SeedBrokers("localhost:9092"))
     if err != nil { panic(err) }
+    defer cl.Close()
 
-    err = p.Produce(context.Background(), "quickstart-events", []byte("user-1"), []byte("Hello Krabka from Go!"))
-    if err != nil { panic(err) }
+    rec := &kgo.Record{Topic: "quickstart-events", Key: []byte("user-1"), Value: []byte("Hello Krabka from Go!")}
+    if err := cl.ProduceSync(context.Background(), rec).FirstErr(); err != nil { panic(err) }
     fmt.Println("Produced message to Krabka!")
 }`,
   java: `// Works unmodified with the standard Apache Kafka Java Producer!
@@ -65,7 +83,8 @@ public class App {
         producer.close();
     }
 }`,
-  cli: `kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
+  cli: `kafka-topics.sh --bootstrap-server localhost:9092 --create --topic quickstart-events --partitions 1 --replication-factor 1
+kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning`
 };
 
@@ -139,6 +158,10 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
         <span class="flex h-8 w-8 items-center justify-center rounded-full bg-krab-500 text-sm font-bold text-white">2</span>
         <h2 class="text-2xl font-bold text-white">Produce and Consume Your First Records</h2>
       </div>
+
+      <p class="mb-4 text-sm text-gray-300 leading-relaxed font-sans">
+        The snippets connect to <code class="font-mono text-krab-300 text-xs">localhost:9092</code>, which the Docker Compose stack publishes. Create the topic first with <code class="font-mono text-krab-300 text-xs">kafka-topics.sh</code> (the Kafka CLI tab starts with that command). On Kubernetes the brokers advertise in-cluster names, so run the clients inside the cluster and use <code class="font-mono text-krab-300 text-xs">m20-quickstart-broker-headless.default.svc.cluster.local:9092</code> as the bootstrap address; the <a href={getPath('/docs/quickstart')} class="text-krab-400 hover:text-krab-300 font-semibold">quickstart</a> shows a <code class="font-mono text-krab-300 text-xs">kubectl run</code> example.
+      </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
         <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist">

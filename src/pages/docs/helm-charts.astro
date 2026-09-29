@@ -30,8 +30,8 @@ helm install krabka-operator krabka/krabka-operator \\
   --verify --keyring ./krabka-keyring.gpg`;
 
 const charts = [
-  { name: 'krabka-operator', repo: 'krabka-operator', purpose: 'The Kubernetes operator. It reconciles Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaRebalance and SchemaRegistry resources.' },
-  { name: 'krabka-rebalancer', repo: 'krabka-rebalancer', purpose: 'The partition rebalancer. It answers KafkaRebalance requests with a partition assignment plan.' },
+  { name: 'krabka-operator', repo: 'krabka-operator', purpose: 'The Kubernetes operator. It installs the CRDs from its <code>crds/</code> directory and reconciles Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaRebalance, KafkaConnector, KafkaGrpcGateway and SchemaRegistry resources.' },
+  { name: 'krabka-rebalancer', repo: 'krabka-rebalancer', purpose: 'The partition rebalancer. It answers KafkaRebalance requests with a partition assignment plan. It needs <code>--set bootstrapServers=host:port</code>.' },
   { name: 'krabka-schema-registry', repo: 'krabka-schema-registry', purpose: 'The Confluent-API-compatible schema registry. It stores schemas in the compacted _schemas topic.' },
 ];
 ---
@@ -86,7 +86,7 @@ const charts = [
                     krabka-io/{c.repo}
                   </a>
                 </td>
-                <td class="py-3 px-4 text-gray-300">{c.purpose}</td>
+                <td class="py-3 px-4 text-gray-300" set:html={c.purpose}></td>
               </tr>
             ))}
           </tbody>

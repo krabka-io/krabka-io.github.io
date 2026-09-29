@@ -3,13 +3,13 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 import versionsData from '../../data/versions.json';
 
-const activeRelease = versionsData.broker?.activeRelease || 'v0.5.3';
+const activeRelease = `v${versionsData.broker?.version ?? '0.6.1'}`;
 
 const runCommand = `# 1. Initialize KRaft metadata on a fresh storage volume
 docker run --rm \\
   -v krabka-data:/var/lib/krabka \\
+  --entrypoint /usr/bin/krabka-format \\
   ghcr.io/krabka-io/krabka-broker:latest \\
-  /usr/bin/krabka-format \\
   --log-dir=/var/lib/krabka \\
   --standalone \\
   --node-id=1 \\
@@ -27,25 +27,25 @@ docker run -d \\
   --process-roles=controller,broker`;
 
 const brokerCrates = [
-  { name: 'krabka-broker', desc: 'Request handlers, coordinators, partition replication, quotas, server binary' },
-  { name: 'krabka-raft', desc: 'KRaft consensus engine implementing KIP-595 wire RPC protocol' },
-  { name: 'krabka-kraft-core', desc: 'Shared KRaft record types and quorum state machine' },
-  { name: 'krabka-log', desc: 'On-disk write-ahead log: segments, index files, compaction, retention' },
-  { name: 'krabka-logfmt', desc: 'High-performance binary log record formatter and framing' },
-  { name: 'krabka-remote-storage', desc: 'Tiered-storage reader and cloud object storage offloader' },
-  { name: 'krabka-remote-storage-topic', desc: 'The __remote_log_metadata topic-backed RLMM' },
-  { name: 'krabka-object-store', desc: 'Unified asynchronous cloud object store driver (S3, GCS, MinIO, Azure Blob)' },
-  { name: 'krabka-verified', desc: 'Formally verified core arithmetic, compaction, and recovery algorithms with Creusot proofs' },
-  { name: 'krabka-throttle', desc: 'Token-bucket rate limiters and KIP-scoped client quota enforcement' },
-  { name: 'krabka-authz', desc: 'Authorizer traits, ACL evaluations, and OPA client' },
-  { name: 'krabka-audit', desc: 'Security audit events, OCSF serialization, and verify CLI' },
-  { name: 'krabka-format', desc: 'Formats fresh log directory: meta.properties.json and VotersRecord' },
-  { name: 'krabka-restore', desc: 'Snapshot compaction and disaster recovery utilities' },
-  { name: 'krabka-records-legacy', desc: 'V0 and V1 legacy message format codecs and downconversion' },
-  { name: 'krabka-telemetry', desc: 'OTLP pipeline, Prometheus metrics, and pprof debug endpoints' },
-  { name: 'krabka-barrier', desc: 'Distributed barrier alignment CLI utility' },
-  { name: 'krabka-guard', desc: 'Mutants and invariant verification test harness CLI' },
+  { name: 'krabka-broker', desc: 'Cluster-capable Kafka-compatible broker: request handlers, coordinators, partition replication, quotas, and the krabka-broker daemon binary' },
+  { name: 'krabka-raft', desc: 'Metadata KRaft quorum (KIP-595 KraftController)' },
+  { name: 'krabka-kraft-core', desc: 'Deterministic, sans-IO KRaft consensus core (KIP-595/996)' },
+  { name: 'krabka-log', desc: 'Byte-compatible reader and writer for Apache Kafka\'s on-disk log format' },
+  { name: 'krabka-logfmt', desc: 'Structured-JSON tracing log formatter shared across Krabka services' },
+  { name: 'krabka-remote-storage', desc: 'KIP-405 tiered-storage SPI (RemoteStorageManager and RemoteLogMetadataManager) with reference implementations; ships the krabka-worm-verify binary' },
+  { name: 'krabka-remote-storage-topic', desc: 'Topic-backed RemoteLogMetadataManager for tiered storage' },
+  { name: 'krabka-object-store', desc: 'Unified object-store construction (S3-compatible, GCS, local filesystem) shared by tiered storage and the observability blockstore' },
   { name: 'krabka-verified', desc: 'Formally verified pure kernels (Creusot) shared by consensus, log, and security' },
+  { name: 'krabka-throttle', desc: 'Shared token-bucket throttling primitives' },
+  { name: 'krabka-authz', desc: 'Shared Kafka-ACL authorization evaluator for the broker and gateway' },
+  { name: 'krabka-audit', desc: 'Audit event model, OCSF serialization, and write pipeline; ships the krabka-audit verify binary' },
+  { name: 'krabka-format', desc: 'Formats a log directory: meta.properties.json, bootstrap records, and the singleton VotersRecord (krabka-format binary)' },
+  { name: 'krabka-restore', desc: 'Offline point-in-time restore: rebuilds a bootable log directory from a KIP-405 tiered-storage archive (krabka-restore binary)' },
+  { name: 'krabka-backup', desc: 'Captures the inputs a point-in-time restore needs (RLMM snapshot, controller checkpoint, committed group offsets) and restores offsets afterwards', folder: 'backup-cli' },
+  { name: 'krabka-records-legacy', desc: 'Kafka v0/v1 MessageSet codec and v2 RecordBatch bridge' },
+  { name: 'krabka-telemetry', desc: 'OTLP distributed-tracing pipeline and profiling support' },
+  { name: 'krabka-barrier', desc: 'CLI that administers barrier groups: define a group, trigger a cut, list cuts, verify a cut', folder: 'barrier-cli' },
+  { name: 'krabka-guard', desc: 'CLI that administers topic write freezes and break-glass proposals (two-person rule)', folder: 'guard-cli' },
 ];
 ---
 
@@ -131,7 +131,7 @@ const brokerCrates = [
           </thead>
           <tbody class="divide-y divide-white/5 text-gray-300">
             {brokerCrates.map((c) => {
-              const crateFolder = c.name.replace(/^krabka-/, '');
+              const crateFolder = c.folder ?? c.name.replace(/^krabka-/, '');
               const githubUrl = `https://github.com/krabka-io/krabka-broker/tree/main/crates/${crateFolder}#readme`;
               return (
                 <tr class="hover:bg-white/5 transition-colors">
@@ -167,8 +167,8 @@ const brokerCrates = [
           <tbody class="divide-y divide-white/5 text-gray-300">
             <tr>
               <td class="py-2 px-4 font-medium text-white">Rust Toolchain</td>
-              <td class="py-2 px-4">Rust 1.97.1+ (Edition 2024)</td>
-              <td class="py-2 px-4 text-gray-400">Nightly required for formal verification passes</td>
+              <td class="py-2 px-4">Rust 1.98.1 (Edition 2024)</td>
+              <td class="py-2 px-4 text-gray-400">Pinned stable toolchain; Creusot proofs and cargo +nightly fmt use a nightly</td>
             </tr>
             <tr>
               <td class="py-2 px-4 font-medium text-white">Kafka Wire Protocol</td>
@@ -178,7 +178,7 @@ const brokerCrates = [
             <tr>
               <td class="py-2 px-4 font-medium text-white">OS Architecture</td>
               <td class="py-2 px-4">Linux x86_64, aarch64</td>
-              <td class="py-2 px-4 text-gray-400">glibc 2.35+ or musl</td>
+              <td class="py-2 px-4 text-gray-400">Container image is built on a Wolfi (glibc) base</td>
             </tr>
           </tbody>
         </table>

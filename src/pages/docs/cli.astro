@@ -15,8 +15,15 @@ krabka format --log-dir /var/lib/krabka \\
 
 const pluginCode = `# Plugin subcommands are resolved from PATH as krabka-<name>
 
-# Point-in-time restore from tiered-storage archive (delegates to krabka-restore)
-krabka restore --archive-dir /mnt/backups/s3-archive --target-dir /var/lib/krabka
+# Point-in-time restore from tiered-storage archive (resolved to the krabka-restore binary on PATH)
+krabka restore \\
+  --archive-local /mnt/backups/s3-archive \\
+  --log-dir /var/lib/krabka-restored \\
+  --standalone --node-id 1 --controller-listener localhost:9093
+
+# Validate an archive without writing the target
+krabka restore --archive-local /mnt/backups/s3-archive --log-dir /tmp/check \\
+  --standalone --node-id 1 --controller-listener localhost:9093 --dry-run
 
 # Any krabka-<name> binary on PATH, including tools from the broader Krabka ecosystem
 krabka <name> --help`;
@@ -50,7 +57,7 @@ krabka <name> --help`;
 
       <h2 class="text-xl font-bold text-white pt-2">Built-in: Cluster Formatting</h2>
       <p>
-        The built-in <code class="font-mono text-krab-300 text-xs">krabka format</code> command prepares a clean log directory before broker startup. It initializes the partition layout, writes cluster UUID metadata to <code class="font-mono text-xs text-gray-200">meta.properties.json</code>, seeds the bootstrap <code class="font-mono text-xs text-gray-200">VotersRecord</code> for KRaft consensus, and optionally provisions bootstrap SCRAM credentials and feature levels.
+        The built-in <code class="font-mono text-krab-300 text-xs">krabka format</code> command prepares a clean log directory before broker startup. It writes cluster UUID metadata to <code class="font-mono text-xs text-gray-200">meta.properties.json</code>, seeds the bootstrap <code class="font-mono text-xs text-gray-200">VotersRecord</code> for KRaft consensus, and optionally provisions bootstrap SCRAM credentials and feature levels.
       </p>
 
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
@@ -90,13 +97,18 @@ krabka <name> --help`;
           <tbody class="divide-y divide-white/5 font-sans">
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka format</td>
-              <td class="py-3 px-4 text-gray-400">krabka-cli</td>
-              <td class="py-3 px-4 text-gray-300">Compiled-in built-in (always wins over PATH)</td>
+              <td class="py-3 px-4 text-gray-400">krabka-cli (logic in the krabka-format crate of krabka-broker)</td>
+              <td class="py-3 px-4 text-gray-300">Compiled-in built-in (always wins over PATH); also ships standalone as krabka-format</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
               <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka restore</td>
               <td class="py-3 px-4 text-gray-400">krabka-broker</td>
               <td class="py-3 px-4 text-gray-300">Dispatched to <code class="font-mono text-xs">krabka-restore</code> plugin</td>
+            </tr>
+            <tr class="hover:bg-white/5 transition-colors">
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka backup, barrier, guard</td>
+              <td class="py-3 px-4 text-gray-400">krabka-broker</td>
+              <td class="py-3 px-4 text-gray-300">Dispatched to the <code class="font-mono text-xs">krabka-backup</code>, <code class="font-mono text-xs">krabka-barrier</code> and <code class="font-mono text-xs">krabka-guard</code> plugins</td>
             </tr>
           </tbody>
         </table>

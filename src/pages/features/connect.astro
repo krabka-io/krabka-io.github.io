@@ -2,22 +2,19 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 
-const cdcConfig = `# krabka-connect.toml - PostgreSQL CDC Source Connector
-[[connectors]]
-name = "postgres-orders-cdc"
-type = "io.krabka.connect.postgres.PostgresSourceConnector"
-tasks_max = 4
+const cdcConfig = `[connector]
+name = "postgres-inventory-cdc"
+connector_class = "krabka_connect_postgres::PostgresWalSource"
+tasks_max = 1
 
-[connectors.config]
-database_hostname = "db-prod.internal"
-database_port = 5432
-database_user = "krabka_cdc"
-database_dbname = "ecommerce"
-plugin_name = "pgoutput"
-publication_name = "krabka_orders_pub"
-slot_name = "krabka_orders_slot"
-topic_prefix = "cdc.postgres"
-tombstones_on_delete = true`;
+[connector.config]
+database_url = "postgres://cdc_user:\${env:POSTGRES_CDC_PASSWORD}@db.internal:5432/inventory"
+schema_registry_url = "http://schema-registry:8081"
+slot_name = "krabka_inventory_slot"
+publication_name = "inventory_publication"
+schema = "public"
+tables = ["orders", "line_items", "customers"]
+max_messages_per_poll = 1000`;
 ---
 
 <BaseLayout
