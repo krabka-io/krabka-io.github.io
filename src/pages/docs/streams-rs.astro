@@ -4,7 +4,7 @@ import { getPath } from '../../utils/paths';
 
 const producerCode = `use std::time::Duration;
 use bytes::Bytes;
-use crabka_client_producer::{Acks, Compression, Producer, ProducerRecord};
+use krabka_client_producer::{Acks, Compression, Producer, ProducerRecord};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,8 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }`;
 
-const consumerCode = `use crabka_client_consumer::{AutoOffsetReset, Consumer};
-use crabka_units::millis;
+const consumerCode = `use krabka_client_consumer::{AutoOffsetReset, Consumer};
+use krabka_units::millis;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }`;
 
-const shareConsumerCode = `use crabka_client_consumer::{ShareAckMode, ShareConsumer};
+const shareConsumerCode = `use krabka_client_consumer::{ShareAckMode, ShareConsumer};
 
 // KIP-932 Share-group consumption without partition assignment locks
 let mut consumer = ShareConsumer::builder()
@@ -105,27 +105,27 @@ let mut consumer = ShareConsumer::builder()
           </thead>
           <tbody class="divide-y divide-white/5 font-sans">
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-client-core</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-core</td>
               <td class="py-3 px-4 text-gray-300">Connection pools, async TCP dispatch, retry backoff, SASL/TLS authentication handshake.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-client-producer</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-producer</td>
               <td class="py-3 px-4 text-gray-300">Idempotent producer (<code class="font-mono text-xs">InitProducerId</code>, sequence tracking), batch accumulation, and transactional APIs (KIP-447).</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-client-consumer</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-consumer</td>
               <td class="py-3 px-4 text-gray-300">Consumer group protocol (rebalance, heartbeats, cooperative sticky assignor) and KIP-932 Share Groups.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-client-admin</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-admin</td>
               <td class="py-3 px-4 text-gray-300">Administrative client for topic creation, partition reassignments, ACLs, and dynamic cluster configs.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-client-streams</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-client-streams</td>
               <td class="py-3 px-4 text-gray-300">Stateful streaming topology DSL, windowing operators, RocksDB state stores, and interactive queries.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-schema-serde</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-schema-serde</td>
               <td class="py-3 px-4 text-gray-300">Schema Registry serialization (Avro, JSON Schema, Protobuf) and Apache Arrow IPC formats.</td>
             </tr>
           </tbody>

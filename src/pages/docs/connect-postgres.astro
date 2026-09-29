@@ -4,13 +4,13 @@ import { getPath } from '../../utils/paths';
 
 const configSnippet = `[connector]
 name = "postgres-inventory-cdc"
-connector_class = "crabka_connect_postgres::PostgresWalSource"
+connector_class = "krabka_connect_postgres::PostgresWalSource"
 tasks_max = 1
 
 [connector.config]
 database_url = "postgres://cdc_user:\${env:POSTGRES_CDC_PASSWORD}@db.internal:5432/inventory"
 schema_registry_url = "http://schema-registry:8081"
-slot_name = "crabka_inventory_slot"
+slot_name = "krabka_inventory_slot"
 publication_name = "inventory_publication"
 schema = "public"
 tables = ["orders", "line_items", "customers"]
@@ -18,7 +18,7 @@ max_messages_per_poll = 1000`;
 
 const acceptanceTestSnippet = `# The Postgres CDC acceptance suite boots Postgres and Schema Registry containers,
 # runs a connector, restarts it, and verifies checkpoint resumption.
-cargo test -p crabka-connect-worker --test postgres_cdc -- --ignored`;
+cargo test -p krabka-connect-worker --test postgres_cdc -- --ignored`;
 ---
 
 <DocsLayout
@@ -62,23 +62,23 @@ cargo test -p crabka-connect-worker --test postgres_cdc -- --ignored`;
           </thead>
           <tbody class="divide-y divide-white/5 font-sans">
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-connect</td>
               <td class="py-3 px-4 text-gray-300">The connector SPI: <code class="font-mono text-xs">Source</code>, <code class="font-mono text-xs">Sink</code>, and <code class="font-mono text-xs">Converter</code> traits with checkpoint contracts.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-derive</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-connect-derive</td>
               <td class="py-3 px-4 text-gray-300">Derive macros for declarative connector configuration schemas (<code class="font-mono text-xs">#[derive(ConnectorConfig)]</code>).</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-postgres</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-connect-postgres</td>
               <td class="py-3 px-4 text-gray-300">PostgreSQL CDC source connector (<code class="font-mono text-xs">PostgresWalSource</code>) over <code class="font-mono text-xs">pgoutput</code> replication slots.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-connect-worker</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-connect-worker</td>
               <td class="py-3 px-4 text-gray-300">Connector worker runtime: polls sources, batches into Kafka producers, and checkpoints offsets.</td>
             </tr>
             <tr class="hover:bg-white/5 transition-colors">
-              <td class="py-3 px-4 font-mono font-bold text-krab-300">crabka-replicator</td>
+              <td class="py-3 px-4 font-mono font-bold text-krab-300">krabka-replicator</td>
               <td class="py-3 px-4 text-gray-300">Cluster-to-cluster replication engine wire-compatible with Kafka MirrorMaker 2.</td>
             </tr>
           </tbody>
