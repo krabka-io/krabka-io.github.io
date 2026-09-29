@@ -51,6 +51,9 @@ npm run check-links
 # Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
 npm run check-seo
 
+# Verify that every API reference linked from /api resolves (needs the network)
+npm run check-api-links
+
 # Cluster Lab checks: presets parse (no build needed), then the headless Chromium
 # suites, which need `npm run build` and Playwright with Chromium
 npm run check-lab-presets
@@ -82,11 +85,12 @@ npm run preview
 - **Collapsible Symmetrical Navigation:** `src/layouts/DocsLayout.astro` groups ecosystem topics into collapsible accordions with automatic active-state expansion and breadcrumbs.
 
 ### 2. Central API Reference Hub (`/api`)
-- Hosts compiler-generated, interactive reference trees generated directly by native language compilers:
-  - **Core Broker Engine:** Multi-crate Rustdoc via Cargo/Aspect (`/api/broker/latest/`) covering the broker workspace's crates
-  - **Java Streams & Arrow:** Multi-module Javadoc via Bazel (`/api/streams-java/latest/`)
-  - **Go Streams & Arrow:** Static Godoc via Bazel (`/api/streams-go/latest/`)
-- Versions and active release tags come from `src/data/versions.json`, which `scripts/sync-docs.mjs` refreshes from the sibling repositories and `gh release view`.
+- `/api` is a directory of every component's compiler-generated reference. It is driven by `src/data/api-reference.json`, one entry per component, and each entry links to where that component's own repository publishes its reference on `https://krabka.io/<repository>/`. This site does not host or copy those trees.
+  - **Rust (Bazel `rust_doc`):** `krabka-broker`, `krabka-protocol`, `krabka-client-rs`, `krabka-streams-rs`, `krabka-cli`, `krabka-connect`, `krabka-operator`, `krabka-rebalancer` and `krabka-gateway`. Each repository's `docs-pages.yml` builds `//crates/...:*_doc`, assembles a landing page with `aspect rustdoc-site`, and deploys it to that repository's GitHub Pages. Pages must be enabled with source "GitHub Actions" in each repository's settings.
+  - **Java:** Javadoc from `krabka-streams-java`, at `/krabka-streams-java/api/`.
+  - **Go:** godoc from `krabka-streams-go`, at `/krabka-streams-go/`.
+- `npm run check-api-links` fetches every link in the directory and fails on a non-200 answer or on the old placeholder page. It needs the network, so it is not part of `npm run build`.
+- Release tags come from `src/data/versions.json`, which `scripts/sync-docs.mjs` refreshes from the sibling repositories and the GitHub API.
 
 ### 3. Interactive WebAssembly Consensus Playground (`/docs/playground`)
 - `/docs/playground` runs Krabka's real KRaft consensus quorum directly in the browser.
@@ -169,7 +173,6 @@ krabka-io.github.io/
 │   └── build.sh              # Compiles to WebAssembly in public/playground/
 ├── why3-web/                 # Why3 and Alt-Ergo compiled to JavaScript with Bazel, for the proof explorer
 ├── public/
-│   ├── api/                  # Synced compiler API references (gitignored, populated at build)
 │   ├── brand/                # Stable brand marks and lockups
 │   ├── charts/               # Aggregated Helm repository: index.yaml and tarballs
 │   ├── docs/lab/             # Cross-origin isolation service worker for the Cluster Lab
@@ -185,6 +188,7 @@ krabka-io.github.io/
 │   ├── sync-proofs.mjs       # Copies the broker's Why3find sessions and Coma files
 │   ├── check-links.mjs       # Internal link crawl and resolution validator
 │   ├── check-seo.mjs         # Production technical SEO audit suite
+│   ├── check-api-links.mjs   # Fetches every API reference the /api directory links to
 │   ├── check-catalog.mjs     # Verification catalog parse check (ledger rows and model notes)
 │   ├── check-lab*.mjs        # Cluster Lab presets and headless Chromium end-to-end checks
 │   ├── check-real-broker.mjs # Real broker in the Cluster Lab
@@ -210,7 +214,7 @@ krabka-io.github.io/
 │   │   └── ProseLayout.astro # Article layout for long-form prose pages
 │   ├── pages/
 │   │   ├── 404.astro         # Custom branded 404 error page
-│   │   ├── api/index.astro   # Searchable API Reference Directory table
+│   │   ├── api/index.astro   # Searchable API Reference Directory, from src/data/api-reference.json
 │   │   ├── docs/             # Hub landing, module home templates, and [...slug].astro
 │   │   ├── features/         # Technical architecture pages (KRaft, Tiered Storage, etc.)
 │   │   ├── brand.astro       # Brand guidelines and vector assets

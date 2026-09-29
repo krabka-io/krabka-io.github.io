@@ -3,40 +3,30 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 import versionsData from '../../data/versions.json';
 
-const apiModules = [
-  {
-    name: 'Java Streams & Arrow',
-    runtime: versionsData['streams-java']?.runtime || 'Java 17+',
-    format: 'Javadoc',
-    version: versionsData['streams-java']?.activeRelease || 'v1.1.0',
-    summary: 'Kafka Streams 4.x API, Apache Arrow columnar batches, Schema Registry serdes.',
-    guideHref: '/docs/streams-java',
-    apiHref: '/api/streams-java/latest/',
-  },
-  {
-    name: 'Core Broker Engine',
-    runtime: versionsData['broker']?.runtime || 'Rust 2024',
-    format: 'Rustdoc',
-    version: versionsData['broker']?.activeRelease || 'v0.6.1',
-    summary: 'Byte-exact Kafka wire broker, KRaft consensus quorum, tiered storage engine.',
-    guideHref: '/docs/broker',
-    apiHref: '/api/broker/latest/',
-  },
-  {
-    name: 'Go Streams & Arrow',
-    runtime: versionsData['streams-go']?.runtime || 'Go 1.26+',
-    format: 'Godoc',
-    version: versionsData['streams-go']?.activeRelease || 'v0.1.0',
-    summary: 'Go stream client with Arrow record batching, barrier cuts, and schema decoding.',
-    guideHref: '/docs/streams-go',
-    apiHref: '/api/streams-go/latest/',
-  },
-];
+import apiReference from '../../data/api-reference.json';
+
+// Each reference is published by its own repository to GitHub Pages, under
+// https://krabka.io/<repo>/. The links are absolute because those trees are not
+// part of this site's build.
+const SITE = 'https://krabka.io';
+
+type VersionInfo = { version?: string; activeRelease?: string };
+const versions = versionsData as Record<string, VersionInfo>;
+
+const apiModules = apiReference.map((entry) => {
+  const info = entry.versionKey ? versions[entry.versionKey] : undefined;
+  const release = info?.activeRelease || (info?.version ? `v${info.version}` : null);
+  return {
+    ...entry,
+    release,
+    apiHref: new URL(entry.apiPath, SITE).href,
+  };
+});
 ---
 
 <BaseLayout
   title="API Reference Directory | Krabka"
-  description="Compiler-generated API reference documentation for Krabka polyglot SDKs and runtime engines (Javadoc, Rustdoc, Godoc)."
+  description="Compiler-generated API reference documentation for every Krabka Rust crate, the Java streams library, and the Go streams library (Rustdoc, Javadoc, Godoc)."
 >
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 font-sans">
     <!-- Breadcrumb -->
@@ -55,7 +45,7 @@ const apiModules = [
           API Reference Directory
         </h1>
         <p class="mt-2 text-sm text-gray-400 max-w-2xl leading-relaxed">
-          Compiler-generated reference trees for each Krabka language runtime, preserved in their native documentation format and hosted under the unified Krabka domain.
+          Compiler-generated reference trees for every Krabka component, in each language's native documentation format, all served under krabka.io.
         </p>
       </div>
 
@@ -83,14 +73,14 @@ const apiModules = [
           <tr>
             <th scope="col" class="py-3 px-5">Component</th>
             <th scope="col" class="py-3 px-4">Format</th>
-            <th scope="col" class="py-3 px-4">Runtime</th>
-            <th scope="col" class="py-3 px-4">Release</th>
+            <th scope="col" class="py-3 px-4">Language</th>
+            <th scope="col" class="py-3 px-4">Latest release</th>
             <th scope="col" class="py-3 px-5 text-right">Documentation</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-white/5">
           {apiModules.map((mod) => (
-            <tr class="api-row hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.runtime} ${mod.format}`.toLowerCase()}>
+            <tr class="api-row hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.repo} ${mod.language} ${mod.format}`.toLowerCase()}>
               <td class="py-3.5 px-5">
                 <div class="font-semibold text-white text-sm">
                   {mod.name}
@@ -105,17 +95,17 @@ const apiModules = [
               </td>
 
               <td class="py-3.5 px-4 whitespace-nowrap text-gray-400">
-                {mod.runtime}
+                {mod.language}
               </td>
 
               <td class="py-3.5 px-4 whitespace-nowrap text-gray-300">
-                {mod.version}
+                {mod.release ?? 'main'}
               </td>
 
               <td class="py-3.5 px-5 text-right whitespace-nowrap">
                 <div class="flex flex-col items-end gap-1">
                   <a
-                    href={getPath(mod.apiHref)}
+                    href={mod.apiHref}
                     class="font-semibold text-krab-400 hover:text-white transition-colors"
                   >
                     Browse {mod.format} Reference
@@ -137,7 +127,7 @@ const apiModules = [
     <!-- Editorial Explanation Text (Clean, no bubbles) -->
     <div class="pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2">
       <p>
-        API references are generated directly from source docstrings by native compiler toolchains (JDK 25 Javadoc, Aspect Rustdoc, and Aspect Godoc) during release packaging and published statically under <code class="text-gray-300">/api/&lt;component&gt;/latest/</code>.
+        Every reference is generated from source docstrings by its own repository's build (Bazel <code class="text-gray-300">rust_doc</code> for Rust, Javadoc for Java, godoc for Go), rendered from the <code class="text-gray-300">main</code> branch, and published from that repository to <code class="text-gray-300">https://krabka.io/&lt;repository&gt;/</code>. The release column names the latest tagged release; the reference itself follows <code class="text-gray-300">main</code>.
       </p>
       <p>
         For architectural overviews, memory management specifications, and runnable tutorials, consult the <a href={getPath('/docs')} class="text-krab-400 hover:underline">Documentation Hub</a>.
