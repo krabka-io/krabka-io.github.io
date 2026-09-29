@@ -8,7 +8,7 @@ docker compose up -d
 KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
 docker run --rm --network host "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh \\
   --bootstrap-server localhost:9092 --create --topic quickstart --partitions 1 --replication-factor 1
-printf 'milestone-20-qualified\\n' | docker run --rm -i --network host "$KAFKA_TOOLS" \\
+printf 'hello krabka\\n' | docker run --rm -i --network host "$KAFKA_TOOLS" \\
   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart
 docker run --rm --network host "$KAFKA_TOOLS" /opt/kafka/bin/kafka-console-consumer.sh \\
   --bootstrap-server localhost:9092 --topic quickstart --from-beginning --max-messages 1
@@ -36,7 +36,7 @@ kubectl rollout status deployment/krabka-rebalancer-krabka-rebalancer --timeout=
 
 KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
 kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
-  /bin/bash -lc "printf 'milestone-20-qualified\\n' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart && /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart --from-beginning --max-messages 1"
+  /bin/bash -lc "printf 'hello krabka\\n' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart && /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart --from-beginning --max-messages 1"
 
 kubectl delete kafkatopic/quickstart
 kubectl delete kafka/m20-quickstart
