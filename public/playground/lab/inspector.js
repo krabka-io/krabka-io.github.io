@@ -11,7 +11,7 @@
 // in it survives the snapshots.
 
 import { el, button, select } from "./dom.js";
-import { kindOf, renderState, commandObject } from "./kinds.js";
+import { kindOf, renderState, commandObject, statusLine } from "./kinds.js";
 import { buildForm } from "./forms.js";
 
 const STATE_INTERVAL_MS = 250;
@@ -39,7 +39,7 @@ export class Inspector {
     const titleRow = el("div", "lab-panel-title-row");
     titleRow.appendChild(el("span", "lab-panel-title", "Inspector"));
     this.root.appendChild(titleRow);
-    this.emptyMsg = el("p", "lab-insp-empty lab-muted", "Select a node on the canvas to inspect it.");
+    this.emptyMsg = el("div", "lab-overview");
     this.root.appendChild(this.emptyMsg);
     this.body = el("div", "lab-insp-body");
     this.body.hidden = true;
@@ -147,12 +147,83 @@ export class Inspector {
     const has = n != null;
     this.body.hidden = !has;
     this.emptyMsg.hidden = has;
-    if (!has) return;
+    if (!has) {
+      this.renderOverview();
+      return;
+    }
     this.renderHeader(n);
     this.renderCommands(n);
     if (this.tab === "state") this.renderState(n, force);
     else if (this.tab === "raw") this.renderRaw(n, force);
     else if (this.tab === "config" && this.formFor !== this.configKey(n)) this.renderConfig(true);
+  }
+
+  // What the inspector shows while nothing is selected: every node, its
+  // health and its one-line status, each a button that selects it.
+  renderOverview() {
+    const snapshot = this.data?.snapshot;
+    const nodes = (snapshot?.nodes || []).filter((n) => !kindOf(n.kind).hidden);
+    const key = nodes.map((n) => [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, statusLine(n)].join(":")).join("|");
+    if (key === this.overviewKey) return;
+    this.overviewKey = key;
+    const box = this.emptyMsg;
+    box.replaceChildren();
+    box.appendChild(el("h3", "lab-rail-heading", "Cluster overview"));
+    if (!nodes.length) {
+      box.appendChild(el("p", "lab-rail-help", "The canvas is empty. Add nodes from the Build tab, or load a preset from Scenarios."));
+      const row = el("div", "lab-palette-actions");
+      row.append(
+        button("Load a preset", "lab-btn-sm lab-primary", () => this.hooks.onOpenTab?.("scenarios")),
+        button("Add a node", "lab-btn-sm", () => this.hooks.onOpenTab?.("build")),
+      );
+      box.appendChild(row);
+      return;
+    }
+    const up = nodes.filter((n) => n.alive).length;
+    box.appendChild(el("p", "lab-rail-help", `${up} of ${nodes.length} nodes up. Select a node to see its state, edit its configuration or send it commands.`));
+    const list = el("ul", "lab-overview-list");
+    for (const n of nodes) {
+      const k = kindOf(n.kind);
+      const li = el("li");
+      const b = el("button", "lab-overview-node");
+      b.type = "button";
+      b.dataset.overviewNode = String(n.id);
+      const glyph = el("span", "lab-kind-glyph", k.glyph);
+      glyph.style.background = k.color;
+      const text = el("span", "lab-overview-text");
+      const chips = el("span", "lab-overview-chips");
+      chips.appendChild(el("span", `lab-chip ${n.alive ? "lab-chip-ok" : "lab-chip-err"}`, n.alive ? "up" : "down"));
+      if (n.isolated) chips.appendChild(el("span", "lab-chip lab-chip-warn", "isolated"));
+      const head = el("span", "lab-overview-name");
+      head.append(el("strong", null, n.name), chips);
+      const status = statusLine(n);
+      text.append(head, el("span", "lab-overview-sub", status ? `${k.label} · ${status}` : k.label));
+      b.append(glyph, text);
+      b.addEventListener("click", () => this.hooks.onSelect?.(n.id));
+      li.appendChild(b);
+      list.appendChild(li);
+    }
+    box.appendChild(list);
+
+    // Things a reader can do to a cluster, each a button that does it.
+    box.appendChild(el("h3", "lab-rail-heading", "Try this"));
+    const tries = el("ul", "lab-try-list");
+    for (const [key, label, what] of [
+      ["kill", "Kill a broker", "Watch the controller fence it and move leadership."],
+      ["partition", "Cut a client off", "Partition a client from a broker and watch it retry."],
+      ["latency", "Slow a link to 300 ms", "See round trips and consumer lag grow."],
+      ["consumer", "Add a consumer", "Join the group and watch partitions rebalance."],
+    ]) {
+      const li = el("li");
+      const b = el("button", "lab-try");
+      b.type = "button";
+      b.dataset.try = key;
+      b.append(el("strong", null, label), el("span", null, what));
+      b.addEventListener("click", () => this.hooks.onTry?.(key));
+      li.appendChild(b);
+      tries.appendChild(li);
+    }
+    box.appendChild(tries);
   }
 
   renderHeader(n) {
@@ -210,6 +281,13 @@ export class Inspector {
     }
 
     this.actions.innerHTML = "";
+    if (!k.hidden) {
+      const fault = (label, command, title, cls = "") => this.actions.appendChild(button(label, `lab-btn-sm ${cls}`.trim(), () => this.hooks.onCommand(n.id, command), { title, data: { fault: command } }));
+      if (n.alive) fault("Kill", "kill", "Halt the node; its disk survives", "lab-danger");
+      else fault("Restart", "restart", "Boot again from the kept state", "lab-primary");
+      if (n.isolated) fault("Reconnect", "reconnect", "Restore every link of the node");
+      else fault("Isolate", "isolate", "Cut every link of the node");
+    }
     if (n.kind === "krabka-broker" && n.hosted) {
       this.actions.appendChild(button("Browse disk", "lab-btn-sm", () => this.hooks.onBrowseVolume(n.id)));
     }

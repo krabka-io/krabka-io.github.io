@@ -60,6 +60,20 @@ const CRATE = path.join(ROOT, 'playground', 'wasi-guest');
 const args = new Set(process.argv.slice(2));
 const HEADLESS = !args.has('--headed');
 const STEP_TIMEOUT = 30_000;
+
+// A fresh browser context that has already seen the lab tour, which would
+// otherwise open over the canvas and take the checks' clicks.
+async function newLabContext(browser, viewport) {
+  const context = await browser.newContext({ viewport });
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('krabka-lab.tour', 'done');
+    } catch {
+      // No storage: the tour opens, and the check reports what it finds.
+    }
+  });
+  return context;
+}
 const GUEST_URL = '/lab-test/krabka-wasi-guest.wasm';
 // The guest again, sent 16 KiB at a time, a piece every 60 ms.
 const SLOW_GUEST_URL = '/lab-test/slow/krabka-wasi-guest.wasm';
@@ -421,7 +435,7 @@ async function openLab(page, base) {
   await page.goto(`${base}/docs/lab/`, { waitUntil: 'load' });
   await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
   await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), SIMULATED_PRESETS.find((p) => p.id === 'network-probe').scenario);
-  await page.locator('#krabka-lab .lab-pal-section').first().locator('summary').click();
+  await page.locator('#krabka-lab .lab-dtab[data-tab="build"]').click();
 }
 
 // ---- the flows --------------------------------------------------------------------------------------
@@ -729,6 +743,7 @@ async function realBroker(context, base, errors) {
   await page.evaluate(() => {
     document.querySelector('#krabka-lab .lab-storage').open = true;
   });
+  await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
   const volume = `${scenarioId}/4`;
   await waitFor(page, `(() => { const td = document.querySelector('#krabka-lab tr[data-storage-volume="${volume}"] td[data-field="volume-bytes"]'); return td && td.textContent !== '0 B'; })()`, 'the volume in the Storage panel');
   check('the Storage panel lists the real broker volume', true);
@@ -857,7 +872,7 @@ async function checkContract() {
 // Opening a shared scenario with a real broker reloads the page once and keeps it.
 async function openShared(browser, base, link, errors) {
   console.log('Real broker: opening a shared scenario that has one');
-  const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const context = await newLabContext(browser, { width: 1400, height: 1000 });
   await context.addInitScript(installHelpers);
   await context.addInitScript((url) => sessionStorage.setItem('krabka-lab.broker-module', url), GUEST_URL);
   const page = await context.newPage();
@@ -913,11 +928,11 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
   const errors = [];
   try {
-    const plain = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+    const plain = await newLabContext(browser, { width: 1400, height: 1000 });
     await plain.addInitScript(installHelpers);
     await missingBuild(plain, base, errors);
     await plain.close();
-    const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+    const context = await newLabContext(browser, { width: 1400, height: 1000 });
     await context.addInitScript(installHelpers);
     const link = await realBroker(context, base, errors);
     await context.close();

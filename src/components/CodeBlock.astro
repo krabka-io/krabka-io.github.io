@@ -1,0 +1,20 @@
+---
+// A syntax-highlighted code block for the hand-written pages. The Markdown
+// guides get the same theme through the processor in astro.config.mjs.
+import { Code } from 'astro:components';
+import theme from '../utils/krabka-shiki-theme.mjs';
+
+interface Props {
+  code: string;
+  // A Shiki language id: bash, rust, go, java, kotlin, yaml, toml, xml, json.
+  lang?: string;
+  size?: 'xs' | 'sm';
+  class?: string;
+}
+
+const { code, lang = 'text', size = 'xs', class: className } = Astro.props;
+---
+
+<div class:list={['code-block', size === 'sm' ? 'text-sm' : 'text-xs', className]}>
+  <Code code={code.replace(/\n+$/, '')} lang={lang} theme={theme} wrap={null} />
+</div>

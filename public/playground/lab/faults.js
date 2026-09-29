@@ -1,4 +1,6 @@
-// The fault toolbar under the canvas.
+// The fault toolbar above the canvas. It is always on screen, so a reader
+// sees at once that the cluster can be broken; its buttons wake up as nodes
+// are selected.
 //
 // One selected node offers kill / restart / wipe / isolate / reconnect; two
 // selected nodes (Shift+click the second) offer partition / heal and the
@@ -46,10 +48,14 @@ export class FaultBar {
     this.snapshot = null;
     this.root = el("div", "lab-faults");
     this.root.setAttribute("aria-label", "Faults");
-    this.info = el("span", "lab-faults-info");
-    this.nodeGroup = el("span", "lab-faults-group");
-    this.linkGroup = el("span", "lab-faults-group");
-    this.root.append(el("span", "lab-label", "Faults"), this.info, this.nodeGroup, this.linkGroup);
+    this.nodeGroup = el("span", "lab-faults-group lab-faults-node");
+    this.linkGroup = el("span", "lab-faults-group lab-faults-link");
+    this.nodeCap = el("span", "lab-faults-cap", "Node");
+    this.linkCap = el("span", "lab-faults-cap", "Link");
+    this.nodeGroup.appendChild(this.nodeCap);
+    this.linkGroup.appendChild(this.linkCap);
+    this.hint = el("span", "lab-faults-hint", "Shift+click: link controls");
+    this.root.append(el("strong", "lab-faults-title", "Break things"), this.nodeGroup, this.hint, this.linkGroup);
     container.appendChild(this.root);
     this.buildNodeGroup();
     this.buildLinkGroup();
@@ -76,7 +82,7 @@ export class FaultBar {
     this.latencyInput.step = "1";
     this.latencyInput.value = "50";
     this.latencyInput.setAttribute("aria-label", "Link latency in milliseconds");
-    this.latencyBtn = button("Latency ms", "lab-btn-sm", () => this.link("latency"), { title: "Set the one-way latency of the link" });
+    this.latencyBtn = button("Set", "lab-btn-sm", () => this.link("latency"), { title: "Set the one-way latency of the link" });
     this.lossInput = el("input", "lab-input lab-input-xs");
     this.lossInput.type = "number";
     this.lossInput.min = "0";
@@ -84,10 +90,14 @@ export class FaultBar {
     this.lossInput.step = "1";
     this.lossInput.value = "10";
     this.lossInput.setAttribute("aria-label", "Link loss in percent");
-    this.lossBtn = button("Loss %", "lab-btn-sm", () => this.link("loss"), { title: "Drop this share of the data frames on the link" });
-    this.resetBtn = button("Reset link", "lab-btn-sm", () => this.resetLink(), { title: "Heal, no loss, default latency" });
+    this.lossBtn = button("Set", "lab-btn-sm", () => this.link("loss"), { title: "Drop this share of the data frames on the link" });
+    this.resetBtn = button("Reset", "lab-btn-sm", () => this.resetLink(), { title: "Heal, no loss, default latency" });
     this.bytesBtn = button("Network bytes", "lab-btn-sm", () => this.hooks.onBrowseTraffic(), { title: "Inspect recent frames and payload bytes between these nodes" });
-    g.append(this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn, this.bytesBtn);
+    const latency = el("span", "lab-fault-num");
+    latency.append("Latency", this.latencyInput, "ms", this.latencyBtn);
+    const loss = el("span", "lab-fault-num");
+    loss.append("Loss", this.lossInput, "%", this.lossBtn);
+    g.append(this.partitionBtn, this.healBtn, latency, loss, this.resetBtn, this.bytesBtn);
   }
 
   update({ snapshot, selection }) {
@@ -98,11 +108,15 @@ export class FaultBar {
     const nodeSnap = (id) => snapshot?.nodes?.find((n) => n.id === id);
     const one = a != null;
     const two = a != null && b != null;
-    this.root.hidden = !one;
-    this.nodeGroup.hidden = !one || two;
+    this.root.dataset.selected = String(this.selection.length);
+    this.nodeGroup.dataset.active = String(one && !two);
+    this.linkGroup.dataset.active = String(two);
+    // Two nodes swap the node buttons for the link controls in the same row.
+    this.nodeGroup.hidden = two;
     this.linkGroup.hidden = !two;
-    for (const btn of [this.killBtn, this.restartBtn, this.wipeBtn, this.isolateBtn, this.reconnectBtn]) btn.disabled = !one;
-    if (one) {
+    this.hint.hidden = two;
+    for (const btn of [this.killBtn, this.restartBtn, this.wipeBtn, this.isolateBtn, this.reconnectBtn]) btn.disabled = !one || two;
+    if (one && !two) {
       const s = nodeSnap(a);
       if (s) {
         this.killBtn.disabled = !s.alive;
@@ -111,7 +125,7 @@ export class FaultBar {
         this.reconnectBtn.disabled = !s.isolated;
       }
     }
-    for (const c of [this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn]) c.disabled = !two;
+    for (const c of [this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn, this.bytesBtn]) c.disabled = !two;
     if (two) {
       const link = snapshot?.links?.find((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a));
       const cut = Boolean(link?.cut);
@@ -123,11 +137,14 @@ export class FaultBar {
         bits.push(`${link.latency_ms} ms`);
         if (link.loss_permille) bits.push(`${(link.loss_permille / 10).toFixed(1)}% loss`);
       } else if (snapshot) bits.push(`${snapshot.default_latency_ms} ms`);
-      this.info.textContent = bits.join(" · ");
+      this.linkCap.textContent = `Link · ${bits.join(" · ")}`;
+      this.nodeCap.textContent = "Node";
     } else if (one) {
-      this.info.textContent = `${name(a)} — Shift+click another node for link controls and bytes`;
+      this.nodeCap.textContent = `Node · ${name(a)}`;
+      this.linkCap.textContent = "Link";
     } else {
-      this.info.textContent = "Select a node; Shift+click a second one for link controls and bytes";
+      this.nodeCap.textContent = "Node · click a card";
+      this.linkCap.textContent = "Link";
     }
   }
 

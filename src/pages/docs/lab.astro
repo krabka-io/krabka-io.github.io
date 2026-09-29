@@ -1,5 +1,5 @@
 ---
-import DocsLayout from '../../layouts/DocsLayout.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 import '../../styles/lab.css';
 
@@ -13,31 +13,39 @@ const real = [
 ];
 
 const controls = [
-  { control: 'Play / Pause, +10 ms, +100 ms, +1 s, Settle, speed', effect: 'The page owns the clock. Nothing moves until it advances simulated time; Settle runs until nothing is due.' },
+  { control: 'Play / Pause, Step, Settle, Speed', effect: 'The page owns the clock. Nothing moves until it advances simulated time; Settle runs until nothing is due. The speed control runs slow events, like a broker session timeout, faster.' },
   { control: 'Drag a card', effect: 'Moves the node. Positions are saved with the scenario and shared with the link.' },
   { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables link controls and Network bytes for that pair. Open a frame for its hex and ASCII bytes; hover a decoded field for its byte key.' },
-  { control: 'Kill / Restart / Wipe', effect: 'Halts a node with its state kept, boots it again from that state, or boots it from nothing.' },
-  { control: 'Isolate / Reconnect, Partition / Heal, Latency, Loss', effect: 'Cuts or restores every link of a node or one link between two, or sets that link’s latency and loss rate.' },
+  { control: 'Break things bar', effect: 'Always above the canvas. With one node selected: Kill halts it with its state kept, Restart boots it from that state, Wipe boots it from nothing, Isolate and Reconnect cut and restore every link of the node. With two selected: Partition and Heal cut and restore one link, and Latency and Loss set its delay and drop rate.' },
   { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command as JSON, faults, remove.' },
-  { control: 'Inspector tabs', effect: 'State shows a real broker’s process, log and network activity; a client’s assignment, positions, commits and lag; or a streams app’s tasks, stores and topology. Config edits the node and restarts it; Raw JSON is the snapshot.' },
-  { control: 'Command bar', effect: 'The selected node’s control commands: a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
+  { control: 'Inspector', effect: 'With nothing selected it lists every node and its health. For a selected node it shows State (a real broker’s process, log and network activity; a client’s assignment, positions, commits and lag; or a streams app’s tasks, stores and topology), Config (edits the node and restarts it), and Raw JSON. Its command bar sends a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
+  { control: 'Events, Network bytes, Storage', effect: 'The tabs under the canvas: everything the cluster recorded, the frames on a selected link, and what each node keeps in this browser.' },
+  { control: 'Tour, ?', effect: 'The tour walks through the controls in a minute and can kill and restart a broker for you. The ? button lists the shortcuts: Space plays and pauses, K and R kill and restart the selected node, F fits the canvas.' },
 ];
 ---
 
-<DocsLayout
-  title="Cluster Lab"
+<BaseLayout
+  title="Cluster Lab | Krabka Documentation"
   description="Run real krabka brokers in your browser with a schema registry, producers, consumers and streams apps, plus network faults and multi-tab hosting."
-  currentSlug="/docs/lab"
-  wide
 >
-  <div class="space-y-6 font-sans">
-    <div class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Cluster Lab</h1>
-      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
-        A distributed-systems playground. Run real krabka brokers with clients and apps, break their links, and watch them recover. No backend, no install.
-      </p>
-    </div>
+  <!-- The lab is an app, so it takes the window: a one-line header above it, the guide below. -->
+  <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pb-3 pt-5 font-sans sm:px-6 lg:px-8">
+    <nav aria-label="Breadcrumb" class="w-full text-xs text-gray-400">
+      <a href={getPath('/')} class="hover:text-white">Home</a> /
+      <a href={getPath('/docs')} class="hover:text-white">Docs</a> /
+      <span class="text-gray-200">Cluster Lab</span>
+    </nav>
+    <h1 class="text-2xl font-extrabold text-white">Cluster Lab</h1>
+    <p class="text-sm text-gray-400">Run real Krabka brokers with clients and apps, break their links, and watch them recover. No backend, no install.</p>
+  </header>
 
+  <div id="krabka-lab" class="not-prose">
+    <p class="lab-fallback">
+      Loading the Cluster Lab. This panel needs JavaScript and WebAssembly. If it does not appear, your browser may have them disabled.
+    </p>
+  </div>
+
+  <div class="mx-auto max-w-4xl space-y-6 px-4 py-10 font-sans sm:px-6">
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
       <p>
         The real brokers run as WebAssembly processes in Workers. Clients and apps run as state machines in the lab module.
@@ -48,12 +56,6 @@ const controls = [
         browser's IndexedDB, so a reload reopens the cluster where you left it. The
         schema registry keeps its schemas where Confluent's does, in the <code class="font-mono text-krab-300">_schemas</code> topic on the brokers, and replays it on every start. Several tabs, on one machine or across the internet, can each host a
         share of the nodes over WebRTC data channels.
-      </p>
-    </div>
-
-    <div id="krabka-lab" class="not-prose">
-      <p class="lab-fallback">
-        Loading the Cluster Lab. This panel needs JavaScript and WebAssembly. If it does not appear, your browser may have them disabled.
       </p>
     </div>
 
@@ -99,12 +101,12 @@ const controls = [
 
       <h2 class="text-xl font-bold text-white pt-2">Saving, sharing, hosting</h2>
       <p>
-        The scenario autosaves to this browser; the <strong class="text-white">Saved</strong> list reopens it with its durable
-        state. In <strong class="text-white">Storage</strong>, open a real broker volume, then a file, to inspect its
+        The scenario autosaves to this browser; the <strong class="text-white">Saved in this browser</strong> list on the Scenarios tab reopens it with its durable
+        state. In the <strong class="text-white">Storage</strong> tab under the canvas, open a real broker volume, then a file, to inspect its
         committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
       </p>
       <p>
-        <strong class="text-white">Invite a tab</strong> in the Session panel makes a link that another tab or another machine
+        <strong class="text-white">Invite a tab</strong> in the Session section of the Connect tab makes a link that another tab or another machine
         opens to join. That page shows an answer code; paste it back into the host and the two are connected without any server.
         The host then assigns nodes to peers from the inspector; frames between tabs travel over the WebRTC data channel, and each
         tab persists the state of the nodes it hosts.
@@ -112,7 +114,7 @@ const controls = [
 
       <h2 class="text-xl font-bold text-white pt-2">Real brokers</h2>
       <p>
-        <strong class="text-white">Krabka broker (real)</strong> in the palette adds the real <code class="font-mono text-krab-300">krabka-broker</code>, compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
+        <strong class="text-white">Krabka broker</strong> in the Build tab adds the real <code class="font-mono text-krab-300">krabka-broker</code>, compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
         WASI runtime: its listeners, its dials to other nodes and its clock are the lab's, so links, faults, pause and speed
         apply to it like to any node, and its disk is a volume in this browser's IndexedDB. The runtime needs a
         cross-origin isolated page, so the first time a scenario with one runs here the page reloads once, and reopens the
@@ -122,7 +124,7 @@ const controls = [
 
       <h2 class="text-xl font-bold text-white pt-2">Connect kafkactl from your computer</h2>
       <p>
-        Open <strong class="text-white">Connect with kafkactl</strong> beside the lab. This is a krabka build of
+        Open the <strong class="text-white">Connect</strong> tab in the left rail and expand <strong class="text-white">Connect with kafkactl</strong>. This is a krabka build of
         <a href="https://github.com/fgrosse/kafkactl">fgrosse/kafkactl v1.4.0</a> with the bridge command added. Download it for
         your computer, extract it, and run <code>kafkactl lab bridge</code>. Enter the token it prints in the lab.
         The browser may ask to allow access to the local network. The bridge listens only on this computer.
@@ -173,6 +175,6 @@ const controls = [
       </div>
     </div>
   </div>
-</DocsLayout>
+</BaseLayout>
 
 <script src={getPath('/playground/lab/app.js')} type="module" is:inline></script>

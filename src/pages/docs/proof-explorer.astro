@@ -1,5 +1,5 @@
 ---
-import DocsLayout from '../../layouts/DocsLayout.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getPath } from '../../utils/paths';
 import sessions from '../../data/proof-sessions.json';
 import '../../styles/proofs.css';
@@ -41,16 +41,20 @@ const commitShort = source.commit.slice(0, 12);
 const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif/krabka_verified_rlib`;
 ---
 
-<DocsLayout
-  title="Proof Explorer"
+<BaseLayout
+  title="Proof Explorer | Krabka Documentation"
   description="Browse the Why3 proof sessions of Krabka's Creusot-verified kernels, tactic by tactic and prover by prover, and re-check one in the browser with Alt-Ergo compiled to JavaScript."
-  currentSlug="/docs/proof-explorer"
-  wide
 >
-  <div class="space-y-6 font-sans min-w-0">
-    <div class="border-b border-white/10 pb-4 min-w-0">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Proof Explorer</h1>
-      <p class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400 [overflow-wrap:anywhere]" aria-label="Proof figures">
+  <!-- The explorer is an app, so it takes the window: a compact header above it, the guide below. -->
+  <header class="mx-auto max-w-[120rem] px-4 pb-3 pt-5 font-sans sm:px-6 lg:px-8">
+    <nav aria-label="Breadcrumb" class="text-xs text-gray-400">
+      <a href={getPath('/')} class="hover:text-white">Home</a> /
+      <a href={getPath('/docs')} class="hover:text-white">Docs</a> /
+      <span class="text-gray-200">Proof Explorer</span>
+    </nav>
+    <div class="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <h1 class="text-2xl font-extrabold text-white">Proof Explorer</h1>
+      <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400 [overflow-wrap:anywhere]" aria-label="Proof figures">
         {facts.map((fact, i) => (
           <>
             {i > 0 && <span class="text-gray-600 select-none" aria-hidden="true">·</span>}
@@ -58,12 +62,24 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
           </>
         ))}
       </p>
-      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
-        The recorded proofs of <code class="font-mono text-krab-300">krabka-verified</code> at broker
-        commit <a href={commitUrl} target="_blank" rel="noopener noreferrer" class="font-mono text-krab-400 hover:text-krab-300">{commitShort}</a>,
-        one session per function, with the browser re-check when the build carries Why3 and Alt-Ergo.
+    </div>
+  </header>
+
+    <script type="application/json" id="proof-sessions" is:inline set:html={sessionsJson}></script>
+  <div id="krabka-proofs" class="not-prose" data-base={getPath('/').replace(/\/$/, '')}>
+      <p class="px-fallback">
+        Loading the proof explorer. This panel needs JavaScript. If it does not appear, your browser may have
+        it disabled.
       </p>
     </div>
+
+
+  <div class="mx-auto max-w-4xl space-y-6 px-4 py-10 font-sans sm:px-6">
+    <p class="text-gray-400 text-sm leading-relaxed">
+      The recorded proofs of <code class="font-mono text-krab-300">krabka-verified</code> at broker
+      commit <a href={commitUrl} target="_blank" rel="noopener noreferrer" class="font-mono text-krab-400 hover:text-krab-300">{commitShort}</a>,
+      one session per function, with the browser re-check when the build carries Why3 and Alt-Ergo.
+    </p>
 
     <div class="grid gap-4 xl:grid-cols-2 xl:gap-8 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
       <p>
@@ -83,6 +99,7 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
       </p>
     </div>
 
+
     <h2 id="sessions" class="text-xl font-bold text-white pt-2">Proof sessions</h2>
     <p class="text-sm text-gray-400 -mt-2 [overflow-wrap:anywhere]">
       Kernels are the decision functions the broker calls, helpers and lemmas support their proofs, and derived
@@ -92,13 +109,6 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
       form <code class="font-mono text-krab-300">#session=module/name</code> opens a session directly.
     </p>
 
-    <script type="application/json" id="proof-sessions" is:inline set:html={sessionsJson}></script>
-    <div id="krabka-proofs" class="not-prose" data-base={getPath('/').replace(/\/$/, '')}>
-      <p class="px-fallback">
-        Loading the proof explorer. This panel needs JavaScript. If it does not appear, your browser may have
-        it disabled.
-      </p>
-    </div>
 
     <div class="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs leading-relaxed text-gray-400 space-y-2 [overflow-wrap:anywhere] not-prose">
       <p>
@@ -133,6 +143,6 @@ const commitUrl = `https://github.com/${source.repo}/tree/${source.commit}/verif
       </div>
     </div>
   </div>
-</DocsLayout>
+</BaseLayout>
 
 <script src={getPath('/proofs/explorer.js')} type="module" is:inline></script>

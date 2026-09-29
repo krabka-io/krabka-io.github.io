@@ -18,6 +18,7 @@
 // the root element, and `sitePath` prefixes it.
 
 import { obligationSummary, formulaTokens, operators, tokenText, readableTokens } from "./readability.js";
+import { highlightWhy } from "./highlight.js";
 
 const COMA_DIR = "/proofs/coma/";
 const WHY3_WEB_DIR = "/why3-web/";
@@ -53,6 +54,7 @@ let byId = new Map();
 let selectedId = null;
 let filterText = "";
 let useFormulaWords = false;
+let activeTab = "tree";
 const kindsOn = new Set(KINDS.filter((k) => k.on).map((k) => k.key));
 
 // The DOM the module owns.
@@ -220,6 +222,7 @@ function renderList() {
       const item = el("button", "px-item");
       item.type = "button";
       item.dataset.id = s.id;
+      item.dataset.kind = s.kind;
       item.title = `${displayName(s)} — ${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.setAttribute("aria-label", item.title);
       if (s.id === selectedId) item.classList.add("px-active");
@@ -242,8 +245,12 @@ function markActive() {
   }
   const active = listEl.querySelector(".px-item.px-active");
   if (active) active.closest("details").open = true;
-  if (active && typeof active.scrollIntoView === "function") {
-    active.scrollIntoView({ block: "nearest" });
+  if (active) {
+    // Scroll the list itself: scrollIntoView would move the page as well.
+    const list = listEl.getBoundingClientRect();
+    const row = active.getBoundingClientRect();
+    if (row.top < list.top) listEl.scrollTop -= list.top - row.top + 8;
+    else if (row.bottom > list.bottom) listEl.scrollTop += row.bottom - list.bottom + 8;
   }
 }
 
@@ -511,12 +518,11 @@ function renderObligations(session) {
 // ---- detail: Coma ------------------------------------------------------------
 
 function renderComa(session) {
-  const details = el("details", "px-section px-coma");
-  const summary = el("summary");
+  const section = el("section", "px-section px-coma");
+  const shead = el("div", "px-section-head");
   const size = session.coma && session.coma.bytes ? `${fmtCount(session.coma.bytes)} bytes` : "";
-  summary.append(el("h3", "px-section-title", "Generated Coma"), el("span", "px-section-hint", `${session.id}.coma${size ? ", " + size : ""}, fetched when opened`));
-  details.appendChild(summary);
-  const body = el("div", "px-coma-body");
+  shead.append(el("h3", "px-section-title", "Generated Coma"), el("span", "px-section-hint", `${session.id}.coma${size ? ", " + size : ""}`));
+  section.appendChild(shead);
   const note = el("p", "px-note");
   note.append(
     document.createTextNode("Creusot translates the Rust function into this Coma program; Why3 derives the verification conditions from it. The "),
@@ -525,29 +531,55 @@ function renderComa(session) {
     el("code", "", "let%span"),
     document.createTextNode(" declarations at the top, which name the source file, line and column the condition came from."),
   );
-  body.appendChild(note);
-  const pre = el("pre", "px-pre", "");
+  section.appendChild(note);
+  const bar = el("div", "px-code-bar");
+  const status = el("span", "px-code-status", "");
+  const wrap = el("label", "px-formula-toggle");
+  const wrapBox = el("input");
+  wrapBox.type = "checkbox";
+  wrap.append(wrapBox, document.createTextNode("Wrap long lines"));
+  const copy = el("button", "px-btn px-btn-sm", "Copy");
+  copy.type = "button";
+  copy.disabled = true;
+  bar.append(status, wrap, copy);
+  section.appendChild(bar);
+  const pre = el("pre", "px-pre px-code", "");
+  pre.tabIndex = 0;
   pre.hidden = true;
-  const status = el("p", "px-note", "");
-  body.append(status, pre);
-  details.appendChild(body);
-  let fetched = false;
-  details.addEventListener("toggle", async () => {
-    if (!details.open || fetched) return;
-    fetched = true;
+  section.appendChild(pre);
+  wrapBox.addEventListener("change", () => pre.classList.toggle("px-wrap", wrapBox.checked));
+  let text = "";
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Copy failed";
+    }
+    setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1800);
+  });
+  let started = false;
+  // Fetched and highlighted the first time the Coma tab opens.
+  section.load = async () => {
+    if (started) return;
+    started = true;
     status.textContent = "Fetching the Coma file...";
     try {
-      const text = await fetchComa(session.id);
-      pre.textContent = text;
+      text = await fetchComa(session.id);
+      pre.innerHTML = highlightWhy(text);
       pre.hidden = false;
-      status.textContent = `${fmtCount(text.split("\n").length)} lines.`;
+      copy.disabled = false;
+      status.textContent = `${fmtCount(text.split("\n").length)} lines`;
+      status.classList.remove("px-error");
     } catch (err) {
-      fetched = false;
+      started = false;
       status.textContent = `Could not fetch ${comaSitePath(session.id)}: ${err && err.message ? err.message : err}`;
       status.classList.add("px-error");
     }
-  });
-  return details;
+  };
+  return section;
 }
 
 const comaCache = new Map();
@@ -569,7 +601,60 @@ function renderDetail(session) {
     detailEl.appendChild(el("p", "px-empty", "Pick a session from the list."));
     return;
   }
-  detailEl.append(renderHead(session), renderTree(session), renderObligations(session), renderComa(session), renderCheckPanel(session));
+  const obligationCount = Array.isArray(session.obligations) ? session.obligations.length : 0;
+  const panels = [
+    { id: "tree", label: "Proof tree", content: renderTree(session) },
+    { id: "obligations", label: "Obligations", count: obligationCount || null, content: renderObligations(session) },
+    { id: "coma", label: "Coma source", content: renderComa(session) },
+    { id: "check", label: "Re-check in browser", content: renderCheckPanel(session) },
+  ];
+  // Each panel sits in a holder of its own, so the re-check panel can be
+  // swapped out (when the bundle probe answers) without losing its tab.
+  for (const p of panels) {
+    p.node = el("div", "px-tabpanel");
+    p.node.appendChild(p.content);
+    p.node.load = p.content.load;
+  }
+  const tabs = el("div", "px-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Session details");
+  const body = el("div", "px-panels");
+  const show = (id) => {
+    activeTab = id;
+    for (const p of panels) {
+      const on = p.id === id;
+      p.tab.classList.toggle("px-tab-active", on);
+      p.tab.setAttribute("aria-selected", String(on));
+      p.tab.tabIndex = on ? 0 : -1;
+      p.node.hidden = !on;
+    }
+    body.scrollTop = 0;
+    const active = panels.find((p) => p.id === id);
+    if (active.node.load) active.node.load();
+  };
+  for (const [i, p] of panels.entries()) {
+    const tab = el("button", "px-tab");
+    tab.type = "button";
+    tab.dataset.tab = p.id;
+    tab.setAttribute("role", "tab");
+    tab.append(document.createTextNode(p.label));
+    if (p.count) tab.appendChild(el("span", "px-tab-n", fmtCount(p.count)));
+    tab.addEventListener("click", () => show(p.id));
+    tab.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const next = panels[(i + step + panels.length) % panels.length];
+      show(next.id);
+      next.tab.focus();
+    });
+    p.tab = tab;
+    p.node.setAttribute("role", "tabpanel");
+    tabs.appendChild(tab);
+    body.appendChild(p.node);
+  }
+  detailEl.append(renderHead(session), tabs, body);
+  show(panels.some((p) => p.id === activeTab) ? activeTab : "tree");
 }
 
 function select(id, pushHash) {
@@ -601,9 +686,17 @@ function buildShell() {
   root.replaceChildren();
   const layout = el("div", "px-layout");
 
-  const sidebar = el("details", "px-sidebar");
-  sidebar.open = true;
-  sidebar.appendChild(el("summary", "px-sidebar-toggle", "Browse sessions"));
+  const sidebar = el("div", "px-sidebar");
+  // In a narrow container the list folds behind this button; wide, it is
+  // always open and the button is hidden.
+  const toggle = el("button", "px-sidebar-toggle", "Browse sessions");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.addEventListener("click", () => {
+    const folded = sidebar.classList.toggle("px-folded");
+    toggle.setAttribute("aria-expanded", String(!folded));
+  });
+  sidebar.appendChild(toggle);
   const controls = el("div", "px-sidebar-controls");
   const filter = el("input", "px-input px-filter");
   filter.type = "search";
@@ -637,13 +730,46 @@ function buildShell() {
   countEl.setAttribute("role", "status");
   listEl = el("nav", "px-list");
   listEl.setAttribute("aria-label", "Proof sessions");
-  controls.append(filter, chips, countEl, listEl);
+  // Arrow keys walk the list, so a reader can step through sessions without the mouse.
+  listEl.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const items = [...listEl.querySelectorAll(".px-item")];
+    const at = items.indexOf(document.activeElement);
+    if (at < 0) return;
+    const next = items[at + (e.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    select(next.dataset.id, true);
+  });
+  filter.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const first = visibleSessions()[0];
+      if (first) select(first.id, true);
+    } else if (e.key === "ArrowDown") {
+      const first = listEl.querySelector(".px-item");
+      if (first) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+  const hint = el("p", "px-hint");
+  hint.append(el("kbd", "", "/"), document.createTextNode(" filter  "), el("kbd", "", "↑"), el("kbd", "", "↓"), document.createTextNode(" browse"));
+  controls.append(filter, chips, countEl, listEl, hint);
   sidebar.appendChild(controls);
 
   detailEl = el("section", "px-detail");
   detailEl.setAttribute("aria-live", "polite");
   layout.append(sidebar, detailEl);
   root.appendChild(layout);
+  root.classList.add("px-app");
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !e.target.closest("input, textarea, select, [contenteditable]")) {
+      e.preventDefault();
+      filter.focus();
+    }
+  });
 }
 
 // Selecting a session pushes `#session=<id>`, so Back and Forward move through

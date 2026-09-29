@@ -67,6 +67,50 @@ p, li, dd, blockquote {
   white-space: nowrap;
 }
 
+/* <CodeBlock>: a Shiki block on the site's code background. The theme colours
+ * the tokens; the wrapper owns the box and the scrolling. */
+.code-block {
+  overflow-x: auto;
+  padding: 1rem;
+  background: #050811;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  line-height: 1.65;
+  -webkit-overflow-scrolling: touch;
+}
+
+.code-block pre.astro-code {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  overflow: visible;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: inherit;
+  line-height: inherit;
+  width: max-content;
+  min-width: 100%;
+  tab-size: 4;
+}
+
+.code-block pre.astro-code code {
+  font-family: inherit;
+}
+
+/* A block inside a panel that already draws the box (the tabbed snippets). */
+.code-block-bare {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* A short command that should wrap rather than scroll (the home page hero). */
+.code-block-wrap pre.astro-code {
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
@@ -328,11 +372,6 @@ summary {
   padding: 1.25rem !important;
   overflow-x: auto;
   margin: 1.5rem 0 !important;
-}
-
-/* Shiki's github-dark comment grey is a shade too dim on this page background. */
-.markdown-body pre span[style*="#6A737D"] {
-  color: #8b949e !important;
 }
 
 .markdown-body pre code {

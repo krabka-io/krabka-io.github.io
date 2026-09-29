@@ -18,11 +18,13 @@ import { Inspector } from "./inspector.js";
 import { Timeline } from "./timeline.js";
 import { FaultBar, FAULT, describeFault } from "./faults.js";
 import { Palette } from "./palette.js";
+import { TabSet } from "./tabs.js";
+import { Tour } from "./tour.js";
 import { StoragePanel } from "./storage-panel.js";
 import { NetworkPanel } from "./network-panel.js";
 import { LabStorage } from "./storage.js";
 import { Session, joinCodeFromUrl } from "./session.js";
-import { KINDS, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
+import { KINDS, KIND_ORDER, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
 import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
@@ -115,18 +117,20 @@ class LabApp {
 
   buildLayout() {
     const root = this.root;
+    root.classList.add("lab-app");
     this.toolbar = el("div", "lab-toolbar");
     root.appendChild(this.toolbar);
     this.buildToolbar();
 
-    const main = el("div", "lab-main");
-    const left = el("div", "lab-col lab-col-left");
-    const center = el("div", "lab-col lab-col-center");
-    const right = el("div", "lab-col lab-col-right");
-    main.append(left, center, right);
-    root.appendChild(main);
+    const work = el("div", "lab-workspace");
+    const rail = el("div", "lab-col lab-col-rail");
+    const stage = el("div", "lab-col lab-col-stage");
+    const side = el("div", "lab-col lab-col-side");
+    work.append(rail, stage, side);
+    root.appendChild(work);
 
-    this.palette = new Palette(left, {
+    // Left rail: build, scenarios, connect.
+    this.palette = new Palette(rail, {
       presets: PRESETS,
       onAddNode: (kind) => this.addNodeDialog(kind),
       onAddTopic: () => this.topicDialog(null),
@@ -143,9 +147,16 @@ class LabApp {
       onClear: () => this.newScenario(),
       listSaved: () => this.storage.listScenarios(),
     });
-    this.buildBridgePanel(left);
+    this.buildSessionPanel(this.palette.connectBody);
+    this.buildBridgePanel(this.palette.connectBody);
 
-    this.canvas = new Canvas(center, {
+    // Stage: the fault bar, the canvas, and the dock of logs under it.
+    this.faultBar = new FaultBar(stage, {
+      onFault: (f) => this.fault(f),
+      onBrowseTraffic: () => this.showNetwork(),
+      nodeName: (id) => this.nodeName(id),
+    });
+    this.canvas = new Canvas(stage, {
       onSelect: (id, { additive }) => this.select(id, additive),
       onDeselect: () => this.select(null),
       onMove: (id, x, y) => this.world.setPosition(id, x, y),
@@ -153,41 +164,69 @@ class LabApp {
       menuItems: (id) => this.menuItems(id),
       nodeName: (id) => this.nodeName(id),
       peerName: (id) => this.session.peerName(id),
+      onOpenTab: (tab) => this.palette.show(tab),
+      onHelp: () => this.helpDialog(),
     });
-    this.faultBar = new FaultBar(center, {
-      onFault: (f) => this.fault(f),
-      onBrowseTraffic: () => this.networkPanel.open(),
+
+    this.dock = new TabSet(stage, {
+      label: "Cluster details",
+      active: "events",
+      className: "lab-dock",
+      tabs: [
+        { id: "events", label: "Events", title: "Everything the cluster recorded, newest at the bottom" },
+        { id: "network", label: "Network bytes", title: "Frames and payload bytes on a link between two nodes" },
+        { id: "storage", label: "Storage", title: "What each node keeps in this browser" },
+      ],
+      hooks: {
+        onShow: (id) => {
+          if (this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
+          if (id === "network") this.networkPanel.refresh();
+          if (id === "storage") this.storagePanel.refresh();
+        },
+      },
+    });
+    this.dockToggle = button("Hide", "lab-btn-sm lab-dock-toggle", () => this.setDockCollapsed(!this.dock.root.classList.contains("lab-dock-collapsed")), {
+      title: "Collapse or restore the details panel",
+    });
+    this.dockToggle.setAttribute("aria-expanded", "true");
+    this.dock.bar.appendChild(this.dockToggle);
+    // Choosing a tab, even the active one, opens a folded dock.
+    this.dock.bar.addEventListener("click", (e) => {
+      if (e.target.closest(".lab-dtab") && this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
+    });
+    this.timeline = new Timeline(this.dock.panel("events"), {
+      onSelect: (id) => this.select(id),
       nodeName: (id) => this.nodeName(id),
     });
-    this.networkPanel = new NetworkPanel(root, {
+    this.networkHint = el("p", "lab-dock-empty", "Select a node, then Shift+click a second one to see the frames and bytes on the link between them.");
+    this.dock.panel("network").appendChild(this.networkHint);
+    this.networkPanel = new NetworkPanel(this.dock.panel("network"), {
       frames: (a, b) => this.world.wireFrames(a, b),
       nodeName: (id) => this.nodeName(id),
     });
 
-    this.inspector = new Inspector(right, {
+    // Right column: the inspector.
+    this.inspector = new Inspector(side, {
       onCommand: (id, command) => this.command(id, command),
       onControl: (id, command) => this.control(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
       onTakeOver: (id) => this.session.requestTakeover(id),
       onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
+      onSelect: (id) => this.select(id),
+      onOpenTab: (tab) => this.palette.show(tab),
+      onTry: (key) => this.tryIt(key),
       onBrowseVolume: async (id) => {
-        this.storagePanel.root.open = true;
+        this.dock.show("storage");
         await this.storagePanel.refresh();
         await this.storagePanel.browseVolume(volumeName(this.world.id, id));
-        const column = this.storagePanel.root.parentElement;
-        const target = this.storagePanel.volumeExplorer;
-        if (column.scrollHeight > column.clientHeight) {
-          column.scrollTop += target.getBoundingClientRect().top - column.getBoundingClientRect().top - 8;
-        } else {
-          target.scrollIntoView({ block: "start" });
-        }
+        this.storagePanel.volumeExplorer.scrollIntoView({ block: "nearest" });
       },
       formCtx: () => ({ nodes: this.nodeList() }),
       peerName: (id) => this.session.peerName(id),
       nodeName: (id) => this.nodeName(id),
       nodeLabelForBroker: (brokerId) => this.nodeLabelForBroker(brokerId),
     });
-    this.storagePanel = new StoragePanel(right, {
+    this.storagePanel = new StoragePanel(this.dock.panel("storage"), {
       storage: this.storage,
       scenarioId: () => this.world.id,
       nodes: () => this.nodeList(),
@@ -204,38 +243,194 @@ class LabApp {
         this.toasts.info(on ? "Persisting durable state to this browser" : "Persistence off: new changes are not stored");
       },
     });
-    this.buildSessionPanel(right);
+    // The dock shows its panels as tabs, so the panels' own disclosure
+    // headings stay open and out of sight.
+    for (const panel of [this.timeline.root, this.storagePanel.root]) panel.open = true;
 
-    this.timeline = new Timeline(root, {
-      onSelect: (id) => this.select(id),
-      nodeName: (id) => this.nodeName(id),
+    this.tour = new Tour(stage, {
+      steps: () => this.tourSteps(),
+      onChange: () => this.renderTourButton(),
     });
 
     this.addExpandControls();
 
-    root.addEventListener("keydown", (e) => {
-      if (e.target.closest("input, textarea, select, dialog")) return;
-      if (e.key === " " && e.target.closest(".lab-canvas")) {
-        e.preventDefault();
-        this.togglePlay();
-      } else if (e.key === "f" || e.key === "F") this.canvas.fit();
-      else if (e.key === "Escape") this.select(null);
+    // Stacked on a narrow screen, the details start folded so the inspector
+    // and the rail sit one short scroll below the canvas.
+    this.stacked = window.matchMedia("(max-width: 1024px)");
+    if (this.stacked.matches) this.setDockCollapsed(true);
+
+    root.addEventListener("keydown", (e) => this.onKey(e));
+  }
+
+  // The inspector's "Try this" buttons: break the running cluster in a way the
+  // reader can watch.
+  tryIt(key) {
+    const nodes = this.world.scenario().nodes.filter((n) => !kindOf(n.kind).hidden);
+    const broker = nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
+    const client = nodes.find((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams");
+    if (key === "consumer") return this.addNodeDialog("consumer");
+    if (!broker) return this.toasts.warn("This scenario has no broker to break; load a preset from Scenarios.");
+    this.world.setPaused(false);
+    if (key === "kill") {
+      this.select(broker.id);
+      this.fault(FAULT.kill(broker.id));
+      return;
+    }
+    if (!client) return this.toasts.warn("This scenario has no client on the other end of a link.");
+    this.select(broker.id);
+    this.select(client.id, true);
+    this.fault(key === "partition" ? FAULT.partition(broker.id, client.id) : FAULT.latency(broker.id, client.id, 300));
+    return;
+  }
+
+  setDockCollapsed(collapsed) {
+    this.dock.root.classList.toggle("lab-dock-collapsed", collapsed);
+    this.dockToggle.textContent = collapsed ? "Show" : "Hide";
+    this.dockToggle.setAttribute("aria-expanded", String(!collapsed));
+  }
+
+  showNetwork() {
+    this.dock.show("network");
+    this.networkPanel.open();
+  }
+
+  // Shortcuts that work anywhere in the lab except while typing or while a
+  // control has focus (Space would press it).
+  onKey(e) {
+    if (e.target.closest("input, textarea, select, dialog")) return;
+    const onControl = e.target.closest("button, summary, a, [role=tab]");
+    const key = e.key;
+    if (key === "?") {
+      e.preventDefault();
+      this.helpDialog();
+    } else if (key === " " && !onControl) {
+      e.preventDefault();
+      this.togglePlay();
+    } else if ((key === "f" || key === "F") && !onControl) this.canvas.fit();
+    else if (key === "Escape") this.select(null);
+    else if ((key === "k" || key === "K") && !onControl && this.selection.length === 1) this.command(this.selection[0], "kill");
+    else if ((key === "r" || key === "R") && !onControl && this.selection.length === 1) this.command(this.selection[0], "restart");
+  }
+
+  async helpDialog() {
+    const body = el("div", "lab-help");
+    body.appendChild(el("p", "lab-small", "The lab runs a real Kafka cluster in this tab. You control time and the network; nothing leaves your browser."));
+    const rows = [
+      ["Space", "play or pause the clock"],
+      ["Click a card", "inspect a node: its state, config and commands"],
+      ["Shift+click a second card", "link controls: partition, latency, loss, and the bytes on the wire"],
+      ["Drag a card", "move it (positions are saved with the scenario)"],
+      ["Drag the background, wheel", "pan and zoom the canvas"],
+      ["Right-click or long-press a card", "context menu: edit, send a command, fault, remove"],
+      ["K / R", "kill or restart the selected node"],
+      ["F", "fit every node in view"],
+      ["Esc", "clear the selection"],
+      ["?", "this list"],
+    ];
+    const table = el("dl", "lab-help-list");
+    for (const [keys, what] of rows) {
+      table.append(el("dt", null, keys), el("dd", null, what));
+    }
+    body.appendChild(table);
+
+    // What the cards and lines on the canvas mean.
+    body.appendChild(el("h4", "lab-rail-heading", "Reading the canvas"));
+    const legend = el("ul", "lab-legend");
+    for (const kind of KIND_ORDER) {
+      const k = KINDS[kind];
+      const item = el("li");
+      const glyph = el("span", "lab-kind-glyph", k.glyph);
+      glyph.style.background = k.color;
+      item.append(glyph, el("span", null, k.label));
+      legend.appendChild(item);
+    }
+    body.appendChild(legend);
+    body.appendChild(
+      el(
+        "p",
+        "lab-small lab-muted",
+        "A card that says down was killed; dashed means its links are cut. Orange arrows are records moving between a client and a topic; faint dashed lines are connections. A dot sliding along a line is a Kafka frame in flight.",
+      ),
+    );
+    body.appendChild(el("p", "lab-small lab-muted", "New here? The tour walks through the controls in about a minute."));
+    let tour = false;
+    await openDialog(this.root, {
+      title: "Shortcuts and tips",
+      body,
+      submitLabel: "Take the tour",
+      cancelLabel: "Close",
+      onSubmit: () => {
+        tour = true;
+        return true;
+      },
     });
+    if (tour) this.tour.start();
+  }
+
+  // The tour, as functions so each step reads the live scenario.
+  tourSteps() {
+    const firstBroker = () => this.world.scenario().nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
+    return [
+      {
+        title: "A live Kafka cluster",
+        text: "Cards are nodes. Lines show who talks to whom, and the dots are Kafka frames in flight. Everything here runs in your browser: real brokers, simulated network.",
+        target: ".lab-canvas-wrap",
+      },
+      {
+        title: "You control time",
+        text: "Pause the clock, step forward in simulated milliseconds, or Settle until nothing is due. Raise the speed to watch slow things, like a broker session timeout, happen.",
+        target: ".lab-tb-clock",
+      },
+      {
+        title: "Inspect a node",
+        text: "Click a card to see its state, edit its configuration and send it commands. For a broker that includes its KRaft role, its partitions and its files.",
+        target: ".lab-col-side",
+        action: {
+          label: "Select a broker for me",
+          run: () => {
+            const n = firstBroker();
+            if (n) this.select(n.id);
+          },
+        },
+      },
+      {
+        title: "Break something",
+        text: "Kill a broker and watch the controller fence it and move leadership once its session runs out. The Break things bar also cuts links and adds latency or loss.",
+        target: ".lab-faults",
+        action: {
+          label: "Kill the selected broker",
+          run: () => {
+            const n = this.selection.length ? this.world.scenario().nodes.find((x) => x.id === this.selection[0]) : firstBroker();
+            if (!n) return;
+            this.select(n.id);
+            this.command(n.id, "kill");
+            this.world.setPaused(false);
+          },
+        },
+      },
+      {
+        title: "Heal it, then build your own",
+        text: "Restart the node and it catches up and rejoins. When you are ready, Build adds nodes and topics, Scenarios loads presets and saved clusters, and Connect invites another tab or drives the cluster from kafkactl.",
+        target: ".lab-col-rail",
+        action: {
+          label: "Restart the broker",
+          run: () => {
+            const dead = this.world.snapshot()?.nodes.find((n) => !n.alive && !kindOf(n.kind).hidden);
+            if (dead) this.command(dead.id, "restart");
+          },
+        },
+      },
+    ];
+  }
+
+  renderTourButton() {
+    if (this.tourBtn) this.tourBtn.setAttribute("aria-pressed", String(this.tour?.active || false));
   }
 
   addExpandControls() {
-    const panels = [
-      this.canvas.wrap,
-      this.inspector.root,
-      this.networkPanel.root,
-      this.storagePanel.root,
-      this.sessionDetails,
-      this.timeline.root,
-      this.bridgePanel,
-      ...this.root.querySelectorAll(".lab-pal-section"),
-    ];
+    const panels = [this.canvas.wrap, this.inspector.root, this.dock.root];
     for (const panel of panels) {
-      const name = panel.getAttribute("aria-label") || panel.querySelector("summary, .lab-panel-title")?.firstChild?.textContent || "canvas";
+      const name = panel.getAttribute("aria-label") || (panel === this.dock.root ? "details" : "canvas");
       const control = button("Expand", "lab-btn-sm lab-expand", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -246,7 +441,7 @@ class LabApp {
         this.collapsePanel();
         this.expandedPanel = panel;
         panel.classList.add("lab-expanded");
-        if (panel.tagName === "DETAILS") panel.open = true;
+        if (panel === this.dock.root) this.setDockCollapsed(false);
         control.textContent = "Close expanded view";
         control.setAttribute("aria-label", `Close expanded ${name}`);
         control.setAttribute("aria-expanded", "true");
@@ -254,7 +449,7 @@ class LabApp {
       }, { ariaLabel: `Expand ${name}` });
       control.setAttribute("aria-expanded", "false");
       if (panel === this.canvas.wrap) this.canvas.tools.appendChild(control);
-      else if (panel.tagName === "DETAILS") panel.querySelector("summary").appendChild(control);
+      else if (panel === this.dock.root) this.dock.bar.insertBefore(control, this.dockToggle);
       else panel.appendChild(control);
       panel._expandControl = control;
       panel._expandName = name;
@@ -355,28 +550,57 @@ class LabApp {
 
   buildToolbar() {
     const t = this.toolbar;
-    t.appendChild(el("span", "lab-brand", "Cluster Lab"));
-    this.playBtn = button("Pause", "lab-btn-sm lab-primary", () => this.togglePlay(), { title: "Run or pause the simulated clock (Space on the canvas)" });
+    const brand = el("div", "lab-tb-brand");
+    this.nameEl = el("span", "lab-tb-scenario");
+    brand.append(el("span", "lab-brand", "Cluster Lab"), this.nameEl);
+
+    this.playBtn = el("button", "lab-btn lab-primary lab-play");
+    this.playBtn.type = "button";
+    this.playBtn.title = "Run or pause the simulated clock (Space)";
     this.playBtn.dataset.action = "play";
+    this.playBtn.addEventListener("click", () => this.togglePlay());
+    this.playGlyph = el("span", "lab-play-glyph");
+    this.playGlyph.setAttribute("aria-hidden", "true");
+    this.playText = el("span", "lab-play-text", "Pause");
+    this.playBtn.append(this.playGlyph, this.playText);
+
     const step = (ms, label) => button(label, "lab-btn-sm", () => this.world.step(ms), { title: `Advance ${label} of simulated time`, data: { step: String(ms) } });
+    const stepGroup = el("div", "lab-tb-group");
+    stepGroup.setAttribute("role", "group");
+    stepGroup.setAttribute("aria-label", "Step the clock");
+    this.settleBtn = button("Settle", "lab-btn-sm", () => this.world.settle(), { title: "Run until nothing is due (at most 5 s of simulated time)" });
+    stepGroup.append(el("span", "lab-tb-cap", "Step"), step(10, "+10 ms"), step(100, "+100 ms"), step(1000, "+1 s"), this.settleBtn);
+
     this.speedSel = select(
       SPEEDS.map((s) => ({ value: s, label: `${s}×` })),
       1,
       (v) => this.world.setSpeed(Number(v)),
     );
     this.speedSel.setAttribute("aria-label", "Simulation speed");
-    this.settleBtn = button("Settle", "lab-btn-sm", () => this.world.settle(), { title: "Run until nothing is due (at most 5 s of simulated time)" });
+    const speedGroup = el("label", "lab-tb-group");
+    speedGroup.append(el("span", "lab-tb-cap", "Speed"), this.speedSel);
+
     this.timeEl = el("span", "lab-time", "0 ms");
     this.timeEl.dataset.field = "sim-time";
     this.statsEl = el("span", "lab-stats lab-muted");
+    const clock = el("div", "lab-tb-clock");
+    clock.append(this.timeEl, this.statsEl);
     this.roleEl = el("span", "lab-role");
-    t.append(this.playBtn, step(10, "+10 ms"), step(100, "+100 ms"), step(1000, "+1 s"), this.settleBtn, el("span", "lab-label", "speed"), this.speedSel, this.timeEl, this.statsEl, this.roleEl);
+
+    this.tourBtn = button("Tour", "lab-btn-sm", () => this.tour.start(), { title: "A one-minute walk through the controls" });
+    this.tourBtn.setAttribute("aria-pressed", "false");
+    const shareBtn = button("Share", "lab-btn-sm", () => this.share(), { title: "Copy a link that carries this scenario" });
+    const helpBtn = button("?", "lab-btn-sm", () => this.helpDialog(), { title: "Shortcuts and tips (?)", ariaLabel: "Shortcuts and tips" });
+    const tools = el("div", "lab-tb-group lab-tb-tools");
+    tools.append(this.roleEl, this.tourBtn, shareBtn, helpBtn);
+
+    t.append(brand, this.playBtn, stepGroup, speedGroup, clock, tools);
   }
 
   buildSessionPanel(container) {
     const d = el("details", "lab-session lab-side-section");
     d.open = false;
-    d.appendChild(el("summary", "lab-panel-title", "Session"));
+    d.appendChild(el("summary", "lab-panel-title", "Session: share this cluster across tabs"));
     const body = el("div", "lab-side-body");
     d.appendChild(body);
     this.sessionBody = body;
@@ -522,14 +746,18 @@ class LabApp {
     this.inspector.update({ snapshot: snap, scenario, session });
     this.faultBar.update({ snapshot: snap, selection: this.selection });
     this.networkPanel.update(this.selection);
-    if (this.expandedPanel?.hidden) this.collapsePanel();
     this.timeline.setNodes(this.nodeList());
     this.palette.update({ scenario, availability: this.availability, role: this.session.role, saveState: this.saveState });
+    this.nameEl.textContent = scenario?.name || "Untitled scenario";
+    this.networkHint.hidden = !this.networkPanel.root.hidden;
+    this.dock.setBadge("events", this.timeline.events.length ? fmtNum(this.timeline.events.length) : "");
     this.renderClock(snap);
   }
 
   renderClock(snap = this.world.snapshot()) {
-    this.playBtn.textContent = this.world.paused ? "Play" : "Pause";
+    this.playGlyph.textContent = this.world.paused ? "▶" : "❚❚";
+    this.playText.textContent = this.world.paused ? "Play" : "Pause";
+    this.playBtn.classList.toggle("lab-paused", this.world.paused);
     this.playBtn.setAttribute("aria-pressed", String(!this.world.paused));
     this.timeEl.textContent = fmtMs(snap ? snap.now : this.world.now());
     if (snap) {
@@ -585,6 +813,8 @@ class LabApp {
     else this.selection = [id];
     this.inspector.setSelection(this.selection[0] ?? null);
     this.pushPanels();
+    // Stacked, the inspector is below the canvas: bring it into view.
+    if (id != null && this.stacked?.matches) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   nodeList() {
@@ -1017,7 +1247,7 @@ class LabApp {
       this.saveState = saved ? `saved ${new Date().toLocaleTimeString()}` : "saved to this page only";
       if (announce) this.toasts.info(this.saveState);
       this.palette.update({ scenario: doc, availability: this.availability, role: this.session.role, saveState: this.saveState });
-      if (this.palette.savedSection.details.open) this.palette.refreshSaved();
+      if (this.palette.savedVisible()) this.palette.refreshSaved();
     } catch (err) {
       this.toasts.error(err, "save");
     }
@@ -1057,6 +1287,7 @@ class LabApp {
       try {
         this.answerCode = await this.session.join(join);
         this.world.setHosted([]);
+        this.palette.show("connect");
         this.sessionDetails.open = true;
         this.renderSession();
         this.toasts.info("Joined as a spoke; hand the answer code to the host");
@@ -1089,6 +1320,7 @@ class LabApp {
     }
     this.world.start();
     this.pushPanels();
+    this.tour.maybeStart();
   }
 }
 

@@ -1,7 +1,9 @@
 ---
+import CodeBlock from './CodeBlock.astro';
 const snippets = [
   {
     id: 'rust',
+    lang: 'rust',
     label: 'Rust Client',
     tag: 'krabka-client-rs',
     code: `// Cargo.toml:
@@ -38,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   },
   {
     id: 'go',
+    lang: 'go',
     label: 'Go Streams (Arrow)',
     tag: 'krabka-streams-go',
     code: `package main
@@ -82,6 +85,7 @@ func main() {
   },
   {
     id: 'java',
+    lang: 'java',
     label: 'Java Streams',
     tag: 'krabka-streams-java',
     code: `import io.krabka.streams.KrabkaStreamsConfig;
@@ -117,6 +121,7 @@ public class OrderCounterApp {
   },
   {
     id: 'k8s',
+    lang: 'yaml',
     label: 'Kubernetes CRD',
     tag: 'krabka-operator',
     code: `apiVersion: krabka.io/v1alpha1
@@ -202,7 +207,7 @@ spec:
             class={`code-panel ${index === 0 ? 'block' : 'hidden'}`}
             data-tag={s.tag}
           >
-            <pre class="font-mono text-sm leading-relaxed text-gray-200"><code class="language-rust">{s.code}</code></pre>
+            <CodeBlock code={s.code} lang={s.lang} size="sm" class="code-block-bare" />
           </div>
         ))}
       </div>

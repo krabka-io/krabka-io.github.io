@@ -1,4 +1,5 @@
 ---
+import CodeBlock from '../../components/CodeBlock.astro';
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 import apiReference from '../../data/api-reference.json';
@@ -103,7 +104,7 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
             Copy
           </button>
         </div>
-        <pre class="bg-black/50 p-4 rounded-lg font-mono text-xs text-gray-200 overflow-x-auto border border-white/5"><code>{javaGradle}</code></pre>
+        <CodeBlock code={javaGradle} lang="kotlin" />
       </div>
 
       <p class="text-sm text-gray-300">
@@ -137,9 +138,9 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
       <p class="text-sm text-gray-300">
         Arrow 19 needs this JVM option when it uses direct buffers:
       </p>
-      <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between">
-        <span>{jvmFlag}</span>
-        <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors" data-copy={jvmFlag}>
+      <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between gap-3">
+        <span class="min-w-0 break-all">{jvmFlag}</span>
+        <button type="button" class="copy-btn shrink-0 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors" data-copy={jvmFlag}>
           Copy Flag
         </button>
       </div>

@@ -2,7 +2,9 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import EvidenceLedger from '../components/EvidenceLedger.astro';
 import type { EvidenceItem } from '../components/EvidenceLedger.astro';
+import { codeToHtml } from 'shiki';
 import { getPath } from '../utils/paths';
+import krabTheme from '../utils/krabka-shiki-theme.mjs';
 import { loadVerificationData } from '../utils/verification-loader';
 
 // Every count and every ledger row below comes from the broker's verification
@@ -135,21 +137,37 @@ const catalogEvidenceSpecs: CatalogEvidenceSpec[] = [
   },
 ];
 
-const catalogEvidence: EvidenceItem[] = catalogEvidenceSpecs.flatMap((spec) => {
-  const found = section(spec.slug);
-  if (!found) return [];
-  return [
-    {
-      id: spec.slug,
-      title: spec.title,
-      kind: spec.kind,
-      area: 'From the catalog',
-      claim: spec.claim,
-      body_html: found.html.join(''),
-      links: [{ label: 'Read in the catalog', url: `${catalogPath}#${spec.slug}` }, ...(spec.links ?? [])],
-    },
-  ];
-});
+// The catalog renders its fenced code as plain <pre><code>; colour it with the
+// site theme so it reads like every other snippet.
+const unescapeHtml = (t: string) =>
+  t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+async function highlightFences(html: string): Promise<string> {
+  let out = html;
+  for (const m of html.matchAll(/<pre><code(?: class="language-([\w-]+)")?>([\s\S]*?)<\/code><\/pre>/g)) {
+    out = out.replace(m[0], await codeToHtml(unescapeHtml(m[2]), { lang: m[1] ?? 'text', theme: krabTheme }));
+  }
+  return out;
+}
+
+const catalogEvidence: EvidenceItem[] = (
+  await Promise.all(
+    catalogEvidenceSpecs.map(async (spec): Promise<EvidenceItem[]> => {
+      const found = section(spec.slug);
+      if (!found) return [];
+      return [
+        {
+          id: spec.slug,
+          title: spec.title,
+          kind: spec.kind,
+          area: 'From the catalog',
+          claim: spec.claim,
+          body_html: await highlightFences(found.html.join('')),
+          links: [{ label: 'Read in the catalog', url: `${catalogPath}#${spec.slug}` }, ...(spec.links ?? [])],
+        },
+      ];
+    }),
+  )
+).flat();
 
 const evidence: EvidenceItem[] = [...localEvidence, ...catalogEvidence];
 
