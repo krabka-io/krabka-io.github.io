@@ -221,16 +221,23 @@ if (fs.existsSync(javaGradleProps)) {
   }
 }
 
-// 2. Broker & CLI (Cargo.toml)
-const brokerCargoToml = path.resolve(ROOT_DIR, '..', 'krabka-broker', 'Cargo.toml');
-if (fs.existsSync(brokerCargoToml)) {
-  const match = fs.readFileSync(brokerCargoToml, 'utf8').match(/^version = "([^"]+)"/m);
+// 2. Rust components: the version is the first `version = "..."` of the root Cargo.toml.
+const cargoComponents = {
+  broker: 'krabka-broker',
+  cli: 'krabka-cli',
+  'client-rs': 'krabka-client-rs',
+  protocol: 'krabka-protocol',
+  operator: 'krabka-operator',
+  connect: 'krabka-connect',
+};
+for (const [key, repoName] of Object.entries(cargoComponents)) {
+  const cargoToml = path.resolve(ROOT_DIR, '..', repoName, 'Cargo.toml');
+  if (!fs.existsSync(cargoToml)) continue;
+  const match = fs.readFileSync(cargoToml, 'utf8').match(/^version = "([^"]+)"/m);
   if (match) {
-    versionsData['broker'] = versionsData['broker'] || {};
-    versionsData['broker'].version = match[1].trim();
-    versionsData['cli'] = versionsData['cli'] || {};
-    versionsData['cli'].version = match[1].trim();
-    console.log(`  ✓ Detected krabka-broker & cli version: ${match[1].trim()}`);
+    versionsData[key] = versionsData[key] || {};
+    versionsData[key].version = match[1].trim();
+    console.log(`  ✓ Detected ${repoName} version: ${match[1].trim()}`);
   }
 }
 
@@ -245,24 +252,44 @@ if (fs.existsSync(goModuleBazel)) {
   }
 }
 
-// 4. Extract active official release tags
-const activeReleaseTags = {
-  'streams-java': 'v1.1.0',
-  'broker': 'v0.5.3',
-  'streams-go': 'v0.1.0-dev',
+// 4. Latest published release tag. Uses the GitHub REST API (GITHUB_TOKEN when set), then `gh`.
+// Without a release the entry keeps no `activeRelease` and pages fall back to `version`.
+const releaseRepos = {
+  'streams-java': 'krabka-streams-java',
+  broker: 'krabka-broker',
+  cli: 'krabka-cli',
 };
 
-for (const [key, defaultTag] of Object.entries(activeReleaseTags)) {
-  let tag = defaultTag;
+async function latestReleaseTag(repoName) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   try {
-    const repoName = key === 'broker' ? 'krabka-broker' : (key === 'streams-java' ? 'krabka-streams-java' : 'krabka-streams-go');
-    const out = execSync(`gh release view -R krabka-io/${repoName} --json tagName --jq .tagName`, { stdio: 'pipe', timeout: 5000 }).toString().trim();
-    if (out) tag = out;
+    const res = await fetch(`https://api.github.com/repos/krabka-io/${repoName}/releases/latest`, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) return (await res.json()).tag_name ?? null;
   } catch {
-    // Keep default pinned tag
+    // fall through to gh
   }
-  if (versionsData[key]) {
+  try {
+    const out = execSync(`gh release view -R krabka-io/${repoName} --json tagName --jq .tagName`, {
+      stdio: 'pipe',
+      timeout: 5000,
+    }).toString().trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+for (const [key, repoName] of Object.entries(releaseRepos)) {
+  const tag = await latestReleaseTag(repoName);
+  if (tag && versionsData[key]) {
     versionsData[key].activeRelease = tag;
+    console.log(`  ✓ Latest ${repoName} release: ${tag}`);
+  } else {
+    console.log(`  ℹ️ No release tag resolved for ${repoName}; keeping the recorded value`);
   }
 }
 
