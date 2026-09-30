@@ -75,7 +75,7 @@ export class Palette {
   block(panel, title, help) {
     const section = el("section", "lab-pal-section");
     section.dataset.section = title.toLowerCase().replace(/[^a-z]+/g, "-");
-    section.appendChild(el("h3", "lab-rail-heading", title));
+    section.appendChild(el("h2", "lab-rail-heading", title));
     if (help) section.appendChild(el("p", "lab-rail-help", help));
     const body = el("div", "lab-pal-body");
     section.appendChild(body);
@@ -123,6 +123,9 @@ export class Palette {
 
   scenariosTab() {
     const panel = this.tabs.panel("scenarios");
+    this.spokeNote = el("p", "lab-note lab-small", "You joined a session: the host picks the scenario, so presets, saves and imports are off here.");
+    this.spokeNote.hidden = true;
+    panel.appendChild(this.spokeNote);
 
     const current = this.block(panel, "This scenario");
     this.scenarioName = el("div", "lab-scenario-name");
@@ -198,7 +201,10 @@ export class Palette {
       b.classList.toggle("lab-unavailable", !ok);
       b.title = ok ? preset.description : `${preset.description} (${FULL_BUILD_NOTE})`;
       b.disabled = !editable;
-      b.classList.toggle("lab-preset-current", scenario?.name === preset.scenario.name);
+      const current = scenario?.name === preset.scenario.name;
+      b.classList.toggle("lab-preset-current", current);
+      if (current) b.setAttribute("aria-current", "true");
+      else b.removeAttribute("aria-current");
     }
     this.topicAdd.disabled = !editable;
     this.renderTopics(scenario, editable);
@@ -207,7 +213,9 @@ export class Palette {
     const t = scenario?.topics?.length || 0;
     const idText = scenario?.id ? ` · id ${scenario.id.slice(0, 8)}` : "";
     this.scenarioMeta.textContent = `${n} node${n === 1 ? "" : "s"} · ${t} topic${t === 1 ? "" : "s"} · seed ${scenario?.seed ?? "?"} · ${scenario?.links?.default_latency_ms ?? "?"} ms links${idText}`;
-    for (const b of [this.settingsBtn, this.clearBtn, this.importBtn]) b.disabled = !editable;
+    for (const b of [this.settingsBtn, this.saveBtn, this.clearBtn, this.importBtn]) b.disabled = !editable;
+    this.spokeNote.hidden = editable;
+    for (const b of this.savedList.querySelectorAll(".lab-saved-open")) b.disabled = !editable;
     this.saveState.textContent = saveState || "";
   }
 
@@ -218,17 +226,26 @@ export class Palette {
     this.topicKey = key;
     this.topicList.innerHTML = "";
     if (!topics.length) this.topicList.appendChild(el("li", "lab-muted lab-small", "No topics yet."));
-    for (const t of topics) {
+    topics.forEach((t, i) => {
       const li = el("li", "lab-topic-row");
       const name = el("span", "lab-topic-row-name", t.name);
       const meta = el("span", "lab-muted lab-small", `${t.partitions}p · rf ${t.replication_factor === -1 ? "default" : t.replication_factor}`);
       li.append(name, meta);
       if (editable) {
         li.appendChild(button("Edit", "lab-btn-sm", () => this.hooks.onEditTopic(t.name), { ariaLabel: `Edit topic ${t.name}` }));
-        li.appendChild(button("×", "lab-btn-sm", () => this.hooks.onRemoveTopic(t.name), { ariaLabel: `Remove topic ${t.name}` }));
+        li.appendChild(button("×", "lab-btn-sm", () => this.removeTopic(t.name, i), { ariaLabel: `Remove topic ${t.name}` }));
       }
       this.topicList.appendChild(li);
-    }
+    });
+  }
+
+  // The list is rebuilt without the row, taking the focused button with it:
+  // focus goes to the remove button that took its place, or to Add topic.
+  removeTopic(name, index) {
+    this.hooks.onRemoveTopic(name);
+    if (this.topicList.contains(document.activeElement)) return;
+    const removes = this.topicList.querySelectorAll(".lab-topic-row button:last-child");
+    (removes[Math.min(index, removes.length - 1)] || this.topicAdd).focus();
   }
 
   // Whether the saved list is on screen, so a save can refresh it.
@@ -256,6 +273,7 @@ export class Palette {
       open.dataset.savedOpen = r.id;
       open.textContent = r.name || "Untitled scenario";
       open.title = `Open (saved ${new Date(r.updated).toLocaleString()})`;
+      open.disabled = this.role === "spoke";
       open.addEventListener("click", () => this.hooks.onOpenSaved(r.id));
       const when = el("span", "lab-muted lab-small", timeAgo(r.updated));
       const del = button("×", "lab-btn-sm", () => this.hooks.onDeleteSaved(r.id), { ariaLabel: `Delete saved scenario ${r.name}` });

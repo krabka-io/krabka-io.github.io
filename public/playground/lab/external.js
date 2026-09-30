@@ -504,7 +504,8 @@ export class ExternalHost {
     this.isolation = info;
     if (info && !info.isolated && info.reason) {
       for (const node of this.nodes.values()) {
-        if (node.state === "unavailable" && node.reason !== MISSING_BUILD) this.setState(node, "unavailable", `cross-origin isolation is unavailable: ${info.reason}`);
+        // `unavailable` also records a fresh timeline event, replacing the "page reloads once" promise.
+        if (node.state === "unavailable" && node.reason !== MISSING_BUILD) this.unavailable(node, `cross-origin isolation is unavailable: ${info.reason}`);
       }
     }
   }

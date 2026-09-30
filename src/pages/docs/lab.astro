@@ -30,10 +30,13 @@ const controls = [
 >
   <!-- The lab is an app, so it takes the window: a one-line header above it, the guide below. -->
   <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pb-3 pt-5 font-sans sm:px-6 lg:px-8">
-    <nav aria-label="Breadcrumb" class="w-full text-xs text-gray-400">
-      <a href={getPath('/')} class="hover:text-white">Home</a> /
-      <a href={getPath('/docs')} class="hover:text-white">Docs</a> /
-      <span class="text-gray-200">Cluster Lab</span>
+    <!-- A flex row, like the docs layout's: the links pad out to a 28px hit area without growing the row. -->
+    <nav aria-label="Breadcrumb" class="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400">
+      <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white">Home</a>
+      <span aria-hidden="true">/</span>
+      <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white">Docs</a>
+      <span aria-hidden="true">/</span>
+      <span class="text-gray-200" aria-current="page">Cluster Lab</span>
     </nav>
     <h1 class="text-2xl font-extrabold text-white">Cluster Lab</h1>
     <p class="text-sm text-gray-400">Run real Krabka brokers with clients and apps, break their links, and watch them recover. No backend, no install.</p>
@@ -178,3 +181,11 @@ const controls = [
 </BaseLayout>
 
 <script src={getPath('/playground/lab/app.js')} type="module" is:inline></script>
+<!-- A module that cannot be fetched never runs its own error handling: say so here instead of loading forever. -->
+<script is:inline>
+  document.currentScript.previousElementSibling.addEventListener('error', function () {
+    var root = document.getElementById('krabka-lab');
+    if (!root || root.dataset.ready) return;
+    root.innerHTML = '<p class="lab-error">The Cluster Lab could not load its scripts. Check your connection and reload.</p><button type="button" class="lab-btn" onclick="location.reload()">Reload the lab</button>';
+  });
+</script>

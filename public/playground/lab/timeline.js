@@ -73,6 +73,7 @@ export class Timeline {
     });
     followLabel.append(this.followBox, el("span", null, "follow"));
     this.count = el("span", "lab-timeline-count", "0 events");
+    this.empty = el("p", "lab-dock-empty", "No events yet.");
     bar.append(this.nodeSel, this.kindSel, this.text, followLabel, this.count, button("Clear", "lab-btn-sm", () => this.clear()));
     this.list = el("ol", "lab-timeline-list");
     this.list.addEventListener("scroll", () => {
@@ -83,7 +84,13 @@ export class Timeline {
         this.followBox.checked = atEnd;
       }
     });
-    body.append(bar, this.list);
+    // The dock hides this tab's list (display: none) while another tab is open or
+    // the dock is folded, and a list that is hidden cannot scroll; when it is
+    // shown again the newest row is what "follow" promised.
+    new ResizeObserver(() => {
+      if (this.follow) this.scrollToEnd();
+    }).observe(this.list);
+    body.append(bar, this.empty, this.list);
     this.root.appendChild(body);
     container.appendChild(this.root);
   }
@@ -119,22 +126,35 @@ export class Timeline {
         newKinds = true;
       }
     }
-    if (this.events.length > MAX_KEPT) this.events.splice(0, this.events.length - MAX_KEPT);
+    if (this.events.length > MAX_KEPT) {
+      this.trimmed = true;
+      this.events.splice(0, this.events.length - MAX_KEPT);
+    }
     if (newKinds) this.refreshKinds();
     for (const e of events) {
       if (this.matches(e)) this.list.appendChild(this.row(e));
     }
     while (this.list.children.length > MAX_ROWS) this.list.firstChild.remove();
-    this.count.textContent = `${this.events.length} events`;
-    this.summary.firstChild.textContent = `Timeline · ${this.events.length} events`;
+    this.refreshCount();
     if (this.follow) this.scrollToEnd();
   }
 
   clear() {
     this.events = [];
+    this.trimmed = false;
     this.list.innerHTML = "";
-    this.count.textContent = "0 events";
-    this.summary.firstChild.textContent = "Timeline · 0 events";
+    this.refreshCount();
+  }
+
+  // The count says how many rows the filter leaves, and that older events are gone once the log is full.
+  refreshCount() {
+    const total = this.events.length;
+    const shown = this.list.children.length;
+    const filtered = Boolean(this.nodeFilter || this.kindFilter || this.textFilter);
+    this.count.textContent = filtered ? `${shown} of ${total} events` : `${this.trimmed ? "latest " : ""}${total} events`;
+    this.summary.firstChild.textContent = `Timeline · ${total} events`;
+    this.empty.textContent = total ? "No events match the filter." : "No events yet.";
+    this.empty.hidden = shown > 0;
   }
 
   refreshKinds() {
@@ -164,6 +184,7 @@ export class Timeline {
     this.list.innerHTML = "";
     const shown = this.events.filter((e) => this.matches(e)).slice(-MAX_ROWS);
     for (const e of shown) this.list.appendChild(this.row(e));
+    this.refreshCount();
     if (this.follow) this.scrollToEnd();
   }
 

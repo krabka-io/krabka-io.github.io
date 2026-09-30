@@ -190,7 +190,7 @@ export class Inspector {
     for (const child of [...box.children]) if (!this.tries.includes(child)) child.remove();
     this.overviewSubs.clear();
     for (const t of this.tries) t.hidden = !nodes.length;
-    const top = [el("h3", "lab-rail-heading", "Cluster overview")];
+    const top = [el("h2", "lab-rail-heading", "Cluster overview")];
     if (!nodes.length) {
       top.push(el("p", "lab-rail-help", "The canvas is empty. Add nodes from the Build tab, or load a preset from Scenarios."));
       const row = el("div", "lab-palette-actions");
@@ -234,7 +234,7 @@ export class Inspector {
 
   // Things a reader can do to a cluster, each a button that does it.
   buildTries() {
-    const heading = el("h3", "lab-rail-heading", "Try this");
+    const heading = el("h2", "lab-rail-heading", "Try this");
     const tries = el("ul", "lab-try-list");
     for (const [key, label, what] of [
       ["kill", "Kill a broker", "Watch the controller fence it and move leadership."],
@@ -267,7 +267,9 @@ export class Inspector {
     const hostedBy = session?.hosting?.get(n.id) ?? null;
     const remote = !n.hosted;
     const offline = this.hostOffline(n);
-    const key = [n.name, n.kind, n.alive, n.isolated, n.hosted, hostedBy, offline, session?.role, session?.peersKey].join("|");
+    // The id is in the key: two nodes can share a name and kind, and the
+    // buttons below close over the id.
+    const key = [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, hostedBy, offline, session?.role, session?.peersKey].join("|");
     if (key === this.headKey) return;
     this.headKey = key;
     this.glyph.textContent = k.glyph;
@@ -435,14 +437,20 @@ export class Inspector {
     // A section heading the reader just toggled has focus: find it again in the new DOM.
     const active = document.activeElement;
     const focusKey = active?.matches?.("details.lab-sec > summary") && panel.contains(active) ? sectionKey(active.parentElement, panel) : null;
-    // Keep the scroll position of a panel that only changed numbers.
-    const scroll = panel.scrollTop;
-    panel.innerHTML = "";
-    panel.appendChild(view);
-    panel.scrollTop = scroll;
-    if (focusKey != null) {
-      for (const d of view.querySelectorAll("details.lab-sec")) {
-        if (sectionKey(d, view) === focusKey) d.querySelector(":scope > summary")?.focus({ preventScroll: true });
+    const old = panel.firstElementChild;
+    if (old && !force) {
+      // Patch the values in place: a heading or JSON branch the reader is
+      // pressing or has focused stays the same element, so the press completes
+      // and focus does not move.
+      morph(old, view);
+    } else {
+      panel.innerHTML = "";
+      panel.appendChild(view);
+    }
+    // Only a heading whose element was replaced needs its focus given back.
+    if (focusKey != null && !panel.contains(document.activeElement)) {
+      for (const d of panel.querySelectorAll("details.lab-sec")) {
+        if (sectionKey(d, panel) === focusKey) d.querySelector(":scope > summary")?.focus({ preventScroll: true });
       }
     }
   }
@@ -505,8 +513,11 @@ export class Inspector {
     const row = el("div", "lab-form-actions");
     const apply = button("Apply", "lab-primary", () => {
       const r = this.form.read();
-      if (r.errors.length) return;
-      const next = { ...spec, name: nameInput.value.trim() || spec.name, config: r.value };
+      if (r.errors.length) {
+        this.form.focusInvalid();
+        return;
+      }
+      const next ={ ...spec, name: nameInput.value.trim() || spec.name, config: r.value };
       if (this.hooks.onUpdateNode(n.id, next)) this.showTab("state");
     });
     const cancel = button("Cancel", "", () => this.showTab("state"));
@@ -616,11 +627,37 @@ function keepSectionsOpen(view, sections) {
   }
 }
 
+// A heading without its live parts (a count in parentheses, the states after
+// a " · ", a JSON branch's "{7}"), so it names the same section while those
+// change.
+function stableTitle(summary) {
+  return (summary?.textContent ?? "").split(/ \(| · |:? ?[{[]\d+[}\]]$/)[0];
+}
+
 // A section's identity across renders: the headings from `root` down to it.
 function sectionKey(d, root) {
   const titles = [];
   for (let e = d; e && e !== root; e = e.parentElement) {
-    if (e.matches("details.lab-sec")) titles.unshift(e.querySelector(":scope > summary")?.textContent ?? "");
+    if (e.matches("details.lab-sec")) titles.unshift(stableTitle(e.querySelector(":scope > summary")));
   }
   return titles.join("\u0000");
+}
+
+// Patch `a` into the shape of `b`, reusing every node that still matches. A
+// `<details>` keeps the open state the reader gave it, and is swapped for the
+// new one when its heading names a different section.
+function morph(a, b) {
+  const sameKind = a.nodeName === b.nodeName && (a.nodeName !== "DETAILS" || stableTitle(a.firstElementChild) === stableTitle(b.firstElementChild));
+  if (!sameKind) return a.replaceWith(b);
+  if (a.nodeType !== 1) {
+    if (a.data !== b.data) a.data = b.data;
+    return undefined;
+  }
+  for (const { name } of [...a.attributes]) if (name !== "open" && !b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of b.attributes) if (name !== "open" && a.getAttribute(name) !== value) a.setAttribute(name, value);
+  const from = [...a.childNodes];
+  const to = [...b.childNodes];
+  to.forEach((node, i) => (from[i] ? morph(from[i], node) : a.appendChild(node)));
+  for (const node of from.slice(to.length)) node.remove();
+  return undefined;
 }

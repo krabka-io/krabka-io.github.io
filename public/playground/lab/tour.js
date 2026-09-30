@@ -34,7 +34,7 @@ export class Tour {
     this.hooks = hooks;
     this.index = -1;
     this.highlighted = null;
-    this.root = el("aside", "lab-tour");
+    this.root = el("section", "lab-tour");
     // A dialog that leaves the page usable: focus moves into it on each step
     // the reader asks for, so a screen reader announces the title and text.
     this.root.setAttribute("role", "dialog");
@@ -52,8 +52,11 @@ export class Tour {
 
   // Opens the tour the first time this browser sees the lab. It leaves focus
   // where it is: taking it on page load would skip the reader past the page.
+  // Returns whether it opened.
   maybeStart() {
-    if (!seen()) this.start({ focus: false });
+    if (seen()) return false;
+    this.start({ focus: false });
+    return true;
   }
 
   start({ focus = true } = {}) {
@@ -127,11 +130,14 @@ export class Tour {
     const next = button(last ? "Done" : "Next", "lab-btn-sm lab-primary", () => this.go(1));
     nav.append(back, next);
     this.root.appendChild(nav);
-    // Stacked, the part of the page a step points at can be screens away: when
-    // none of it shows above the card, bring it up under the site header.
+    // Stacked, the part of the page a step points at can be screens away, or
+    // sit under the card: when none of it shows above the card, or the card
+    // covers a good part of it, bring it up under the site header.
     const box = this.highlighted?.getBoundingClientRect();
-    const shown = Math.min(window.innerHeight, this.root.getBoundingClientRect().top);
-    if (box && (box.bottom < 64 || box.top > shown - 48)) this.highlighted.scrollIntoView({ block: "start", behavior: "smooth" });
+    const card = this.root.getBoundingClientRect();
+    const shown = Math.min(window.innerHeight, card.top);
+    const covered = box ? Math.max(0, Math.min(box.right, card.right) - Math.max(box.left, card.left)) * Math.max(0, Math.min(box.bottom, card.bottom) - Math.max(box.top, card.top)) : 0;
+    if (box && (box.bottom < 64 || box.top > shown - 48 || covered > 0.4 * box.width * box.height)) this.highlighted.scrollIntoView({ block: "start", behavior: "smooth" });
     // The buttons were rebuilt, so the one the reader pressed is gone; the
     // next step's own button takes the focus.
     if (focus) next.focus({ preventScroll: true });

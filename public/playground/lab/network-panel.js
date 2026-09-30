@@ -1,6 +1,6 @@
 // Recent bytes on a selected link. The world keeps 40 frames per node pair;
 // each frame keeps its length and the first 16 KiB of payload bytes.
-import { el, button, fmtBytes } from "./dom.js";
+import { el, button, fmtBytes, fmtMs } from "./dom.js";
 import { hexDump } from "./storage-panel.js";
 
 const PAGE_BYTES = 256;
@@ -81,7 +81,11 @@ export class NetworkPanel {
       const item = el("details", "lab-wire-frame");
       const src = `${this.hooks.nodeName(frame.src.node)}:${frame.src.port}`;
       const dst = `${this.hooks.nodeName(frame.dst.node)}:${frame.dst.port}`;
-      item.appendChild(el("summary", null, `${frame.at} ms · ${src} → ${dst} · ${frame.label} · ${frame.kind === "data" ? fmtBytes(frame.size) : frame.kind}`));
+      // A non-Kafka frame (KRaft on 9093) can open with raw bytes: name it plainly.
+      const label = /[\u0000-\u001f�]/.test(frame.label) ? "binary" : String(frame.label).slice(0, 32);
+      // The label already says open or close; only a data frame has a size to add.
+      const tail = frame.kind === "data" ? ` · ${fmtBytes(frame.size)}` : frame.kind === frame.label ? "" : ` · ${frame.kind}`;
+      item.appendChild(el("summary", null, `${fmtMs(frame.at)} · ${src} → ${dst} · ${label}${tail}`));
       const content = el("div", "lab-wire-content");
       content.appendChild(el("p", "lab-muted lab-small", `Connection ${frame.conn} · ${frame.kind === "data" ? `${frame.size} payload bytes` : `TCP ${frame.kind}; no payload bytes`}`));
       if (frame.kind === "data") {

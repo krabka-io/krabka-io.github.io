@@ -38,7 +38,9 @@
 
 /* The lab fills the window under the site header; the page text follows it. */
 #krabka-lab.lab-app {
-  height: max(640px, calc(100dvh - 8.5rem));
+  /* The rem floor grows with the reader's default font size; a fixed 640px
+   * would clip the dock when the text is 24px. */
+  height: max(640px, 40rem, calc(100dvh - 8.5rem));
   border-radius: 0;
   border-left: 0;
   border-right: 0;
@@ -52,14 +54,17 @@
 #krabka-lab [hidden] { display: none !important; }
 #krabka-lab .lab-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* The load-failure message carries a URL that has no break opportunity. */
 #krabka-lab .lab-fallback,
 #krabka-lab .lab-error {
   color: var(--lab-muted);
   padding: 1rem;
+  overflow-wrap: anywhere;
 }
 #krabka-lab .lab-error {
   color: var(--lab-err);
 }
+#krabka-lab .lab-error + .lab-btn { margin: 0 1rem 1rem; }
 
 /* ---- text helpers ---- */
 #krabka-lab .lab-muted { color: var(--lab-muted); }
@@ -124,6 +129,11 @@
 #krabka-lab .lab-select { width: auto; }
 #krabka-lab .lab-input-sm { padding: 0.2rem 0.4rem; font-size: 0.76rem; width: auto; }
 #krabka-lab .lab-input-xs { padding: 0.15rem 0.3rem; font-size: 0.74rem; width: 4.2rem; }
+/* The small controls are 24 px tall: too little for a finger. */
+@media (pointer: coarse) {
+  #krabka-lab .lab-btn-sm,
+  #krabka-lab .lab-input-sm { min-height: 32px; }
+}
 #krabka-lab .lab-textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.76rem; resize: vertical; }
 #krabka-lab .lab-code { overflow-wrap: anywhere; }
 #krabka-lab .lab-checkbox,
@@ -133,6 +143,7 @@
 #krabka-lab .lab-field-label { font-size: 0.76rem; color: var(--lab-muted); }
 #krabka-lab .lab-field-help { display: block; font-size: 0.72rem; color: var(--lab-muted); opacity: 0.85; }
 #krabka-lab .lab-field-inline { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0; }
+#krabka-lab .lab-field-inline > .lab-muted { white-space: nowrap; }
 #krabka-lab .lab-field.lab-field-inline { flex-direction: row; }
 #krabka-lab .lab-field-error { color: var(--lab-err); font-size: 0.74rem; }
 #krabka-lab .lab-invalid .lab-input,
@@ -172,7 +183,7 @@
 #krabka-lab .lab-tb-brand { display: flex; flex-direction: column; min-width: 0; width: 12.5rem; max-width: 100%; line-height: 1.2; }
 #krabka-lab .lab-brand { font-weight: 800; letter-spacing: 0.02em; font-size: 0.95rem; }
 #krabka-lab .lab-tb-scenario { color: var(--lab-muted); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#krabka-lab .lab-tb-group { display: inline-flex; align-items: center; gap: 0.3rem; }
+#krabka-lab .lab-tb-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
 #krabka-lab .lab-tb-cap { color: var(--lab-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.1rem; }
 #krabka-lab .lab-play { display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-width: 6.6rem; padding: 0.45rem 0.9rem; font-size: 0.9rem; }
 #krabka-lab .lab-play-glyph { font-size: 0.8rem; letter-spacing: -0.1em; }
@@ -209,6 +220,10 @@
 #krabka-lab .lab-col-stage { overflow: hidden; position: relative; }
 @media (max-width: 1280px) {
   #krabka-lab .lab-workspace { grid-template-columns: 270px minmax(0, 1fr) 320px; }
+}
+/* Just above the stacked breakpoint the side columns would leave the canvas under 500px. */
+@media (max-width: 1200px) {
+  #krabka-lab .lab-workspace { grid-template-columns: 240px minmax(0, 1fr) 290px; }
 }
 @media (max-width: 1024px) {
   #krabka-lab.lab-app { height: auto; }
@@ -267,9 +282,9 @@
 #krabka-lab .lab-side-section > summary { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0; }
 #krabka-lab .lab-side-section > summary::before { content: "▸"; color: var(--lab-muted); font-size: 0.8rem; transition: transform 0.12s ease; }
 #krabka-lab .lab-side-section[open] > summary::before { transform: rotate(90deg); }
-#krabka-lab .lab-bridge a { color: var(--lab-accent); text-decoration: underline; }
+#krabka-lab .lab-bridge a { color: var(--lab-accent); text-decoration: underline; white-space: nowrap; }
 #krabka-lab .lab-bridge-command { display: flex; align-items: start; gap: 0.3rem; margin: 0.35rem 0; }
-#krabka-lab .lab-bridge-command code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.73rem; padding: 0.4rem 0.6rem; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 0.5rem; background: #050811; color: #e5e7eb; }
+#krabka-lab .lab-bridge-command code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.73rem; padding: 0.4rem 0.6rem; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 0.5rem; background: #050811; color: #e5e7eb; }
 /* The shell tokens of `commandTokens()` in app.js, in the site's code colours. */
 #krabka-lab .lab-tok-cmd { color: #93c5fd; }
 #krabka-lab .lab-tok-flag { color: #ff8466; }
@@ -310,6 +325,10 @@
 #krabka-lab .lab-preset-summary { font-size: 0.7rem; color: var(--lab-info); }
 #krabka-lab .lab-preset-desc { font-size: 0.72rem; color: var(--lab-muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 #krabka-lab .lab-preset-btn:hover .lab-preset-desc { -webkit-line-clamp: unset; }
+/* A touch screen has no hover, and a tap loads the preset: show the whole text. */
+@media (hover: none) {
+  #krabka-lab .lab-preset-desc { -webkit-line-clamp: unset; }
+}
 #krabka-lab .lab-preset-current { border-color: var(--lab-accent); box-shadow: inset 3px 0 0 var(--lab-accent); }
 #krabka-lab .lab-kind-glyph {
   display: inline-flex; align-items: center; justify-content: center;
@@ -333,10 +352,13 @@
   flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--lab-text);
   font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0.1rem 0; text-decoration: underline dotted; overflow-wrap: anywhere;
 }
-#krabka-lab .lab-saved-open:hover { color: var(--lab-accent); }
+#krabka-lab .lab-saved-open:hover:not(:disabled) { color: var(--lab-accent); }
+#krabka-lab .lab-saved-open:disabled { opacity: 0.45; cursor: not-allowed; }
 #krabka-lab .lab-scenario-name { font-weight: 700; overflow-wrap: anywhere; }
 #krabka-lab .lab-palette-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
-#krabka-lab .lab-peer-name { flex: 1; }
+/* The name stays on one line; the state and hosted nodes beside it wrap instead. */
+#krabka-lab .lab-peer-name { flex: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#krabka-lab .lab-peer-name + span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #krabka-lab .lab-peer-connected .lab-peer-name::before { content: "●"; color: var(--lab-ok); margin-right: 0.3rem; }
 #krabka-lab .lab-peer-connecting .lab-peer-name::before { content: "●"; color: var(--lab-warn); margin-right: 0.3rem; }
 #krabka-lab .lab-peer-closed .lab-peer-name::before { content: "●"; color: var(--lab-err); margin-right: 0.3rem; }
@@ -357,6 +379,18 @@
 }
 #krabka-lab .lab-canvas { width: 100%; height: 100%; min-height: 0; display: block; flex: 1; touch-action: none; cursor: grab; outline: none; }
 #krabka-lab .lab-canvas:active { cursor: grabbing; }
+/* Stacked, a finger dragging up or down the empty canvas scrolls the page past
+ * it; sideways drags and a two-finger pinch stay with the canvas, and so do
+ * all gestures once it is expanded or starts on a card. */
+@media (max-width: 1024px) {
+  #krabka-lab .lab-canvas-wrap:not(.lab-expanded) .lab-canvas { touch-action: pan-y; }
+}
+/* A strip above the gesture hint, so it never covers a card. */
+#krabka-lab .lab-canvas-note {
+  order: 1; flex: none; padding: 0.25rem 0.7rem; font-size: 0.72rem; color: var(--lab-muted);
+  background: rgba(12, 19, 34, 0.6); border-top: 1px solid var(--lab-border);
+}
+#krabka-lab .lab-canvas-note[hidden] { display: none; }
 /* The tools float over the canvas corner, so the whole box is drawing area;
  * fit() keeps a margin at the top for them. */
 #krabka-lab .lab-canvas-tools { position: absolute; top: 0.4rem; right: 0.4rem; z-index: 2; display: flex; gap: 0.25rem; }
@@ -374,10 +408,12 @@
 }
 #krabka-lab .lab-canvas-hint kbd { font: inherit; font-weight: 600; color: var(--lab-text); padding: 0 0.3rem; border: 1px solid var(--lab-border-strong); border-radius: 4px; background: rgba(255, 255, 255, 0.05); }
 /* Keep the strip to one line: the +/- buttons cover the wheel when the canvas is narrow. */
-@container (max-width: 700px) { #krabka-lab .lab-canvas-hint li:nth-child(5) { display: none; } }
+@container (max-width: 780px) { #krabka-lab .lab-canvas-hint li:nth-child(5) { display: none; } }
+@container (max-width: 625px) { #krabka-lab .lab-canvas-hint li:nth-child(4) { display: none; } }
+@container (max-width: 360px) { #krabka-lab .lab-canvas-hint li:nth-child(2) { display: none; } }
 @media (max-width: 640px) { #krabka-lab .lab-canvas-hint li:nth-child(n+3) { display: none; } }
 
-#krabka-lab .lab-node { cursor: pointer; outline: none; }
+#krabka-lab .lab-node { cursor: pointer; outline: none; touch-action: none; }
 #krabka-lab .lab-card { fill: var(--lab-panel-2); stroke-width: 1.5; }
 #krabka-lab .lab-card-halo { fill: none; stroke: transparent; stroke-width: 2; }
 #krabka-lab .lab-node:hover .lab-card { fill: #182338; }
@@ -465,11 +501,13 @@
 #krabka-lab .lab-faults-title { color: var(--lab-err); font-size: 0.78rem; letter-spacing: 0.02em; white-space: nowrap; }
 #krabka-lab .lab-faults-title::before { content: "⚡ "; }
 
-#krabka-lab .lab-faults-group { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; padding: 0.15rem 0.45rem; border-radius: 8px; border: 1px solid transparent; transition: border-color 0.15s ease; }
+#krabka-lab .lab-faults-group { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; min-width: 0; max-width: 100%; padding: 0.15rem 0.45rem; border-radius: 8px; border: 1px solid transparent; transition: border-color 0.15s ease; }
 /* Only the controls dim while nothing is selected; the caption is instruction and stays readable. */
 #krabka-lab .lab-faults-group > :not(.lab-faults-cap) { opacity: 0.6; transition: opacity 0.15s ease; }
 #krabka-lab .lab-faults-group[data-active="true"] { border-color: var(--lab-border-strong); background: rgba(255, 255, 255, 0.03); }
 #krabka-lab .lab-faults-group[data-active="true"] > * { opacity: 1; }
+/* After the two rules above, which would otherwise hold a disabled button at full strength. */
+#krabka-lab .lab-faults-group > .lab-btn:disabled { opacity: 0.45; }
 /* The link controls share the title's row and wrap among themselves: two rows in all, not a title row above two more. */
 @media (min-width: 641px) {
   #krabka-lab .lab-faults-link { flex: 1 1 0; min-width: 0; }
@@ -478,7 +516,7 @@
 #krabka-lab .lab-faults [hidden] { display: none; }
 #krabka-lab .lab-fault-num { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.76rem; color: var(--lab-muted); }
 #krabka-lab .lab-fault-num .lab-input { width: 3.4rem; }
-#krabka-lab .lab-faults-cap { color: var(--lab-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.15rem; }
+#krabka-lab .lab-faults-cap { color: var(--lab-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 0.15rem; min-width: 0; overflow-wrap: anywhere; }
 
 /* ---- selected link bytes ---- */
 #krabka-lab .lab-wire { border: 0; border-radius: 0; background: none; min-width: 0; scroll-margin-top: 5rem; }
@@ -566,12 +604,18 @@
 #krabka-lab .lab-sec-title { font-size: 0.76rem; font-weight: 700; color: var(--lab-muted); cursor: pointer; user-select: none; padding: 0.15rem 0; }
 /* The site strips the browser's disclosure marker; give the folded rows one back. */
 #krabka-lab .lab-sec-title::before,
+#krabka-lab .lab-advanced-title::before,
+#krabka-lab .lab-ev-detail > summary::before,
+#krabka-lab .lab-file > summary::before,
 #krabka-lab .lab-wire-frame > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--lab-muted); transition: transform 0.12s ease; }
 #krabka-lab .lab-sec[open] > .lab-sec-title::before,
+#krabka-lab .lab-advanced[open] > .lab-advanced-title::before,
+#krabka-lab .lab-ev-detail[open] > summary::before,
+#krabka-lab .lab-file[open] > summary::before,
 #krabka-lab .lab-wire-frame[open] > summary::before { transform: rotate(90deg); }
 #krabka-lab .lab-sec-nested { margin-left: 0.6rem; }
 #krabka-lab .lab-kv { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); gap: 0.1rem 0.7rem; margin: 0.2rem 0; font-size: 0.78rem; }
-#krabka-lab .lab-kv dt { color: var(--lab-muted); }
+#krabka-lab .lab-kv dt { color: var(--lab-muted); overflow-wrap: anywhere; }
 #krabka-lab .lab-kv dd { margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; overflow-wrap: anywhere; }
 #krabka-lab .lab-table-wrap { overflow-x: auto; max-width: 100%; }
 #krabka-lab .lab-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; margin: 0.2rem 0; }
@@ -603,12 +647,12 @@
 #krabka-lab .lab-storage-total { font-size: 0.76rem; }
 #krabka-lab .lab-storage-value { color: var(--lab-info); font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; }
 #krabka-lab .lab-storage-table td:first-child { font-family: inherit; }
+/* A long node name wraps instead of pushing the other columns out of the panel. */
+#krabka-lab .lab-storage-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 /* On a phone the table must fit the panel, or the Forget column sits cut off at the edge with no hint that it scrolls. */
 @media (max-width: 400px) {
   #krabka-lab .lab-storage-table th,
   #krabka-lab .lab-storage-table td { padding-left: 0.25rem; padding-right: 0.25rem; }
-  #krabka-lab .lab-storage-table th,
-  #krabka-lab .lab-storage-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 }
 #krabka-lab .lab-storage-volumes { margin-top: 0.5rem; }
 #krabka-lab .lab-volume-explorer { margin-top: 0.5rem; padding: 0.5rem; border: 1px solid var(--lab-border); border-radius: 8px; min-width: 0; scroll-margin-top: 5rem; }
@@ -636,7 +680,7 @@
 /* ---- dock: events, network bytes and storage under the canvas ---- */
 #krabka-lab .lab-dock {
   flex: none;
-  height: clamp(140px, 18vh, 200px);
+  height: clamp(172px, 22vh, 240px);
   border: 1px solid var(--lab-border);
   border-radius: 10px;
   background: var(--lab-panel);
@@ -646,6 +690,15 @@
 #krabka-lab .lab-tabset-head { display: flex; align-items: center; border-bottom: 1px solid var(--lab-border); flex: none; }
 #krabka-lab .lab-tabset-head .lab-tabset-bar { flex: 1; min-width: 0; border-bottom: 0; }
 #krabka-lab .lab-tabset-tools { display: flex; align-items: center; gap: 0.3rem; padding: 0 0.35rem; flex: none; }
+/* Expanded, the dock is the whole window: there is nothing to fold it into. */
+#krabka-lab .lab-dock.lab-expanded .lab-dock-toggle { display: none; }
+/* On a phone the three tabs need the full row; the buttons drop under them. */
+@media (max-width: 640px) {
+  #krabka-lab .lab-tabset-head { flex-wrap: wrap; }
+  #krabka-lab .lab-tabset-head .lab-tabset-bar { flex: 1 0 100%; border-bottom: 1px solid var(--lab-border); }
+  #krabka-lab .lab-tabset-tools { margin-left: auto; padding: 0.25rem 0.35rem; }
+  #krabka-lab .lab-dock-collapsed .lab-tabset-bar { border-bottom: 0; }
+}
 #krabka-lab .lab-dock .lab-dpanel { padding: 0; height: 100%; }
 #krabka-lab .lab-dock .lab-dpanel[data-panel="network"],
 #krabka-lab .lab-dock .lab-dpanel[data-panel="storage"] { padding: 0.6rem 0.75rem 0.9rem; height: auto; }
@@ -674,8 +727,12 @@
  * wrapper sizes to the log and the log never scrolls, so "follow" has nothing to follow. */
 #krabka-lab .lab-timeline::details-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #krabka-lab .lab-timeline-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#krabka-lab .lab-timeline-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--lab-border); flex: none; }
-#krabka-lab .lab-timeline-count { font-size: 0.74rem; color: var(--lab-muted); margin-left: auto; }
+#krabka-lab .lab-timeline-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--lab-border); flex: none; container-type: inline-size; }
+/* The text filter takes what the selects leave, so the bar stays one row on a laptop-sized dock. */
+#krabka-lab .lab-timeline-bar .lab-select { max-width: 7rem; }
+#krabka-lab .lab-timeline-bar .lab-input { flex: 1 1 5rem; min-width: 5rem; width: auto; }
+#krabka-lab .lab-timeline-count { font-size: 0.74rem; color: var(--lab-muted); margin-left: auto; white-space: nowrap; }
+@container (max-width: 560px) { #krabka-lab .lab-timeline-count { display: none; } }
 #krabka-lab .lab-follow { font-size: 0.76rem; margin: 0; }
 #krabka-lab .lab-timeline-list { list-style: none; margin: 0; padding: 0.2rem 0; flex: 1; min-height: 0; height: auto; overflow: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.72rem; }
 #krabka-lab .lab-ev { display: grid; grid-template-columns: 5.5rem minmax(0, 9rem) minmax(0, 10rem) minmax(0, 1fr); gap: 0.5rem; padding: 0.15rem 0.6rem; border-left: 3px solid transparent; }
@@ -708,20 +765,13 @@
 @media (max-width: 1280px) {
   #krabka-lab .lab-tour { right: calc(320px + 1.7rem); }
 }
+@media (max-width: 1200px) {
+  #krabka-lab .lab-tour { right: calc(290px + 1.7rem); }
+}
 @media (max-width: 1024px) {
   #krabka-lab .lab-tour { left: 0.75rem; right: 0.75rem; width: auto; max-width: 30rem; margin-inline: auto; }
   /* Scrolled to a step's target, it lands below the sticky site header. */
   #krabka-lab .lab-tour-target { scroll-margin-top: 5rem; }
-}
-/* On a phone the card shares a row between its action and Back/Next, so it hides less of the page. */
-@media (max-width: 640px) {
-  #krabka-lab .lab-tour { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.5rem; padding: 0.6rem 0.75rem; }
-  #krabka-lab .lab-tour-head,
-  #krabka-lab .lab-tour-title,
-  #krabka-lab .lab-tour-text { flex: 0 0 100%; }
-  #krabka-lab .lab-tour-text { font-size: 0.78rem; line-height: 1.4; margin-bottom: 0.45rem; }
-  #krabka-lab .lab-tour-action { margin-bottom: 0; }
-  #krabka-lab .lab-tour-nav { margin-left: auto; }
 }
 #krabka-lab .lab-tour[hidden] { display: none; }
 #krabka-lab .lab-tour-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
@@ -731,7 +781,22 @@
 #krabka-lab .lab-tour-text { margin: 0 0 0.6rem; font-size: 0.82rem; color: #cbd5e1; line-height: 1.45; }
 #krabka-lab .lab-tour-action { margin-bottom: 0.6rem; border-color: var(--lab-accent); color: var(--lab-accent); }
 #krabka-lab .lab-tour-nav { display: flex; justify-content: flex-end; gap: 0.4rem; }
+/* On a phone the card shares a row between its action and Back/Next, so it hides less of the page.
+ * After the base rules above: a block placed before them loses the cascade. */
+@media (max-width: 640px) {
+  #krabka-lab .lab-tour { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.5rem; padding: 0.6rem 0.75rem; }
+  #krabka-lab .lab-tour-head,
+  #krabka-lab .lab-tour-title,
+  #krabka-lab .lab-tour-text { flex: 0 0 100%; }
+  #krabka-lab .lab-tour-text { font-size: 0.78rem; line-height: 1.4; margin-bottom: 0.45rem; }
+  #krabka-lab .lab-tour-action { margin-bottom: 0; }
+  #krabka-lab .lab-tour-nav { margin-left: auto; }
+}
 #krabka-lab .lab-tour-target { outline: 2px solid var(--lab-accent); outline-offset: 3px; animation: lab-outline 1.8s ease-in-out infinite; }
+/* The wide stage clips what spills past its edge, so inside it the outline is drawn inward. */
+@media (min-width: 1025px) {
+  #krabka-lab .lab-col-stage .lab-tour-target { outline-offset: -3px; }
+}
 @keyframes lab-outline {
   0%, 100% { outline-color: rgba(255, 77, 46, 0.95); }
   50% { outline-color: rgba(255, 77, 46, 0.35); }
@@ -810,3 +875,31 @@
 #krabka-lab .lab-toast-error { border-color: var(--lab-err); }
 #krabka-lab .lab-toast-close { padding: 0 0.35rem; }
 #krabka-lab .lab-toast-action { flex: none; color: var(--lab-accent); }
+
+/* ---- touch: every control is at least 32px tall, the main ones 36px ---- */
+@media (pointer: coarse) {
+  #krabka-lab .lab-btn { min-height: 2.25rem; }
+  #krabka-lab .lab-btn-sm,
+  #krabka-lab .lab-select,
+  #krabka-lab .lab-input { min-height: 2rem; }
+  #krabka-lab .lab-toast-close { min-width: 2rem; min-height: 2rem; }
+  /* A row's node button is a line of text; padding lifts it past the 24px minimum without a second line. */
+  #krabka-lab .lab-ev-node { padding: 0.3rem 0; }
+  #krabka-lab input[type="checkbox"] { width: 1.25rem; height: 1.25rem; }
+}
+
+/* ---- forced colours: state that rides on a tint or a hue gets a system colour ---- */
+@media (forced-colors: active) {
+  #krabka-lab .lab-bridge a,
+  #krabka-lab .lab-saved-open { color: LinkText; }
+  #krabka-lab .lab-dtab-active,
+  #krabka-lab .lab-tab-active { border-bottom-color: Highlight; }
+  #krabka-lab .lab-selected .lab-card-halo { stroke: Highlight; stroke-width: 3; }
+  #krabka-lab .lab-pick-b .lab-card-halo { stroke: LinkText; }
+  #krabka-lab .lab-preset-current { border-color: Highlight; box-shadow: inset 3px 0 0 Highlight; }
+  #krabka-lab .lab-faults-group[data-active="true"] { border-color: Highlight; }
+  #krabka-lab .lab-tb-tools [aria-pressed="true"] { border-color: Highlight; color: Highlight; }
+  #krabka-lab .lab-tour-target { outline-color: Highlight; }
+  #krabka-lab .lab-btn:disabled,
+  #krabka-lab .lab-menu-item:disabled { color: GrayText; border-color: GrayText; }
+}

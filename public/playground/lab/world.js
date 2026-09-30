@@ -723,15 +723,17 @@ export function normalizeScenario(input) {
     name: typeof s.name === "string" ? s.name : "",
     links: { default_latency_ms: Number(s.links?.default_latency_ms ?? 5) },
     link_overrides: Array.isArray(s.link_overrides) ? s.link_overrides : [],
-    nodes: (Array.isArray(s.nodes) ? s.nodes : []).map((n) => ({
+    nodes: (Array.isArray(s.nodes) ? s.nodes : []).map((n, i) => ({
       id: Number(n.id) || 0,
       kind: String(n.kind || ""),
-      name: typeof n.name === "string" ? n.name : "",
-      x: Number(n.x) || 0,
-      y: Number(n.y) || 0,
+      // A blank name would leave a card with no title; the Add dialog falls back the same way.
+      name: (typeof n.name === "string" && n.name.trim()) || (n.kind && Number(n.id) ? `${n.kind}-${Number(n.id)}` : ""),
+      // A file without positions gets a grid instead of one stacked point.
+      x: n.x == null ? 140 + (i % 5) * 210 : Number(n.x) || 0,
+      y: n.y == null ? 100 + Math.floor(i / 5) * 140 : Number(n.y) || 0,
       config: n.config && typeof n.config === "object" ? n.config : {},
     })),
-    topics: (Array.isArray(s.topics) ? s.topics : []).map((t) => {
+    topics: (Array.isArray(s.topics) ? s.topics : []).filter((t) => t && typeof t === "object").map((t) => {
       const topic = {
         name: String(t.name || ""),
         partitions: Number(t.partitions) || 1,

@@ -1311,6 +1311,12 @@ fn frame_label(frame: &Frame) -> String {
                     .split(|&b| b == b'\r' || b == b'\n')
                     .next()
                     .unwrap_or(&[]);
+                // Only a printable first line can be an HTTP message; anything
+                // else (the Raft frames between brokers) is opaque bytes and
+                // would show as control characters in the Network bytes list.
+                if !line.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
+                    return "binary".to_string();
+                }
                 let text = String::from_utf8_lossy(line);
                 let mut words = text.split_whitespace();
                 match (words.next(), words.next()) {
@@ -2016,5 +2022,12 @@ mod tests {
             b"HTTP/1.1 200 OK\r\n\r\n",
         )));
         assert!(frame_label(&resp) == "HTTP 200");
+        let raft = Frame::data(
+            Endpoint::new(NodeId(1), 9093),
+            Endpoint::new(NodeId(2), 9093),
+            ConnId(0),
+            Bytes::from_static(&[0, 0, 0, b'i', 0, 0, 4, 0xff, 0xfe]),
+        );
+        assert!(frame_label(&raft) == "binary");
     }
 }
