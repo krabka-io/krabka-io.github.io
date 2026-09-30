@@ -44,7 +44,6 @@
 
   margin: 1rem 0;
   padding: 1rem;
-  container-type: inline-size;
   border: 1px solid var(--px-border);
   border-radius: 12px;
   background: var(--px-bg);
@@ -106,7 +105,7 @@
 }
 
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -159,7 +158,7 @@
   content: '−';
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-sidebar.px-folded > .px-sidebar-controls {
     display: none;
   }
@@ -190,7 +189,8 @@
 }
 
 #krabka-proofs .px-input::placeholder {
-  color: rgba(156, 163, 175, 0.55);
+  color: var(--px-muted);
+  opacity: 1;
 }
 
 #krabka-proofs .px-input:focus,
@@ -296,7 +296,7 @@
   min-height: 0;
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-list {
     max-height: 280px;
     border: 1px solid var(--px-border);
@@ -604,7 +604,9 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.2rem 0.6rem;
-  padding: 0.18rem 0.25rem;
+  /* The chevron sits in the left padding, so a name that wraps cannot strand it on a line of its own. */
+  position: relative;
+  padding: 0.18rem 0.25rem 0.18rem 1.25rem;
   border-radius: 6px;
   cursor: pointer;
   list-style: none;
@@ -624,8 +626,9 @@
 #krabka-proofs .px-goal > summary::before,
 #krabka-proofs .px-node > summary::before {
   content: '';
-  flex: none;
-  align-self: center;
+  position: absolute;
+  top: 0.6rem;
+  left: 0.25rem;
   width: 0.4rem;
   height: 0.4rem;
   border-right: 1.6px solid var(--px-muted);
@@ -902,7 +905,8 @@
   display: none;
   position: absolute;
   z-index: 10;
-  bottom: 100%;
+  /* Below the pill: above it, the tooltip of a pill near the top of the scrolling panel is cut off. */
+  top: 100%;
   left: 0;
   width: min(18rem, 55vw);
   padding: 0.65rem;
@@ -1108,7 +1112,10 @@
  * Once the script has run, the explorer is an app that fills the window under
  * the site header: the session list on the left, one session on the right with
  * its own header, tabs and scrolling body. The page text follows it. In a
- * narrow container everything stacks and the page scrolls as before. */
+ * narrow window everything stacks and the page scrolls as before. The switch is
+ * a viewport query, not a container query: the root itself has to drop its fixed
+ * height, and a container cannot style itself. The app fills the window, so the
+ * two widths are the same. */
 
 #krabka-proofs.px-app {
   display: flex;
@@ -1211,7 +1218,8 @@
   gap: 0.15rem;
   padding: 0 0.7rem;
   border-bottom: 1px solid var(--px-border);
-  overflow-x: auto;
+  /* Wraps rather than scrolling: a cut-off last tab gave no cue that it was there. */
+  flex-wrap: wrap;
   flex: none;
 }
 
@@ -1272,7 +1280,7 @@
   margin-top: 0;
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs.px-app {
     display: block;
     height: auto;
@@ -1321,6 +1329,12 @@
   overflow-wrap: anywhere;
 }
 
+/* After the rule above, which would otherwise win the colour at equal specificity. */
+#krabka-proofs .px-code-status.px-error {
+  margin: 0;
+  color: var(--px-error);
+}
+
 #krabka-proofs .px-btn-sm {
   padding: 0.18rem 0.55rem;
   font-size: 0.76rem;
@@ -1328,7 +1342,9 @@
 
 #krabka-proofs .px-pre.px-code {
   counter-reset: px-line;
-  max-height: none;
+  /* Sized to fit under the note and bar in the app's scrolling panel, so the
+   * block scrolls on both axes and its horizontal scrollbar is in view. */
+  max-height: max(20rem, calc(100dvh - 28rem));
   padding: 0.6rem 0;
   overflow: auto;
   white-space: pre;
@@ -1341,6 +1357,21 @@
 #krabka-proofs .px-pre.px-code.px-wrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Stacked, the page scrolls and the panel is not a box of its own. */
+@media (max-width: 60rem) {
+  #krabka-proofs .px-pre.px-code {
+    max-height: 70dvh;
+  }
+}
+
+/* Wrapped text hangs under the code, not the line number: the padding is the
+ * gutter (3.4rem number + 0.7rem margin) and the negative indent pulls the
+ * number back out into it. */
+#krabka-proofs .px-code.px-wrap .px-line {
+  padding-left: 4.1rem;
+  text-indent: -4.1rem;
 }
 
 #krabka-proofs .px-code .px-line {
@@ -1357,6 +1388,7 @@
   padding-right: 0.9rem;
   margin-right: 0.7rem;
   text-align: right;
+  text-indent: 0;
   color: #6b7280;
   border-right: 1px solid var(--px-border);
   user-select: none;

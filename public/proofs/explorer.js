@@ -62,6 +62,7 @@ let root = null;
 let listEl = null;
 let countEl = null;
 let detailEl = null;
+let announceEl = null;
 let chipEls = new Map();
 
 // Set while a session is rendered: leaf key -> status cell, so the live check
@@ -135,6 +136,14 @@ function displayName(session) {
   return session.impl ? `${session.impl}/${session.name}` : session.name;
 }
 
+// What the list shows. Every derived Clone impl would start with the same 15
+// characters and end in `/clone`, which the ellipsis would then cut the type
+// name out of; the full name stays in the row's tooltip.
+function listName(session) {
+  if (session.kind === "derived" && session.name === "clone") return session.impl.replace(/^impl_Clone_for_/, "");
+  return displayName(session);
+}
+
 function kindLabel(kind) {
   const k = KINDS.find((x) => x.key === kind);
   return kind === "derived" ? "derived impl" : k ? k.label.replace(/s$/, "") : kind;
@@ -176,12 +185,13 @@ function idFromHash() {
   }
 }
 
-function writeHash(id) {
-  const hash = HASH_PREFIX + encodeURIComponent(id);
-  if (location.hash !== hash) {
+function writeHash(id, replace) {
+  // Compare the decoded id: the address bar may hold the documented
+  // `#session=module/name` form, which differs from the encoded one written here.
+  if (idFromHash() !== id) {
     // A hash change would scroll to a matching element; there is none, so the
     // page stays put and the listener below picks the selection up.
-    history.pushState(null, "", hash);
+    history[replace ? "replaceState" : "pushState"](null, "", HASH_PREFIX + encodeURIComponent(id).replace(/%2F/g, "/"));
   }
 }
 
@@ -226,7 +236,7 @@ function renderList() {
       item.title = `${displayName(s)} — ${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.setAttribute("aria-label", item.title);
       if (s.id === selectedId) item.classList.add("px-active");
-      const name = el("span", "px-item-name", displayName(s));
+      const name = el("span", "px-item-name", listName(s));
       const meta = el("span", "px-item-meta", fmtTime(s.stats.time));
       meta.title = `${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.append(name, meta);
@@ -396,7 +406,7 @@ function renderObligations(session) {
   shead.appendChild(el("h3", "px-section-title", "Obligations"));
   const obligations = Array.isArray(session.obligations) ? session.obligations : [];
   if (session.kind === "derived") {
-    section.append(shead, el("p", "px-note", "The page does not list obligations for derived Clone implementations; open the Coma below to read the generated conditions."));
+    section.append(shead, el("p", "px-note", "The page does not list obligations for derived Clone implementations; open the Coma source tab to read the generated conditions."));
     return section;
   }
   if (obligations.length === 0) {
@@ -541,7 +551,11 @@ function renderComa(session) {
   const copy = el("button", "px-btn px-btn-sm", "Copy");
   copy.type = "button";
   copy.disabled = true;
-  bar.append(status, wrap, copy);
+  const retry = el("button", "px-btn px-btn-sm", "Retry");
+  retry.type = "button";
+  retry.hidden = true;
+  retry.addEventListener("click", () => section.load());
+  bar.append(status, retry, wrap, copy);
   section.appendChild(bar);
   const pre = el("pre", "px-pre px-code", "");
   pre.tabIndex = 0;
@@ -565,18 +579,21 @@ function renderComa(session) {
   section.load = async () => {
     if (started) return;
     started = true;
+    retry.hidden = true;
     status.textContent = "Fetching the Coma file...";
+    status.classList.remove("px-error");
     try {
       text = await fetchComa(session.id);
       pre.innerHTML = highlightWhy(text);
       pre.hidden = false;
       copy.disabled = false;
-      status.textContent = `${fmtCount(text.split("\n").length)} lines`;
-      status.classList.remove("px-error");
+      // One .px-line per line, so the count cannot disagree with the numbers shown.
+      status.textContent = `${fmtCount(pre.childElementCount)} lines`;
     } catch (err) {
       started = false;
       status.textContent = `Could not fetch ${comaSitePath(session.id)}: ${err && err.message ? err.message : err}`;
       status.classList.add("px-error");
+      retry.hidden = false;
     }
   };
   return section;
@@ -641,14 +658,18 @@ function renderDetail(session) {
     if (p.count) tab.appendChild(el("span", "px-tab-n", fmtCount(p.count)));
     tab.addEventListener("click", () => show(p.id));
     tab.addEventListener("keydown", (e) => {
-      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-      if (!step) return;
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: panels.length - 1 }[e.key];
+      if (to === undefined) return;
       e.preventDefault();
-      const next = panels[(i + step + panels.length) % panels.length];
+      const next = panels[(to + panels.length) % panels.length];
       show(next.id);
       next.tab.focus();
     });
     p.tab = tab;
+    tab.id = `px-tab-${p.id}`;
+    tab.setAttribute("aria-controls", `px-panel-${p.id}`);
+    p.node.id = `px-panel-${p.id}`;
+    p.node.setAttribute("aria-labelledby", tab.id);
     p.node.setAttribute("role", "tabpanel");
     tabs.appendChild(tab);
     body.appendChild(p.node);
@@ -657,7 +678,9 @@ function renderDetail(session) {
   show(panels.some((p) => p.id === activeTab) ? activeTab : "tree");
 }
 
-function select(id, pushHash) {
+// `pushHash` writes the session into the URL; `replace` overwrites the current
+// history entry instead of adding one, for stepping through the list.
+function select(id, pushHash, replace = false) {
   const session = byId.get(id);
   if (!session) return false;
   selectedId = id;
@@ -668,7 +691,8 @@ function select(id, pushHash) {
     markActive();
   }
   renderDetail(session);
-  if (pushHash) writeHash(id);
+  announceEl.textContent = `Showing ${displayName(session)}`;
+  if (pushHash) writeHash(id, replace);
   return true;
 }
 
@@ -687,7 +711,7 @@ function buildShell() {
   const layout = el("div", "px-layout");
 
   const sidebar = el("div", "px-sidebar");
-  // In a narrow container the list folds behind this button; wide, it is
+  // In a narrow window the list folds behind this button; wide, it is
   // always open and the button is hidden.
   const toggle = el("button", "px-sidebar-toggle", "Browse sessions");
   toggle.type = "button";
@@ -740,7 +764,7 @@ function buildShell() {
     if (!next) return;
     e.preventDefault();
     next.focus();
-    select(next.dataset.id, true);
+    select(next.dataset.id, true, true);
   });
   filter.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -760,9 +784,12 @@ function buildShell() {
   sidebar.appendChild(controls);
 
   detailEl = el("section", "px-detail");
-  detailEl.setAttribute("aria-live", "polite");
+  // The pane is rebuilt on every selection; announcing one short line beats
+  // asking a screen reader to read the whole new pane.
+  announceEl = el("p", "px-visually-hidden");
+  announceEl.setAttribute("role", "status");
   layout.append(sidebar, detailEl);
-  root.appendChild(layout);
+  root.append(layout, announceEl);
   root.classList.add("px-app");
   document.addEventListener("keydown", (e) => {
     if (e.key === "/" && !e.target.closest("input, textarea, select, [contenteditable]")) {
