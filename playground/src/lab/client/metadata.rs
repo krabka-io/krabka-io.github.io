@@ -2,8 +2,9 @@
 //! leader and epoch, the controller, and the cluster id.
 //!
 //! The cache is the replay of the last `Metadata` responses. A broker's
-//! endpoint comes from its advertised host: a lab broker advertises
-//! `node-<id>`, and the cache maps it to [`Endpoint::kafka`] of that node.
+//! endpoint comes from its advertised host: a real lab broker advertises
+//! `127.0.0.1:(9091+n)`, which the cache maps to [`Endpoint::kafka`] of node
+//! `n` through the broker id.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -64,8 +65,8 @@ pub struct MetadataCache {
 }
 
 /// The lab endpoint of a broker that advertises `host`: `node-<id>` names
-/// the node directly, as does a virtual address `10.0.x.y` (a real broker
-/// the page runs in a Worker advertises one); any other host falls back to
+/// the node directly, as does a virtual address `10.0.x.y`; any other host,
+/// such as the `127.0.0.1` a real broker in a Worker advertises, falls back to
 /// the broker id as the node id.
 #[must_use]
 pub fn endpoint_for_host(host: &str, node_id: i32) -> Endpoint {
@@ -404,6 +405,7 @@ mod tests {
             ("10.0.1.2", 9, 258),
             ("10.1.0.5", 9, 9),
             ("broker-3.example", 4, 4),
+            ("127.0.0.1", 4, 4),
             ("", 9, 9),
             ("node-x", 2, 2),
             ("node-1", -1, 1),

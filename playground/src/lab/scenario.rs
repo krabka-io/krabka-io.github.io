@@ -159,13 +159,13 @@ mod tests {
     #[test]
     fn scenario_parses_with_defaults_and_rejects_unknown_keys() {
         let s: Scenario = serde_json::from_str(
-            r#"{"version":1,"nodes":[{"id":1,"kind":"broker","config":{"broker_id":1}}],
+            r#"{"version":1,"nodes":[{"id":1,"kind":"krabka-broker","config":{"broker_id":1}}],
                 "topics":[{"name":"orders"}]}"#,
         )
         .unwrap();
         assert!(s.seed == 0);
         assert!(s.links.default_latency_ms == DEFAULT_LATENCY_MS);
-        assert!(s.nodes[0].display_name() == "broker-1");
+        assert!(s.nodes[0].display_name() == "krabka-broker-1");
         assert!(s.topics[0].partitions == 1);
         assert!(s.topics[0].replication_factor == -1);
 

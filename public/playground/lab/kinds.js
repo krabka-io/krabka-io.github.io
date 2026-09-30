@@ -46,7 +46,7 @@ const BOOTSTRAP = {
   key: "bootstrap",
   label: "Bootstrap brokers",
   type: "noderefs",
-  of: ["broker", REAL_BROKER_KIND],
+  of: [REAL_BROKER_KIND],
   required: true,
   help: "The brokers the client connects to first. Metadata leads it to the rest.",
 };
@@ -76,66 +76,9 @@ export const KINDS = {
     edges: () => [],
     status: (s) => s?.connected ? "connected" : "waiting for kafkactl",
   },
-  broker: {
-    kind: "broker",
-    label: "Broker",
-    glyph: "▣",
-    color: "#f7b73a",
-    description: "A Krabka broker in combined mode: a KRaft voter or observer, partition leader or follower, and a group coordinator.",
-    listens: KAFKA_PORT,
-    probe: { broker_id: 99 },
-    fields: [
-      { key: "broker_id", label: "Broker id", type: "number", required: true, min: 1, step: 1, help: "node.id. It equals the node id: clients resolve the advertised host node-<id> back to this node." },
-      { key: "rack", label: "Rack", type: "text", placeholder: "a", help: "broker.rack, advertised in the broker's registration." },
-      {
-        key: "voter",
-        label: "KRaft voter",
-        type: "boolean",
-        default: true,
-        emitDefault: false,
-        help: "process.roles=broker,controller. The quorum is static: its voters are the brokers checked here when the scenario loads, and a broker added to a running scenario observes until it loads again. Unchecked, the broker only observes.",
-      },
-      num("default_partitions", "Default partitions", 1, "num.partitions: auto-created topics and CreateTopics with -1.", { min: 1 }),
-      num("default_replication_factor", "Default replication factor", -1, "default.replication.factor. -1 means every unfenced broker.", {
-        min: -1,
-        validate: (v) => (v === 0 ? "positive, or -1" : null),
-      }),
-      num("min_insync_replicas", "min.insync.replicas", 1, "An acks=all produce needs this many in-sync replicas.", { min: 1 }),
-      num("replica_lag_time_max_ms", "Replica lag time max (ms)", 30000, "replica.lag.time.max.ms: how long a follower may lag before it leaves the ISR."),
-      num("log_retention_ms", "Log retention (ms)", 604800000, "log.retention.ms, the default retention.ms. -1 keeps everything.", { min: -1 }),
-      {
-        type: "advanced",
-        label: "Advanced: timeouts and the group coordinator",
-        fields: [
-          num("request_timeout_ms", "Request timeout (ms)", 30000, "request.timeout.ms: the longest a held request waits."),
-          num("broker_heartbeat_interval_ms", "Broker heartbeat interval (ms)", 2000, "broker.heartbeat.interval.ms: the pause between two heartbeats to the controller.", { min: 1 }),
-          num("broker_session_timeout_ms", "Broker session timeout (ms)", 9000, "broker.session.timeout.ms: how long the controller waits for a heartbeat before it fences the broker.", { min: 1 }),
-          num("offsets_commit_timeout_ms", "Offsets commit timeout (ms)", 5000, "offsets.commit.timeout.ms: how long a group coordinator write waits for its commit."),
-          num("group_initial_rebalance_delay_ms", "Classic: initial rebalance delay (ms)", 3000, "group.initial.rebalance.delay.ms"),
-          num("group_min_session_timeout_ms", "Classic: min session timeout (ms)", 6000, "group.min.session.timeout.ms"),
-          num("group_max_session_timeout_ms", "Classic: max session timeout (ms)", 1800000, "group.max.session.timeout.ms"),
-          num("group_consumer_session_timeout_ms", "KIP-848: session timeout (ms)", 45000, "group.consumer.session.timeout.ms"),
-          num("group_consumer_heartbeat_interval_ms", "KIP-848: heartbeat interval (ms)", 5000, "group.consumer.heartbeat.interval.ms: the interval a member is told."),
-          num("group_consumer_assignment_interval_ms", "KIP-848: assignment interval (ms)", 1000, "group.consumer.assignment.interval.ms"),
-          num("group_streams_session_timeout_ms", "Streams: session timeout (ms)", 45000, "group.streams.session.timeout.ms"),
-          num("group_streams_heartbeat_interval_ms", "Streams: heartbeat interval (ms)", 5000, "group.streams.heartbeat.interval.ms"),
-          num("group_streams_num_standby_replicas", "Streams: standby replicas", 0, "group.streams.num.standby.replicas"),
-          num("group_streams_initial_rebalance_delay_ms", "Streams: initial rebalance delay (ms)", 3000, "group.streams.initial.rebalance.delay.ms"),
-          num("group_streams_assignment_interval_ms", "Streams: assignment interval (ms)", 1000, "group.streams.assignment.interval.ms"),
-        ],
-      },
-    ],
-    suggest: ({ nextId }) => ({ broker_id: nextId }),
-    // The broker changes only through the requests it serves and the records
-    // its quorum commits.
-    commands: [],
-    noCommands: "A broker takes no control commands: it changes only through the requests it serves and the records its quorum commits.",
-    edges: () => [],
-    status: (s) => brokerStatus(s),
-  },
   [REAL_BROKER_KIND]: {
     kind: REAL_BROKER_KIND,
-    label: "Krabka broker (real)",
+    label: "Krabka broker",
     glyph: "▣",
     color: "#f7b73a",
     real: true,
@@ -492,7 +435,7 @@ export const KINDS = {
     description: "Opens a connection to a target and pings it on a period; reports the mean round trip.",
     probe: { target: 1 },
     fields: [
-      { key: "target", label: "Target", type: "noderef", of: ["echo", "broker", REAL_BROKER_KIND, "schema-registry", "pinger"], required: true },
+      { key: "target", label: "Target", type: "noderef", of: ["echo", REAL_BROKER_KIND, "schema-registry", "pinger"], required: true },
       { key: "period_ms", label: "Period (ms)", type: "number", default: 100, min: 1, step: 1 },
       { key: "port", label: "Port", type: "number", default: KAFKA_PORT, emitDefault: false, min: 0, max: 65535, step: 1, help: "9092 for a broker or echo, 8081 for a registry." },
     ],
@@ -684,44 +627,6 @@ export function probeAvailability(Lab) {
 }
 
 // ---- the broker's card line ----------------------------------------------------------
-
-// The quorum role as the card and the inspector name it: `controller` for the
-// active controller, `observer` for a broker that does not vote, `voter` for
-// a following voter, else the raft state.
-export function quorumRole(q) {
-  if (!q || typeof q !== "object") return null;
-  if (q.active) return "controller";
-  if (q.voter === false) return "observer";
-  if (q.role === "Follower") return "voter";
-  return q.role != null ? String(q.role).toLowerCase() : null;
-}
-
-// How many partitions of the user topics a broker leads, of how many.
-export function leadership(s) {
-  let led = 0;
-  let total = 0;
-  const me = s.broker_id;
-  for (const t of Array.isArray(s.topics) ? s.topics : []) {
-    if (t.internal) continue;
-    for (const p of t.partitions || []) {
-      total += 1;
-      if (me != null && p.leader === me) led += 1;
-    }
-  }
-  return { led, total };
-}
-
-function brokerStatus(s) {
-  const parts = [];
-  if (s.state && s.state !== "RUNNING") parts.push(String(s.state).toLowerCase());
-  else if (s.lifecycle?.fenced) parts.push("fenced");
-  const q = s.quorum && typeof s.quorum === "object" ? s.quorum : null;
-  const role = quorumRole(q);
-  if (role) parts.push(q.epoch != null ? `${role} e${q.epoch}` : role);
-  const { led, total } = leadership(s);
-  if (total) parts.push(`leads ${led}/${total}`);
-  return parts.join(" · ");
-}
 
 // The card's line for a real broker: what its process is doing.
 function realBrokerStatus(s) {

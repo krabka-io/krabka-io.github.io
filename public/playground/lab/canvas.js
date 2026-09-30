@@ -232,7 +232,7 @@ export class Canvas {
       const spec = this.scenario?.nodes?.find((s) => s.id === n.id);
       const target = spec?.config?.bootstrap?.[0];
       const anchor = target != null ? this.positions.get(Number(target)) : null;
-      const brokers = nodes.filter((b) => b.kind === "broker" || b.kind === "krabka-broker");
+      const brokers = nodes.filter((b) => b.kind === "krabka-broker");
       const base = anchor || (brokers.length ? this.positions.get(brokers[0].id) : null) || { x: 60, y: 60 };
       // The nearest row under the broker that no card is on: where cards sit
       // close together the gap is narrower than the usual 96.
@@ -316,8 +316,7 @@ export class Canvas {
     // from the end first. The full text stays in the title and aria-label.
     const room = entry.w - (entry.ghost ? 38 : 52);
     fitText(entry.name, [n.name || `${n.kind}-${n.id}`], "", room, entry.ghost ? 14 : 16);
-    // "(real)" is already a badge on the card; dropping it keeps the id on the line.
-    if (entry.kind) fitText(entry.kind, [k.label.replace(/ \(real\)$/, "").toLowerCase(), `#${n.id}`], " · ", room, 22);
+    if (entry.kind) fitText(entry.kind, [k.label.toLowerCase(), `#${n.id}`], " · ", room, 22);
     if (entry.status) fitText(entry.status, st.split(" · "), " · ", room, 18);
     const g = entry.g;
     g.classList.toggle("lab-down", !n.alive);

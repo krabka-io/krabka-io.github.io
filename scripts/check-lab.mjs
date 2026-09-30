@@ -1,225 +1,37 @@
 // End-to-end check of the Cluster Lab page (`/docs/lab`) in headless Chromium.
 //
+// It needs no broker module: the scenario is the echo-and-pinger Network probe
+// (`NETWORK_PROBE` in lab-check-lib.mjs). The cluster flows on real brokers
+// are in `check-lab-clusters`.
+//
 // Serves the built site from `dist/`, opens the lab, and drives it the way a
-// reader would: the default preset runs, frames cross the canvas, the
-// inspector shows the pinger's round trips, a kill and a restart take effect,
-// the echo node's frame counter survives a page reload through IndexedDB and
-// comes back when the saved scenario is reopened from the "Saved" list, the
-// durable state stored after persistence is turned back on equals the live
-// state, a share link reproduces the
-// scenario even without `DecompressionStream`, and two pages in one browser
-// host a cluster together over WebRTC with the link latency intact and the
-// scenario edited only by the host. Before the browser starts, the
-// raw-DEFLATE fallback round-trips `CompressionStream` output in Node.
+// reader would: the probe runs, frames cross the canvas, the inspector shows
+// the pinger's round trips, a kill and a restart take effect, the echo node's
+// frame counter survives a page reload through IndexedDB and comes back when
+// the saved scenario is reopened from the "Saved" list, the durable state
+// stored after persistence is turned back on equals the live state, a share
+// link reproduces the scenario even without `DecompressionStream`, and two
+// pages in one browser host a cluster together over WebRTC with the link
+// latency intact and the scenario edited only by the host. Before the browser
+// starts, the raw-DEFLATE fallback round-trips `CompressionStream` output in
+// Node.
 //
-// The cluster presets run at 20× in a browser context of their own. Three
-// brokers form one KRaft quorum, create the topic and serve two consumers
-// that share its partitions; the inspector shows the quorum and the
-// partitions, and a section the reader opens stays open as the State tab
-// renders again; the command bars pause, resume, send, set rates and
-// processing times, commit, seek, close and query; killing the leader of a partition
-// moves the leadership in the inspector while the group keeps consuming,
-// and the restarted broker rejoins the ISR; a page reload brings the brokers
-// back from IndexedDB and the group resumes from its committed offsets; a
-// broker added to the running scenario observes the quorum and says why. The
-// registry preset's producer registers its schema, the registry answers
-// `GET /subjects` and the consumer decodes every value; schemas registered
-// through REST with persistence on and off come back after a reload from the
-// brokers' `_schemas` log, since the registry keeps nothing of its own; a
-// second registry joins the group as a secondary and serves a write by
-// forwarding it to the primary; the streams preset
-// counts words into its store, with the changelog topic the group created,
-// and answers a store query; in the five-broker preset the majority serves
-// while two brokers are cut off, and they join once the links heal.
-//
-// Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--no-cluster] [--headed]
-// Needs `playwright` or `playwright-core`, project-local or global (found
-// through `npm root -g`), and a Chromium: the one that Playwright finds by
-// itself (its own download, `npx playwright install chromium`, or the build
-// it expects under PLAYWRIGHT_BROWSERS_PATH), or else the newest `chromium-N`
-// under PLAYWRIGHT_BROWSERS_PATH. The fallback covers a project-local
-// `playwright-core` newer than the installed browsers, which is what
-// `npm run check-wasi` leaves behind. Exits 2 when either is missing, 1 when
-// a check fails.
+// Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--headed]
+// Needs `playwright` or `playwright-core` and a Chromium, found as
+// lab-check-lib.mjs finds them. Exits 2 when either is missing, 1 when a check
+// fails.
 
 import fs from 'fs';
-import http from 'http';
 import path from 'path';
 import crypto from 'crypto';
-import { createRequire } from 'module';
-import { execSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 import { recordBatchFields } from '../public/playground/lab/storage-panel.js';
+import { DIST_DIR, NETWORK_PROBE, STEP_TIMEOUT, args, checker, launchOrExit, newLabContext, nodeState, openLab, openScenario, serve, waitFor, watchErrors } from './lab-check-lib.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.resolve(__dirname, '..', 'dist');
-const args = new Set(process.argv.slice(2));
 const WEBRTC = !args.has('--no-webrtc');
-const CLUSTER = !args.has('--no-cluster');
-const HEADLESS = !args.has('--headed');
-const STEP_TIMEOUT = 30_000;
+const t = checker();
+const { check, failures } = t;
 
-// A fresh browser context that has already seen the lab tour, which would
-// otherwise open over the canvas and take the checks' clicks.
-async function newLabContext(browser, viewport) {
-  const context = await browser.newContext({ viewport });
-  await context.addInitScript(() => {
-    try {
-      localStorage.setItem('krabka-lab.tour', 'done');
-    } catch {
-      // No storage: the tour opens, and the check reports what it finds.
-    }
-  });
-  return context;
-}
-
-// ---- Playwright, project-local or global ----------------------------------------------------
-
-async function loadPlaywright() {
-  const require = createRequire(import.meta.url);
-  // `playwright-core` is what `npm i --no-save playwright-core` brings; it has
-  // the same `chromium` API without the browser download hooks.
-  const candidates = ['playwright', 'playwright-core'];
-  try {
-    const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
-    candidates.push(path.join(globalRoot, 'playwright'), path.join(globalRoot, 'playwright-core'));
-  } catch {
-    // No npm on the path; the local package is the only candidate.
-  }
-  for (const c of candidates) {
-    try {
-      return require(c);
-    } catch {
-      // try the next
-    }
-  }
-  return null;
-}
-
-// The newest Chromium under PLAYWRIGHT_BROWSERS_PATH, for a Playwright whose
-// own browser build is not installed there; undefined when there is none. A
-// headless run prefers the headless shell, as Playwright itself does.
-function installedChromium() {
-  const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!base || !fs.existsSync(base)) return undefined;
-  const builds = [
-    ['chromium', ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-win/chrome.exe']],
-  ];
-  if (HEADLESS) {
-    builds.unshift(['chromium_headless_shell', ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell']]);
-  }
-  const entries = fs.readdirSync(base);
-  for (const [name, executables] of builds) {
-    const pattern = new RegExp(`^${name}-(\\d+)$`);
-    const dirs = entries
-      .filter((d) => pattern.test(d))
-      .sort((a, b) => Number(b.match(pattern)[1]) - Number(a.match(pattern)[1]));
-    for (const dir of dirs) {
-      for (const executable of executables) {
-        const candidate = path.join(base, dir, executable);
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
-// Launch Chromium, falling back to `installedChromium()` when Playwright's own
-// build is missing.
-async function launchChromium(pw) {
-  try {
-    return await pw.chromium.launch({ headless: HEADLESS });
-  } catch (err) {
-    const executablePath = installedChromium();
-    if (!executablePath && process.platform === 'win32') return pw.chromium.launch({ headless: HEADLESS, channel: 'msedge' });
-    if (!executablePath) throw err;
-    return pw.chromium.launch({ headless: HEADLESS, executablePath });
-  }
-}
-
-// ---- a static server over dist/ -----------------------------------------------------------
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.wasm': 'application/wasm',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain',
-  '.xml': 'application/xml',
-};
-
-function serve(dir) {
-  const server = http.createServer((req, res) => {
-    let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    let file = path.join(dir, p);
-    if (!file.startsWith(dir)) {
-      res.writeHead(403).end();
-      return;
-    }
-    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
-    else if (!fs.existsSync(file) && fs.existsSync(`${file}.html`)) file = `${file}.html`;
-    if (!fs.existsSync(file)) {
-      res.writeHead(404).end('not found');
-      return;
-    }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
-    fs.createReadStream(file).pipe(res);
-  });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
-}
-
-// ---- the checks ------------------------------------------------------------------------------
-
-let passed = 0;
-const failures = [];
-function check(name, ok, detail) {
-  if (ok) {
-    passed += 1;
-    console.log(`  ok   ${name}`);
-  } else {
-    failures.push(`${name}${detail ? ` (${detail})` : ''}`);
-    console.error(`  FAIL ${name}${detail ? ` (${detail})` : ''}`);
-  }
-}
-
-async function waitFor(page, fn, label, timeout = STEP_TIMEOUT) {
-  const start = Date.now();
-  let last;
-  while (Date.now() - start < timeout) {
-    last = await page.evaluate(fn);
-    if (last) return last;
-    await page.waitForTimeout(100);
-  }
-  throw new Error(`timed out waiting for ${label}`);
-}
-
-// Page errors and console errors from the page's own origin. A font or a
-// script from another origin that fails to load (no network in CI, a proxy)
-// is not a lab failure and is left out.
-function watchErrors(page, name, base) {
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() !== 'error') return;
-    const url = (m.location() && m.location().url) || '';
-    if (url && !url.startsWith(base)) return;
-    errors.push(`${name}: console.error ${m.text()}${url ? ` @ ${url}` : ''}`);
-  });
-  return errors;
-}
-
-async function openLab(page, base, hash = '') {
-  await page.goto(`${base}/docs/lab/${hash}`, { waitUntil: 'load' });
-  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-}
-
-const nodeState = (id) => `(() => { const s = window.krabkaLab.world.snapshot(); const n = s && s.nodes.find((x) => x.id === ${id}); return n ? JSON.stringify({ alive: n.alive, hosted: n.hosted, isolated: n.isolated, state: n.state }) : null; })()`;
 
 // The node's snapshot entry, waiting for the first snapshot after a load.
 async function readNode(page, id) {
@@ -246,7 +58,7 @@ async function checkInflate() {
     random: (n) => new Uint8Array(crypto.randomBytes(n)),
     repetitive: (n) => Uint8Array.from({ length: n }, (_, i) => 'krabka-lab '.charCodeAt(i % 11) ^ (i >> 12 & 1)),
     scenario: (n) => {
-      const text = JSON.stringify({ nodes: Array.from({ length: Math.ceil(n / 40) + 1 }, (_, i) => ({ id: i, kind: i % 3 ? 'broker' : 'consumer', x: (i * 37) % 900 })) });
+      const text = JSON.stringify({ nodes: Array.from({ length: Math.ceil(n / 40) + 1 }, (_, i) => ({ id: i, kind: i % 3 ? 'krabka-broker' : 'consumer', x: (i * 37) % 900 })) });
       return new TextEncoder().encode(text).slice(0, n);
     },
   };
@@ -291,14 +103,6 @@ async function setPersistUI(page, on) {
   await waitFor(page, `window.krabkaLab.storage.persist === ${on}`, `persistence ${on ? 'on' : 'off'}`);
 }
 
-const avro = (name, fields) => JSON.stringify({ type: 'record', name, namespace: 'io.krabka.lab', fields });
-// The registry preset's Order schema with one more field, which has a
-// default: a BACKWARD-compatible second version of orders-value.
-const ORDER_V2 = avro('Order', [{ name: 'id', type: 'long' }, { name: 'customer', type: 'string' }, { name: 'total', type: 'double' }, { name: 'note', type: 'string', default: '' }]);
-const PAYMENT_V1 = avro('Payment', [{ name: 'id', type: 'long' }, { name: 'amount', type: 'double' }]);
-const INVENTORY_V1 = avro('Inventory', [{ name: 'sku', type: 'string' }, { name: 'count', type: 'int' }]);
-const SHIPMENT_V1 = avro('Shipment', [{ name: 'order', type: 'long' }, { name: 'carrier', type: 'string' }]);
-
 // What the store holds for the echo counter of node 1.
 const storedFrames = (page, scenarioId) =>
   page.evaluate(async (id) => {
@@ -306,451 +110,6 @@ const storedFrames = (page, scenarioId) =>
     const b64 = images['1']?.kv?.counters?.frames;
     return b64 == null ? null : Number(atob(b64));
   }, scenarioId);
-
-// ---- the KRaft cluster presets ---------------------------------------------------------------
-
-// The presets as the site ships them, for their names and node ids.
-async function loadPresets() {
-  return (await import(pathToFileURL(path.join(DIST_DIR, '..', 'scripts', 'lab-simulated-presets.js')).href)).PRESETS;
-}
-
-// Load a preset the way a reader does, from its button, and run it at 20×.
-async function openPreset(page, preset) {
-  await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), preset.scenario);
-  await waitFor(page, `window.krabkaLab.world.scenario().name === ${JSON.stringify(preset.name)}`, `the ${preset.id} preset`);
-  await fastest(page);
-}
-
-async function fastest(page) {
-  await page.locator('#krabka-lab select[aria-label="Simulation speed"]').selectOption('20');
-}
-
-// Wait until `fn`, the source of a function of the snapshot's nodes by id,
-// returns something truthy, and return it. It runs in the page, so it can
-// only use what it is given.
-function until(page, label, fn, timeout = 60_000) {
-  const expr = `(() => { const s = window.krabkaLab.world.snapshot(); if (!s) return null; const n = {}; for (const x of s.nodes) n[x.id] = x; try { const r = (${fn})(n); return r ? JSON.stringify(r) : null; } catch { return null; } })()`;
-  return waitFor(page, expr, label, timeout).then((r) => JSON.parse(r));
-}
-
-const nodeStateOf = (page, id) => page.evaluate((id) => window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id)?.state ?? null, id);
-
-// Fit every card into the canvas, as a reader does after adding a node.
-async function fit(page) {
-  await page.locator('#krabka-lab .lab-canvas-tools button', { hasText: 'Fit' }).click();
-}
-
-// Select a node on the canvas and wait for the inspector to show it.
-async function inspect(page, id, name) {
-  await page.locator(`#krabka-lab .lab-node[data-node-id="${id}"]`).click();
-  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector .lab-insp-name')?.textContent === ${JSON.stringify(name)}`, `the inspector on ${name}`);
-}
-
-// Run a command from the inspector's command bar, after filling its inputs,
-// and return what the bar says.
-async function command(page, cmd, params = {}) {
-  const row = page.locator(`#krabka-lab .lab-insp-commands .lab-cmd[data-command="${cmd}"]`);
-  for (const [key, value] of Object.entries(params)) {
-    const input = row.locator(`[data-param="${key}"]`);
-    if ((await input.evaluate((e) => e.tagName)) === 'SELECT') await input.selectOption(String(value));
-    else await input.fill(String(value));
-  }
-  await page.evaluate(() => {
-    const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]');
-    if (r) r.dataset.command = '';
-  });
-  await row.locator(`button[data-command="${cmd}"]`).click();
-  const text = await waitFor(page, `(() => { const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]'); return r && r.dataset.command === ${JSON.stringify(cmd)} ? JSON.stringify({ ok: r.dataset.ok === 'true', text: r.textContent }) : null; })()`, `the answer to ${cmd}`);
-  return JSON.parse(text);
-}
-
-// The text of one cell of an inspector table.
-const cell = (page, row, col) =>
-  page.evaluate(([row, col]) => document.querySelector(`#krabka-lab .lab-inspector tr[data-row="${row}"] td[data-col="${col}"]`)?.textContent ?? null, [row, col]);
-
-// The text of one key/value row of the inspector.
-const field = (page, name) => page.evaluate((name) => document.querySelector(`#krabka-lab .lab-inspector dd[data-field="${name}"]`)?.textContent ?? null, name);
-
-async function checkClusters(browser, base, errors) {
-  const presets = await loadPresets();
-  const byId = (id) => presets.find((p) => p.id === id);
-  // A context of its own: its IndexedDB and last scenario are the cluster's.
-  const context = await newLabContext(browser, { width: 1400, height: 1000 });
-  const page = await context.newPage();
-  const pageErrors = watchErrors(page, 'cluster page', base);
-  await openLab(page, base);
-  // Each flow on its own: one that fails does not hide the others.
-  for (const [flow, preset] of [
-    [checkThreeBrokers, 'three-brokers'],
-    [checkRegistryPreset, 'schema-registry'],
-    [checkWordCount, 'streams-word-count'],
-    [checkPartitionPreset, 'five-brokers-partition'],
-  ]) {
-    try {
-      await flow(page, byId(preset));
-    } catch (err) {
-      failures.push(`${preset}: ${err.message}`);
-      console.error(`  FAIL ${preset}: ${err.stack || err.message}`);
-    }
-  }
-  errors.push(...pageErrors);
-  await context.close();
-}
-
-async function checkThreeBrokers(page, preset) {
-  console.log(`Cluster Lab: ${preset.name}`);
-  await openPreset(page, preset);
-  // Brokers 1 to 3, the producer 4, the consumers 5 and 6.
-  const quorum = await until(page, 'the quorum and the topic', `(n) => {
-    const b = [1, 2, 3].map((i) => n[i] && n[i].state);
-    if (!b.every((s) => s && s.state === 'RUNNING')) return null;
-    const orders = b[0].topics.find((t) => t.name === 'orders');
-    const leaders = b.filter((s) => s.quorum.role === 'Leader');
-    if (!orders || leaders.length !== 1) return null;
-    return { voters: b.map((s) => s.quorum.voters.join(',')), votes: b.map((s) => s.quorum.voter), controllers: b.map((s) => s.controller_id), leader: leaders[0].broker_id, replicas: orders.partitions.map((p) => p.replicas.length) };
-  }`);
-  check('three brokers run one KRaft quorum, voters 1, 2 and 3, with one active controller', quorum.voters.every((v) => v === '1,2,3') && quorum.votes.every(Boolean) && quorum.controllers.every((c) => c === quorum.leader), JSON.stringify(quorum));
-  check('the controller creates orders with three partitions of three replicas', JSON.stringify(quorum.replicas) === '[3,3,3]', JSON.stringify(quorum));
-
-  const group = await until(page, 'both consumers to consume', `(n) => {
-    const c = [5, 6].map((i) => n[i].state);
-    if (!c.every((s) => s && s.state === 'stable' && s.processed > 0 && s.assignment.length)) return null;
-    return c.map((s) => ({ parts: s.assignment.map((a) => a.topic + '-' + a.partition), processed: s.processed }));
-  }`, 90_000);
-  const shared = [...group[0].parts, ...group[1].parts].sort();
-  check('the two consumers of the group share the three partitions', JSON.stringify(shared) === '["orders-0","orders-1","orders-2"]', JSON.stringify(group));
-  check('and both of them consume', group.every((c) => c.processed > 0), JSON.stringify(group));
-
-  // The broker inspector: the quorum, and the partitions it hosts.
-  await inspect(page, 2, 'broker-2');
-  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_voters"]')?.textContent === '1, 2, 3'`, 'the quorum in the inspector');
-  const insp = { votes: await field(page, 'quorum_votes'), state: await field(page, 'state'), leader: await cell(page, 'orders-0', 'leader'), isr: await cell(page, 'orders-0', 'isr') };
-  check('the broker inspector shows the quorum and the partitions', insp.votes === 'yes: a voter' && insp.state === 'RUNNING' && /^[123]$/.test(insp.leader) && insp.isr.split(' ').length === 3, JSON.stringify(insp));
-
-  // A section the reader opens stays open through the State tab's renders,
-  // each of which builds every section afresh.
-  await inspect(page, 4, 'orders-producer');
-  const clientSection = `[...document.querySelectorAll('#krabka-lab .lab-inspector details.lab-sec')].find((d) => d.querySelector(':scope > summary')?.textContent === 'Client')`;
-  await page.locator('#krabka-lab .lab-inspector details.lab-sec > summary', { hasText: /^Client$/ }).first().click();
-  const sectionOpened = await page.evaluate(`(() => { const d = ${clientSection}; if (d) d.dataset.seen = 'yes'; return d?.open === true; })()`);
-  await waitFor(page, `(() => { const d = ${clientSection}; return Boolean(d) && d.dataset.seen !== 'yes'; })()`, 'the State tab to render again');
-  const sectionKept = await page.evaluate(`${clientSection}?.open === true`);
-  check('a section the reader opens stays open when the State tab renders again', sectionOpened && sectionKept, `opened ${sectionOpened}, after a render ${sectionKept}`);
-
-  // The producer's command bar.
-  const paused = await command(page, 'pause');
-  const atPause = await until(page, 'the producer to pause', `(n) => n[4].state.paused === true && { generated: n[4].state.generated, now: window.krabkaLab.world.now() }`);
-  await waitFor(page, `window.krabkaLab.world.now() > ${atPause.now} + 3000`, 'three seconds to pass');
-  const stillPaused = (await nodeStateOf(page, 4)).generated;
-  check('Pause stops the producer', paused.ok && stillPaused === atPause.generated, `${JSON.stringify(paused)}; ${atPause.generated} -> ${stillPaused}`);
-  const sent = await command(page, 'send', { count: 7 });
-  const afterSend = await until(page, 'Send to generate seven records', `(n) => n[4].state.generated === ${atPause.generated + 7} && n[4].state`);
-  check('Send generates records at once, paused or not', sent.ok && /"generated":7/.test(sent.text) && afterSend.paused === true, sent.text);
-  await command(page, 'resume');
-  const rate = await command(page, 'rate', { rate_per_sec: 10 });
-  const resumed = await until(page, 'the producer to resume at ten a second', `(n) => n[4].state.paused === false && n[4].state.rate === 10 && n[4].state`);
-  check('Resume and Set rate take effect', rate.ok && resumed.rate === 10, rate.text);
-  await command(page, 'rate', { rate_per_sec: 5 });
-
-  // The consumer's command bar.
-  await inspect(page, 5, 'billing-1');
-  // Paused, the consumer takes no records; like Kafka's fetcher, its client
-  // does not fetch a partition while records wait in its buffer.
-  await command(page, 'pause');
-  const held = await until(page, 'the consumer to pause', `(n) => n[5].state.paused === true && { processed: n[5].state.processed, now: window.krabkaLab.world.now() }`);
-  await waitFor(page, `window.krabkaLab.world.now() > ${held.now} + 3000`, 'three seconds to pass');
-  const stillHeld = (await nodeStateOf(page, 5)).processed;
-  check('Pause stops the consumer taking records', stillHeld === held.processed, `${held.processed} -> ${stillHeld}`);
-  await command(page, 'resume');
-  const caught = await until(page, 'the resumed consumer to catch up', `(n) => n[5].state.paused === false && n[5].state.lag === 0 && n[5].state.processed > ${stillHeld} && n[5].state`);
-  check('Resume lets it catch up', caught.lag === 0, `processed ${stillHeld} -> ${caught.processed}`);
-  const slow = await command(page, 'process_ms', { ms: 5 });
-  await until(page, 'the new processing time', `(n) => n[5].state.process_ms === 5`);
-  check('Set processing changes the time per record', slow.ok, slow.text);
-  await command(page, 'process_ms', { ms: 2 });
-  const commits = (await nodeStateOf(page, 5)).commits;
-  const commit = await command(page, 'commit');
-  await until(page, 'the commit', `(n) => n[5].state.commits > ${commits}`);
-  check('Commit now commits', commit.ok, commit.text);
-  // Seek, with the producer held so what the consumer reads next is the
-  // records it read before.
-  await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'pause' }));
-  await until(page, 'billing-1 to catch up', `(n) => n[4].state.paused && n[5].state.lag === 0 && n[5].state.processing_backlog === 0`);
-  const [row] = (await nodeStateOf(page, 5)).assignment.filter((a) => a.position >= 3);
-  const back = row.position - 3;
-  const seek = await command(page, 'seek', { topic: row.topic, partition: row.partition, offset: back });
-  const reread = await until(page, 'the consumer to read again from the offset', `(n) => {
-    const r = n[5].state.last_records.filter((x) => x.topic === '${row.topic}' && x.partition === ${row.partition}).map((x) => x.offset);
-    return r.includes(${back}) && r.includes(${row.position - 1}) && r.slice(-3);
-  }`);
-  check(`Seek reads ${row.topic}-${row.partition} again from offset ${back}`, seek.ok && JSON.stringify(reread) === JSON.stringify([back, back + 1, back + 2]), `${seek.text} ${JSON.stringify(reread)}`);
-  await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'resume' }));
-
-  // Kill the leader of orders-0: another broker's inspector shows the
-  // leadership move, and the group keeps consuming.
-  await inspect(page, 1, 'broker-1');
-  await waitFor(page, `/^[123]$/.test(document.querySelector('#krabka-lab .lab-inspector tr[data-row="orders-0"] td[data-col="leader"]')?.textContent || '')`, 'the leader of orders-0');
-  const leader = Number(await cell(page, 'orders-0', 'leader'));
-  const before = await until(page, 'the log end of orders-0', `(n) => { const p = n[${leader}].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === 0); return { hwm: p.hwm, processed: n[5].state.processed + n[6].state.processed }; }`);
-  await inspect(page, leader, `broker-${leader}`);
-  await page.locator('#krabka-lab .lab-faults button', { hasText: 'Kill' }).click();
-  await waitFor(page, `(() => { const r = ${nodeState(leader)}; return r && JSON.parse(r).alive === false; })()`, `broker ${leader} to be down`);
-  const other = [1, 2, 3].find((b) => b !== leader);
-  await inspect(page, other, `broker-${other}`);
-  const moved = await waitFor(page, `(() => { const v = document.querySelector('#krabka-lab .lab-inspector tr[data-row="orders-0"] td[data-col="leader"]')?.textContent; return v && v !== '${leader}' && v !== 'none' ? v : null; })()`, 'the leadership of orders-0 to move', 60_000);
-  check(`killing broker ${leader}, the leader of orders-0, moves the leadership to broker ${moved} in the inspector`, Number(moved) !== leader);
-  const kept = await until(page, 'the group to consume past the kill', `(n) => {
-    const c = [5, 6].map((i) => n[i].state);
-    const past = c.some((s) => s.last_records.some((r) => r.partition === 0 && r.offset >= ${before.hwm}));
-    return c[0].processed + c[1].processed >= ${before.processed} + 15 && past && { processed: c[0].processed + c[1].processed };
-  }`, 90_000);
-  check('the consumers keep consuming, orders-0 from its new leader', kept.processed >= before.processed + 15, JSON.stringify({ before, kept }));
-  await inspect(page, leader, `broker-${leader}`);
-  await page.locator('#krabka-lab .lab-faults button', { hasText: 'Restart' }).click();
-  const rejoined = await until(page, `broker ${leader} to rejoin the ISR`, `(n) => {
-    const s = n[${leader}].state;
-    if (!n[${leader}].alive || s.state !== 'RUNNING') return null;
-    const p = n[${moved}].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === 0);
-    return p.isr.includes(${leader}) && { isr: p.isr };
-  }`, 90_000);
-  check(`restarted, broker ${leader} catches up and rejoins the ISR of orders-0`, rejoined.isr.length === 3, JSON.stringify(rejoined));
-
-  await checkReload(page);
-
-  // Legacy simulated scenarios still support a joining observer, although
-  // the palette now offers only real brokers.
-  const added = await page.evaluate(() => {
-    const world = window.krabkaLab.world;
-    const id = Math.max(...world.snapshot().nodes.map((node) => node.id)) + 1;
-    return world.addNode({ id, kind: 'broker', name: `broker-${id}`, x: 820, y: 80, config: { broker_id: id } });
-  });
-  check('a legacy broker can still join a running scenario', added != null, String(added));
-  await fit(page);
-  await inspect(page, added, `broker-${added}`);
-  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="quorum_votes"]')?.textContent === 'no: an observer'`, 'the added broker to observe', 60_000);
-  const why = await page.evaluate(() => document.querySelector('#krabka-lab .lab-inspector [data-field="observer-note"]')?.textContent || '');
-  const observed = await page.evaluate((id) => window.krabkaLab.timeline.events.some((e) => e.node === id && e.kind === 'quorum_observer'), added);
-  check('a broker added to the running scenario observes the static quorum, and the inspector says why', /joined a running scenario/.test(why) && /1, 2, 3/.test(why) && observed, why);
-
-  // Close: billing-2 commits and leaves, and billing-1 takes its partitions.
-  await inspect(page, 6, 'billing-2');
-  const closed = await command(page, 'close');
-  const alone = await until(page, 'billing-1 to take every partition', `(n) => n[6].state.closed === true && n[6].state.assignment.length === 0 && n[5].state.assignment.length === 3 && n[5].state.assignment.map((a) => a.partition)`);
-  check('Close commits and leaves the group, and the other member takes its partitions over', closed.ok && alone.length === 3, closed.text);
-}
-
-// The cluster survives a page reload through IndexedDB, and the consumers
-// resume from their committed offsets. The producer is set to rate 0 in its
-// config first, so after the reload nothing new arrives until it is set back:
-// a consumer that started over would read the old records again.
-async function checkReload(page) {
-  await inspect(page, 4, 'orders-producer');
-  await page.locator('#krabka-lab .lab-tab#lab-tab-config').click();
-  await page.getByLabel('Records per second').fill('0');
-  await page.locator('#krabka-lab .lab-tabpanel[data-tab="config"] button', { hasText: 'Apply' }).click();
-  await waitFor(page, `window.krabkaLab.world.spec(4).config.rate_per_sec === 0`, 'the producer to stop');
-  for (const [id, name] of [[5, 'billing-1'], [6, 'billing-2']]) {
-    await until(page, `${name} to catch up`, `(n) => n[${id}].state.lag === 0 && n[${id}].state.processing_backlog === 0`, 60_000);
-    await inspect(page, id, name);
-    await command(page, 'commit');
-  }
-  const committed = await until(page, 'the commits to cover every record', `(n) => {
-    const rows = [5, 6].flatMap((i) => n[i].state.assignment);
-    if (rows.length !== 3 || !rows.every((a) => a.committed != null && a.committed === a.hwm && a.hwm > 0)) return null;
-    return Object.fromEntries(rows.map((a) => [a.topic + '-' + a.partition, a.committed]));
-  }`, 60_000);
-  const scenarioId = await page.evaluate(() => window.krabkaLab.world.id);
-  await page.evaluate(() => window.krabkaLab.saveNow());
-  await page.evaluate(() => window.krabkaLab.storage.flush());
-  await page.reload({ waitUntil: 'load' });
-  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-  const reopened = await page.evaluate(() => ({ id: window.krabkaLab.world.id, nodes: window.krabkaLab.world.scenario().nodes.length }));
-  check('a reload reopens the cluster', reopened.id === scenarioId && reopened.nodes >= 6, JSON.stringify(reopened));
-  await fastest(page);
-  const logs = await until(page, 'the brokers to serve again', `(n) => {
-    if (![1, 2, 3].every((i) => n[i].state.state === 'RUNNING')) return null;
-    const orders = n[1].state.topics.find((t) => t.name === 'orders');
-    return orders && Object.fromEntries(orders.partitions.map((p) => ['orders-' + p.index, n[p.leader] ? n[p.leader].state.topics.find((t) => t.name === 'orders').partitions.find((x) => x.index === p.index).hwm : null]));
-  }`, 90_000);
-  check('the brokers restore their logs from IndexedDB and serve again', Object.entries(committed).every(([p, c]) => logs[p] >= c), JSON.stringify({ committed, logs }));
-  const rejoined = await until(page, 'the consumers to rejoin with their commits', `(n) => {
-    const rows = [5, 6].flatMap((i) => n[i].state.state === 'stable' ? n[i].state.assignment : []);
-    if (rows.length !== 3 || !rows.every((a) => a.committed != null)) return null;
-    return { rows: Object.fromEntries(rows.map((a) => [a.topic + '-' + a.partition, a.committed])), now: window.krabkaLab.world.now() };
-  }`, 120_000);
-  await waitFor(page, `window.krabkaLab.world.now() > ${rejoined.now} + 5000`, 'five seconds after the rejoin');
-  const idle = [(await nodeStateOf(page, 5)).processed, (await nodeStateOf(page, 6)).processed];
-  const sorted = (o) => JSON.stringify(Object.entries(o).sort());
-  check('after the reload the group fetches its committed offsets and reads nothing again', sorted(rejoined.rows) === sorted(committed) && idle[0] === 0 && idle[1] === 0, JSON.stringify({ committed, rejoined: rejoined.rows, processed: idle }));
-  // New records: the producer back at its rate (Apply restarts it).
-  await inspect(page, 4, 'orders-producer');
-  await page.locator('#krabka-lab .lab-tab#lab-tab-config').click();
-  await page.getByLabel('Records per second').fill('5');
-  await page.locator('#krabka-lab .lab-tabpanel[data-tab="config"] button', { hasText: 'Apply' }).click();
-  const fresh = await until(page, 'new records to arrive', `(n) => {
-    const c = [5, 6].map((i) => n[i].state);
-    return c[0].processed + c[1].processed >= 5 && c.flatMap((s) => s.last_records.map((r) => ({ p: r.topic + '-' + r.partition, offset: r.offset })));
-  }`, 60_000);
-  check('and consumes the new records from where it left off', fresh.every((r) => r.offset >= committed[r.p]), JSON.stringify(fresh));
-}
-
-async function checkRegistryPreset(page, preset) {
-  console.log(`Cluster Lab: ${preset.name}`);
-  await openPreset(page, preset);
-  // Brokers 1 to 3, the registry 4, the producer 5, the consumer 6.
-  const registered = await until(page, 'the producer to register its schema', `(n) => n[5].state.serialization && n[5].state.serialization.state === 'ready' && n[5].state.serialization`, 90_000);
-  const subjects = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects' }));
-  check('the registry answers GET /subjects with the subject the producer registered', subjects.ok && subjects.answer.status === 200 && JSON.stringify(subjects.answer.body) === '["orders-value"]', JSON.stringify(subjects));
-  const decoded = await until(page, 'the consumer to decode', `(n) => {
-    const r = n[6].state.last_records;
-    return n[5].state.acked > 0 && r.length && r.every((x) => x.schema_id === ${registered.schema_id} && x.value_preview && typeof x.value_preview.customer === 'string') && r;
-  }`, 90_000);
-  check('the consumer decodes every value with the schema it fetched by id', decoded.length > 0, JSON.stringify(decoded[0]));
-  await inspect(page, 6, 'billing');
-  const shown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector td[data-col="schema_id"]')?.textContent || null`, 'the schema column');
-  check('the consumer inspector shows the schema id of each record', shown === `id ${registered.schema_id}`, shown);
-
-  // The registry keeps nothing of its own: a schema's record lives in
-  // `_schemas` on the brokers, which the page persists. With persistence on,
-  // then off, then on again, a reload brings every schema back.
-  const scenarioId = await page.evaluate(() => window.krabkaLab.world.id);
-  const payments = await registryWrite(page, 4, 'POST', '/subjects/payments-value/versions', { schema: PAYMENT_V1 });
-  check('a schema registered through REST is answered once its record is back from the brokers', payments.ok && payments.answer.status === 200 && Number.isInteger(payments.answer.body.id), JSON.stringify(payments));
-  await setPersistUI(page, false);
-  const storedAtOff = await schemasStored(page, scenarioId);
-  const inventory = await registryWrite(page, 4, 'POST', '/subjects/inventory-value/versions', { schema: INVENTORY_V1 });
-  const orders2 = await registryWrite(page, 4, 'POST', '/subjects/orders-value/versions', { schema: ORDER_V2 });
-  const storedWhileOff = await schemasStored(page, scenarioId);
-  check(
-    'with persistence off the registry still writes, and the brokers\' new _schemas records are not stored',
-    inventory.ok && inventory.answer.status === 200 && orders2.ok && orders2.answer.status === 200 && storedAtOff > 0 && storedWhileOff === storedAtOff,
-    JSON.stringify({ inventory, orders2, storedAtOff, storedWhileOff }),
-  );
-  await setPersistUI(page, true);
-  const version2 = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/orders-value/versions/latest' }));
-  const live = await until(page, 'the registry to show every subject', `(n) => n[4].state.subjects.length === 3 && n[4].state.subjects`);
-  await page.evaluate(() => window.krabkaLab.saveNow());
-  await page.evaluate(() => window.krabkaLab.storage.flush());
-  check('turning persistence back on stores the _schemas records written while it was off', (await schemasStored(page, scenarioId)) > storedAtOff);
-  await page.reload({ waitUntil: 'load' });
-  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-  await fastest(page);
-  const replayed = await until(page, 'the registry to replay _schemas', `(n) => n[4].state.state === 'ready' && n[4].state.subjects`, 120_000);
-  check('after a reload the registry replays every schema from the brokers\' _schemas log', JSON.stringify(replayed) === JSON.stringify(live), `${JSON.stringify(replayed)} vs ${JSON.stringify(live)}`);
-  const served = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/inventory-value/versions/1' }));
-  const latest = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/orders-value/versions/latest' }));
-  check(
-    'and serves the schemas registered while persistence was off, with the same ids and versions',
-    served.ok && served.answer.status === 200 && served.answer.body.id === inventory.answer.body.id && latest.ok && JSON.stringify(latest.answer.body) === JSON.stringify(version2.answer.body) && latest.answer.body.version === 2,
-    JSON.stringify({ served, latest }),
-  );
-
-  // A second registry joins the group. The eligible instance with the
-  // smallest URL, node 4, stays the primary; the new one is a secondary that
-  // forwards the writes it takes to the primary.
-  await page.locator('#krabka-lab .lab-dtab[data-tab="build"]').click();
-  await page.locator('#krabka-lab .lab-kind-btn[data-kind="schema-registry"]').click();
-  await page.waitForSelector('#krabka-lab dialog[open]');
-  await page.locator('#krabka-lab dialog button[type="submit"]').click();
-  const second = await waitFor(page, `(() => { const n = window.krabkaLab.world.scenario().nodes.find((x) => x.kind === 'schema-registry' && x.id !== 4); return n ? n.id : null; })()`, 'the second registry');
-  const roles = await until(page, 'the two registries to elect a primary', `(n) => {
-    const e = [4, ${second}].map((i) => n[i].state.state === 'ready' && n[i].state.election);
-    return e[0] && e[1] && e[0].leader && e[0].leader === e[1].leader && { leader: e[0].leader, primary: e.map((x) => x.is_leader) };
-  }`, 120_000);
-  const cards = await waitFor(page, `(() => { const s = [4, ${second}].map((i) => document.querySelector('#krabka-lab .lab-node[data-node-id="' + i + '"]')?.dataset.status || ''); return /primary/.test(s[0]) && /secondary/.test(s[1]) ? JSON.stringify(s) : null; })()`, 'the cards to say primary and secondary');
-  check(
-    'two registries of one group elect one primary, the smaller URL, and the cards say so',
-    roles.leader === 'http://node-4:8081' && JSON.stringify(roles.primary) === '[true,false]',
-    `${JSON.stringify(roles)} ${cards}`,
-  );
-  const via = await registryWrite(page, second, 'POST', '/subjects/shipments-value/versions', { schema: SHIPMENT_V1 });
-  const onPrimary = await page.evaluate(() => window.krabkaLab.world.control(4, { cmd: 'http', method: 'GET', path: '/subjects/shipments-value/versions/1' }));
-  const forwarded = await until(page, 'the secondary to count the forward', `(n) => n[${second}].state.forwarder && n[${second}].state.forwarder.forwarded > 0 && n[${second}].state.forwarder`);
-  check(
-    'a write through the secondary is forwarded to the primary and served',
-    via.ok && via.answer.status === 200 && onPrimary.ok && onPrimary.answer.status === 200 && onPrimary.answer.body.id === via.answer.body.id && forwarded.forwarded > 0,
-    JSON.stringify({ via, onPrimary: onPrimary.answer, forwarded }),
-  );
-  await fit(page);
-  await inspect(page, second, `schema-registry-${second}`);
-  const role = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="election_role"]')?.textContent || null`, 'the election in the inspector');
-  const labelled = await page.evaluate(() => [...document.querySelectorAll('#krabka-lab .lab-ev-kind[data-kind="election"]')].map((e) => e.textContent));
-  check('the inspector names the secondary, and the timeline labels the election', /^secondary/.test(role) && labelled.length > 0 && labelled.every((t) => t === 'registry election'), `${role}; ${labelled.length} election rows`);
-  const listed = await command(page, 'http', { path: '/subjects' });
-  check('the registry command bar reads a REST resource', listed.ok && /"status":200/.test(listed.text) && /shipments-value/.test(listed.text), listed.text);
-}
-
-// A REST write through the registry's `http` command: it joins the write
-// queue and is answered by the `registry` event that carries its number.
-async function registryWrite(page, id, method, path, body) {
-  const r = await page.evaluate(([id, method, path, body]) => window.krabkaLab.world.control(id, { cmd: 'http', method, path, body }), [id, method, path, body]);
-  if (!r.ok || r.answer.queued == null) return r;
-  const detail = JSON.parse(
-    await waitFor(
-      page,
-      `(() => { const e = window.krabkaLab.timeline.events.find((x) => x.node === ${id} && x.kind === 'registry' && x.detail && x.detail.request === ${r.answer.queued}); return e ? JSON.stringify(e.detail) : null; })()`,
-      `the answer to request ${r.answer.queued}`,
-      60_000,
-    ),
-  );
-  return { ok: true, answer: { status: detail.status, body: detail.result ?? { message: detail.message } } };
-}
-
-// How many `_schemas` records the page stored, over every broker.
-const schemasStored = (page, scenarioId) =>
-  page.evaluate(async (id) => {
-    const images = await window.krabkaLab.storage.loadImages(id);
-    return Object.values(images).reduce((sum, image) => sum + (image.logs?.['log/_schemas/0']?.length ?? 0), 0);
-  }, scenarioId);
-
-async function checkPartitionPreset(page, preset) {
-  console.log(`Cluster Lab: ${preset.name}`);
-  await openPreset(page, preset);
-  // Brokers 1 to 5, with 4 and 5 cut off from the rest; the producer 6, the consumer 7.
-  const split = await until(page, 'the majority to serve', `(n) => {
-    const b = [1, 2, 3, 4, 5].map((i) => n[i].state);
-    if (!b.slice(0, 3).every((s) => s.state === 'RUNNING') || !(n[7].state.processed > 0)) return null;
-    return { states: b.map((s) => s.state), voters: b[0].quorum.voters, hwm: b[0].quorum.hwm, processed: n[7].state.processed };
-  }`, 90_000);
-  check(
-    'with brokers 4 and 5 cut off, the majority of five voters elects a controller and serves the group',
-    split.voters.length === 5 && split.states.slice(3).every((s) => s !== 'RUNNING') && split.processed > 0,
-    JSON.stringify(split),
-  );
-  for (const a of [4, 5]) for (const b of [1, 2, 3]) await page.evaluate(([a, b]) => window.krabkaLab.fault({ kind: 'heal', a, b }), [a, b]);
-  const healed = await until(page, 'the minority to catch up and join', `(n) => [4, 5].every((i) => n[i].state.state === 'RUNNING' && n[i].state.lifecycle.fenced === false) && [1, 2, 3, 4, 5].map((i) => n[i].state.quorum.hwm)`, 90_000);
-  check('healed, brokers 4 and 5 catch up with the metadata log, register and are unfenced', healed.slice(3).every((h) => h >= split.hwm), JSON.stringify({ before: split.hwm, healed }));
-}
-
-async function checkWordCount(page, preset) {
-  console.log(`Cluster Lab: ${preset.name}`);
-  await openPreset(page, preset);
-  // Brokers 1 to 3, the producer 4, the streams app 5, the consumer 6.
-  const counting = await until(page, 'the streams app to count', `(n) => {
-    const s = n[5].state;
-    if (s.state !== 'running' || s.tasks.length !== 3 || !s.tasks.every((t) => t.phase === 'running')) return null;
-    const entries = s.stores.flatMap((st) => st.entries);
-    return entries.length && n[6].state.processed > 0 && { entries, tasks: s.tasks.map((t) => t.id), sink: n[6].state.processed };
-  }`, 90_000);
-  check('the streams app runs three tasks and counts the words in its store', counting.tasks.length === 3 && counting.entries.every(([, count]) => count > 0), JSON.stringify(counting.entries.slice(0, 4)));
-  check('a consumer reads the counts from word-counts', counting.sink > 0, `${counting.sink} records`);
-  const changelog = await until(page, 'the changelog topic', `(n) => { const t = n[1].state.topics.find((x) => x.name === 'word-count-counts-changelog'); return t && { partitions: t.partitions.length }; }`);
-  const pill = await page.locator('#krabka-lab .lab-topic[data-topic="word-count-counts-changelog"]').count();
-  check('the group creates the store\'s changelog topic, and the canvas draws it', changelog.partitions === 3 && pill === 1, `${JSON.stringify(changelog)}, ${pill} pill`);
-
-  await inspect(page, 5, 'word-count');
-  const [word] = counting.entries[0];
-  const query = await command(page, 'query', { store: 'counts', key: word });
-  const answer = JSON.parse(query.text.slice(query.text.indexOf('{')));
-  check(`the query box reads ${word} from the counts store`, query.ok && answer.key === word && answer.value >= counting.entries[0][1], query.text);
-  await command(page, 'pause');
-  const held = await until(page, 'the streams app to pause', `(n) => n[5].state.paused === true && { in: n[5].state.records_in, now: window.krabkaLab.world.now() }`);
-  await waitFor(page, `window.krabkaLab.world.now() > ${held.now} + 3000`, 'three seconds to pass');
-  const stillIn = (await nodeStateOf(page, 5)).records_in;
-  await command(page, 'resume');
-  const moving = await until(page, 'the streams app to resume', `(n) => n[5].state.paused === false && n[5].state.records_in > ${stillIn} && n[5].state.records_in`);
-  check('Pause holds the streams app and Resume starts it again', stillIn === held.in && moving > stillIn, `${held.in} -> ${stillIn} -> ${moving}`);
-}
 
 async function main() {
   if (!fs.existsSync(path.join(DIST_DIR, 'docs', 'lab', 'index.html'))) {
@@ -769,19 +128,7 @@ async function main() {
   const fields = recordBatchFields(batches, batches.length);
   check('RecordBatch byte labels follow both batch boundaries', fields.some((f) => f.start === 61 && f.label === 'Base offset: 42') && fields.some((f) => f.start === 118 && f.label === 'Record count: 3'));
 
-  const pw = await loadPlaywright();
-  if (!pw) {
-    console.error('Playwright is not installed (neither in node_modules nor globally); cannot run the lab check.');
-    process.exit(2);
-  }
-  let browser;
-  try {
-    browser = await launchChromium(pw);
-  } catch (err) {
-    console.error(`Playwright could not launch Chromium: ${err.message.split('\n')[0]}`);
-    console.error('Install it with `npx playwright install chromium`, or point PLAYWRIGHT_BROWSERS_PATH at an installed one.');
-    process.exit(2);
-  }
+  const browser = await launchOrExit();
   const { server, port } = await serve(DIST_DIR);
   const base = `http://127.0.0.1:${port}`;
   const context = await newLabContext(browser, { width: 1400, height: 1000 });
@@ -792,7 +139,7 @@ async function main() {
     const pageErrors = watchErrors(page, 'page', base);
     await openLab(page, base);
     check('page boots and the module initialises', true);
-    await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
+    await openScenario(page, NETWORK_PROBE.scenario);
 
     const nodeCount = await page.locator('#krabka-lab .lab-node').count();
     check('the network probe preset is on the canvas', nodeCount === 3, `${nodeCount} nodes`);
@@ -850,7 +197,7 @@ async function main() {
     await page.setViewportSize({ width: 1400, height: 1000 });
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
     if (args.has('--expand-only')) {
-      console.log(`\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
+      console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
       if (failures.length) process.exitCode = 1;
       return;
     }
@@ -1016,15 +363,13 @@ async function main() {
 
     errors.push(...pageErrors, ...page2Errors, ...page3Errors);
 
-    if (CLUSTER) await checkClusters(browser, base, errors);
-
     if (WEBRTC) {
       console.log('Cluster Lab: two tabs over WebRTC');
       await page.evaluate(() => window.krabkaLab.world.setPaused(true));
       const hub = await context.newPage();
       const hubErrors = watchErrors(hub, 'hub', base);
       await openLab(hub, base);
-      await hub.evaluate((scenario) => window.krabkaLab.openScenario(scenario), (await loadPresets()).find((p) => p.id === 'network-probe').scenario);
+      await openScenario(hub, NETWORK_PROBE.scenario);
       await waitFor(hub, `window.krabkaLab.world.scenario().nodes.length === 3`, 'the hub preset');
 
       // Same-tab baseline: 200 ms each way on the pinger–echo-a link, the
@@ -1106,7 +451,7 @@ async function main() {
 
   check('no page errors or console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
-  console.log(`\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
+  console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
   if (failures.length) {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);

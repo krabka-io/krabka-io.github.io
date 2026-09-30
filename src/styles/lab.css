@@ -903,3 +903,121 @@
   #krabka-lab .lab-btn:disabled,
   #krabka-lab .lab-menu-item:disabled { color: GrayText; border-color: GrayText; }
 }
+
+/* ---- logs: the dock's Logs tab (public/playground/lab/logs.js) ---- */
+#krabka-lab .lab-dock .lab-dpanel[data-panel="logs"] { display: flex; flex-direction: column; }
+/* A log needs more rows than the other tabs need height; expanded or folded, the dock keeps its own rules. */
+#krabka-lab .lab-dock:has(.lab-dpanel[data-panel="logs"]:not([hidden])):not(.lab-expanded):not(.lab-dock-collapsed) { height: clamp(280px, 42vh, 460px); }
+@media (max-width: 1024px) {
+  #krabka-lab .lab-dock:has(.lab-dpanel[data-panel="logs"]:not([hidden])):not(.lab-expanded):not(.lab-dock-collapsed) { height: clamp(360px, 64vh, 560px); }
+}
+#krabka-lab .lab-dtab-badge[data-severity="warn"] { background: rgba(247, 183, 58, 0.18); color: var(--lab-warn); }
+#krabka-lab .lab-dtab-badge[data-severity="error"] { background: rgba(255, 107, 90, 0.2); color: var(--lab-err); }
+#krabka-lab .lab-logs { --lab-log-row: 1.55rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#krabka-lab .lab-logs-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; flex: none; }
+#krabka-lab .lab-logs-search { flex: 1 1 12rem; min-width: 8rem; width: auto; }
+/* The folds sit in the bar's row. Wide, they are not folds: the buttons of "More" join the row and the filters fill the next one. */
+#krabka-lab .lab-logs-fold { display: contents; }
+#krabka-lab .lab-logs-foldbtn { display: none; }
+#krabka-lab .lab-logs-foldbody { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+#krabka-lab .lab-logs-more > .lab-logs-foldbody { display: contents; }
+#krabka-lab .lab-logs-filters > .lab-logs-foldbody { flex: 1 0 100%; order: 10; align-items: flex-start; }
+/* Narrow, each fold is one button, and what it holds opens on its own row under the buttons. */
+#krabka-lab .lab-logs[data-narrow="true"] .lab-logs-foldbtn { display: inline-flex; }
+#krabka-lab .lab-logs[data-narrow="true"] .lab-logs-search { flex-basis: 100%; }
+#krabka-lab .lab-logs[data-narrow="true"] .lab-logs-fold > .lab-logs-foldbody { display: flex; flex: 1 0 100%; order: 10; }
+#krabka-lab .lab-logs[data-narrow="true"] .lab-logs-fold[data-open="false"] > .lab-logs-foldbody { display: none; }
+#krabka-lab .lab-logs .lab-btn-sm[aria-pressed="true"] { border-color: var(--lab-accent); color: var(--lab-accent); }
+#krabka-lab .lab-logs-levelset { border: 0; margin: 0; padding: 0; min-width: 0; }
+#krabka-lab .lab-seg { display: inline-flex; border: 1px solid var(--lab-border-strong); border-radius: 6px; overflow: hidden; }
+#krabka-lab .lab-seg-opt { position: relative; display: inline-flex; align-items: baseline; gap: 0.3rem; padding: 0.22rem 0.5rem; font-size: 0.72rem; cursor: pointer; }
+#krabka-lab .lab-seg-opt + .lab-seg-opt { border-left: 1px solid var(--lab-border); }
+#krabka-lab .lab-seg-opt input { position: absolute; inset: 0; width: auto; height: auto; margin: 0; opacity: 0; appearance: none; cursor: pointer; }
+#krabka-lab .lab-seg-opt:has(input:checked) { background: rgba(255, 255, 255, 0.12); }
+#krabka-lab .lab-seg-opt:has(input:checked) .lab-seg-name { color: var(--lab-text); }
+#krabka-lab .lab-seg-opt:has(input:focus-visible) { outline: 2px solid var(--lab-accent); outline-offset: -2px; }
+#krabka-lab .lab-seg-name { font-weight: 600; letter-spacing: 0.03em; color: var(--lab-muted); }
+#krabka-lab .lab-seg-n { color: var(--lab-muted); font-variant-numeric: tabular-nums; }
+#krabka-lab .lab-seg-opt.lab-lv-warn .lab-seg-name { color: var(--lab-warn); }
+#krabka-lab .lab-seg-opt.lab-lv-error .lab-seg-name { color: var(--lab-err); }
+#krabka-lab .lab-logs-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+#krabka-lab .lab-nchip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border: 1px solid var(--lab-border-strong); border-radius: 999px; background: none; color: var(--lab-text); font: inherit; font-size: 0.74rem; cursor: pointer; }
+#krabka-lab .lab-nchip:hover { border-color: var(--chip, var(--lab-accent)); }
+#krabka-lab .lab-nchip[aria-pressed="true"] { background: color-mix(in srgb, var(--chip, #94a3b8) 24%, transparent); border-color: var(--chip, var(--lab-accent)); }
+#krabka-lab .lab-nchip:focus-visible { outline: 2px solid var(--lab-accent); outline-offset: 2px; }
+#krabka-lab .lab-nchip-dot { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--chip, var(--lab-muted)); }
+#krabka-lab .lab-logs-targets > summary { cursor: pointer; padding: 0.2rem 0.55rem; border: 1px solid var(--lab-border-strong); border-radius: 6px; font-size: 0.74rem; list-style: none; }
+#krabka-lab .lab-logs-targets > summary::-webkit-details-marker { display: none; }
+#krabka-lab .lab-logs-targets > summary:focus-visible { outline: 2px solid var(--lab-accent); outline-offset: 2px; }
+#krabka-lab .lab-logs-targetbox { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; width: min(22rem, 100%); }
+#krabka-lab .lab-logs-targetlist { max-height: 7rem; overflow: auto; display: flex; flex-direction: column; }
+#krabka-lab .lab-logs-target { display: flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.72rem; cursor: pointer; }
+#krabka-lab .lab-logs-tname { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#krabka-lab .lab-logs-status { display: flex; align-items: center; gap: 0.5rem; padding: 0.1rem 0.6rem 0.2rem; font-size: 0.72rem; color: var(--lab-muted); flex: none; }
+#krabka-lab .lab-logs-pill { margin-left: auto; border-color: var(--lab-accent); color: var(--lab-accent); }
+#krabka-lab .lab-logs-empty { padding: 0.7rem 0.8rem; color: var(--lab-muted); font-size: 0.8rem; }
+#krabka-lab .lab-logs-scroll { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--lab-border); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.72rem; }
+#krabka-lab .lab-logs-scroll:focus-visible { outline: 2px solid var(--lab-accent); outline-offset: -2px; }
+#krabka-lab .lab-logs-scroll[hidden] { display: none; }
+#krabka-lab .lab-lgrow { border-left: 3px solid transparent; }
+#krabka-lab .lab-lgrow.lab-lv-warn { border-left-color: var(--lab-warn); }
+#krabka-lab .lab-lgrow.lab-lv-error { border-left-color: var(--lab-err); background: rgba(255, 107, 90, 0.06); }
+#krabka-lab .lab-log-head { display: grid; grid-template-columns: 5.6rem 5.4rem minmax(0, 7rem) minmax(0, 12rem) minmax(0, 1fr); gap: 0.5rem; align-items: center; height: var(--lab-log-row); padding: 0 0.6rem; cursor: pointer; white-space: nowrap; }
+#krabka-lab .lab-log-head > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#krabka-lab .lab-log-head:hover { background: rgba(255, 255, 255, 0.04); }
+#krabka-lab .lab-log-active > .lab-log-head { background: rgba(255, 255, 255, 0.08); }
+#krabka-lab .lab-logs-scroll:focus-visible .lab-log-active > .lab-log-head { outline: 2px solid var(--lab-accent); outline-offset: -2px; }
+#krabka-lab .lab-log-time { color: var(--lab-muted); font-variant-numeric: tabular-nums; }
+#krabka-lab .lab-log-level { justify-self: start; padding: 0 0.3rem; border: 1px solid currentColor; border-radius: 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; line-height: 1.35; color: #9fb4d0; }
+#krabka-lab .lab-lv-trace .lab-log-level,
+#krabka-lab .lab-lv-debug .lab-log-level { color: var(--lab-muted); }
+#krabka-lab .lab-lv-warn .lab-log-level { color: var(--lab-warn); }
+#krabka-lab .lab-lv-error .lab-log-level { color: var(--lab-err); }
+#krabka-lab .lab-log-raw { margin-left: 0.3rem; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: var(--lab-muted); }
+#krabka-lab .lab-log-node { display: inline-flex; align-items: center; gap: 0.35rem; }
+#krabka-lab .lab-log-target { color: #ffb39e; }
+#krabka-lab .lab-log-kv { color: var(--lab-muted); }
+#krabka-lab .lab-log-marker > .lab-log-head { font-style: italic; background: rgba(255, 255, 255, 0.035); }
+#krabka-lab .lab-log-marker .lab-log-level { border-style: dashed; }
+#krabka-lab .lab-logs-wrap .lab-log-head { height: auto; min-height: var(--lab-log-row); align-items: start; white-space: normal; padding-top: 0.2rem; padding-bottom: 0.2rem; }
+#krabka-lab .lab-logs-wrap .lab-log-head > * { overflow: visible; overflow-wrap: anywhere; }
+#krabka-lab .lab-log-detail { padding: 0.4rem 0.8rem 0.6rem 1.6rem; border-top: 1px dashed var(--lab-border); background: rgba(0, 0, 0, 0.2); white-space: normal; cursor: auto; user-select: text; }
+#krabka-lab .lab-log-detail-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+#krabka-lab .lab-log-detail-bar > .lab-muted { flex: 1; min-width: 8rem; }
+#krabka-lab .lab-log-full { margin: 0.3rem 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; color: #e5e7eb; }
+#krabka-lab .lab-loglevels { display: flex; flex-direction: column; gap: 0.6rem; min-width: min(28rem, 100%); }
+#krabka-lab .lab-loglevels fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; }
+#krabka-lab .lab-loglevels legend { float: left; width: 100%; margin-bottom: 0.25rem; }
+#krabka-lab .lab-loglevels-preset { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+#krabka-lab .lab-loglevels-check { margin: 0; min-height: 1.2em; color: var(--lab-muted); }
+#krabka-lab .lab-loglevels-bad { color: var(--lab-err); }
+#krabka-lab .lab-loglevels-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+#krabka-lab .lab-loglevels-running { margin: 0; padding-left: 1.1rem; font-size: 0.78rem; }
+#krabka-lab .lab-loglevels-running code { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+@media (pointer: coarse) {
+  #krabka-lab .lab-logs { --lab-log-row: 2.25rem; }
+  #krabka-lab .lab-logs .lab-btn-sm,
+  #krabka-lab .lab-logs .lab-input-sm,
+  #krabka-lab .lab-nchip,
+  #krabka-lab .lab-seg-opt,
+  #krabka-lab .lab-logs-targets > summary,
+  #krabka-lab .lab-logs-target,
+  #krabka-lab .lab-loglevels-preset { min-height: 2.25rem; }
+  #krabka-lab .lab-loglevels .lab-btn-sm { min-height: 2.25rem; }
+}
+@media (max-width: 640px) {
+  #krabka-lab .lab-log-head { grid-template-columns: 4.2rem 5.2rem 4.5rem minmax(0, 1fr); }
+  #krabka-lab .lab-log-target { display: none; }
+  #krabka-lab .lab-loglevels { min-width: 0; }
+}
+@media (forced-colors: active) {
+  #krabka-lab .lab-logs .lab-btn-sm[aria-pressed="true"],
+  #krabka-lab .lab-nchip[aria-pressed="true"] { border-color: Highlight; color: Highlight; }
+  /* A tint does not survive forced colours: the chosen level is outlined and its name underlined. */
+  #krabka-lab .lab-seg-opt:has(input:checked) { outline: 2px solid Highlight; outline-offset: -2px; }
+  #krabka-lab .lab-seg-opt:has(input:checked) .lab-seg-name { text-decoration: underline; }
+  #krabka-lab .lab-log-active > .lab-log-head { outline: 2px solid Highlight; outline-offset: -2px; }
+  #krabka-lab .lab-lgrow.lab-lv-warn,
+  #krabka-lab .lab-lgrow.lab-lv-error { border-left-color: CanvasText; }
+  #krabka-lab .lab-nchip-dot { forced-color-adjust: none; }
+}

@@ -32,7 +32,7 @@ function summarize(scenario) {
   for (const n of scenario.nodes) {
     const k = kindOf(n.kind);
     if (k.hidden) continue;
-    const label = k.label.replace(/ \(real\)$/, "").replace(/^Krabka /, "").toLowerCase();
+    const label = k.label.replace(/^Krabka /, "").toLowerCase();
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   const plural = (label) => (/y$/.test(label) ? `${label.slice(0, -1)}ies` : `${label}s`);
@@ -140,7 +140,7 @@ export class Palette {
     this.saveState = el("p", "lab-muted lab-small");
     current.appendChild(this.saveState);
 
-    const presets = this.block(panel, "Start from a preset", "Every preset runs real brokers. Pick one, press Play, then break something.");
+    const presets = this.block(panel, "Start from a preset", "Pick one, press Play, then break something.");
     this.presetButtons = [];
     for (const p of this.hooks.presets) {
       const b = el("button", "lab-preset-btn");

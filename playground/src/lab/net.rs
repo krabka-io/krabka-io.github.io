@@ -40,7 +40,7 @@ pub type Millis = u64;
 #[serde(transparent)]
 pub struct NodeId(pub u32);
 
-/// The port a simulated broker listens on.
+/// The port a broker listens on.
 pub const KAFKA_PORT: u16 = 9092;
 /// The port a simulated schema registry listens on.
 pub const HTTP_PORT: u16 = 8081;
@@ -544,14 +544,15 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// A simulated process: a broker, a schema registry, or a client application.
+/// A process in the world: a stand-in for a real broker, a schema registry, or
+/// a client application.
 ///
 /// The world calls the methods one at a time, never concurrently. A node keeps
 /// no wall-clock time and no `HashMap` whose iteration order reaches the wire;
 /// use `BTreeMap` wherever order is observable. A node must only send frames
 /// whose `src.node` is its own id.
 pub trait Node {
-    /// The node kind, as it appears in the scenario: `"broker"`,
+    /// The node kind, as it appears in the scenario: `"krabka-broker"`,
     /// `"schema-registry"`, `"producer"`, `"consumer"`, `"streams"`, ...
     fn kind(&self) -> &'static str;
 

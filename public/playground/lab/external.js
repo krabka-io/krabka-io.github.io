@@ -238,6 +238,39 @@ export function parseConfig(config) {
   return { voter, fileConfig };
 }
 
+// The settings the lab's old simulated broker shared with the real one, by
+// the simulated name; the value is the real key.
+const SIMULATED_CONFIG = Object.freeze({
+  rack: "rack",
+  voter: "voter",
+  default_partitions: "num_partitions",
+  default_replication_factor: "default_replication_factor",
+  min_insync_replicas: "min_insync_replicas",
+  replica_lag_time_max_ms: "replica_lag_time_max_ms",
+});
+
+/**
+ * The configuration a real broker takes over from an old simulated broker's:
+ * the settings both had, under the real names, and only the values the real
+ * validator accepts (the simulated `-1` replication factor meant "every
+ * broker" and has no real equivalent). Everything else is dropped, so the
+ * converted node is valid rather than `invalid`.
+ */
+export function realConfigFromSimulated(old) {
+  const out = {};
+  if (!old || typeof old !== "object" || Array.isArray(old)) return out;
+  for (const [from, to] of Object.entries(SIMULATED_CONFIG)) {
+    if (old[from] == null) continue;
+    try {
+      parseConfig({ [to]: old[from] });
+      out[to] = old[from];
+    } catch {
+      // The real broker would reject this value, so it does not come along.
+    }
+  }
+  return out;
+}
+
 /** The ids of the scenario's real brokers that are KRaft voters, ascending. */
 export function votersOf(scenario) {
   const ids = [];
@@ -255,14 +288,16 @@ export function votersOf(scenario) {
 /**
  * The environment of the process behind node `nodeId`, on top of what the
  * runtime sets (`KRABKA_LISTEN_FDS`, `KRABKA_LISTEN_PORTS`, `KRABKA_DIAL_FD`).
+ * `logLevel` is a `KRABKA_LOG` directive; left out, the broker logs its default.
  */
-export function processEnv({ nodeId, voters, clusterId, fileConfig }) {
+export function processEnv({ nodeId, voters, clusterId, fileConfig, logLevel }) {
   return {
     KRABKA_NODE_ID: String(nodeId),
     KRABKA_HOST: nodeIp(nodeId),
     KRABKA_VOTERS: voters.map((id) => `${id}@${nodeIp(id)}:${CONTROLLER_PORT}`).join(","),
     KRABKA_CLUSTER_ID: clusterId,
     KRABKA_CONFIG: JSON.stringify(fileConfig),
+    ...(logLevel ? { KRABKA_LOG: logLevel } : {}),
   };
 }
 
@@ -405,6 +440,7 @@ class RealNode {
     this.volume = null;
     this.env = null;
     this.incarnation = 0;
+    this.origin = null; // why the next process starts: "restarted" | "wiped"; null is the first start
     this.startedAt = null;
     this.exit = null;
     this.pending = []; // frames that arrived before the process started
@@ -451,6 +487,9 @@ export class ExternalHost {
   //   scenario()               the scenario document, with its id
   //   event(id, kind, detail)  a timeline entry about a process
   //   exited(id, exit)         a process ended by itself: the page kills the node
+  //   logLevel(id)             the `KRABKA_LOG` directive the node starts with (optional; "" is the default)
+  //   log(id, entry)           for the Logs tab (optional): a line `{ stream, text, base }`, `base` being the lab
+  //                            time the process started at, or a lifecycle row `{ marker, message, level, detail }`
   constructor(hooks) {
     this.hooks = hooks;
     this.nodes = new Map();
@@ -587,12 +626,17 @@ export class ExternalHost {
 
   halt(node) {
     const ended = node.state === "exited" || node.state === "trapped";
+    const wasKilled = node.state === "killed";
     this.stopProcess(node);
     if (ended) this.publish(node);
-    else this.setState(node, "killed", "");
+    else {
+      if (!wasKilled) this.mark(node, "killed", "process killed", "WARN");
+      this.setState(node, "killed", "");
+    }
   }
 
   relaunch(node, wipe) {
+    node.origin = wipe ? "wiped" : "restarted";
     this.stopProcess(node, { forget: wipe });
     this.launch(node);
   }
@@ -677,7 +721,7 @@ export class ExternalHost {
       this.unavailable(node, reason);
       return;
     }
-    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.id), fileConfig: config.fileConfig });
+    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.id), fileConfig: config.fileConfig, logLevel: this.hooks.logLevel?.(node.id) });
     await this.volumeBusy.get(node.volume);
     if (gen !== node.gen) return;
     this.clock ??= new wasi.WasiClock({ mode: "host", timeMs: this.clockMs });
@@ -701,14 +745,24 @@ export class ExternalHost {
     proc.on("exit", (info) => this.exited(node, gen, info));
     proc.on("warn", (text) => this.note(node, "warn", text));
     proc.on("error", (err) => this.note(node, "error", err && err.message ? err.message : String(err)));
-    proc.on("stdout", () => this.publishSoon(node));
-    proc.on("stderr", () => this.publishSoon(node));
+    // A process that was replaced may still flush its last lines: only the current one is logged.
+    for (const stream of ["stdout", "stderr"]) {
+      proc.on(stream, (text) => {
+        if (node.proc === proc) this.hooks.log?.(node.id, { stream, text, base: node.startedAt });
+        this.publishSoon(node);
+      });
+    }
+    const origin = node.origin ?? (node.incarnation > 1 ? "restarted" : "started");
+    node.origin = null;
+    const level = env.KRABKA_LOG ?? "";
+    this.mark(node, origin, `process ${origin === "wiped" ? "restarted on a fresh disk" : origin} with ${level ? `KRABKA_LOG=${level}` : "the default log level"}`, "INFO", { incarnation: node.incarnation, log_level: level });
     this.setState(node, "booting", "");
     try {
       await proc.start();
     } catch (err) {
       if (gen !== node.gen) return;
       this.setState(node, "failed", err.message);
+      this.mark(node, "failed", `process failed to start: ${err.message}`, "ERROR");
       this.event(node, "process_failed", { level: "error", reason: err.message });
       this.refusePending(node);
       return;
@@ -745,6 +799,7 @@ export class ExternalHost {
     node.settling = null;
     node.deadline = Infinity;
     this.setState(node, trap ? "trapped" : "exited", reason);
+    this.mark(node, trap ? "trapped" : "exited", `process ${reason}`, trap || info.code ? "ERROR" : "INFO", { code: info.code ?? null });
     this.event(node, trap ? "process_trap" : "process_exit", { level: "error", reason, code: info.code ?? null });
     this.hooks.exited(node.id, node.exit);
   }
@@ -1139,6 +1194,11 @@ export class ExternalHost {
 
   event(node, kind, detail) {
     this.hooks.event(node.id, kind, detail);
+  }
+
+  // A lifecycle row in the Logs tab, between the lines of one process and the next.
+  mark(node, marker, message, level = "INFO", detail = {}) {
+    this.hooks.log?.(node.id, { marker, message, level, detail });
   }
 
   publishSoon(node) {

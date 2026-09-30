@@ -1,27 +1,28 @@
 # Cluster Lab design
 
-The Cluster Lab is the interactive distributed-systems playground on `/docs/lab`. It runs simulated Krabka brokers, a Confluent-compatible schema registry, Kafka producers and consumers, and `krabka-client-streams` applications inside one WebAssembly module, and it lets several browser tabs, on one machine or across the internet, each host a share of the nodes over WebRTC data channels.
+The Cluster Lab is the interactive distributed-systems playground on `/docs/lab`. It runs real `krabka-broker` processes (compiled for `wasm32-wasip1`, in Web Workers) joined by a virtual network to a Confluent-compatible schema registry, Kafka producers and consumers, and `krabka-client-streams` applications, which run as state machines inside one WebAssembly module. Several browser tabs, on one machine or across the internet, can each host a share of the clients and apps over WebRTC data channels; the brokers stay in the tab that started them.
 
 This document is the contract between the modules. Every module owner codes against it. When an interface here has to change, change this document in the same commit.
 
 ## What is real and what is simulated
 
-The lab is a **sans-IO simulation**. Every node is a synchronous state machine that receives frames and timer ticks and emits frames. Nothing in the crate opens a socket, reads a clock, spawns a thread, or touches a file. The host (the JavaScript page) owns the clock and the transport.
+The brokers are the real thing: the `krabka-broker` binary, built for `wasm32-wasip1` and run as a process in a Web Worker (see [External nodes](#external-nodes-labexternal) and [`lab-real-broker.md`](lab-real-broker.md)). Its KRaft quorum, metadata, partition logs, replication, group coordinators and request handling are the broker's own code, unmodified; the page supplies its clock, network and disk.
 
-The following pieces are the real Krabka code, compiled unchanged for `wasm32-unknown-unknown`:
+Everything else in the lab is a **sans-IO simulation**. The echo and pinger probes, the schema registry, the producer, consumer and streams apps, and the Kafka client they share are synchronous state machines that receive frames and timer ticks and emit frames. Nothing in the crate opens a socket, reads a clock, spawns a thread, or touches a file. The host (the JavaScript page) owns the clock and the transport. Faults, latency and loss are applied to frames by the world, so they reach a broker process the same way they reach a simulated node, and the world, the clients and the apps replay under the scenario's seed; a broker process does not (it draws real randomness).
 
-| Piece | Crate | Used for |
-| --- | --- | --- |
-| Kafka wire codec, every request and response, byte-exact | `krabka-protocol` | every frame a simulated broker or client handles |
-| `RecordBatch` v2 codec with CRC-32C | `krabka-protocol::records` | every partition log |
-| KRaft state machine (KIP-595, KIP-996) | `krabka-kraft-core` | the controller quorum between brokers |
-| Metadata records and the immutable metadata image | `krabka-metadata` | the controller log and every broker's view of the cluster |
-| Streams topology, DSL, processors, state stores, changelogs | `krabka-client-streams` | every streams application node |
-| KIP-1071 wire topology (`StreamsGroupHeartbeat.Topology`) | `krabka-client-streams::topology` | the streams group join |
-| Avro schema parsing and reader/writer compatibility | `apache-avro` (the engine `krabka-schema-registry` uses) | the schema registry |
-| JSON Schema and Protobuf parsing | `jsonschema`, `protox-parse`, `prost-reflect` | the schema registry |
+The following pieces are the real Krabka code:
 
-The following pieces are written for the lab, in this crate, and they model the behaviour of the real components rather than link them: the broker's request handlers, partition replication and ISR maintenance, the group coordinator (classic, KIP-848 and KIP-1071), the schema registry's REST surface and `_schemas` store, the JSON Schema and Protobuf compatibility rules (a documented subset), and the Kafka client used by the producer, consumer, streams and registry nodes. The real `krabka-broker`, `krabka-schema-registry` and `krabka-client-*` crates are tokio programs over TCP and files, so they cannot run in a browser. Where the lab's model and Apache Kafka disagree, the lab is wrong: match Kafka.
+| Piece | Crate | Runs in | Used for |
+| --- | --- | --- | --- |
+| The broker: request handlers, partition logs and replication, group coordinators, KRaft controller quorum, metadata image | `krabka-broker`, `krabka-raft`, `krabka-metadata` | a Web Worker, `wasm32-wasip1` | every broker node |
+| Kafka wire codec, every request and response, byte-exact | `krabka-protocol` | the broker process and the lab module | every frame a broker or client handles |
+| `RecordBatch` v2 codec with CRC-32C | `krabka-protocol::records` | the broker process and the lab module | every partition log, every produced or fetched batch |
+| Streams topology, DSL, processors, state stores, changelogs | `krabka-client-streams` | the lab module, `wasm32-unknown-unknown` | every streams application node |
+| KIP-1071 wire topology (`StreamsGroupHeartbeat.Topology`) | `krabka-client-streams::topology` | the lab module | the streams group join |
+| Avro schema parsing and reader/writer compatibility | `apache-avro` (the engine `krabka-schema-registry` uses) | the lab module | the schema registry |
+| JSON Schema and Protobuf parsing | `jsonschema`, `protox-parse`, `prost-reflect` | the lab module | the schema registry |
+
+The following pieces are written for the lab, in this crate, and they model the behaviour of the real components rather than link them: the schema registry's REST surface and `_schemas` store, the JSON Schema and Protobuf compatibility rules (a documented subset), and the Kafka client used by the producer, consumer, streams and registry nodes. The real `krabka-schema-registry` and `krabka-client-*` crates are tokio programs over TCP and files, so they do not run in the lab module. Where the lab's model and Apache Kafka disagree, the lab is wrong: match Kafka.
 
 ## Module map and ownership
 
@@ -29,16 +30,15 @@ Everything lives under `playground/src/lab/`. One owner per directory; nobody ed
 
 | Path | Owner | Holds |
 | --- | --- | --- |
-| `lab/mod.rs`, `lab/net.rs`, `lab/world.rs`, `lab/clock.rs`, `lab/scenario.rs`, `lab/events.rs`, `lab/testing.rs` | core | the virtual network, the scheduler, the node trait, faults, the scenario format, the event log, and the test harness |
+| `lab/mod.rs`, `lab/net.rs`, `lab/world.rs`, `lab/scenario.rs`, `lab/events.rs`, `lab/testing.rs` | core | the virtual network, the scheduler, the node trait, faults, the scenario format, the event log, and the test harness |
 | `lab/codes.rs` | core | Kafka error codes as `i16` constants (the broker's `codes.rs` names) |
-| `lab/broker/**` | broker | the simulated broker: connection pipeline, dispatch registry, handlers, partition logs, replication, coordinator |
-| `lab/controller/**` | controller | the KRaft driver over `krabka-kraft-core`, the metadata log, the controller decisions (registration, topics, leader election, ISR) |
+| `lab/external.rs` | core | `ExternalNode`, the world's stand-in for a real `krabka-broker` process that runs in a Web Worker |
 | `lab/registry/**` | registry | the schema registry node: HTTP layer, REST routes, store, compatibility engines, `_schemas` client |
 | `lab/client/**` | client | the sans-IO Kafka client: connections, metadata, produce, fetch, group membership, offsets |
 | `lab/apps/**` | apps | the producer, consumer and streams application nodes, and the topology compiler |
 | `lab/wasm.rs` | core | the `wasm-bindgen` surface |
 
-Everything is `pub` inside `lab` where another module needs it, and `pub(crate)` never appears inside a private module (see the code style guide). The `lab` module is `pub` from `lib.rs` so integration tests under `playground/tests/` can drive it.
+Everything is `pub` inside `lab` where another module needs it, and `pub(crate)` never appears inside a private module (see the code style guide). The `lab` module is `pub` from `lib.rs`, so tests outside the module tree can drive it.
 
 ## Core types (`lab::net`)
 
@@ -92,7 +92,8 @@ Ordering: frames on one connection are delivered in send order (FIFO per connect
 pub type Millis = u64;
 
 pub trait Node {
-    /// Node kind, one of "broker", "schema-registry", "producer", "consumer", "streams".
+    /// Node kind, one of "echo", "pinger", "schema-registry", "producer", "consumer",
+    /// "streams", "krabka-broker" (an `ExternalNode`, see below).
     fn kind(&self) -> &'static str;
     /// Called once when the node starts or restarts. `ctx.now()` is the start time.
     fn start(&mut self, ctx: &mut Ctx<'_>);
@@ -179,22 +180,26 @@ Faults on a link between a local and a remote node are applied locally on the se
 
 ## External nodes (`lab::external`)
 
-A real `krabka-broker`, compiled for `wasm32-wasip1`, runs in a Web Worker behind the browser WASI runtime (`public/playground/wasi/`), not inside this crate. Its scenario node has kind `krabka-broker`; the world keeps an `ExternalNode` stand-in for it (`Node::external()` is true), so links, faults, events and snapshots treat it like any other node.
+A real `krabka-broker`, compiled for `wasm32-wasip1`, runs in a Web Worker behind the browser WASI runtime (`public/playground/wasi/`), not inside this crate. It is the only broker the lab has. Its scenario node has kind `krabka-broker`; the world keeps an `ExternalNode` stand-in for it (`Node::external()` is true), so links, faults, events and snapshots treat it like any other node. A scenario saved by an earlier version of the lab with kind `broker` (a model of the broker that the lab no longer has) is converted to `krabka-broker` by the page when it loads; this crate rejects the old kind as unknown.
 
 - The world holds a frame for an external node for its link latency like any frame, then hands it to the page through `drainExternal()` (`[{deliver_at, frame}]`, each due now) instead of calling a `Node` method. The page gives it to the process: an `Open` to port 9092 or 9093 becomes a connection to that listener, `Data` bytes on it, `Close` its end.
 - Frames the process sends (bytes on an accepted connection, an outbound dial and what follows on it) come back through `routeExternal(frames)`, which routes each as sent by its node, through the link model, at the current time. Frames from a node that is not an external node this world hosts, or that is down, are dropped.
 - A killed external node refuses new connections at once, like a local one, and the page kills or restarts its process when it applies the fault. The page reports the process's state with `applyRemoteSnapshot`; until it does, the snapshot is `{"external": true}`.
-- Addresses: a process sees the lab network as IPv4, node `n` at `10.0.(n >> 8).(n & 255)` (`net::node_ip`, `net::node_for_ip`): Kafka on 9092, the KRaft controller on 9093, a registry on 8081. A broker advertises its virtual address, and the lab client maps it back to the node.
+- Addresses: a process sees the lab network as IPv4, node `n` at `10.0.(n >> 8).(n & 255)` (`net::node_ip`, `net::node_for_ip`): Kafka on 9092, the KRaft controller on 9093, a registry on 8081. A broker advertises `127.0.0.1:(9091 + n)` in its metadata, so the local kafkactl bridge can expose it on every OS, and the lab client maps that address back to the node.
 
-The page side (the bridge between the world and the processes, the lab clock the processes run on, faults, volumes and cross-origin isolation), the process contract, and what the broker's entry crate must do are in [`lab-real-broker.md`](lab-real-broker.md).
+The page side (the bridge between the world and the processes, the lab clock the processes run on, faults, volumes, logs and cross-origin isolation), the process contract, and what the broker's entry crate must do are in [`lab-real-broker.md`](lab-real-broker.md).
+
+**Logs.** The dock's Logs tab is the page's view of what the broker processes write to stderr: one JSON object per line, stamped with the lab clock (the record format and the `KRABKA_LOG` level variable are in [`lab-real-broker.md`](lab-real-broker.md#logs)). The tab lists the lines of every broker of the scenario in lab-time order, in a virtualized list, with columns for time, level, node, target and message. A row opens into the whole record as a collapsible JSON tree. Filters cover the minimum level, the nodes, the targets, and a text search that also takes `field:value` terms; the stream can follow the newest line or pause when the reader scrolls up, be cleared, and be downloaded as NDJSON, the raw lines currently shown. Lines that are not JSON, such as a panic message, stay visible as raw lines with a guessed level. Process starts, exits, kills and restarts appear in the stream as marker rows. The crate has no part in it: the page keeps the lines (up to 5,000 per node, 20,000 in all) and never sends them to the world.
+
+The tab also sets the log level: a preset (Quiet, Normal, Verbose, Trace) or a directive, for all brokers or for one. A level is a setting of the page, not of the node's `config` (editing a config wipes the node's disk), so it lives in the browser's `localStorage` per scenario. Changing it restarts the affected processes on their own disks, after a confirmation, because the level is an environment variable read when the process starts.
 
 ## Durable state (`lab::net::DurableOp`, `lab::net::DurableImage`)
 
-A node's durable state (a broker's partition logs and metadata, the controller's log) must survive a page reload, so the page keeps it in the browser's IndexedDB. The crate never touches storage itself: a node records every change through `Ctx::persist(DurableOp)`, the world collects the ops per node, and the page drains them with `drainDurable()` after every step and writes them to IndexedDB in order. When the page loads a scenario it read from storage, it folds the stored ops into one `DurableImage` per node (`DurableImage::apply` is the reference fold; the JavaScript store applies the same rules) and calls `loadScenarioWithState(scenario, hosted, images)`, which hands each image to `Node::load` before the node starts.
+The one node of the lab module that keeps state across a page reload is the echo node, whose counter survives, so the page keeps it in the browser's IndexedDB. The crate never touches storage itself: a node records every change through `Ctx::persist(DurableOp)`, the world collects the ops per node, and the page drains them with `drainDurable()` after every step and writes them to IndexedDB in order. When the page loads a scenario it read from storage, it folds the stored ops into one `DurableImage` per node (`DurableImage::apply` is the reference fold; the JavaScript store applies the same rules) and calls `loadScenarioWithState(scenario, hosted, images)`, which hands each image to `Node::load` before the node starts.
 
-Two kinds of store, both named by the node: an append-only **log** whose entries the node numbers itself (a partition log uses the batch base offset, the controller its log offset) with `Append`, `TruncateBefore` and `TruncateFrom`, and a **key-value** store with `Put` and `Delete`. `Clear` drops one store; the world emits `ClearAll` for a node on `Fault::Wipe`, on `update_node` and on `remove_node`, so the page drops what it kept. A node that keeps everything in memory ignores `load` and persists nothing.
+Two kinds of store, both named by the node: an append-only **log** whose entries the node numbers itself, with `Append`, `TruncateBefore` and `TruncateFrom`, and a **key-value** store with `Put` and `Delete`. `Clear` drops one store; the world emits `ClearAll` for a node on `Fault::Wipe`, on `update_node` and on `remove_node`, so the page drops what it kept. A node that keeps everything in memory ignores `load` and persists nothing.
 
-Store names are conventions per node kind, documented on the node type. The broker uses `log/<topic>/<partition>` for partition batches, `meta/<topic>/<partition>` for the partition's checkpoints (high watermark, leader epoch cache, producer state), the log store `kraft` for its copy of the metadata quorum's log, and the key-value store `kraft-state` for its quorum state (`quorum`) and high watermark (`hwm`); a reload rebuilds the metadata image by replaying the committed part of `kraft`. The schema registry persists nothing: its state is the `_schemas` topic on the brokers, which it replays on every start.
+Store names are conventions per node kind, documented on the node type. The echo node uses the key-value store `counters`. A real broker's disk is not part of this pipeline: it is a volume of the WASI runtime, in its own IndexedDB database (see "Volume" in [`lab-real-broker.md`](lab-real-broker.md)). The schema registry persists nothing: its state is the `_schemas` topic on the brokers, which it replays on every start.
 
 ## Scenario format (`lab::scenario`)
 
@@ -206,8 +211,8 @@ Store names are conventions per node kind, documented on the node type. The brok
   "name": "Three brokers, one producer, one consumer group",
   "links": { "default_latency_ms": 5 },
   "nodes": [
-    { "id": 1, "kind": "broker", "name": "broker-1", "x": 120, "y": 80,
-      "config": { "broker_id": 1, "voter": true, "rack": "a" } },
+    { "id": 1, "kind": "krabka-broker", "name": "broker-1", "x": 120, "y": 80,
+      "config": { "voter": true, "rack": "a" } },
     { "id": 4, "kind": "schema-registry", "name": "registry", "x": 400, "y": 80,
       "config": { "bootstrap": [1, 2, 3] } },
     { "id": 5, "kind": "producer", "name": "orders-producer", "x": 60, "y": 300,
@@ -229,33 +234,11 @@ Store names are conventions per node kind, documented on the node type. The brok
 }
 ```
 
-`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `id` is the identity the page assigns when it first saves a scenario; the durable state in IndexedDB is keyed by it. `topics` are created exactly as `kafka-topics --create` would: an admin connection the world owns, bootstrapped at the scenario's brokers, simulated or real, sends a real `CreateTopics` to the broker the metadata names as controller once that broker serves, and the broker forwards it to the active controller in an `Envelope`.
+`x`/`y` are UI positions; the crate stores and echoes them but never reads them. `id` is the identity the page assigns when it first saves a scenario; the durable state in IndexedDB is keyed by it. `topics` are created exactly as `kafka-topics --create` would: an admin connection the world owns, bootstrapped at the scenario's brokers, sends a real `CreateTopics` to the broker the metadata names as controller once that broker serves, and the broker forwards it to the active controller in an `Envelope`.
 
-Node config keys are owned by the node kind's module and documented in that module's rustdoc. Unknown keys are an error at load time, not ignored.
+Node config keys are owned by the node kind's module and documented in that module's rustdoc; a `krabka-broker` node's keys are checked by the page and listed in [`lab-real-broker.md`](lab-real-broker.md#configuration). Unknown keys are an error at load time, not ignored.
 
-The controller quorum is static, as a KRaft quorum without KIP-853 is: when a scenario loads, its voters are the brokers whose `voter` is not `false`, and the world gives every broker that names no `controller_quorum_voters` that list (the scenario keeps what its author wrote). A broker added to a running scenario joins as an observer until the scenario loads again, except the first voter of a world with no quorum yet, which starts one; a voter of the loaded quorum cannot be turned into an observer.
-
-## Broker (`lab::broker`)
-
-`BrokerNode` implements `Node`. Its parts:
-
-- **Connections.** Per `(peer endpoint, conn)`: a decode buffer is not needed (frames are whole), the negotiated api versions, the client id, and a FIFO of in-flight requests. Kafka serves the requests of one connection **in order**, one at a time; the broker may hold a request (a Fetch with `max_wait_ms`, a Produce with `acks=-1` waiting for the ISR) and it must still answer later requests on the same connection only after the held one. Model this with a per-connection queue and a "blocked" head.
-- **Dispatch registry.** A macro lists every supported request type once: `(ApiKey, owned::FooRequest, handler)`. The registry derives `MIN_VERSION`, `MAX_VERSION`, `LATEST_STABLE_VERSION` and `FLEXIBLE_MIN` from `ProtocolRequest`, answers `ApiVersions` from the list, decodes the request header at header version 2 when `version >= FLEXIBLE_MIN` else 1 (`ControlledShutdown` v0 is header 0; the lab does not serve it), and encodes the response header at version 1 when the body is flexible else 0 (`ApiVersions` always 0). An unsupported api key or version gets `UNSUPPORTED_VERSION` (35) with an empty body of the right shape where Kafka does that, and a decode error closes the connection, as Kafka does.
-- **Handlers.** `ApiVersions`, `Metadata`, `CreateTopics`, `DeleteTopics`, `CreatePartitions`, `Produce`, `Fetch`, `ListOffsets`, `OffsetForLeaderEpoch`, `FindCoordinator`, `JoinGroup`, `SyncGroup`, `Heartbeat`, `LeaveGroup`, `OffsetCommit`, `OffsetFetch`, `DescribeGroups`, `ListGroups`, `ConsumerGroupHeartbeat`, `ConsumerGroupDescribe`, `StreamsGroupHeartbeat`, `StreamsGroupDescribe`, `InitProducerId`, `DescribeCluster`, `DescribeConfigs`, `DescribeTopicPartitions`, `SaslHandshake` (returns the empty mechanism list: plaintext only), `DescribeQuorum` (forwarded to the active controller). The controller listener (9093) serves `ApiVersions`, `CreateTopics`, `DeleteTopics`, `CreatePartitions`, `DescribeQuorum`, `AlterPartition`, `Envelope`, `BrokerRegistration`, `BrokerHeartbeat` and `AllocateProducerIds`. Each handler is `fn(&mut BrokerNode, &mut Ctx, &RequestCtx, FooRequest) -> HandlerOutcome` where the outcome is `Reply(FooResponse)`, `Hold(...)` (answer later from a timer or a state change) or `Close`.
-- **Partition log.** `PartitionLog { batches: Vec<StoredBatch>, log_start: i64, hwm: i64, leader_epoch: i32, epoch_cache: Vec<(epoch, start_offset)> }`. Append assigns offsets, stamps `partition_leader_epoch`, re-encodes the batch (the CRC covers the assigned offsets? No: `base_offset` and `partition_leader_epoch` are outside the CRC; only the batch length/CRC-covered part is fixed) and stores the encoded bytes, so a Fetch returns bytes the way Kafka does. Idempotent producers: per `producer_id` the last 5 `(epoch, base_seq, last_seq)`; out-of-order sequence → `OUT_OF_ORDER_SEQUENCE_NUMBER`, duplicate → success with the original offset.
-- **Replication.** A follower replica runs a fetch loop against the leader with `replica_id = my broker id`, appends returned batches verbatim, and reports its LEO on the next fetch. The leader tracks each follower's LEO and time of last fetch, advances the HWM to `min(LEO over ISR)`, and proposes ISR shrink (follower behind for `replica_lag_time_max_ms`, Kafka's 30 s of logical time) or expand (follower caught up to HWM) to the controller with `AlterPartition`. `acks=-1` produces complete when the HWM passes their last offset, else after `request_timeout` they fail with `REQUEST_TIMED_OUT`... Kafka returns `NOT_ENOUGH_REPLICAS` before append when `|ISR| < min.insync.replicas`, and `NOT_ENOUGH_REPLICAS_AFTER_APPEND` if the ISR shrinks after; match that.
-- **Coordinator.** Group state per group id on the coordinator broker (`hash(group) % 50` mapped onto the `__consumer_offsets` partitions, which the lab creates as an internal topic with `replication_factor = min(3, brokers)`; the coordinator for a group is the leader of that partition, so a broker failure moves groups the way Kafka does). Group state and committed offsets are written as records to that partition (the real Kafka key/value formats are NOT required; a JSON value is fine, but write them, so that a coordinator failover on another broker loads the state from the replicated log). Classic protocol: `JoinGroup` with a rebalance timeout, leader/assignment through `SyncGroup`, generation ids, `Heartbeat` with session timeouts, `LeaveGroup`. KIP-848 `ConsumerGroupHeartbeat`: member epochs, server-side assignor (uniform, sticky-ish: keep an existing owner when possible), the reconciliation dance (`member_epoch`, revoked partitions must be acked before new ones are assigned). KIP-1071 `StreamsGroupHeartbeat`: same epoch mechanics; the topology is registered once (topology epoch), internal topics (repartition, changelog) are created from `TopicInfo`, `MISSING_SOURCE_TOPICS`/`MISSING_INTERNAL_TOPICS` statuses until they exist, active tasks are assigned per subtopology and partition, standby tasks when `num_standby_replicas > 0`.
-- **Controller side.** Every broker embeds a `ControllerCore`, as a voter when its id is in `controller_quorum_voters` and as an observer otherwise (`process.roles=broker,controller`). The quorum leader becomes the active controller once it has applied its own leader-change record and makes every metadata decision with `ControllerDecisions`. Brokers register and heartbeat with the active controller's controller listener, stay fenced until they have caught up with the metadata log, and answer clients only once unfenced (connections are accepted earlier and wait). Controller requests sent to any broker are forwarded in an `Envelope`; leaders propose ISR changes with `AlterPartition`; producer-id blocks come from `AllocateProducerIds`. Every broker's image is the replay of the committed log.
-
-Everything the UI shows for a broker comes from `snapshot()`: role in the quorum, epoch, controller id, registered brokers, topics with per-partition leader/ISR/replicas/LEO/HWM per replica, groups with members and lag, connection count, request counters per api key.
-
-## Controller (`lab::controller`)
-
-A driver over `krabka_kraft_core::QuorumStateMachine` shaped like `kraft_core::sim` but over `Ctx`: the quorum messages are `Event`s serialized with `serde_json` in `Payload::Data` on connection ids from 2^30 up (`RAFT_CONN_BASE`) between brokers (they are not Kafka frames; the lab does not claim wire fidelity for KIP-595 RPCs). Timers: election, fetch, heartbeat (300 ms), check-quorum, derived from the machine's `ResetTimer` actions and the node id stagger, as in `sim/node.rs`. A follower's `Fetch` carries its high watermark and the leader answers at once when its own is higher (KIP-1166).
-
-The log is `MetadataLog { entries: Vec<(Epoch, MetadataBatch)> }` where a batch is `Vec<MetadataRecord>`; the leader appends, followers replicate on `Fetch`, the HWM from the machine marks commit, and committed batches are applied to `MetadataImage` on every node and handed out by `ControllerCore::take_committed` and applied by the broker.
-
-Controller decisions (run by the active controller only, on every committed batch and on timers): broker registration (epoch, fenced/unfenced from heartbeats, 9 s session), topic creation with Kafka's striped placement, made deterministic (unfenced brokers first, the first replica leads), partition leader election when a leader is fenced (the first replica in replica order that is in the ISR and unfenced; if none, `NO_LEADER` and the partition is offline with its last ISR member kept; unclean election only where the topic enables it), producer-id blocks, `AlterPartition` validation (leader epoch and partition epoch checks), `__consumer_offsets` creation on first `FindCoordinator`, and topic deletion.
+The controller quorum is static, as a KRaft quorum without KIP-853 is, and the page computes it: the voters are the `krabka-broker` nodes whose `voter` is not `false`, handed to every process as `KRABKA_VOTERS` when it starts (see `lab-real-broker.md`). A change to the voter set reaches a running process when it next starts, as a static `controller.quorum.voters` does.
 
 ## Schema registry (`lab::registry`)
 
@@ -351,6 +334,6 @@ Every string is JSON; bytes inside JSON are base64. The page never sees a Rust t
 
 ## Testing
 
-`lab::testing::TestWorld` builds a world from a scenario literal and offers `run_for(ms)`, `run_until(pred, max_ms)`, `frames_between(a, b)` counters and `node_snapshot(id)`. Module tests use it; integration tests in `playground/tests/lab_*.rs` run whole scenarios: a three-broker cluster elects a controller and creates topics; a producer's records reach a consumer through a replicated partition; killing the leader moves leadership and loses no acked record; a schema registered through REST survives a registry wipe; a streams app counts records into a sink topic.
+`lab::testing::TestWorld` builds a world from a scenario literal and offers `run_for(ms)`, `run_until(pred, max_ms)`, `frames_between(a, b)` counters and `node_snapshot(id)`. Module tests use it, with `client::fake_broker::FakeBroker`, a test fixture that answers the requests a client makes, in place of a broker. There is no broker in the crate's tests: cluster behaviour (a quorum forming, topics created through the admin node, producers and consumers through replicated partitions, leadership moving when a leader is killed, a schema registry replaying `_schemas`, a streams app counting into a sink topic) is covered in headless Chromium against real brokers by `npm run check-real-broker` and `npm run check-lab-clusters`, and `npm run check-lab` covers the page, persistence and WebRTC hosting without a broker.
 
 Every assertion uses `assert2`. Wire-facing tests compare whole decoded structs. No test reads source text.

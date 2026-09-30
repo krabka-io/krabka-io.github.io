@@ -2,9 +2,8 @@
 //
 // Events arrive in batches from the world loop. The panel keeps the last few
 // thousand in memory for re-filtering and at most 500 rows in the DOM. Rows
-// are coloured by `detail.level`; the kinds that change who leads what carry
-// a label and the colour of the node kind they concern; clicking a row
-// selects its node.
+// are coloured by `detail.level`; a registry election carries a label and the
+// colour of its node kind; clicking a row selects its node.
 
 import { el, button, select, fmtMs, shortJson } from "./dom.js";
 import { KINDS } from "./kinds.js";
@@ -16,10 +15,6 @@ const MAX_KEPT = 4000;
 // name as it is.
 const KIND_STYLES = {
   election: { label: "registry election", color: KINDS["schema-registry"].color },
-  elect: { label: "KRaft election", color: KINDS.broker.color },
-  controller: { label: "active controller", color: KINDS.broker.color },
-  quorum_observer: { label: "quorum observer", color: KINDS.broker.color },
-  leader_change: { label: "leader change", color: KINDS.broker.color },
 };
 
 // The text a kind shows in the list and in the filter.

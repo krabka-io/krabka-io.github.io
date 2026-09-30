@@ -29,6 +29,8 @@ import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
 import { validateScenario, saveLocal, loadLocal, clearLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
 import { ExternalHost, REAL_BROKER_KIND, hasRealBroker, volumeName } from "./external.js";
+import { LogStore, LogLevels } from "./logstore.js";
+import { LogsPanel } from "./logs.js";
 import { KafkactlBridge, LOCAL_CLIENT_KIND, NO_CLIENT_NODE } from "./kafkactl.js";
 
 const ROOT_ID = "krabka-lab";
@@ -75,8 +77,13 @@ class LabApp {
       hostedSnapshots: () => (this.world.snapshot()?.nodes || []).filter((n) => n.hosted).map((n) => ({ id: n.id, state: n.state })),
       scenario: () => this.world.scenario(),
     });
+    // What those processes write, and the level they are asked to write at.
+    this.logs = new LogStore();
+    this.logLevels = new LogLevels();
     // The processes behind this tab's real brokers.
     this.external = new ExternalHost({
+      log: (id, entry) => this.recordLog(id, entry),
+      logLevel: (id) => this.logLevels.directive(this.world.id ?? "", id),
       route: (frames) => this.world.routeExternal(frames),
       publish: (id, state) => this.world.applyRemoteSnapshot(id, state),
       world: () => this.world.liveSnapshot(),
@@ -101,6 +108,10 @@ class LabApp {
       onChange: (opts) => this.onChange(opts),
       onReset: () => this.onReset(),
       onClock: () => this.renderClock(),
+      onUpgrade: (ids) => {
+        const one = ids.length === 1;
+        this.toasts.show(`${one ? "A broker" : `${ids.length} brokers`} in this scenario used the lab's old simulated broker. ${one ? "It now runs" : "They now run"} the real krabka-broker, on a new empty disk, with only the settings the real broker supports.`, { ttl: 12_000 });
+      },
     });
     this.world.attachExternal(this.external);
     this.world.attachBridge(this.bridge);
@@ -184,12 +195,14 @@ class LabApp {
       tools: true,
       tabs: [
         { id: "events", label: "Events", title: "Everything the cluster recorded, newest at the bottom" },
+        { id: "logs", label: "Logs", title: "What the real brokers log, with filters and a setting for how much they log" },
         { id: "network", label: "Network bytes", title: "Frames and payload bytes on a link between two nodes" },
         { id: "storage", label: "Storage", title: "What each node keeps in this browser" },
       ],
       hooks: {
         onShow: (id) => {
           if (this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
+          if (id === "logs") this.logsPanel.shown();
           if (id === "network") this.networkPanel.refresh();
           if (id === "storage") this.storagePanel.refresh();
         },
@@ -206,6 +219,17 @@ class LabApp {
     this.timeline = new Timeline(this.dock.panel("events"), {
       onSelect: (id) => this.select(id),
       nodeName: (id) => this.nodeName(id),
+    });
+    this.logsPanel = new LogsPanel(this.dock.panel("logs"), {
+      store: this.logs,
+      levels: this.logLevels,
+      dialogRoot: root,
+      scenarioId: () => this.world.id ?? "",
+      nodes: () => this.logNodes(),
+      brokers: () => this.logBrokers(),
+      apply: (change) => this.applyLogLevels(change),
+      toast: (message) => this.toasts.info(message),
+      onBadge: (badge) => this.renderLogBadge(badge),
     });
     this.networkHint = el("p", "lab-dock-empty", "Select a node, then Shift+click a second one (on touch, long-press it and pick \"Pick as second node\") to see the frames and bytes on the link between them.");
     this.dock.panel("network").appendChild(this.networkHint);
@@ -287,7 +311,7 @@ class LabApp {
     // A live node when there is one, so pressing the button twice breaks a second node.
     const up = (n) => this.world.snapshot()?.nodes?.find((s) => s.id === n.id)?.alive !== false;
     const pick = (list) => list.find(up) || list[0];
-    const broker = pick(nodes.filter((n) => kindOf(n.kind).real || n.kind === "broker"));
+    const broker = pick(nodes.filter((n) => n.kind === REAL_BROKER_KIND));
     const client = pick(nodes.filter((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams"));
     if (key === "consumer") {
       // Only the host edits the scenario; a spoke's node would exist in this tab alone.
@@ -352,7 +376,7 @@ class LabApp {
 
   async helpDialog() {
     const body = el("div", "lab-help");
-    body.appendChild(el("p", "lab-small", "The lab runs a real Kafka cluster in this tab. You control time and the network; nothing leaves your browser."));
+    body.appendChild(el("p", "lab-small", "The lab runs real Krabka brokers in this tab. You control time and the network. Nothing goes to a server; the only traffic that leaves the tab goes to a tab you invite and to the kafkactl bridge."));
     const rows = [
       ["Space", "play or pause the clock"],
       ["Click a card", "inspect a node: its state, config and commands"],
@@ -409,7 +433,7 @@ class LabApp {
 
   // The tour, as functions so each step reads the live scenario.
   tourSteps() {
-    const firstBroker = () => this.world.scenario().nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
+    const firstBroker = () => this.world.scenario().nodes.find((n) => n.kind === REAL_BROKER_KIND);
     return [
       {
         title: "A live Kafka cluster",
@@ -423,7 +447,7 @@ class LabApp {
       },
       {
         title: "Inspect a node",
-        text: "Click a card to see its state, edit its configuration and send it commands. For a broker that includes its KRaft role, its partitions and its files.",
+        text: "Click a card to see its state, edit its configuration and send it commands. For a broker that includes its process, logs and network activity, and a Browse disk button for its files.",
         target: ".lab-col-side",
         action: {
           label: "Select a broker for me",
@@ -435,7 +459,7 @@ class LabApp {
       },
       {
         title: "Break something",
-        text: "Kill a broker and watch the controller fence it and move leadership once its session runs out. The Break things bar also cuts links and adds latency or loss.",
+        text: "Kill a broker and watch the producer retry and the consumers rebalance once its session runs out. The Break things bar also cuts links and adds latency or loss.",
         target: ".lab-faults",
         action: {
           label: "Kill the selected broker",
@@ -888,6 +912,7 @@ class LabApp {
 
   onReset() {
     this.timeline.clear();
+    this.logs.clear();
     this.select(null);
     // An Undo made for the old scenario would put its node or its contents into this one.
     this.toasts.dropActions();
@@ -952,7 +977,7 @@ class LabApp {
 
   // A broker id as the inspector shows it: the node that carries it.
   nodeLabelForBroker(brokerId) {
-    const n = this.world.scenario().nodes.find((s) => (s.kind === REAL_BROKER_KIND && Number(s.id) === Number(brokerId)) || (s.kind === "broker" && Number(s.config?.broker_id) === Number(brokerId)));
+    const n = this.world.scenario().nodes.find((s) => s.kind === REAL_BROKER_KIND && Number(s.id) === Number(brokerId));
     return n ? `${n.name} (broker ${brokerId})` : `broker ${brokerId}`;
   }
 
@@ -1069,6 +1094,49 @@ class LabApp {
   processExited(id, exit) {
     this.toasts.warn(`${this.nodeName(id)}: the process ${exit.message}; the node is down`);
     this.fault(FAULT.kill(id), { quiet: true });
+  }
+
+  // A line a real broker wrote, or a row about its process, for the Logs tab.
+  recordLog(id, entry) {
+    const now = this.world.now();
+    if (entry.marker) this.logs.mark(id, entry.marker, entry.message, { level: entry.level, now, detail: entry.detail });
+    else this.logs.add(id, entry.stream, entry.text, now, entry.base);
+  }
+
+  // The real brokers, as the Logs tab's node chips.
+  logNodes() {
+    return this.world
+      .scenario()
+      .nodes.filter((n) => n.kind === REAL_BROKER_KIND)
+      .map((n) => ({ id: n.id, name: n.name || `#${n.id}`, color: kindOf(n.kind).color }));
+  }
+
+  // Each real broker with the level its process started with (null: none has started).
+  logBrokers() {
+    const up = this.world.snapshot()?.nodes || [];
+    return this.logNodes().map((n) => {
+      const env = this.external.state(n.id)?.env;
+      return { ...n, alive: up.find((s) => s.id === n.id)?.alive !== false, level: env ? (env.KRABKA_LOG ?? "") : null };
+    });
+  }
+
+  renderLogBadge({ count, errors, warns }) {
+    this.dock.setBadge("logs", count ? fmtNum(count) : "");
+    const { badge } = this.dock.tabs.get("logs");
+    badge.dataset.severity = errors ? "error" : "warn";
+    badge.title = `${plural(errors, "error")} and ${plural(warns, "warning")} logged`;
+  }
+
+  // Saves the level, then restarts the brokers that run at another one: a kill
+  // and a boot on the same disk, the path of the Kill and Restart buttons.
+  applyLogLevels({ scope, directive, restart }) {
+    this.logLevels.set(this.world.id ?? "", scope, directive);
+    for (const id of restart) {
+      this.fault(FAULT.kill(id), { quiet: true });
+      this.fault(FAULT.restart(id), { quiet: true });
+    }
+    const level = directive ? `log level ${directive}` : "the default log level";
+    this.toasts.info(restart.length ? `Restarted ${plural(restart.length, "broker")} on ${restart.length === 1 ? "its" : "their"} disk with ${level}` : `Saved ${level}; a broker takes it when it starts`);
   }
 
   // Whether this tab runs the scenario's real brokers: alone or as the hub
@@ -1206,7 +1274,7 @@ class LabApp {
     // A real broker may need the one isolation reload first; say so up front.
     const reloads = kind === REAL_BROKER_KIND && !globalThis.crossOriginIsolated && this.session.role !== "spoke" && (await this.external.moduleAvailable());
     const scenario = this.world.scenario();
-    // The id the node gets, given explicitly: a broker's id must equal it,
+    // The id the node gets, given explicitly: a broker's id is its node id,
     // and the world's own nodes (the hidden admin) take ids too.
     const taken = [...scenario.nodes, ...(this.world.snapshot()?.nodes || [])];
     const nextId = taken.reduce((m, n) => Math.max(m, n.id), 0) + 1;

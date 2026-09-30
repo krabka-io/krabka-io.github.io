@@ -237,7 +237,7 @@ export class Inspector {
     const heading = el("h2", "lab-rail-heading", "Try this");
     const tries = el("ul", "lab-try-list");
     for (const [key, label, what] of [
-      ["kill", "Kill a broker", "Watch the controller fence it and move leadership."],
+      ["kill", "Kill a broker", "Watch producers retry and the consumer group rebalance."],
       ["partition", "Cut a client off", "Partition a client from a broker and watch it retry."],
       ["latency", "Slow a link to 300 ms", "See round trips and consumer lag grow."],
       ["consumer", "Add a consumer", "Join the group and watch partitions rebalance."],
@@ -430,7 +430,6 @@ export class Inspector {
       collapsed: ts.collapsed,
       nodeName: this.hooks.nodeName,
       nodeLabelForBroker: this.hooks.nodeLabelForBroker,
-      spec: this.data?.scenario?.nodes?.find((s) => s.id === n.id) || null,
     };
     const view = renderState(n, ctx);
     keepSectionsOpen(view, ts.sections);
