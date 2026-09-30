@@ -31,6 +31,8 @@ const SESSIONS_ID = "proof-sessions";
 const ROOT_ID = "krabka-proofs";
 const HASH_PREFIX = "#session=";
 const GITHUB = "https://github.com";
+// Where the list stacks above the detail (proofs.css uses the same width).
+const STACKED = "(max-width: 60rem)";
 
 // Alt-Ergo in the browser.
 const ALT_ERGO_STEPS_BOUND = 5_000_000;
@@ -54,12 +56,17 @@ let byId = new Map();
 let selectedId = null;
 let filterText = "";
 let useFormulaWords = false;
+let wrapComa = false;
 let activeTab = "tree";
 const kindsOn = new Set(KINDS.filter((k) => k.on).map((k) => k.key));
 
 // The DOM the module owns.
 let root = null;
+let sidebarEl = null;
+let toggleEl = null;
 let listEl = null;
+// The one list row in the Tab order; the arrow keys move between the others.
+let roving = null;
 let countEl = null;
 let detailEl = null;
 let announceEl = null;
@@ -206,9 +213,23 @@ function visibleSessions() {
   });
 }
 
+// Only one row is a Tab stop, so Tab crosses the list in one press; the arrow
+// keys reach the rest.
+function setRoving(row) {
+  if (roving && roving !== row) roving.tabIndex = -1;
+  if (row) row.tabIndex = 0;
+  roving = row;
+}
+
+// What the arrow keys reach: the group titles and the sessions in open groups.
+function listRows() {
+  return [...listEl.querySelectorAll(".px-group-title, .px-group[open] > .px-item")];
+}
+
 function renderList() {
   const visible = visibleSessions();
   listEl.replaceChildren();
+  roving = null;
   countEl.textContent = `${fmtCount(visible.length)} of ${fmtCount(sessions.length)} sessions`;
   for (const [key, chip] of chipEls) {
     chip.setAttribute("aria-pressed", String(kindsOn.has(key)));
@@ -226,42 +247,67 @@ function renderList() {
     const group = el("details", "px-group");
     group.open = true;
     const title = el("summary", "px-group-title");
+    title.tabIndex = -1;
     title.append(el("span", "", module), el("span", "px-group-n", fmtCount(rows.length)));
     group.appendChild(title);
-    for (const s of rows) {
+    // Derived impls go last: the list shows them by type name, so in id order
+    // they would sit among names they do not sort with.
+    const ordered = rows.filter((s) => s.kind !== "derived").concat(rows.filter((s) => s.kind === "derived"));
+    for (const s of ordered) {
       const item = el("button", "px-item");
       item.type = "button";
+      item.tabIndex = -1;
       item.dataset.id = s.id;
       item.dataset.kind = s.kind;
       item.title = `${displayName(s)} — ${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.setAttribute("aria-label", item.title);
-      if (s.id === selectedId) item.classList.add("px-active");
+      if (s.id === selectedId) {
+        item.classList.add("px-active");
+        item.setAttribute("aria-current", "true");
+      }
       const name = el("span", "px-item-name", listName(s));
       const meta = el("span", "px-item-meta", fmtTime(s.stats.time));
       meta.title = `${plural(s.stats.leaves, "leaf", "leaves")}, ${fmtTime(s.stats.time)} prover time`;
       item.append(name, meta);
       item.addEventListener("click", () => {
-        select(s.id, true);
+        select(s.id, true, false, true);
       });
       group.appendChild(item);
     }
     listEl.appendChild(group);
   }
+  setRoving(listEl.querySelector(".px-item.px-active") || listEl.querySelector(".px-item"));
+}
+
+// Scroll the list itself: scrollIntoView would move the page as well.
+function scrollListToActive() {
+  const active = listEl.querySelector(".px-item.px-active");
+  if (!active) return;
+  const list = listEl.getBoundingClientRect();
+  const row = active.getBoundingClientRect();
+  if (row.top < list.top) listEl.scrollTop -= list.top - row.top + 8;
+  else if (row.bottom > list.bottom) listEl.scrollTop += row.bottom - list.bottom + 8;
 }
 
 function markActive() {
   for (const item of listEl.querySelectorAll(".px-item")) {
-    item.classList.toggle("px-active", item.dataset.id === selectedId);
+    const on = item.dataset.id === selectedId;
+    item.classList.toggle("px-active", on);
+    if (on) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
   }
   const active = listEl.querySelector(".px-item.px-active");
-  if (active) active.closest("details").open = true;
   if (active) {
-    // Scroll the list itself: scrollIntoView would move the page as well.
-    const list = listEl.getBoundingClientRect();
-    const row = active.getBoundingClientRect();
-    if (row.top < list.top) listEl.scrollTop -= list.top - row.top + 8;
-    else if (row.bottom > list.bottom) listEl.scrollTop += row.bottom - list.bottom + 8;
+    active.closest("details").open = true;
+    setRoving(active);
+    scrollListToActive();
   }
+}
+
+// Stacked, the list folds behind its toggle so the detail is what is on screen.
+function setFolded(folded) {
+  sidebarEl.classList.toggle("px-folded", folded);
+  toggleEl.setAttribute("aria-expanded", String(!folded));
 }
 
 // ---- detail: head ------------------------------------------------------------
@@ -316,6 +362,24 @@ function renderHead(session) {
 
 // ---- detail: proof tree ------------------------------------------------------
 
+// The tooltip is position: fixed so the panel's scroll box cannot clip it. It
+// opens under the pill, or above it when the window has no room below, and
+// touches the pill so the pointer can move onto it. Escape closes it without
+// moving focus (document keydown in buildShell); leaving the pill re-arms it.
+function attachTip(pill, help) {
+  const place = () => {
+    const p = pill.getBoundingClientRect();
+    const below = window.innerHeight - p.bottom >= help.offsetHeight + 8 || p.top < help.offsetHeight + 8;
+    help.style.top = `${below ? p.bottom : p.top - help.offsetHeight}px`;
+    help.style.left = `${Math.max(8, Math.min(p.left, window.innerWidth - help.offsetWidth - 8))}px`;
+  };
+  const rearm = () => delete pill.dataset.dismissed;
+  pill.addEventListener("mouseenter", place);
+  pill.addEventListener("focus", place);
+  pill.addEventListener("mouseleave", rearm);
+  pill.addEventListener("blur", rearm);
+}
+
 function renderTree(session) {
   const section = el("section", "px-section");
   const shead = el("div", "px-section-head");
@@ -356,8 +420,8 @@ function renderTree(session) {
       fill.style.width = `${Math.max(1, Math.min(100, (time / maxTime) * 100)).toFixed(1)}%`;
       bar.appendChild(fill);
       bar.title = `${fmtTime(time)} of ${fmtTime(maxTime)} max`;
+      // Not a live region: a run updates every leaf, and the panel's own status announces the run.
       const live = el("span", "px-live");
-      live.setAttribute("aria-live", "polite");
       const prover = el("span", `px-prover ${proverClass(node.prover)}`, node.prover);
       prover.tabIndex = 0;
       const help = el("span", "px-prover-help", `${node.prover === "alt-ergo" ? "Alt-Ergo" : node.prover} is an automated theorem prover. It checked this proof condition and recorded it as proved. The time beside it is the recorded solver runtime.`);
@@ -365,6 +429,7 @@ function renderTree(session) {
       help.setAttribute("role", "tooltip");
       prover.setAttribute("aria-describedby", help.id);
       prover.appendChild(help);
+      attachTip(prover, help);
       leaf.append(el("span", "px-leaf-idx", String(leafNo)), prover, el("span", "px-leaf-time", fmtTime(time)), bar, live);
       leafCells.set(key, { cell: live, recorded: time, prover: node.prover });
       return leaf;
@@ -547,6 +612,7 @@ function renderComa(session) {
   const wrap = el("label", "px-formula-toggle");
   const wrapBox = el("input");
   wrapBox.type = "checkbox";
+  wrapBox.checked = wrapComa;
   wrap.append(wrapBox, document.createTextNode("Wrap long lines"));
   const copy = el("button", "px-btn px-btn-sm", "Copy");
   copy.type = "button";
@@ -560,8 +626,13 @@ function renderComa(session) {
   const pre = el("pre", "px-pre px-code", "");
   pre.tabIndex = 0;
   pre.hidden = true;
+  pre.classList.toggle("px-wrap", wrapComa);
   section.appendChild(pre);
-  wrapBox.addEventListener("change", () => pre.classList.toggle("px-wrap", wrapBox.checked));
+  // Kept across sessions, like Readable mode.
+  wrapBox.addEventListener("change", () => {
+    wrapComa = wrapBox.checked;
+    pre.classList.toggle("px-wrap", wrapComa);
+  });
   let text = "";
   copy.addEventListener("click", async () => {
     try {
@@ -658,6 +729,8 @@ function renderDetail(session) {
     if (p.count) tab.appendChild(el("span", "px-tab-n", fmtCount(p.count)));
     tab.addEventListener("click", () => show(p.id));
     tab.addEventListener("keydown", (e) => {
+      // Alt+Left is the browser's Back, which the explorer's history entries make likely here.
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: panels.length - 1 }[e.key];
       if (to === undefined) return;
       e.preventDefault();
@@ -679,20 +752,32 @@ function renderDetail(session) {
 }
 
 // `pushHash` writes the session into the URL; `replace` overwrites the current
-// history entry instead of adding one, for stepping through the list.
-function select(id, pushHash, replace = false) {
+// history entry instead of adding one, for stepping through the list. `reveal`
+// is a pick from the list (click, Enter): stacked, it folds the list away and
+// scrolls the new session into view, where a hash change or boot leaves the page alone.
+function select(id, pushHash, replace = false, reveal = false) {
   const session = byId.get(id);
   if (!session) return false;
+  // A re-check belongs to the pane on screen, which is rebuilt below.
+  if (activeCheck) {
+    activeCheck.cancel();
+    activeCheck = null;
+  }
   selectedId = id;
   if (!kindsOn.has(session.kind)) {
     kindsOn.add(session.kind);
     renderList();
-  } else {
-    markActive();
   }
+  markActive();
   renderDetail(session);
   announceEl.textContent = `Showing ${displayName(session)}`;
   if (pushHash) writeHash(id, replace);
+  if (reveal && window.matchMedia(STACKED).matches) {
+    // The focused row is about to be hidden; keep focus on something that stays.
+    if (listEl.contains(document.activeElement)) toggleEl.focus({ preventScroll: true });
+    setFolded(true);
+    detailEl.scrollIntoView({ block: "start" });
+  }
   return true;
 }
 
@@ -711,14 +796,17 @@ function buildShell() {
   const layout = el("div", "px-layout");
 
   const sidebar = el("div", "px-sidebar");
+  sidebarEl = sidebar;
   // In a narrow window the list folds behind this button; wide, it is
   // always open and the button is hidden.
   const toggle = el("button", "px-sidebar-toggle", "Browse sessions");
+  toggleEl = toggle;
   toggle.type = "button";
   toggle.setAttribute("aria-expanded", "true");
   toggle.addEventListener("click", () => {
-    const folded = sidebar.classList.toggle("px-folded");
-    toggle.setAttribute("aria-expanded", String(!folded));
+    setFolded(!sidebar.classList.contains("px-folded"));
+    // Hidden, the list forgets its scroll position.
+    scrollListToActive();
   });
   sidebar.appendChild(toggle);
   const controls = el("div", "px-sidebar-controls");
@@ -754,24 +842,37 @@ function buildShell() {
   countEl.setAttribute("role", "status");
   listEl = el("nav", "px-list");
   listEl.setAttribute("aria-label", "Proof sessions");
-  // Arrow keys walk the list, so a reader can step through sessions without the mouse.
+  // Arrow keys walk the list, so a reader can step through sessions without the
+  // mouse: focus moves to the next row that is on screen (group titles
+  // included, sessions inside a collapsed group are skipped), and landing on a
+  // session selects it, so focus and selection never disagree.
   listEl.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const items = [...listEl.querySelectorAll(".px-item")];
-    const at = items.indexOf(document.activeElement);
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const rows = listRows();
+    const at = rows.indexOf(document.activeElement);
     if (at < 0) return;
-    const next = items[at + (e.key === "ArrowDown" ? 1 : -1)];
-    if (!next) return;
+    const sessionRows = rows.filter((row) => row.classList.contains("px-item"));
+    const step = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 }[e.key];
+    let next;
+    if (step !== undefined) next = rows[Math.max(0, Math.min(rows.length - 1, at + step))];
+    else if (e.key === "Home") next = sessionRows[0];
+    else if (e.key === "End") next = sessionRows[sessionRows.length - 1];
+    else return;
     e.preventDefault();
+    if (!next || next === document.activeElement) return;
     next.focus();
-    select(next.dataset.id, true, true);
+    if (next.classList.contains("px-item")) select(next.dataset.id, true, true);
+  });
+  listEl.addEventListener("focusin", (e) => {
+    if (e.target.matches(".px-item, .px-group-title")) setRoving(e.target);
   });
   filter.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const first = visibleSessions()[0];
-      if (first) select(first.id, true);
+      if (first) select(first.id, true, false, true);
     } else if (e.key === "ArrowDown") {
-      const first = listEl.querySelector(".px-item");
+      const rows = listRows();
+      const first = rows.find((row) => row.classList.contains("px-item")) || rows[0];
       if (first) {
         e.preventDefault();
         first.focus();
@@ -779,7 +880,7 @@ function buildShell() {
     }
   });
   const hint = el("p", "px-hint");
-  hint.append(el("kbd", "", "/"), document.createTextNode(" filter  "), el("kbd", "", "↑"), el("kbd", "", "↓"), document.createTextNode(" browse"));
+  hint.append(el("kbd", "", "/"), document.createTextNode(" filter  "), el("kbd", "", "↑"), el("kbd", "", "↓"), document.createTextNode(" browse  "), el("kbd", "", "Home"), el("kbd", "", "End"), document.createTextNode(" first, last"));
   controls.append(filter, chips, countEl, listEl, hint);
   sidebar.appendChild(controls);
 
@@ -795,6 +896,9 @@ function buildShell() {
     if (e.key === "/" && !e.target.closest("input, textarea, select, [contenteditable]")) {
       e.preventDefault();
       filter.focus();
+    } else if (e.key === "Escape") {
+      // Closes a prover tooltip that hover or focus is holding open.
+      for (const pill of root.querySelectorAll(".px-prover:hover, .px-prover:focus")) pill.dataset.dismissed = "";
     }
   });
 }
@@ -821,10 +925,18 @@ function main() {
     byId = new Map(sessions.map((s) => [s.id, s]));
     buildShell();
     root.classList.add("px-ready");
+    // The app fills the window under the header, and the header's height moves
+    // with wrapping and font loading, so the CSS takes the measured offset.
+    const fit = () => root.style.setProperty("--px-top", `${Math.round(root.getBoundingClientRect().top + window.scrollY)}px`);
+    fit();
+    new ResizeObserver(fit).observe(document.body);
 
     const wanted = idFromHash();
     renderList();
-    if (!(wanted && select(wanted, false))) {
+    if (wanted && select(wanted, false)) {
+      // A link to a session is for the session, not the list above it.
+      if (window.matchMedia(STACKED).matches) setFolded(true);
+    } else {
       const first = visibleSessions()[0];
       if (first) select(first.id, false);
     }
@@ -868,7 +980,11 @@ function main() {
 
 let why3 = null;
 let altErgoPool = null;
-let checkRunning = false;
+// The re-check in flight, {cancel()}, or null. It belongs to the pane on
+// screen, so selecting a session cancels it: there is never a running check
+// whose panel is out of sight.
+let activeCheck = null;
+const CANCELLED = new Error("cancelled");
 
 async function probeBundle() {
   try {
@@ -922,33 +1038,64 @@ function renderCheckPanel(session) {
     });
   });
 
+  if (altLeaves.length === 0) {
+    const others = [...new Set(otherLeaves.map((l) => l.prover))].join(", ");
+    panel.appendChild(el("p", "px-note", `Nothing to re-check in the browser: no leaf of this session was recorded with alt-ergo, the only prover that runs here${others ? `; its leaves were recorded with ${others}` : ""}.`));
+    return panel;
+  }
+
   const note = el("p", "px-note");
   note.textContent =
     `Replays the recorded tree: Why3 loads the Coma file and splits it with the recorded tactics, then Alt-Ergo compiled to JavaScript tries each of the ${plural(altLeaves.length, "leaf", "leaves")} recorded with alt-ergo` +
     (otherLeaves.length > 0 ? `; the ${plural(otherLeaves.length, "leaf", "leaves")} recorded with ${[...new Set(otherLeaves.map((l) => l.prover))].join(", ")} stay as recorded.` : ".") +
-    ` Up to ${Math.max(1, navigator.hardwareConcurrency || 2)} Alt-Ergo workers run in parallel with a ${ALT_ERGO_TIMEOUT_MS / 1000} s limit per leaf.`;
+    ` Up to ${Math.max(1, navigator.hardwareConcurrency || 2)} Alt-Ergo workers run in parallel with a ${ALT_ERGO_TIMEOUT_MS / 1000} s limit per leaf. Choosing another session stops a run in progress.`;
   panel.appendChild(note);
 
+  // While a run is going the button becomes its Cancel, so it never goes
+  // disabled (which would drop keyboard focus and dim its label).
   const actions = el("div", "px-check-actions");
   const button = el("button", "px-btn px-primary", "Re-check this session");
   button.type = "button";
   const status = el("p", "px-check-status", "");
-  actions.append(button, status);
+  // Progress changes with every leaf, so only the start and the outcome are announced.
+  const announce = el("p", "px-visually-hidden");
+  announce.setAttribute("role", "status");
+  actions.append(button, status, announce);
   panel.appendChild(actions);
   const log = el("ul", "px-check-log");
   log.hidden = true;
   panel.appendChild(log);
 
+  const setRunning = (running, label) => {
+    button.textContent = label;
+    button.classList.toggle("px-primary", !running);
+  };
   button.addEventListener("click", async () => {
-    if (checkRunning) return;
-    checkRunning = true;
-    button.disabled = true;
-    button.textContent = "Re-checking...";
+    if (activeCheck) {
+      activeCheck.cancel();
+      return;
+    }
+    let cancelled = false;
+    const mine = {
+      cancel: () => {
+        if (cancelled) return;
+        cancelled = true;
+        button.setAttribute("aria-disabled", "true");
+        setRunning(true, "Cancelling...");
+        // Abandons the leaves in flight; the replay stops at its next checkpoint.
+        if (altErgoPool) altErgoPool.terminate();
+        altErgoPool = null;
+      },
+    };
+    activeCheck = mine;
+    setRunning(true, "Cancel re-check");
+    announce.textContent = "Re-check started.";
     log.replaceChildren();
     log.hidden = false;
     panel.classList.remove("px-check-ok", "px-check-partial", "px-check-failed");
     try {
       const summary = await recheckSession(session, {
+        cancelled: () => cancelled,
         status: (text) => {
           status.textContent = text;
         },
@@ -959,17 +1106,19 @@ function renderCheckPanel(session) {
         },
       });
       status.textContent = summary.text;
-      panel.classList.add(summary.proved === summary.attempted && summary.attempted > 0 ? "px-check-ok" : summary.proved > 0 ? "px-check-partial" : "px-check-failed");
+      announce.textContent = summary.text;
+      // Green only when every leaf the session recorded with alt-ergo was re-proved here.
+      panel.classList.add(summary.proved === summary.total ? "px-check-ok" : summary.proved > 0 ? "px-check-partial" : "px-check-failed");
     } catch (err) {
-      const message = err && err.message ? err.message : String(err);
-      status.textContent = `The re-check stopped: ${message}`;
-      const li = el("li", "px-log-error", message);
-      log.appendChild(li);
-      panel.classList.add("px-check-failed");
+      const message = err === CANCELLED ? "Re-check cancelled." : `The re-check stopped: ${err && err.message ? err.message : String(err)}`;
+      status.textContent = message;
+      announce.textContent = message;
+      if (err !== CANCELLED) panel.classList.add("px-check-failed");
     } finally {
-      checkRunning = false;
-      button.disabled = false;
-      button.textContent = "Re-check again";
+      // Another session's run may have started while this one unwound.
+      if (activeCheck === mine) activeCheck = null;
+      button.removeAttribute("aria-disabled");
+      setRunning(false, "Re-check again");
     }
   });
   return panel;
@@ -1134,6 +1283,7 @@ class AltErgoPool {
     for (const slot of this.slots) {
       clearTimeout(slot.timer);
       if (slot.worker) slot.worker.terminate();
+      if (slot.job) slot.job.resolve({ kind: "error", message: "pool shut down", ms: 0 });
       slot.worker = null;
       slot.job = null;
     }
@@ -1153,26 +1303,44 @@ function setLeafIn(cells, key, state, text) {
   if (!entry) return;
   entry.cell.className = `px-live px-live-${state}`;
   entry.cell.textContent = text;
+  entry.cell.title = text;
 }
 
 async function recheckSession(session, ui) {
   const started = performance.now();
-  // The tree keys are positions, so they collide across sessions. Results go
-  // to the cells rendered for this session, even after the reader selects
-  // another one while the run continues.
+  // The tree keys are positions, so they collide across sessions; results go
+  // to the cells rendered for this session.
   const cells = leafCells;
   const setLeaf = (key, state, text) => setLeafIn(cells, key, state, text);
   const totals = { attempted: 0, proved: 0, unproved: 0, timeout: 0, error: 0, skipped: 0, diverged: 0, missing: 0 };
+  // The leaves the session recorded with alt-ergo: what the run is measured against.
+  let total = 0;
+  session.goals.forEach((goal, gi) => {
+    walkTree(goal.tree, String(gi), 0, (n) => {
+      if (!n.tactic && n.prover === "alt-ergo") total += 1;
+    });
+  });
+  // Stops a cancelled run at the next await, leaving the unfinished leaves marked.
+  const checkpoint = () => {
+    if (!ui.cancelled()) return;
+    for (const [key, entry] of cells) {
+      if (entry.cell.classList.contains("px-live-running")) setLeaf(key, "skipped", "cancelled");
+    }
+    throw CANCELLED;
+  };
 
   ui.status("Starting Why3...");
   const w = await getWhy3();
+  checkpoint();
   ui.log(`Why3 ${w.info.why3}, driver for ${w.info.prover}`);
   const pool = getAltErgoPool();
 
   ui.status("Fetching the Coma file...");
   const coma = await fetchComa(session.id);
+  checkpoint();
   ui.status("Loading the Coma file into Why3...");
   const loaded = await w.request({ cmd: "load", name: session.name, content: coma });
+  checkpoint();
   const loadedGoals = new Map();
   for (const theory of loaded.theories || []) {
     for (const goal of theory.goals || []) loadedGoals.set(goal.name, goal.id);
@@ -1185,24 +1353,29 @@ async function recheckSession(session, ui) {
   const proofs = [];
   let leafNo = 0;
 
+  // Every leaf of the subtree shows the state; only the alt-ergo ones are
+  // counted, so the counters add up to `total`.
   const markSubtree = (node, key, state, text, counter) => {
     walkTree(node, key, 0, (n, k) => {
       if (n.tactic) return;
       setLeaf(k, state, text);
-      totals[counter] += 1;
+      if (n.prover === "alt-ergo") totals[counter] += 1;
     });
   };
 
   const walk = async (node, key, taskId) => {
+    checkpoint();
     if (node.tactic) {
       let reply;
       try {
         reply = await w.request({ cmd: "transform", id: taskId, name: node.tactic });
       } catch (err) {
+        checkpoint();
         ui.log(`${node.tactic} on task ${taskId}: ${err.message}`, true);
         markSubtree(node, key, "error", "transform failed", "error");
         return;
       }
+      checkpoint();
       const children = Array.isArray(reply.children) ? reply.children : [];
       const recorded = node.children || [];
       if (children.length !== recorded.length) {
@@ -1226,15 +1399,18 @@ async function recheckSession(session, ui) {
       setLeaf(key, "running", "printing task");
       task = await w.request({ cmd: "task", id: taskId });
     } catch (err) {
+      checkpoint();
       ui.log(`task ${taskId}: ${err.message}`, true);
       setLeaf(key, "error", "no task text");
       totals.error += 1;
       return;
     }
+    checkpoint();
     totals.attempted += 1;
     setLeaf(key, "running", "alt-ergo running");
     const n = leafNo;
     const p = pool.prove(task.text).then((outcome) => {
+      if (ui.cancelled()) return;
       const time = fmtMs(outcome.ms);
       const recorded = fmtTime(node.time);
       if (outcome.kind === "proved") {
@@ -1253,7 +1429,7 @@ async function recheckSession(session, ui) {
         setLeaf(key, "error", `error ${time}`);
         ui.log(`leaf ${n} (${task.expl || task.name || taskId}): ${outcome.message}`, true);
       }
-      ui.status(`${fmtCount(totals.proved)} of ${fmtCount(totals.attempted)} leaves re-proved so far, ${fmtMs(performance.now() - started)} elapsed`);
+      ui.status(`${fmtCount(totals.proved)} of ${fmtCount(total)} leaves re-proved so far, ${fmtMs(performance.now() - started)} elapsed`);
     });
     proofs.push(p);
   };
@@ -1272,6 +1448,7 @@ async function recheckSession(session, ui) {
 
   ui.status(`Waiting for Alt-Ergo on ${plural(totals.attempted, "leaf", "leaves")}...`);
   await Promise.all(proofs);
+  checkpoint();
 
   const elapsed = performance.now() - started;
   const parts = [];
@@ -1281,9 +1458,8 @@ async function recheckSession(session, ui) {
   if (totals.timeout) parts.push(`${fmtCount(totals.timeout)} timed out`);
   if (totals.unproved) parts.push(`${fmtCount(totals.unproved)} not proved`);
   if (totals.error) parts.push(`${fmtCount(totals.error)} errors`);
-  const text = `${fmtCount(totals.proved)} of ${fmtCount(totals.attempted)} leaves re-proved in the browser in ${fmtMs(elapsed)}` + (parts.length ? ` (${parts.join(", ")})` : "") + ".";
-  ui.log(text);
-  return { ...totals, text };
+  const text = `${fmtCount(totals.proved)} of ${fmtCount(total)} leaves re-proved in the browser in ${fmtMs(elapsed)}` + (parts.length ? ` (${parts.join(", ")})` : "") + ".";
+  return { ...totals, total, text };
 }
 
 // ---- go -----------------------------------------------------------------------------

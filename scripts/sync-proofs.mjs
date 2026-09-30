@@ -123,6 +123,7 @@ function parseHeaderSpan(coma) {
 function parseObligations(coma, spans) {
   const obligations = [];
   const re = /\[@expl:([^\]]*)\]/g;
+  const keyword = /(?<![\w'])(if|else)(?![\w'])/y;
   for (const m of coma.matchAll(re)) {
     const expl = m[1].trim();
     let i = m.index + m[0].length;
@@ -143,8 +144,10 @@ function parseObligations(coma, spans) {
       }
       break;
     }
-    // Formula: until the brace that closes the enclosing `{`.
+    // Formula: until the brace that closes the enclosing `{`, or the `else` of
+    // an `if` that opened before the formula (it was the `then` branch).
     let depth = 0;
+    let openIfs = 0;
     let j = i;
     while (j < coma.length) {
       const ch = coma[j];
@@ -152,6 +155,14 @@ function parseObligations(coma, spans) {
       else if (ch === '}' || ch === ']' || ch === ')') {
         if (depth === 0) break;
         depth -= 1;
+      } else if (depth === 0) {
+        keyword.lastIndex = j;
+        const word = keyword.exec(coma)?.[1];
+        if (word === 'if') openIfs += 1;
+        else if (word === 'else') {
+          if (openIfs === 0) break;
+          openIfs -= 1;
+        }
       }
       j += 1;
     }

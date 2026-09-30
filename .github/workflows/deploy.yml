@@ -133,6 +133,11 @@ jobs:
       - name: Check the verification catalog still parses
         run: npm run check-catalog
 
+      # Unit checks of the proof explorer's Why3 highlighter and the readable
+      # obligation summaries. They need no build output.
+      - name: Check the proof explorer's highlighter and summaries
+        run: npm run check-proof-highlight && npm run check-proof-readability
+
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.
       - name: Upload GitHub Pages artifact
