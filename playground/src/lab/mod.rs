@@ -1,5 +1,6 @@
-//! The Cluster Lab: a sans-IO simulation of Krabka brokers, a schema registry,
-//! and Kafka client applications, driven from the browser.
+//! The Cluster Lab: a schema registry and Kafka client applications, plus the
+//! virtual network that joins them to real krabka-broker processes, driven
+//! from the browser.
 //!
 //! Every node is a synchronous state machine behind [`net::Node`]. The
 //! [`world::World`] owns the logical clock, the link model and the delivery
@@ -14,18 +15,16 @@
 //! - [`scenario`] — the JSON document that describes a world.
 //! - [`events`] — the bounded timeline.
 //! - [`codes`] — Kafka error codes.
-//! - [`broker`], [`controller`], [`registry`], [`client`], [`apps`] — the node
-//!   kinds.
+//! - [`registry`], [`client`], [`apps`] — the node kinds.
+//! - [`external`] — the stand-in for a real krabka-broker process.
 //! - [`testing`] — the test harness and the diagnostic node kinds.
 //! - [`wasm`] — the `wasm-bindgen` surface the page calls.
 
 use thiserror::Error;
 
 pub mod apps;
-pub mod broker;
 pub mod client;
 pub mod codes;
-pub mod controller;
 pub mod events;
 pub mod external;
 pub mod net;
@@ -81,7 +80,6 @@ impl LabError {
 /// Returns an error when the kind is unknown or the node rejects its config.
 pub fn build_node(spec: &NodeSpec) -> Result<Box<dyn Node>, LabError> {
     Ok(match spec.kind.as_str() {
-        "broker" => Box::new(broker::BrokerNode::from_spec(spec)?),
         "schema-registry" => Box::new(registry::RegistryNode::from_spec(spec)?),
         "producer" => Box::new(apps::ProducerNode::from_spec(spec)?),
         "consumer" => Box::new(apps::ConsumerNode::from_spec(spec)?),

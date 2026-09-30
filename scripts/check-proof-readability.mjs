@@ -50,4 +50,11 @@ assert.equal(pretty('(forall r: Int64.t. result = Some r -> Int64.to_int r = 1) 
 assert.equal(pretty('result = None'), 'returned value == □');
 assert.equal(pretty('x = "result Some None"'), 'x == "result Some None"');
 assert.equal(formulaTokens('result = Some r').map((token) => tokenText(token, false)).join(''), 'result = Some r');
+assert.equal(pretty("Int64.to_int facts.consumed_at_ms <= 0"), 'facts.consumed_at_ms <= 0');
+assert.equal(pretty("Int32.to_int result.limit_offset = Int64.to_int w.log_start"), 'returned value.limit_offset == w.log_start');
+assert.equal(pretty("(result = Missing'0) = (facts.proposal = Missing)"), '(returned value == Missing\'0) == (facts.proposal == Missing)');
+assert.equal(pretty("result = Some'0 r"), 'returned value == ▣ r');
+assert.equal(pretty("match self_ with | Some'0 v -> result = Continue v | None'0 -> result = Break (None'1) end").replace(/\s+/g, ' '), 'match self_: case ▣ v: returned value == Continue v case □: returned value == Break (□) end');
+assert.equal(formulaTokens("x'1 = 0").map((token) => tokenText(token, false)).join(''), "x'1 = 0");
+assert.equal(formulaTokens("x'1 = 0").find((token) => token.text === '0').kind, 'literal');
 console.log('Proof readability checks passed.');

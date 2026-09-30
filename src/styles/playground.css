@@ -70,7 +70,7 @@
 
 #krabka-playground .cp-btn:hover {
   border-color: var(--cp-accent);
-  color: var(--cp-accent-deep);
+  color: var(--cp-accent);
 }
 
 #krabka-playground .cp-btn:active {
@@ -102,8 +102,23 @@
 
 @media (max-width: 720px) {
   #krabka-playground .cp-stage {
-    grid-template-columns: 1fr;
+    /* minmax(0, ...): a plain 1fr will not shrink below an unbreakable event
+     * name and pushes the diagram past the widget border. */
+    grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Screen-reader-only live region (see announce() in app.js). */
+#krabka-playground .cp-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 #krabka-playground .cp-diagram-wrap,
@@ -147,9 +162,16 @@
   font-size: 0.8rem;
 }
 
+#krabka-playground .cp-timeline:empty::before {
+  content: "No events yet. Press Play or Step.";
+  display: block;
+  padding: 0.3rem 0.1rem;
+  color: var(--cp-muted);
+}
+
 #krabka-playground .cp-event {
   display: grid;
-  grid-template-columns: 1.1rem 3.2rem 1fr;
+  grid-template-columns: 1.1rem 3.2rem minmax(0, 1fr);
   gap: 0.3rem;
   align-items: baseline;
   padding: 0.18rem 0.1rem;
@@ -163,6 +185,10 @@
 #krabka-playground .cp-event-icon {
   color: var(--cp-accent);
   text-align: center;
+}
+
+#krabka-playground .cp-event-note {
+  overflow-wrap: anywhere;
 }
 
 #krabka-playground .cp-event-clock {
@@ -179,8 +205,10 @@
   transition: stroke 0.15s ease, fill 0.15s ease;
 }
 
+/* app.js sizes the svg viewBox to its column in screen pixels, so these are
+ * real pixel sizes at every width. */
 #krabka-playground .cp-node-id {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   fill: var(--cp-text);
 }
@@ -191,13 +219,30 @@
 }
 
 #krabka-playground .cp-node-log {
-  font-size: 9.5px;
+  font-size: 11px;
   fill: var(--cp-muted);
+  /* Message arrows end at the rim, over this caption; keep it readable. */
+  paint-order: stroke;
+  stroke: var(--cp-panel);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
 }
 
+#krabka-playground .cp-node:focus-visible {
+  outline: 2px solid var(--cp-text);
+  outline-offset: 2px;
+}
+
+/* The partition marker: the accent, not accent-deep, which is only 3.2:1 on the
+ * panel. Shown only while the node is cut off. */
 #krabka-playground .cp-node-cut {
-  font-size: 16px;
-  fill: var(--cp-accent-deep);
+  display: none;
+  font-size: 14px;
+  fill: var(--cp-accent);
+}
+
+#krabka-playground .cp-partitioned .cp-node-cut {
+  display: inline;
 }
 
 #krabka-playground .cp-leader .cp-node-bg {
@@ -218,10 +263,9 @@
 #krabka-playground .cp-observer .cp-node-bg {
   stroke: var(--cp-observer);
 }
-#krabka-playground .cp-partitioned {
-  opacity: 0.42;
-}
+/* Dim only the disc: fading the whole node dropped its text to 2.3:1. */
 #krabka-playground .cp-partitioned .cp-node-bg {
+  opacity: 0.6;
   stroke-dasharray: 3 4;
 }
 
@@ -237,22 +281,17 @@
   fill: var(--cp-msg);
 }
 
+#krabka-playground .cp-labels {
+  pointer-events: none;
+}
+
 #krabka-playground .cp-msg-label {
-  font-size: 8.5px;
+  font-size: 11px;
   fill: var(--cp-text);
   paint-order: stroke;
   stroke: var(--cp-panel);
   stroke-width: 2.4px;
   stroke-linejoin: round;
-}
-
-/* The diagram scales with its column, so on a phone SVG text renders at half
- * size. These sizes counter that; the circles keep their geometry. */
-@media (max-width: 560px) {
-  #krabka-playground .cp-node-id { font-size: 17px; }
-  #krabka-playground .cp-node-role,
-  #krabka-playground .cp-node-log { font-size: 12.5px; }
-  #krabka-playground .cp-msg-label { font-size: 12px; }
 }
 
 /* Legend. */
@@ -294,7 +333,7 @@
 }
 
 #krabka-playground .cp-error {
-  color: var(--cp-accent-deep);
+  color: #ff8466;
   font-size: 0.88rem;
 }
 

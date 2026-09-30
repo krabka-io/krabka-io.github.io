@@ -42,12 +42,9 @@ if (stats.catalogAvailable) {
   <div class="space-y-6 font-sans">
     <div class="border-b border-white/10 pb-4">
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Verification Playground</h1>
-      <p class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400" aria-label="Verification figures">
-        {facts.map((fact, i) => (
-          <>
-            {i > 0 && <span class="text-gray-600 select-none" aria-hidden="true">·</span>}
-            <span><span class="font-semibold text-white tabular-nums">{fact.value}</span> {fact.label}</span>
-          </>
+      <p class="mt-2 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-xs text-gray-400" role="group" aria-label="Verification figures">
+        {facts.map((fact) => (
+          <span><span class="font-semibold text-white tabular-nums">{fact.value}</span> {fact.label}</span>
         ))}
       </p>
       <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
@@ -105,9 +102,8 @@ if (stats.catalogAvailable) {
         depend on networking and file I/O, and the checker itself uses threads. The list below gives the
         inventory instead. Its {formatCount(stats.models)} entry points are grouped by area, and each opens to
         the production code it drives, its bounds, its properties, its pinned unique states
-        ({formatCount(stats.pinnedTotal)} between them), what stays outside the model, and one level further
-        down the catalog's own paragraphs about it. Every figure comes from the verification catalog, which
-        pull request CI keeps in step with the models.
+        ({formatCount(stats.pinnedTotal)} between them), and what stays outside the model. Every figure comes
+        from the verification catalog, which pull request CI keeps in step with the models.
       </p>
     </div>
 

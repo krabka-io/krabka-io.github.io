@@ -5,6 +5,21 @@ import krabTheme from '../utils/krabka-shiki-theme.mjs';
 
 const startCommand = 'curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml && docker compose up -d';
 const produceCommand = 'kafka-console-producer.sh --bootstrap-server localhost:9092 --topic events';
+
+// Shiki puts the space before a word inside that word's span. The stylesheet keeps
+// each word whole (`.code-block-wrap`), so the space has to sit outside it, or the
+// only break a command has would be hidden inside the span.
+const spaceOutsideToken = {
+  line(line) {
+    line.children = line.children.flatMap((token) => {
+      const first = token.children?.[0];
+      const space = first?.type === 'text' && first.value.match(/^\s+/)?.[0];
+      if (!space) return [token];
+      const rest = [{ ...first, value: first.value.slice(space.length) }, ...token.children.slice(1)];
+      return [{ type: 'text', value: space }, { ...token, children: rest }];
+    });
+  },
+};
 ---
 
 <section class="relative overflow-hidden pt-12 pb-10 md:pt-20 md:pb-24">
@@ -85,7 +100,7 @@ const produceCommand = 'kafka-console-producer.sh --bootstrap-server localhost:9
 
           <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-center gap-2">
             <span class="text-gray-500 select-none">$</span>
-            <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={startCommand} lang="bash" theme={krabTheme} wrap={null} /></div>
+            <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={startCommand} lang="bash" theme={krabTheme} wrap={null} transformers={[spaceOutsideToken]} /></div>
           </div>
         </div>
 
@@ -107,14 +122,14 @@ const produceCommand = 'kafka-console-producer.sh --bootstrap-server localhost:9
 
           <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-center gap-2">
             <span class="text-gray-500 select-none">$</span>
-            <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={produceCommand} lang="bash" theme={krabTheme} wrap={null} /></div>
+            <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={produceCommand} lang="bash" theme={krabTheme} wrap={null} transformers={[spaceOutsideToken]} /></div>
           </div>
         </div>
 
         <!-- Status Bar -->
         <div class="rounded-xl bg-black/40 p-3 text-xs text-gray-400 border border-white/5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 font-sans">
           <div class="flex items-center gap-2 text-emerald-400 font-medium">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="h-2 w-2 rounded-full bg-emerald-400 motion-safe:animate-pulse"></span>
             <span>KRaft Quorum Active (0.0.0.0:9092)</span>
           </div>
           <div class="text-gray-300">
@@ -127,21 +142,3 @@ const produceCommand = 'kafka-console-producer.sh --bootstrap-server localhost:9
     </div>
   </div>
 </section>
-
-<script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
-        const span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          setTimeout(() => {
-            span.textContent = 'Copy';
-          }, 2000);
-        }
-      }
-    });
-  });
-</script>

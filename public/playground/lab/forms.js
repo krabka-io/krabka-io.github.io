@@ -103,17 +103,34 @@ export function buildForm(fields, values = {}, ctx = {}) {
       const first = root.querySelector("input, select, textarea, button");
       if (first) first.focus();
     },
+    // After a read that found errors: the screen reader hears the message
+    // with the field it is about.
+    focusInvalid: () => focusInvalid(root),
   };
 }
+
+// Ids for the parts of a field that other attributes point at.
+let idCount = 0;
 
 function makeControl(spec, value, ctx) {
   const wrap = el("div", `lab-control lab-control-${spec.type}`);
   const errorEl = el("div", "lab-field-error");
   errorEl.hidden = true;
+  errorEl.setAttribute("role", "alert");
+  errorEl.id = `lab-error-${++idCount}`;
+  // The field the message is about: a plain labelled row has exactly one control.
   const setError = (msg) => {
-    errorEl.textContent = msg;
     errorEl.hidden = !msg;
+    errorEl.textContent = msg;
     wrap.classList.toggle("lab-invalid", Boolean(msg));
+    const field = wrap.querySelector(":scope > label > :is(input, select, textarea)");
+    if (!field) return;
+    if (msg) field.setAttribute("aria-invalid", "true");
+    else field.removeAttribute("aria-invalid");
+    const described = (field.getAttribute("aria-describedby") || "").split(" ").filter((id) => id && id !== errorEl.id);
+    if (msg) described.push(errorEl.id);
+    if (described.length) field.setAttribute("aria-describedby", described.join(" "));
+    else field.removeAttribute("aria-describedby");
   };
   let read;
   const initial = value !== undefined ? value : spec.default;
@@ -143,6 +160,7 @@ function makeControl(spec, value, ctx) {
       if (spec.min != null) input.min = String(spec.min);
       if (spec.max != null) input.max = String(spec.max);
       if (spec.step != null) input.step = String(spec.step);
+      if (spec.placeholder) input.placeholder = spec.placeholder;
       input.value = initial == null ? "" : String(initial);
       wrap.appendChild(labelled(label, input, help));
       read = () => {
@@ -249,7 +267,11 @@ function makeControl(spec, value, ctx) {
       }
       if (!candidates.length) list.appendChild(el("p", "lab-muted", `Add a ${(spec.of || ["node"]).join(" or ")} first.`));
       const field = el("div", "lab-field");
-      field.append(el("span", "lab-field-label", label), list);
+      const caption = el("span", "lab-field-label", label);
+      caption.id = `lab-checklist-${++idCount}`;
+      field.setAttribute("role", "group");
+      field.setAttribute("aria-labelledby", caption.id);
+      field.append(caption, list);
       if (help) field.appendChild(el("small", "lab-field-help", help));
       wrap.appendChild(field);
       read = () => {
@@ -390,8 +412,13 @@ function makeControl(spec, value, ctx) {
       read = () => ({ value: undefined });
     }
   }
+  if (spec.required) wrap.querySelector(":scope > label > :is(input, select, textarea)")?.setAttribute("aria-required", "true");
   wrap.appendChild(errorEl);
   return { spec, root: wrap, read, setError };
+}
+
+function focusInvalid(root) {
+  root.querySelector(".lab-invalid :is(input, select, textarea)")?.focus();
 }
 
 function nodesOf(ctx, kinds) {
@@ -455,6 +482,7 @@ function opsEditor(initialOps, ctx) {
     "filter",
     null,
   );
+  pick.setAttribute("aria-label", "Operation to add");
   adder.append(pick, button("+ Add op", "", () => addRow({ op: pick.value })));
   root.appendChild(adder);
   for (const op of initialOps) addRow(op);
@@ -572,6 +600,7 @@ export function openDialog(container, { title, body, submitLabel = "Apply", canc
         }
       }
       if (ok) close(true);
+      else focusInvalid(dialog);
     });
     dialog.addEventListener("cancel", (e) => {
       e.preventDefault();

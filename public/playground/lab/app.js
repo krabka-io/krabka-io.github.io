@@ -11,7 +11,7 @@
 // first time a scenario with one runs here.
 
 import init, { Lab } from "../krabka_playground.js";
-import { el, button, select, labelled, fmtMs, fmtNum, copyToClipboard, debounce, Toasts } from "./dom.js";
+import { el, button, select, labelled, fmtMs, fmtNum, plural, copyToClipboard, debounce, Toasts } from "./dom.js";
 import { LabWorld, SPEEDS } from "./world.js";
 import { Canvas } from "./canvas.js";
 import { Inspector } from "./inspector.js";
@@ -23,13 +23,15 @@ import { Tour } from "./tour.js";
 import { StoragePanel } from "./storage-panel.js";
 import { NetworkPanel } from "./network-panel.js";
 import { LabStorage } from "./storage.js";
-import { Session, joinCodeFromUrl } from "./session.js";
+import { Session, joinCodeFromUrl, NAME_MAX } from "./session.js";
 import { KINDS, KIND_ORDER, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
 import { PRESETS, presetById } from "./presets.js";
 import { buildForm, openDialog } from "./forms.js";
-import { validateScenario, saveLocal, loadLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
+import { validateScenario, saveLocal, loadLocal, clearLocal, exportScenario, importScenario, shareLink, scenarioFromHash } from "./scenarios.js";
 import { ExternalHost, REAL_BROKER_KIND, hasRealBroker, volumeName } from "./external.js";
-import { KafkactlBridge, LOCAL_CLIENT_KIND } from "./kafkactl.js";
+import { LogStore, LogLevels } from "./logstore.js";
+import { LogsPanel } from "./logs.js";
+import { KafkactlBridge, LOCAL_CLIENT_KIND, NO_CLIENT_NODE } from "./kafkactl.js";
 
 const ROOT_ID = "krabka-lab";
 const AUTOSAVE_MS = 800;
@@ -38,6 +40,8 @@ const DEFAULT_PRESET = "single-broker";
 const COI_URL = new URL("../../docs/lab/coi.js", import.meta.url).href;
 // Set just before the isolation reload, so the reloaded page can say why.
 const RELOADED_KEY = "krabka-lab.isolation-reload";
+// Why an invite or share link failed to open, kept across that reload.
+const SHARE_ERROR_KEY = "krabka-lab.share-error";
 
 function newScenarioId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -68,11 +72,18 @@ class LabApp {
       onTakeover: (node, peer) => this.session.setHost(node, peer),
       onError: (err, ctx) => this.toasts.error(err, ctx),
       onLog: (text) => this.toasts.info(text),
+      // The hub's tab left or dropped: this tab keeps the last scenario but cannot edit it.
+      onHubLost: () => this.toasts.show("The host is gone. This tab keeps the last scenario; leave the session to run it on your own.", { level: "warn", ttl: 0, action: { label: "Leave session", run: () => this.leaveSession() } }),
       hostedSnapshots: () => (this.world.snapshot()?.nodes || []).filter((n) => n.hosted).map((n) => ({ id: n.id, state: n.state })),
       scenario: () => this.world.scenario(),
     });
+    // What those processes write, and the level they are asked to write at.
+    this.logs = new LogStore();
+    this.logLevels = new LogLevels();
     // The processes behind this tab's real brokers.
     this.external = new ExternalHost({
+      log: (id, entry) => this.recordLog(id, entry),
+      logLevel: (id) => this.logLevels.directive(this.world.id ?? "", id),
       route: (frames) => this.world.routeExternal(frames),
       publish: (id, state) => this.world.applyRemoteSnapshot(id, state),
       world: () => this.world.liveSnapshot(),
@@ -97,6 +108,10 @@ class LabApp {
       onChange: (opts) => this.onChange(opts),
       onReset: () => this.onReset(),
       onClock: () => this.renderClock(),
+      onUpgrade: (ids) => {
+        const one = ids.length === 1;
+        this.toasts.show(`${one ? "A broker" : `${ids.length} brokers`} in this scenario used the lab's old simulated broker. ${one ? "It now runs" : "They now run"} the real krabka-broker, on a new empty disk, with only the settings the real broker supports.`, { ttl: 12_000 });
+      },
     });
     this.world.attachExternal(this.external);
     this.world.attachBridge(this.bridge);
@@ -157,9 +172,14 @@ class LabApp {
       nodeName: (id) => this.nodeName(id),
     });
     this.canvas = new Canvas(stage, {
-      onSelect: (id, { additive }) => this.select(id, additive),
+      onSelect: (id, { additive }) => this.select(id, additive, { scroll: false }),
       onDeselect: () => this.select(null),
-      onMove: (id, x, y) => this.world.setPosition(id, x, y),
+      onMove: (id, x, y) => {
+        // Only the host owns positions: a move here would be lost at the host's next change.
+        if (this.session.role !== "spoke") return this.world.setPosition(id, x, y);
+        this.toasts.warn("Only the host moves cards");
+        this.pushPanels();
+      },
       onCommand: (id, command) => this.command(id, command),
       menuItems: (id) => this.menuItems(id),
       nodeName: (id) => this.nodeName(id),
@@ -172,14 +192,17 @@ class LabApp {
       label: "Cluster details",
       active: "events",
       className: "lab-dock",
+      tools: true,
       tabs: [
         { id: "events", label: "Events", title: "Everything the cluster recorded, newest at the bottom" },
+        { id: "logs", label: "Logs", title: "What the real brokers log, with filters and a setting for how much they log" },
         { id: "network", label: "Network bytes", title: "Frames and payload bytes on a link between two nodes" },
         { id: "storage", label: "Storage", title: "What each node keeps in this browser" },
       ],
       hooks: {
         onShow: (id) => {
           if (this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
+          if (id === "logs") this.logsPanel.shown();
           if (id === "network") this.networkPanel.refresh();
           if (id === "storage") this.storagePanel.refresh();
         },
@@ -188,8 +211,7 @@ class LabApp {
     this.dockToggle = button("Hide", "lab-btn-sm lab-dock-toggle", () => this.setDockCollapsed(!this.dock.root.classList.contains("lab-dock-collapsed")), {
       title: "Collapse or restore the details panel",
     });
-    this.dockToggle.setAttribute("aria-expanded", "true");
-    this.dock.bar.appendChild(this.dockToggle);
+    this.dock.tools.appendChild(this.dockToggle);
     // Choosing a tab, even the active one, opens a folded dock.
     this.dock.bar.addEventListener("click", (e) => {
       if (e.target.closest(".lab-dtab") && this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
@@ -198,7 +220,18 @@ class LabApp {
       onSelect: (id) => this.select(id),
       nodeName: (id) => this.nodeName(id),
     });
-    this.networkHint = el("p", "lab-dock-empty", "Select a node, then Shift+click a second one to see the frames and bytes on the link between them.");
+    this.logsPanel = new LogsPanel(this.dock.panel("logs"), {
+      store: this.logs,
+      levels: this.logLevels,
+      dialogRoot: root,
+      scenarioId: () => this.world.id ?? "",
+      nodes: () => this.logNodes(),
+      brokers: () => this.logBrokers(),
+      apply: (change) => this.applyLogLevels(change),
+      toast: (message) => this.toasts.info(message),
+      onBadge: (badge) => this.renderLogBadge(badge),
+    });
+    this.networkHint = el("p", "lab-dock-empty", "Select a node, then Shift+click a second one (on touch, long-press it and pick \"Pick as second node\") to see the frames and bytes on the link between them.");
     this.dock.panel("network").appendChild(this.networkHint);
     this.networkPanel = new NetworkPanel(this.dock.panel("network"), {
       frames: (a, b) => this.world.wireFrames(a, b),
@@ -210,12 +243,16 @@ class LabApp {
       onCommand: (id, command) => this.command(id, command),
       onControl: (id, command) => this.control(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
-      onTakeOver: (id) => this.session.requestTakeover(id),
+      onTakeOver: (id) => {
+        if (!this.session.requestTakeover(id)) this.toasts.warn("Cannot reach the host; leave the session to run this node here.");
+      },
       onUpdateNode: (id, spec) => this.updateNodeConfig(id, spec),
       onSelect: (id) => this.select(id),
       onOpenTab: (tab) => this.palette.show(tab),
       onTry: (key) => this.tryIt(key),
       onBrowseVolume: async (id) => {
+        // Showing the tab it is already on does not unfold a folded dock.
+        this.setDockCollapsed(false);
         this.dock.show("storage");
         await this.storagePanel.refresh();
         await this.storagePanel.browseVolume(volumeName(this.world.id, id));
@@ -259,16 +296,28 @@ class LabApp {
     this.stacked = window.matchMedia("(max-width: 1024px)");
     if (this.stacked.matches) this.setDockCollapsed(true);
 
-    root.addEventListener("keydown", (e) => this.onKey(e));
+    // The shortcuts answer while focus is in the lab or the pointer is over it:
+    // a click on a button that re-renders drops focus to the page.
+    this.pointerInLab = false;
+    root.addEventListener("pointerenter", () => (this.pointerInLab = true));
+    root.addEventListener("pointerleave", () => (this.pointerInLab = false));
+    document.addEventListener("keydown", (e) => this.onKey(e));
   }
 
   // The inspector's "Try this" buttons: break the running cluster in a way the
   // reader can watch.
   tryIt(key) {
     const nodes = this.world.scenario().nodes.filter((n) => !kindOf(n.kind).hidden);
-    const broker = nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
-    const client = nodes.find((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams");
-    if (key === "consumer") return this.addNodeDialog("consumer");
+    // A live node when there is one, so pressing the button twice breaks a second node.
+    const up = (n) => this.world.snapshot()?.nodes?.find((s) => s.id === n.id)?.alive !== false;
+    const pick = (list) => list.find(up) || list[0];
+    const broker = pick(nodes.filter((n) => n.kind === REAL_BROKER_KIND));
+    const client = pick(nodes.filter((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams"));
+    if (key === "consumer") {
+      // Only the host edits the scenario; a spoke's node would exist in this tab alone.
+      if (this.session.role === "spoke") return this.toasts.warn("Only the host tab can add nodes; ask it to add the consumer.");
+      return this.addNodeDialog("consumer");
+    }
     if (!broker) return this.toasts.warn("This scenario has no broker to break; load a preset from Scenarios.");
     this.world.setPaused(false);
     if (key === "kill") {
@@ -285,20 +334,33 @@ class LabApp {
 
   setDockCollapsed(collapsed) {
     this.dock.root.classList.toggle("lab-dock-collapsed", collapsed);
+    // The label says what a press does, so it carries no expanded state too.
     this.dockToggle.textContent = collapsed ? "Show" : "Hide";
-    this.dockToggle.setAttribute("aria-expanded", String(!collapsed));
   }
 
   showNetwork() {
+    this.setDockCollapsed(false);
     this.dock.show("network");
     this.networkPanel.open();
   }
 
-  // Shortcuts that work anywhere in the lab except while typing or while a
-  // control has focus (Space would press it).
+  // Shortcuts that work anywhere in the lab, or with the pointer over it,
+  // except while typing, while a dialog is open or while a control has focus
+  // (Space would press it).
   onKey(e) {
-    if (e.target.closest("input, textarea, select, dialog")) return;
-    const onControl = e.target.closest("button, summary, a, [role=tab]");
+    const target = e.target instanceof Element ? e.target : document.body;
+    // A held key repeats: Space would flip the clock on every repeat.
+    if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+    const typing = target.closest("input, textarea, select, dialog, [contenteditable]") || document.querySelector("dialog[open]");
+    // The tour opens by itself with focus still at the top of the page, so
+    // Escape closes it from anywhere.
+    if (e.key === "Escape" && this.tour.active && !typing) {
+      this.tour.close();
+      return;
+    }
+    if (!this.root.contains(target) && !this.pointerInLab) return;
+    if (typing) return;
+    const onControl = target.closest("button, summary, a, [role=tab]");
     const key = e.key;
     if (key === "?") {
       e.preventDefault();
@@ -306,7 +368,7 @@ class LabApp {
     } else if (key === " " && !onControl) {
       e.preventDefault();
       this.togglePlay();
-    } else if ((key === "f" || key === "F") && !onControl) this.canvas.fit();
+    } else if ((key === "f" || key === "F") && !onControl) this.canvas.fit({ whole: true });
     else if (key === "Escape") this.select(null);
     else if ((key === "k" || key === "K") && !onControl && this.selection.length === 1) this.command(this.selection[0], "kill");
     else if ((key === "r" || key === "R") && !onControl && this.selection.length === 1) this.command(this.selection[0], "restart");
@@ -314,13 +376,14 @@ class LabApp {
 
   async helpDialog() {
     const body = el("div", "lab-help");
-    body.appendChild(el("p", "lab-small", "The lab runs a real Kafka cluster in this tab. You control time and the network; nothing leaves your browser."));
+    body.appendChild(el("p", "lab-small", "The lab runs real Krabka brokers in this tab. You control time and the network. Nothing goes to a server; the only traffic that leaves the tab goes to a tab you invite and to the kafkactl bridge."));
     const rows = [
       ["Space", "play or pause the clock"],
       ["Click a card", "inspect a node: its state, config and commands"],
-      ["Shift+click a second card", "link controls: partition, latency, loss, and the bytes on the wire"],
+      ["Shift+click a second card", "link controls: partition, latency, loss, and the bytes on the wire (on touch: long-press it, Pick as second node)"],
       ["Drag a card", "move it (positions are saved with the scenario)"],
-      ["Drag the background, wheel", "pan and zoom the canvas"],
+      // Stacked, a plain wheel scrolls the page; Expand gives the canvas the whole window back.
+      [this.stacked?.matches ? "Drag the background, Ctrl+wheel" : "Drag the background, wheel", "pan and zoom the canvas"],
       ["Right-click or long-press a card", "context menu: edit, send a command, fault, remove"],
       ["K / R", "kill or restart the selected node"],
       ["F", "fit every node in view"],
@@ -332,6 +395,7 @@ class LabApp {
       table.append(el("dt", null, keys), el("dd", null, what));
     }
     body.appendChild(table);
+    body.appendChild(el("p", "lab-small lab-muted", "The keys answer while focus is in the lab or the pointer is over it."));
 
     // What the cards and lines on the canvas mean.
     body.appendChild(el("h4", "lab-rail-heading", "Reading the canvas"));
@@ -369,7 +433,7 @@ class LabApp {
 
   // The tour, as functions so each step reads the live scenario.
   tourSteps() {
-    const firstBroker = () => this.world.scenario().nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
+    const firstBroker = () => this.world.scenario().nodes.find((n) => n.kind === REAL_BROKER_KIND);
     return [
       {
         title: "A live Kafka cluster",
@@ -379,11 +443,11 @@ class LabApp {
       {
         title: "You control time",
         text: "Pause the clock, step forward in simulated milliseconds, or Settle until nothing is due. Raise the speed to watch slow things, like a broker session timeout, happen.",
-        target: ".lab-tb-clock",
+        target: ".lab-toolbar",
       },
       {
         title: "Inspect a node",
-        text: "Click a card to see its state, edit its configuration and send it commands. For a broker that includes its KRaft role, its partitions and its files.",
+        text: "Click a card to see its state, edit its configuration and send it commands. For a broker that includes its process, logs and network activity, and a Browse disk button for its files.",
         target: ".lab-col-side",
         action: {
           label: "Select a broker for me",
@@ -395,7 +459,7 @@ class LabApp {
       },
       {
         title: "Break something",
-        text: "Kill a broker and watch the controller fence it and move leadership once its session runs out. The Break things bar also cuts links and adds latency or loss.",
+        text: "Kill a broker and watch the producer retry and the consumers rebalance once its session runs out. The Break things bar also cuts links and adds latency or loss.",
         target: ".lab-faults",
         action: {
           label: "Kill the selected broker",
@@ -428,6 +492,7 @@ class LabApp {
   }
 
   addExpandControls() {
+    this.inerted = [];
     const panels = [this.canvas.wrap, this.inspector.root, this.dock.root];
     for (const panel of panels) {
       const name = panel.getAttribute("aria-label") || (panel === this.dock.root ? "details" : "canvas");
@@ -441,18 +506,29 @@ class LabApp {
         this.collapsePanel();
         this.expandedPanel = panel;
         panel.classList.add("lab-expanded");
+        // The old view was laid out for the old box: refit to the new one.
+        if (panel === this.canvas.wrap) this.canvas.userMovedView = false;
         if (panel === this.dock.root) this.setDockCollapsed(false);
-        control.textContent = "Close expanded view";
+        // The panel covers the window: it is a modal for the keyboard and for
+        // screen readers too, and the page behind it cannot be reached.
+        panel.setAttribute("role", "dialog");
+        panel.setAttribute("aria-modal", "true");
+        if (panel._expandLabelled) panel.setAttribute("aria-label", name);
+        this.inertAround(panel);
+        // Folding the details away would leave the window empty.
+        this.dockToggle.hidden = panel === this.dock.root;
+        // Short, so the dock's tab strip keeps room on a phone.
+        control.textContent = "Close";
         control.setAttribute("aria-label", `Close expanded ${name}`);
-        control.setAttribute("aria-expanded", "true");
         control.focus();
       }, { ariaLabel: `Expand ${name}` });
-      control.setAttribute("aria-expanded", "false");
       if (panel === this.canvas.wrap) this.canvas.tools.appendChild(control);
-      else if (panel === this.dock.root) this.dock.bar.insertBefore(control, this.dockToggle);
+      else if (panel === this.dock.root) this.dock.tools.insertBefore(control, this.dockToggle);
       else panel.appendChild(control);
       panel._expandControl = control;
       panel._expandName = name;
+      // A label added for the dialog comes off again with it.
+      panel._expandLabelled = !panel.hasAttribute("aria-label");
     }
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !this.expandedPanel || document.querySelector("dialog[open]")) return;
@@ -466,12 +542,31 @@ class LabApp {
     const panel = this.expandedPanel;
     if (!panel) return;
     panel.classList.remove("lab-expanded");
+    if (panel === this.canvas.wrap) this.canvas.userMovedView = false;
+    panel.removeAttribute("role");
+    panel.removeAttribute("aria-modal");
+    if (panel._expandLabelled) panel.removeAttribute("aria-label");
+    for (const e of this.inerted) e.inert = false;
+    this.inerted = [];
+    this.dockToggle.hidden = false;
     const control = panel._expandControl;
     control.textContent = "Expand";
     control.setAttribute("aria-label", `Expand ${panel._expandName}`);
-    control.setAttribute("aria-expanded", "false");
     this.expandedPanel = null;
     control.focus();
+  }
+
+  // Everything around an expanded panel is covered by it: inert keeps Tab and
+  // screen readers out. The toasts stay live, and a dialog opened from the
+  // panel is added after this and so is not inert.
+  inertAround(panel) {
+    for (let node = panel; node !== document.body; node = node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node || sibling.inert || sibling.matches(".lab-toasts")) continue;
+        sibling.inert = true;
+        this.inerted.push(sibling);
+      }
+    }
   }
 
   buildBridgePanel(container) {
@@ -491,7 +586,7 @@ class LabApp {
       const link = el("a", "", label);
       link.href = `https://github.com/krabka-io/krabka-io.github.io/releases/download/kafkactl-lab-v0.1.0/${asset}`;
       link.rel = "noopener noreferrer";
-      downloads.append(link, " ");
+      downloads.append(link, " · ");
     }
     const checksums = el("a", "", "SHA-256 checksums");
     checksums.href = "https://github.com/krabka-io/krabka-io.github.io/releases/download/kafkactl-lab-v0.1.0/checksums.txt";
@@ -499,8 +594,9 @@ class LabApp {
     body.appendChild(downloads);
     const command = (label, value) => {
       const row = el("div", "lab-bridge-command");
-      const code = el("code", "lab-code", value);
-      row.append(code, button("Copy", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(value)) ? `${label} copied` : "Copy failed; select the command")));
+      const code = el("code", "lab-code");
+      code.append(...commandTokens(value));
+      row.append(code, button("Copy", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(value)) ? `${label} copied` : "Copy failed; select the command"), { ariaLabel: `Copy ${label.toLowerCase()}` }));
       body.appendChild(row);
     };
     body.appendChild(el("p", "lab-small", "2. Extract it and open a terminal in the extracted folder. Start the bridge there:"));
@@ -512,14 +608,13 @@ class LabApp {
     token.autocomplete = "off";
     const connect = button("Connect", "lab-btn-sm lab-primary", async () => {
       if (this.session.role === "spoke") return this.toasts.warn("Connect from the host tab that runs the real brokers.");
-      if (!this.world.scenario().nodes.some((n) => n.kind === LOCAL_CLIENT_KIND)) {
-        const ids = this.world.liveSnapshot()?.nodes.map((n) => n.id) || this.world.scenario().nodes.map((n) => n.id);
-        const id = Math.max(0, ...ids) + 1;
-        if (this.world.addNode({ id, kind: LOCAL_CLIENT_KIND, name: "local kafkactl", x: 140, y: 480, config: {} }) == null) return;
-      }
+      if (!this.addLocalClient()) return;
       this.bridge.sync();
+      const value = token.value.trim();
+      // A click with no token must not drop the live bridge: it only restores the client node above.
+      if (!value && this.bridge.socket) return;
       try {
-        await this.bridge.connect(token.value.trim());
+        await this.bridge.connect(value);
         token.value = "";
       } catch (err) {
         this.renderBridgeStatus("error", err.message);
@@ -529,6 +624,11 @@ class LabApp {
     this.bridgeStatus = el("p", "lab-muted lab-small", "Bridge disconnected");
     this.bridgeStatus.setAttribute("role", "status");
     body.appendChild(this.bridgeStatus);
+    this.bridgeAddNode = button("Add client node", "lab-btn-sm", () => {
+      if (this.addLocalClient()) this.bridge.sync();
+    }, { title: "Add the local kafkactl client node this scenario needs" });
+    this.bridgeAddNode.hidden = true;
+    body.appendChild(this.bridgeAddNode);
     body.appendChild(el("p", "lab-small", "4. Open a second terminal. Add a context, then inspect, write, and read the orders topic:"));
     command("Context command", `${executable} config add krabka-lab --broker 127.0.0.1:9092`);
     command("Broker command", `${executable} --context krabka-lab get brokers`);
@@ -546,6 +646,17 @@ class LabApp {
     if (!this.bridgeStatus) return;
     this.bridgeStatus.textContent = `${state === "connected" ? "Connected" : state === "connecting" ? "Connecting" : state === "error" ? "Bridge error" : "Bridge disconnected"}${reason ? `: ${reason}` : ""}`;
     this.bridgeStatus.dataset.state = state;
+    if (this.bridgeAddNode) this.bridgeAddNode.hidden = !(state === "error" && reason === NO_CLIENT_NODE);
+  }
+
+  // The scenario's local kafkactl client node, added in a free spot when it is
+  // missing. False when the world refused it.
+  addLocalClient() {
+    const scenario = this.world.scenario();
+    if (scenario.nodes.some((n) => n.kind === LOCAL_CLIENT_KIND)) return true;
+    const ids = this.world.liveSnapshot()?.nodes.map((n) => n.id) || scenario.nodes.map((n) => n.id);
+    const pos = freePosition(scenario.nodes);
+    return this.world.addNode({ id: Math.max(0, ...ids) + 1, kind: LOCAL_CLIENT_KIND, name: "local kafkactl", x: pos.x, y: pos.y, config: {} }) != null;
   }
 
   buildToolbar() {
@@ -621,19 +732,15 @@ class LabApp {
       el(
         "p",
         "lab-muted lab-small",
-        "Several tabs, on one machine or across the internet, can each host a share of the nodes. Frames between tabs travel over WebRTC data channels; there is no server.",
+        "Several tabs, on one machine or across the internet, can each host a share of the nodes. Frames between tabs travel over WebRTC data channels; there is no server. After a tab connects, select a node and pick its host in the inspector. Each tab keeps its own clock, speed and event counts.",
       ),
     );
     const nameRow = el("label", "lab-field-inline");
     const nameInput = el("input", "lab-input lab-input-sm");
     nameInput.value = s.name;
     nameInput.setAttribute("aria-label", "Your peer name");
-    nameInput.addEventListener("change", () => {
-      s.name = nameInput.value.trim() || s.name;
-      nameInput.value = s.name;
-      this.renderSession();
-      this.pushPanels();
-    });
+    nameInput.maxLength = NAME_MAX;
+    nameInput.addEventListener("change", () => s.setName(nameInput.value));
     nameRow.append(el("span", "lab-muted", "this tab"), nameInput, el("span", "lab-role-badge", s.role));
     body.appendChild(nameRow);
 
@@ -643,25 +750,32 @@ class LabApp {
       li.dataset.peer = p.id;
       const hosted = [...s.hosting].filter(([, peer]) => peer === p.id).map(([n]) => this.nodeName(n));
       li.append(el("span", "lab-peer-name", p.name), el("span", "lab-muted lab-small", `${p.state}${hosted.length ? ` · ${hosted.join(", ")}` : ""}`));
+      if (s.role === "hub" && !p.self && p.state === "closed") {
+        li.appendChild(button("Forget", "lab-btn-sm", () => s.forgetPeer(p.id), { title: `Remove ${p.name} and run its nodes here again` }));
+      }
       peers.appendChild(li);
     }
     body.appendChild(peers);
+    // Once the host accepted the answer it is spent.
+    if (s.peerList().some((p) => !p.self && p.state === "connected")) this.answerCode = null;
 
     const actions = el("div", "lab-form-actions");
+    // Kept so focus can go back to it: creating the invite rebuilds this panel.
+    this.inviteBtn = null;
     if (s.role !== "spoke") {
-      actions.appendChild(
-        button("Invite a tab…", "lab-btn-sm", () => this.inviteDialog(), { title: "Make a link another tab or machine opens to join" }),
-      );
+      this.inviteBtn = button("Invite a tab…", "lab-btn-sm", () => this.inviteDialog(), { title: "Make a link another tab or machine opens to join" });
+      actions.appendChild(this.inviteBtn);
     }
     if (s.role !== "solo") actions.appendChild(button("Leave session", "lab-btn-sm lab-danger", () => this.leaveSession()));
     body.appendChild(actions);
     if (this.answerCode) {
-      body.appendChild(el("p", "lab-small", "Give this answer code to the host to finish joining:"));
+      body.appendChild(el("p", "lab-small", "Waiting for the host. Give them this answer code to paste in their Invite dialog; the scenario appears once they accept it:"));
       const ta = el("textarea", "lab-textarea lab-code");
       ta.readOnly = true;
       ta.rows = 3;
       ta.value = this.answerCode;
       ta.dataset.field = "answer-code";
+      ta.setAttribute("aria-label", "Answer code");
       body.appendChild(ta);
       body.appendChild(button("Copy answer", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(this.answerCode)) ? "Answer copied" : "Copy failed; select the text")));
     }
@@ -674,6 +788,7 @@ class LabApp {
     const linkTa = el("textarea", "lab-textarea lab-code");
     linkTa.readOnly = true;
     linkTa.rows = 3;
+    linkTa.setAttribute("aria-label", "Invite link");
     linkTa.value = "making the invite…";
     body.appendChild(linkTa);
     body.appendChild(button("Copy link", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(link)) ? "Link copied" : "Copy failed; select the text")));
@@ -681,8 +796,10 @@ class LabApp {
     const answerTa = el("textarea", "lab-textarea lab-code");
     answerTa.rows = 3;
     answerTa.placeholder = "answer code";
+    answerTa.setAttribute("aria-label", "Answer code");
     body.appendChild(answerTa);
     const status = el("p", "lab-muted lab-small");
+    status.setAttribute("role", "status");
     body.appendChild(status);
     const promise = openDialog(this.root, {
       title: "Invite a tab",
@@ -709,6 +826,13 @@ class LabApp {
       linkTa.value = `could not make an invite: ${err.message}`;
     }
     await promise;
+    this.refocus(this.inviteBtn);
+  }
+
+  // A dialog's opener can be rebuilt or gone by the time it closes: focus goes
+  // to its stand-in instead of dropping to the page.
+  refocus(target) {
+    if (document.activeElement === document.body) target?.focus();
   }
 
   leaveSession() {
@@ -727,12 +851,20 @@ class LabApp {
 
   pushPanels(snap = this.world.snapshot()) {
     const scenario = this.world.scenario();
+    // The hub can remove a node this tab has selected; a selection of nothing
+    // would leave live Kill and Isolate buttons for a node that is gone.
+    const gone = (id) => !scenario.nodes.some((n) => n.id === id) && !snap?.nodes?.some((n) => n.id === id);
+    if (this.selection.some(gone)) {
+      this.selection = this.selection.filter((id) => !gone(id));
+      this.inspector.setSelection(this.selection[0] ?? null);
+    }
     const session = {
       role: this.session.role,
       hosting: this.session.hosting,
       peers: this.session.peerList(),
       me: this.session.me,
       peersKey: this.session.peersKey,
+      offline: this.session.offlinePeers(),
     };
     this.canvas.setData({
       snapshot: snap,
@@ -758,14 +890,17 @@ class LabApp {
     this.playGlyph.textContent = this.world.paused ? "▶" : "❚❚";
     this.playText.textContent = this.world.paused ? "Play" : "Pause";
     this.playBtn.classList.toggle("lab-paused", this.world.paused);
-    this.playBtn.setAttribute("aria-pressed", String(!this.world.paused));
     this.timeEl.textContent = fmtMs(snap ? snap.now : this.world.now());
     if (snap) {
       const delivered = (snap.delivered || []).reduce((s, d) => s + (d[2] || 0), 0);
-      this.statsEl.textContent = `${snap.nodes.length} nodes · ${snap.in_flight.length} in flight · ${fmtNum(delivered)} delivered · ${fmtNum(snap.event_count)} events`;
+      // The hidden admin client is not a node the reader sees.
+      const shown = snap.nodes.filter((n) => !kindOf(n.kind).hidden).length;
+      this.statsEl.textContent = `${plural(shown, "node")} · ${snap.in_flight.length} in flight · ${fmtNum(delivered)} delivered · ${plural(this.timeline.events.length, "event")}`;
     }
     const r = this.session.role;
-    this.roleEl.textContent = r === "solo" ? "" : `${r} · ${this.session.peerList().filter((p) => p.state === "connected").length} peers`;
+    // Other tabs only: the list also carries this one.
+    this.roleEl.textContent = r === "solo" ? "" : `${r} · ${plural(this.session.peerList().filter((p) => p.state === "connected" && !p.self).length, "peer")}`;
+    this.roleEl.title = r === "solo" ? "" : "In a session each tab keeps its own clock, speed and counters";
   }
 
   onChange(opts = {}) {
@@ -777,8 +912,13 @@ class LabApp {
 
   onReset() {
     this.timeline.clear();
+    this.logs.clear();
     this.select(null);
+    // An Undo made for the old scenario would put its node or its contents into this one.
+    this.toasts.dropActions();
+    // A new scenario starts from a fit, whatever zoom the last one was left at.
     this.canvas.fitted = false;
+    this.canvas.userMovedView = false;
   }
 
   onPeers() {
@@ -807,14 +947,21 @@ class LabApp {
 
   // ---- selection and node commands -----------------------------------------------------------------------------
 
-  select(id, additive = false) {
+  // `scroll: false` for a click on the canvas: the reader is working there,
+  // and the fault bar already names the node.
+  select(id, additive = false, { scroll = true } = {}) {
     if (id == null) this.selection = [];
     else if (additive && this.selection.length && this.selection[0] !== id) this.selection = [this.selection[0], id];
     else this.selection = [id];
     this.inspector.setSelection(this.selection[0] ?? null);
     this.pushPanels();
-    // Stacked, the inspector is below the canvas: bring it into view.
-    if (id != null && this.stacked?.matches) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // Stacked, the inspector is below the canvas: when a pick from a list
+    // leaves it out of sight altogether, bring it into view. The tour's own
+    // card would scroll out of sight, so leave the page alone then.
+    if (id != null && scroll && this.stacked?.matches && !this.tour?.active) {
+      const box = this.inspector.root.getBoundingClientRect();
+      if (box.bottom < 0 || box.top > window.innerHeight) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
 
   nodeList() {
@@ -830,7 +977,7 @@ class LabApp {
 
   // A broker id as the inspector shows it: the node that carries it.
   nodeLabelForBroker(brokerId) {
-    const n = this.world.scenario().nodes.find((s) => (s.kind === REAL_BROKER_KIND && Number(s.id) === Number(brokerId)) || (s.kind === "broker" && Number(s.config?.broker_id) === Number(brokerId)));
+    const n = this.world.scenario().nodes.find((s) => s.kind === REAL_BROKER_KIND && Number(s.id) === Number(brokerId));
     return n ? `${n.name} (broker ${brokerId})` : `broker ${brokerId}`;
   }
 
@@ -840,7 +987,10 @@ class LabApp {
     const editable = this.session.role !== "spoke" && !k.hidden;
     return [
       { label: "Edit…", command: "edit", disabled: !editable },
-      { label: "Send command…", command: "control", disabled: Boolean(k.real) },
+      // A node another tab runs answers only there.
+      { label: "Send command…", command: "control", disabled: Boolean(k.real) || (this.session.role !== "solo" && this.session.hostOf(id) !== this.session.me) },
+      // The touch route to a link: Shift+click has no finger equivalent.
+      { label: "Pick as second node", command: "pick-second", disabled: !this.selection.length || this.selection[0] === id },
       { separator: true },
       { label: snap?.alive ? "Kill" : "Restart", command: snap?.alive ? "kill" : "restart" },
       { label: "Wipe (restart from nothing)", command: "wipe" },
@@ -856,10 +1006,13 @@ class LabApp {
         this.select(id);
         this.inspector.showTab("config");
         break;
+      case "pick-second":
+        this.select(id, true, { scroll: false });
+        break;
       case "remove":
-        if (this.session.role === "spoke") return;
-        this.world.removeNode(id);
-        if (this.selection.includes(id)) this.select(null);
+        // The hidden admin is the lab's own: not removable (the menu disables it too).
+        if (this.session.role === "spoke" || kindOf(this.world.snapshot()?.nodes.find((n) => n.id === id)?.kind).hidden) return;
+        this.removeNode(id);
         break;
       case "control":
         this.controlDialog(id);
@@ -873,6 +1026,33 @@ class LabApp {
         break;
       default:
     }
+  }
+
+  // Remove acts at once; the toast offers to put the node back. What comes
+  // back is its configuration, not the state it had stored.
+  removeNode(id) {
+    const spec = this.world.spec(id);
+    // A keyboard user's focus is on the node or button that is about to go.
+    const byKeyboard = this.root.contains(document.activeElement) && document.activeElement.matches(":focus-visible");
+    this.world.removeNode(id);
+    if (this.selection.includes(id)) this.select(null);
+    if (!spec) return;
+    const toast = this.toasts.show(`Removed ${spec.name}`, {
+      action: {
+        label: "Undo",
+        run: () => {
+          if (this.session.role !== "spoke" && this.world.addNode(spec) != null) {
+            this.select(spec.id);
+            if (byKeyboard) {
+              // The card is drawn from the next snapshot: take it now.
+              this.world.flush(performance.now(), true);
+              this.canvas.focusNode(spec.id);
+            }
+          }
+        },
+      },
+    });
+    if (byKeyboard) toast.querySelector(".lab-toast-action").focus();
   }
 
   // A control command for a node, from the inspector's command bar or the
@@ -916,6 +1096,51 @@ class LabApp {
     this.fault(FAULT.kill(id), { quiet: true });
   }
 
+  // A line a real broker wrote, or a row about its process, for the Logs tab.
+  recordLog(id, entry) {
+    const now = this.world.now();
+    if (entry.marker) this.logs.mark(id, entry.marker, entry.message, { level: entry.level, now, detail: entry.detail });
+    else this.logs.add(id, entry.stream, entry.text, now, entry.base);
+  }
+
+  // The real brokers, as the Logs tab's node chips.
+  logNodes() {
+    return this.world
+      .scenario()
+      .nodes.filter((n) => n.kind === REAL_BROKER_KIND)
+      .map((n) => ({ id: n.id, name: n.name || `#${n.id}`, color: kindOf(n.kind).color }));
+  }
+
+  // Each real broker with the level its process started with (null: none has started).
+  logBrokers() {
+    const up = this.world.snapshot()?.nodes || [];
+    return this.logNodes().map((n) => {
+      const env = this.external.state(n.id)?.env;
+      return { ...n, alive: up.find((s) => s.id === n.id)?.alive !== false, level: env ? (env.KRABKA_LOG ?? "") : null };
+    });
+  }
+
+  renderLogBadge({ count, errors, warns }) {
+    this.dock.setBadge("logs", count ? fmtNum(count) : "");
+    const { badge } = this.dock.tabs.get("logs");
+    badge.dataset.severity = errors ? "error" : "warn";
+    badge.title = `${plural(errors, "error")} and ${plural(warns, "warning")} logged`;
+  }
+
+  // Saves the level, then restarts the brokers that run at another one: a kill
+  // and a boot on the same disk, the path of the Kill and Restart buttons.
+  applyLogLevels({ scope, directive, restart }) {
+    // The brokers run on the hub, so a spoke's setting would change nothing.
+    if (this.session.role === "spoke") return this.toasts.warn("Only the host tab runs the brokers; change their log level there.");
+    this.logLevels.set(this.world.id ?? "", scope, directive);
+    for (const id of restart) {
+      this.fault(FAULT.kill(id), { quiet: true });
+      this.fault(FAULT.restart(id), { quiet: true });
+    }
+    const level = directive ? `log level ${directive}` : "the default log level";
+    this.toasts.info(restart.length ? `Restarted ${plural(restart.length, "broker")} on ${restart.length === 1 ? "its" : "their"} disk with ${level}` : `Saved ${level}; a broker takes it when it starts`);
+  }
+
   // Whether this tab runs the scenario's real brokers: alone or as the hub
   // (they never move to a spoke).
   hostsRealBroker(doc) {
@@ -929,21 +1154,34 @@ class LabApp {
   // Resolves true when the page is about to reload.
   async ensureIsolation(doc = this.world.scenario()) {
     if (!this.hostsRealBroker(doc)) return false;
-    const { ensureCrossOriginIsolation } = await import(COI_URL);
+    let ensureCrossOriginIsolation;
+    try {
+      ({ ensureCrossOriginIsolation } = await import(COI_URL));
+    } catch (err) {
+      // The scenario still opens; its real brokers say why they cannot run.
+      const reason = `the isolation helper did not load (${err.message})`;
+      this.external.setIsolation({ isolated: false, reason });
+      this.toasts.warn(`Real brokers cannot run in this browser: ${reason}`);
+      return false;
+    }
     if (globalThis.crossOriginIsolated) {
       this.external.setIsolation(await ensureCrossOriginIsolation());
-      if (sessionFlag(RELOADED_KEY, false)) this.toasts.info("The page reloaded once to turn on cross-origin isolation: the real broker runs in this tab.");
+      if (sessionFlag(RELOADED_KEY, false)) this.toasts.show("Reloaded once so the real broker can run in this tab.", { ttl: 3000 });
       return false;
     }
     if (!(await this.external.moduleAvailable())) return false;
-    this.toasts.warn("This scenario runs a real Krabka broker, which needs cross-origin isolation: the page reloads once to turn it on. The scenario is kept.");
+    const notice = this.toasts.warn("A real Krabka broker needs one page reload before it can run in the browser. The scenario is kept.");
     await this.keepScenarioForReload();
     sessionFlag(RELOADED_KEY, true);
     const coi = await ensureCrossOriginIsolation();
     if (!coi.isolated && !coi.reloading) {
+      // No reload is coming: retract the promise and the flag that explains one.
+      notice.remove();
+      sessionFlag(RELOADED_KEY, false);
       this.external.setIsolation(coi);
       this.toasts.warn(`Real brokers cannot run in this browser: ${coi.reason}`);
     }
+    this.reloading = coi.reloading;
     return coi.reloading;
   }
 
@@ -989,6 +1227,8 @@ class LabApp {
     ta.value = JSON.stringify(commands.length ? commandExample(commands[0]) : { cmd: "" }, null, 2);
     const out = el("pre", "lab-raw");
     out.dataset.field = "command-answer";
+    // The answer appears after Send, with focus still on the button.
+    out.setAttribute("aria-live", "polite");
     const body = el("div");
     if (commands.length) {
       const list = el("div", "lab-cmd-palette");
@@ -1023,6 +1263,8 @@ class LabApp {
         return false;
       },
     });
+    // Its opener, the context menu, is gone: the card it was for is the next stop.
+    this.refocus(this.canvas.nodeEls.get(id)?.g);
   }
 
   // ---- dialogs -----------------------------------------------------------------------------------------------------
@@ -1034,7 +1276,7 @@ class LabApp {
     // A real broker may need the one isolation reload first; say so up front.
     const reloads = kind === REAL_BROKER_KIND && !globalThis.crossOriginIsolated && this.session.role !== "spoke" && (await this.external.moduleAvailable());
     const scenario = this.world.scenario();
-    // The id the node gets, given explicitly: a broker's id must equal it,
+    // The id the node gets, given explicitly: a broker's id is its node id,
     // and the world's own nodes (the hidden admin) take ids too.
     const taken = [...scenario.nodes, ...(this.world.snapshot()?.nodes || [])];
     const nextId = taken.reduce((m, n) => Math.max(m, n.id), 0) + 1;
@@ -1081,8 +1323,15 @@ class LabApp {
 
   async topicDialog(name) {
     const existing = name ? this.world.topics.find((t) => t.name === name) : null;
+    // What Kafka accepts in a topic name; a name it rejects would fail later, silently.
+    const nameProblem = (v) => {
+      if (!/^[A-Za-z0-9._-]+$/.test(v)) return "use letters, digits, . _ and - only";
+      if (v.length > 249) return "at most 249 characters";
+      if (v === "." || v === "..") return "cannot be . or ..";
+      return this.world.topics.some((t) => t.name === v && t.name !== name) ? "a topic with that name exists" : null;
+    };
     const fields = [
-      { key: "name", label: "Name", type: "text", required: true, placeholder: "orders" },
+      { key: "name", label: "Name", type: "text", required: true, placeholder: "orders", validate: nameProblem },
       { key: "partitions", label: "Partitions", type: "number", default: 3, min: 1, step: 1, required: true },
       { key: "replication_factor", label: "Replication factor", type: "number", default: -1, min: -1, step: 1, required: true, help: "-1 uses the broker default." },
     ];
@@ -1094,10 +1343,6 @@ class LabApp {
         const r = form.read();
         if (r.errors.length) return false;
         const topics = this.world.topics.filter((t) => t.name !== name);
-        if (topics.some((t) => t.name === r.value.name)) {
-          form.root.appendChild(el("p", "lab-field-error", "a topic with that name exists"));
-          return false;
-        }
         topics.push({ name: r.value.name, partitions: r.value.partitions, replication_factor: r.value.replication_factor });
         this.world.setTopics(topics);
         return true;
@@ -1174,11 +1419,16 @@ class LabApp {
     if (!p) return;
     const missing = [...new Set(p.scenario.nodes.map((n) => n.kind))].filter((k) => this.availability[k] === false);
     if (missing.length) this.toasts.warn(`This preset needs the full build (${missing.join(", ")} not in the loaded module); the crate will reject it`);
-    this.openScenario(p.scenario);
+    this.openScenario(p.scenario).then((ok) => ok && this.toasts.info(`Opened ${p.name}`));
   }
 
-  newScenario() {
-    this.openScenario({ version: 1, seed: 1, name: "", links: { default_latency_ms: 5 }, nodes: [], topics: [] });
+  // Clears at once; the toast offers to bring the scenario back.
+  async newScenario() {
+    const prev = this.world.scenario();
+    const cleared = await this.openScenario({ version: 1, seed: 1, name: "", links: { default_latency_ms: 5 }, nodes: [], topics: [] });
+    if (cleared && (prev.nodes.length || prev.topics.length)) {
+      this.toasts.show(`Cleared ${prev.name || "the scenario"}`, { ttl: 8000, action: { label: "Undo", run: () => this.openScenario(prev, { keepId: true }) } });
+    }
   }
 
   async openSaved(id) {
@@ -1188,14 +1438,14 @@ class LabApp {
         this.toasts.warn("That scenario is gone");
         return;
       }
-      await this.openScenario(doc, { keepId: true });
-      this.toasts.info(`Opened ${doc.name || "saved scenario"}`);
+      if (await this.openScenario(doc, { keepId: true })) this.toasts.info(`Opened ${doc.name || "saved scenario"}`);
     } catch (err) {
       this.toasts.error(err, "open saved scenario");
     }
   }
 
   async deleteSaved(id) {
+    if (!(await this.confirm("Delete saved scenario", "Delete this scenario and everything stored for it in this browser? This cannot be undone.", "Delete"))) return;
     try {
       await this.storage.deleteScenario(id);
       await this.external.forgetScenarioVolumes(id);
@@ -1210,8 +1460,7 @@ class LabApp {
   async importFile(file) {
     try {
       const doc = await importScenario(file);
-      await this.openScenario(doc);
-      this.toasts.info(`Imported ${doc.name || file.name}`);
+      if (await this.openScenario(doc)) this.toasts.info(`Imported ${doc.name || file.name}`);
     } catch (err) {
       this.toasts.error(err, "import");
     }
@@ -1243,9 +1492,18 @@ class LabApp {
     }
     try {
       const saved = await this.storage.saveScenario(doc);
-      saveLocal(doc);
-      this.saveState = saved ? `saved ${new Date().toLocaleTimeString()}` : "saved to this page only";
-      if (announce) this.toasts.info(this.saveState);
+      const local = saveLocal(doc);
+      // A copy that did not fit must not leave the last smaller one to reopen on reload.
+      if (!local) clearLocal();
+      const failed = !saved && !local;
+      // Autosave says so once, not on every tick.
+      const firstFailure = failed && !this.saveFailed;
+      this.saveFailed = failed;
+      const time = new Date().toLocaleTimeString();
+      this.saveState = saved
+        ? local ? `saved ${time}` : `saved ${time}, but too large to reopen on reload: open it from Saved in this browser`
+        : local ? "saved to this page only" : "not saved: this browser's storage is full or blocked";
+      if (announce || firstFailure) this.toasts[failed ? "warn" : "info"](this.saveState);
       this.palette.update({ scenario: doc, availability: this.availability, role: this.session.role, saveState: this.saveState });
       if (this.palette.savedVisible()) this.palette.refreshSaved();
     } catch (err) {
@@ -1263,7 +1521,13 @@ class LabApp {
     }
   }
 
+  // A question for an action that cannot be undone: resolves true on the yes.
+  confirm(title, text, submitLabel) {
+    return openDialog(this.root, { title, body: el("p", null, text), submitLabel, onSubmit: () => true });
+  }
+
   async forgetScenario() {
+    if (!(await this.confirm("Forget stored data", "Drop every stored log and key of this scenario? This cannot be undone.", "Forget"))) return;
     try {
       // In a session, only the nodes this tab hosts: another tab in this
       // browser may be storing the rest under the same scenario.
@@ -1280,7 +1544,27 @@ class LabApp {
 
   // ---- boot ------------------------------------------------------------------------------------------------------------
 
+  // A link that would not open: say so, and keep the message for the page that
+  // follows the isolation reload, which would wipe this one.
+  startFailed(err, context) {
+    this.toasts.error(err, context);
+    try {
+      sessionStorage.setItem(SHARE_ERROR_KEY, `${context}: ${err instanceof Error ? err.message : err}`);
+    } catch {
+      // The message is not carried over a reload.
+    }
+  }
+
   async start() {
+    // A link error shown before the isolation reload would vanish with the
+    // page: it waits here, and every page shows it until one finishes loading.
+    try {
+      const carried = sessionStorage.getItem(SHARE_ERROR_KEY);
+      if (carried) this.toasts.warn(carried);
+    } catch {
+      // No sessionStorage: nothing was carried.
+    }
+    let opened = false;
     const join = joinCodeFromUrl(window.location.search);
     if (join) {
       this.world.create(1);
@@ -1290,9 +1574,13 @@ class LabApp {
         this.palette.show("connect");
         this.sessionDetails.open = true;
         this.renderSession();
+        this.sessionBody.querySelector("[data-field=answer-code]")?.scrollIntoView({ block: "nearest" });
         this.toasts.info("Joined as a spoke; hand the answer code to the host");
+        opened = true;
       } catch (err) {
-        this.toasts.error(err, "join");
+        // A broken invite leaves an ordinary lab behind, not an empty one.
+        this.session.leave();
+        this.startFailed(err, "join");
       }
       // A join link works once; a reload should not try again.
       try {
@@ -1301,26 +1589,38 @@ class LabApp {
         // Nothing to clean up.
       }
     } else {
-      let opened = false;
       try {
         const shared = await scenarioFromHash(window.location.hash);
         if (shared) {
           opened = await this.openScenario(shared);
-          if (opened) this.toasts.info(`Opened shared scenario ${shared.name || ""}`.trim());
+          if (opened) {
+            this.toasts.info(`Opened shared scenario ${shared.name || ""}`.trim());
+            // The copy is this reader's now: a reload reopens the saved, edited one, not the link.
+            history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+          }
         }
       } catch (err) {
-        this.toasts.error(err, "shared link");
+        this.startFailed(err, "shared link");
       }
-      if (!opened) {
-        const last = loadLocal();
-        if (last && last.id) opened = await this.openScenario(last, { keepId: true });
+    }
+    if (!opened) {
+      const last = loadLocal();
+      if (last && last.id) opened = await this.openScenario(last, { keepId: true });
+    }
+    if (!opened) opened = await this.openScenario(presetById(DEFAULT_PRESET).scenario);
+    if (!opened) this.world.create(1);
+    // Not while a reload is coming: the next page still has to show it.
+    if (!this.reloading) {
+      try {
+        sessionStorage.removeItem(SHARE_ERROR_KEY);
+      } catch {
+        // Nothing was stored.
       }
-      if (!opened) opened = await this.openScenario(presetById(DEFAULT_PRESET).scenario);
-      if (!opened) this.world.create(1);
     }
     this.world.start();
     this.pushPanels();
-    this.tour.maybeStart();
+    // It opens without taking focus, so say so for those who cannot see it.
+    if (this.tour.maybeStart()) this.toasts.info("A short tour of the lab is open. Press Escape to close it.");
   }
 }
 
@@ -1336,6 +1636,37 @@ function sessionFlag(key, value) {
   } catch {
     return false;
   }
+}
+
+// A shell command line as text and colour spans: the program, its flags, the
+// values that follow them and the pipe. The text itself is unchanged, so what
+// the Copy button copies is the plain command.
+function commandTokens(value) {
+  const tok = (cls, text) => el("span", `lab-tok-${cls}`, text);
+  const out = [];
+  let program = true; // the next word is a program
+  let operand = false; // the next word is the value of a flag or of echo
+  for (const part of value.split(/(\s+)/)) {
+    const flag = /^(-[^=]+)(=)(.*)$/.exec(part);
+    if (!part.trim()) out.push(part);
+    else if (part === "|") {
+      out.push(tok("op", part));
+      program = true;
+    } else if (program) {
+      out.push(tok("cmd", part));
+      program = false;
+      operand = part === "echo";
+    } else if (flag) out.push(tok("flag", flag[1]), tok("op", flag[2]), tok("str", flag[3]));
+    else if (part.startsWith("-")) {
+      out.push(tok("flag", part));
+      operand = true;
+    } else if (part.startsWith("$")) out.push(tok("var", part));
+    else if (operand) {
+      out.push(tok("str", part));
+      operand = false;
+    } else out.push(part);
+  }
+  return out;
 }
 
 // A command of `kinds.js` as the JSON the Send command dialog starts from.
@@ -1371,8 +1702,8 @@ async function boot() {
     root.dataset.ready = "true";
   } catch (err) {
     root.innerHTML = "";
-    const p = el("p", "lab-error", `The Cluster Lab failed to load: ${err instanceof Error ? err.message : String(err)}`);
-    root.appendChild(p);
+    const p = el("p", "lab-error", `The Cluster Lab failed to load. Check your connection and reload. Details: ${err instanceof Error ? err.message : String(err)}`);
+    root.append(p, button("Reload the lab", "", () => window.location.reload()));
     // eslint-disable-next-line no-console
     console.error("krabka lab failed to initialise", err);
   }

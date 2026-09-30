@@ -18,6 +18,9 @@ export default defineConfig({
   redirects: {
     '/benchmarks': '/verification',
     '/docs/benchmarks': '/verification',
+    // The quickstart files are served from /quickstart/ (docker-compose.yml and
+    // friends); the guide is under /docs, which is where trimming a file URL lands.
+    '/quickstart': '/docs/quickstart',
     '/features/observability': 'https://github.com/krabka-io/krabka-o11y',
     '/docs/observability': 'https://github.com/krabka-io/krabka-o11y/blob/main/docs/observing_krabka_clusters.md',
     // The API reference used to be built into this site; each project now

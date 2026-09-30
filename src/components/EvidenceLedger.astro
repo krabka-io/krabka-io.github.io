@@ -107,6 +107,12 @@ function plural(n: number, one: string, many: string): string {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
 }
 
+// Where a long Rust path may wrap: after `_` and `::`. Rendered as <wbr>, not a
+// zero-width space, so a copied name carries no invisible character.
+function breakParts(name: string): string[] {
+  return name.split(/(?<=_|::)/);
+}
+
 function fileStem(path: string): string {
   const base = path.split('/').pop() ?? path;
   return base.replace(/\.rs$/, '');
@@ -258,7 +264,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                       <summary class="el-summary">
                         <span class="el-names">
                           {row.kernels.map((k) => <code class="el-fn">{k.label}</code>)}
-                          {row.modules.map((m) => <span class="el-module">{m}.rs</span>)}
+                          {row.files.map((f) => <span class="el-module">{f}</span>)}
                         </span>
                         <span class="el-meta">
                           <span class="el-meta-item">{plural(row.proofs.length, 'proof', 'proofs')}</span>{' '}
@@ -340,7 +346,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                           {model.drives.length > 0 && (
                             <>
                               <dt>Drives</dt>
-                              <dd class="el-taglist">{model.drives.map((d) => <code class="el-tag">{d}</code>)}</dd>
+                              <dd class="el-taglist">{model.drives.map((d) => <code class="el-tag">{breakParts(d).map((part, i) => <>{i > 0 && <wbr />}{part}</>)}</code>)}</dd>
                             </>
                           )}
                           {model.bounds && (
@@ -352,7 +358,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                           {model.properties.length > 0 && (
                             <>
                               <dt>Properties</dt>
-                              <dd class="el-taglist">{model.properties.map((p) => <code class="el-tag el-tag-prop">{p}</code>)}</dd>
+                              <dd class="el-taglist">{model.properties.map((p) => <code class="el-tag el-tag-prop">{breakParts(p).map((part, i) => <>{i > 0 && <wbr />}{part}</>)}</code>)}</dd>
                             </>
                           )}
                           {model.pinned_states.length > 0 && (

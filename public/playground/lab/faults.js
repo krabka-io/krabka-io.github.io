@@ -47,6 +47,7 @@ export class FaultBar {
     this.selection = [];
     this.snapshot = null;
     this.root = el("div", "lab-faults");
+    this.root.setAttribute("role", "group");
     this.root.setAttribute("aria-label", "Faults");
     this.nodeGroup = el("span", "lab-faults-group lab-faults-node");
     this.linkGroup = el("span", "lab-faults-group lab-faults-link");
@@ -54,7 +55,7 @@ export class FaultBar {
     this.linkCap = el("span", "lab-faults-cap", "Link");
     this.nodeGroup.appendChild(this.nodeCap);
     this.linkGroup.appendChild(this.linkCap);
-    this.hint = el("span", "lab-faults-hint", "Shift+click: link controls");
+    this.hint = el("span", "lab-faults-hint", "Pick a second node: link controls");
     this.root.append(el("strong", "lab-faults-title", "Break things"), this.nodeGroup, this.hint, this.linkGroup);
     container.appendChild(this.root);
     this.buildNodeGroup();

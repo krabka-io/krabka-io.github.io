@@ -221,8 +221,8 @@
     "bounds": "The basic config has two members, two partitions, and epochs through 6; the wide config three members, two partitions, and epochs through 5.",
     "properties": [],
     "pinned_states": [
-      { "config": "basic", "count": 2386 },
-      { "config": "wide", "count": 17191 }
+      { "config": "basic", "count": 5986 },
+      { "config": "wide", "count": 30421 }
     ],
     "outside": "Plain consumer groups deliver at least once, so no-duplicate and no-gap delivery are deliberately not checked; __consumer_offsets persistence and the classic protocol are out of scope.",
     "summary": "Reuses the reconciliation model's driving of step_heartbeat and composes it with the production OffsetCommit epoch fence, cross-checking every commit against an independent oracle of the expected epoch comparison and error code. It requires that no two members own one partition and that no member is advertised a partition another member still owns."
@@ -287,8 +287,8 @@
     "bounds": "One transactional id with producer epochs up to 3 (basic, depth 11) and 6 (wide, depth 20).",
     "properties": [],
     "pinned_states": [
-      { "config": "basic", "count": 192 },
-      { "config": "wide", "count": 5812 }
+      { "config": "basic", "count": 231 },
+      { "config": "wide", "count": 7744 }
     ],
     "outside": "The KIP-360 identity classification and keepPreparedTxn recovery are not exercised.",
     "summary": "Runs one transactional id through every interleaving of an EndTxn split at its marker window, InitProducerId, AddPartitionsToTxn, and the completion task. It requires that an EndTxn whose Phase 3 finds the entry moved never writes Complete*, that each generation finalizes at most once, that InitProducerId never moves a Prepare* transaction, and that the epoch never regresses."
@@ -320,8 +320,8 @@
     "bounds": "One transactional id, requested timeouts 1, 60000, 900000, 900001 and 0, a monotonic clock over 0, 1, 2, 60000, 60001, 900000, 900001, i32::MAX, i32::MAX + 1 and i64::MAX, and producer epochs up to 3 (basic, depth 20) and 5 (wide, depth 22).",
     "properties": ["two_pc_never_reaped", "reaper_never_early", "reaper_never_misses"],
     "pinned_states": [
-      { "config": "basic", "count": 23124 },
-      { "config": "wide", "count": 93754 }
+      { "config": "basic", "count": 21876 },
+      { "config": "wide", "count": 80914 }
     ],
     "summary": "Runs InitProducerId with and without enable2Pc, AddPartitionsToTxn, EndTxn, completion, and the idle reaper over a clock that meets every timeout's start + timeout and start + timeout + 1. The headline property keys on the request's enable2Pc flag so a wrong encoding fails it, and the reaper properties compare every sweep with Kafka's timedOutTransactions rule in exact arithmetic."
   },
@@ -407,8 +407,8 @@
     "bounds": "Abstract logs of up to 4 entries (basic) and up to 5 entries (wide).",
     "properties": ["control-not-deduped", "marker-data-precedence", "tombstone-aging", "idempotent-stamp", "no-data-loss"],
     "pinned_states": [
-      { "config": "basic", "count": 128796 },
-      { "config": "wide", "count": 898738 }
+      { "config": "basic", "count": 144128 },
+      { "config": "wide", "count": 1102770 }
     ],
     "summary": "Runs one pass of the cleaner over an abstract log per step, using the production key-indexing and retain decisions, and checks each pass's output against its input with rules computed from the two logs alone. The legacy cleaner, which indexes control keys and dedups markers by them, is run through the same checker and reports exactly control-not-deduped and marker-data-precedence as broken."
   },
@@ -458,11 +458,12 @@
     "path": "crates/throttle/tests/bucket_model.rs",
     "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/throttle/tests/bucket_model.rs",
     "drives": ["plan_consume", "TokenBucket"],
-    "bounds": "bucket_basic checks two consumers, one reset between bursts 2 and 1, two clock units, and requests up to two; bucket_wide checks two consumers, two resets among (rate 1, burst 3), (2, 1), (0, 0) and (1, 0), two clock units, and requests up to two.",
+    "bounds": "bucket_basic checks two consumers, one reset between bursts 2 and 1, two clock units, and requests up to two; bucket_wide checks two consumers, two resets among (rate 1, burst 3), (2, 1), (0, 0) and (1, 0), two clock units, and requests up to two; bucket_fractional meters two storage units to a token and checks two consumers, one reset from (rate 1, burst 3) to (1, 1), two clock units, and requests up to two whole tokens.",
     "properties": [],
     "pinned_states": [
-      { "config": "bucket_basic", "count": 41601 },
-      { "config": "bucket_wide", "count": 222236 }
+      { "config": "bucket_basic", "count": 56259 },
+      { "config": "bucket_wide", "count": 372204 },
+      { "config": "bucket_fractional", "count": 33964 }
     ],
     "outside": "The clock is modeled in whole seconds with whole-token rates and memory as sequentially consistent; the part-token remainder is covered by unit tests.",
     "summary": "Drives the proved cap-and-grant arithmetic at every commit and steps the token bucket protocol one shared-memory access at a time. It requires available <= burst and exact token conservation per configuration, so a claimed refill can neither vanish nor be granted twice, and RED witnesses must find both bugs of the former lock-free seqlock design."

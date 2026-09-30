@@ -65,7 +65,13 @@ export function exportScenario(scenario) {
 
 export async function importScenario(file) {
   const text = await readFileText(file);
-  return validateScenario(JSON.parse(text));
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    throw new Error("that file is not JSON; import a scenario exported from the lab (.lab.json)");
+  }
+  return validateScenario(doc);
 }
 
 // The URL that reopens this scenario.

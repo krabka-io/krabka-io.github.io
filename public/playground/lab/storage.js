@@ -1,9 +1,10 @@
 // Durable state in the browser: the IndexedDB database behind the lab.
 //
-// A node records every change to its durable state (a broker's partition
-// logs and its copy of the KRaft metadata log, the echo node's frame
-// counter) as a `DurableOp`; the world hands them to the page through
-// `drainDurable()` after every step. This module keeps two copies:
+// A node records every change to its durable state (today only the echo
+// node's frame counter) as a `DurableOp`; the world hands them to the page
+// through `drainDurable()` after every step. A real broker keeps its files on
+// its own volume (`wasi/volumes.js`), not here. Records the lab's old simulated
+// broker left in this database are ignored. This module keeps two copies:
 //
 // - the **mirror**, an in-memory image per node, folded from the images the
 //   world was loaded with and every op since, whatever the persistence

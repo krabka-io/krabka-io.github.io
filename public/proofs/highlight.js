@@ -27,7 +27,7 @@ const TOKEN = new RegExp(
     String.raw`(?<attr>\[(?:@|%#?)[^\]]*\])`,
     String.raw`(?<number>\b\d+(?:\.\d+)?\b)`,
     String.raw`(?<path>\b(?:[A-Z][A-Za-z0-9_']*\.)+)`,
-    String.raw`(?<kw2>(?:let|val|axiom|goal|lemma|function|predicate)%[a-z_]+)`,
+    String.raw`(?<kw2>\b(?:let|val|axiom|goal|lemma|function|predicate)%[a-z_]+)`,
     String.raw`(?<word>[A-Za-z_][A-Za-z0-9_']*)`,
     String.raw`(?<op><->|->|\/\\|\\\/|<>|<=|>=|:=|[-+*\/<>=|&!~^%])`,
   ].join("|"),
@@ -104,7 +104,9 @@ function highlightLine(line, state) {
 
 export function highlightWhy(text) {
   const state = { comment: 0 };
+  // A file ends with a newline; that is not another, empty line.
   return text
+    .replace(/\n$/, "")
     .split("\n")
     .map((line) => `<span class="px-line">${highlightLine(line, state)}</span>`)
     .join("\n");

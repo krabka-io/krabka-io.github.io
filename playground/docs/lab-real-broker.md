@@ -4,11 +4,11 @@ How the lab page runs the real `krabka-broker`, compiled for `wasm32-wasip1`, as
 
 ## Design Goals
 
-The lab's simulated broker models the real one; it does not run it. A reader should also be able to put the real broker on the canvas and treat it like any node: connect clients to it, cut its links, kill it, restart it on the disk it had, and read what it does. Three properties follow, and they shaped everything below.
+The real broker is the only broker the lab has. A reader puts it on the canvas and treats it like any node: connects clients to it, cuts its links, kills it, restarts it on the disk it had, and reads what it does, its log included. Three properties follow, and they shaped everything below.
 
-- **The real process is a node of the world.** The world keeps its slot (`lab::external::ExternalNode`), so links, faults, events and snapshots apply to it exactly as to a simulated node. Its frames cross the same link model, with the same latency, loss and cuts, and that includes the connections a broker opens to itself.
-- **The real process runs on the lab's clock.** Pause stops it, speed scales it, and it answers a frame at the logical instant the frame arrived, as a simulated node does. Otherwise every latency measured through a real broker would include how fast this machine runs WebAssembly.
-- **Nothing changes for readers who do not use it.** The lab page is not cross-origin isolated by default and loads none of the WASI runtime; the first real broker in a scenario turns both on.
+- **The real process is a node of the world.** The world keeps its slot (`lab::external::ExternalNode`), so links, faults, events and snapshots apply to it exactly as to any node of the lab. Its frames cross the same link model, with the same latency, loss and cuts, and that includes the connections a broker opens to itself.
+- **The real process runs on the lab's clock.** Pause stops it, speed scales it, and it answers a frame at the logical instant the frame arrived, as a node of the lab module does. Otherwise every latency measured through a real broker would include how fast this machine runs WebAssembly.
+- **A scenario without a broker loads none of it.** The lab page is not cross-origin isolated by default and loads none of the WASI runtime; the first real broker in a scenario turns both on. Every preset has brokers, so a first visit downloads the module and reloads once; a scenario of echo and pinger nodes only costs neither.
 
 ## Architecture Overview
 
@@ -44,7 +44,7 @@ This is what the page gives the process and what it expects back. The broker's e
 | fd | What |
 | --- | --- |
 | 0 | stdin, always at its end |
-| 1, 2 | stdout and stderr, split into lines; the inspector shows the last 40 of each |
+| 1, 2 | stdout and stderr, split into lines; the inspector shows the last 40 of each, and the Logs tab keeps more (see [Logs](#logs)) |
 | 3 | the node's volume, preopened at `/data` |
 | 4 | the listening socket for port 9092 (Kafka) |
 | 5 | the listening socket for port 9093 (the KRaft controller) |
@@ -54,7 +54,7 @@ The directory comes before the sockets, so wasi-libc finds `/data` among the pre
 
 ### Environment
 
-The process gets exactly these variables:
+The process gets exactly these variables (`KRABKA_LOG` only when the lab has a log level for the node):
 
 | Variable | Value |
 | --- | --- |
@@ -66,6 +66,7 @@ The process gets exactly these variables:
 | `KRABKA_VOTERS` | `id@10.0.x.y:9093` for every `krabka-broker` node of the scenario whose `voter` is true, in ascending id, joined by `,`: the same list on every node, and a node is a voter when its own id is in it. Empty when the scenario has no voter, and then no controller quorum can form |
 | `KRABKA_CLUSTER_ID` | 22 characters of URL-safe base64 without padding: the first 16 bytes of SHA-256(`krabka-lab/cluster-id/<scenario id>`), with byte 6 set to `(b & 0x0f) \| 0x80` and byte 8 to `(b & 0x3f) \| 0x80` (a version-8 UUID); hashed again with `/1`, `/2`, ... appended while the text starts with `-`, as Kafka's `Uuid.randomUuid()` avoids a leading dash. The same on every node of the scenario |
 | `KRABKA_CONFIG` | the JSON form of the broker's `broker.toml` (`krabka_broker::file_config::FileConfig`), built from the node's configuration below; `{}` when it sets nothing |
+| `KRABKA_LOG` | optional: the log level, a `tracing-subscriber` `Targets` directive, comma separated, each entry a bare level (`trace`, `debug`, `info`, `warn`, `error`, `off`) or `target=level`: `info`, `warn,krabka_broker=debug`, `info,krabka_broker::request=debug`. Unset or empty: the default, `INFO` with the request and connection log target at `WARN`. A value that does not parse logs one `ERROR` line saying why and falls back to the default. See [Logs](#logs) |
 
 The environment is computed when a process starts: a change to the voter set reaches a running process when it next starts, which is how a static `controller.quorum.voters` behaves. The cluster id is derived from the scenario id so that a volume formatted by one run matches the scenario on every later run, across page reloads, without the page having to read the volume.
 
@@ -120,13 +121,41 @@ All processes of the tab read one host-driven `WasiClock` that follows the world
 
 So a process answers at the logical instant its input arrived, its timers fire exactly at their deadlines (tokio's timer wheel also wakes at slot boundaries, which are stops too), pause stops them and speed scales them. A process that has not blocked after 200 ms of wall time at one instant is marked lagging and runs free (its frames are routed when they come) until it blocks again, so one busy process cannot stall the lab. A process runs free from its start until it first blocks: that is its `booting` state.
 
+### Logs
+
+The process writes its log to stderr, **one JSON object per line**, written by a small `tracing-subscriber` event formatter in the entry crate (`logging.rs`; the stock JSON layer cannot name its clock key `ts`): the event's own structured fields are flattened to the top level of the object and there is no span list. A field that is called `ts`, `level`, `target` or `message` gets a `field_` prefix, so it cannot shadow the fixed keys. A line looks like this:
+
+```json
+{"ts":12.345,"level":"WARN","target":"krabka_broker::replica","message":"follower fell out of the ISR","topic":"orders","partition":1,"replica":2}
+```
+
+| Key | Value |
+| --- | --- |
+| `ts` | seconds since the process started, a JSON number with millisecond precision. The process reads the lab's clock, so it counts lab time (pause stops it, speed scales it), and added to the process's start time it gives the lab time of the event |
+| `level` | `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR` |
+| `target` | the `tracing` target, usually a module path |
+| `message` | the event's message |
+| anything else | the event's structured fields, each at the top level |
+
+Stderr is not guaranteed to be all JSON: a panic message and anything else printed outside `tracing` appear as plain lines, and readers of the stream must cope with them. The page keeps such a line as it is, guesses `ERROR` for one that mentions a panic or an error and `INFO` for any other, and labels it raw. Stdout lines are kept the same way.
+
+The **log level** is the optional `KRABKA_LOG` variable above, read once when the process starts. A directive applies to the targets it names and a bare level applies to the rest; `off` silences. A bare word that is no level (`inf`) is refused, where `tracing-subscriber` alone would read it as a target and silence everything else. A level cannot change in a running process, so the page restarts it.
+
+The page owns everything else. It splits each process's stderr and stdout into lines, parses them, and keeps up to 5,000 lines per node and 20,000 in all, dropping the oldest first. It adds a marker row to the stream when a process starts (with the `KRABKA_LOG` it started with), exits (with its code), is killed or is restarted; a marker is a JSON record of its own, with the target `lab::process`, so it stays in a download. The Logs tab in the dock shows the stream; the log level settings are the page's, not the node's `config`, because editing a config wipes the node's disk:
+
+- They are kept in `localStorage` under `krabka-lab.loglevels`, keyed by scenario id: `{ "default": "<directive>", "nodes": { "<node id>": "<directive>" } }`. A node's entry wins over the default, and setting the default for all brokers drops the per-node entries; an empty directive, or none, leaves the broker's own default level in force.
+- The dialog offers four presets, Quiet (`warn`), Normal (no directive: the broker's default), Verbose (`debug`) and Trace (`trace`), or a custom directive that it checks as you type, for all brokers or for one. It shows the directive each running broker started with.
+- Applying a new level kills the affected processes and starts new ones on the same volumes, the path `restart` takes, never the wipe path, after a confirmation that says so. The disk, the cluster id and the node's place in the quorum are kept. A broker that is stopped takes the level when it is next started.
+
+The tab lists lines in a virtualized list, so a stream of ten thousand lines stays smooth, with the time, level, node, target and message of each; a row opens into the whole record as a collapsible JSON tree, and a line that is not JSON opens as itself. It filters by minimum level, node, target (a list of the targets seen, with counts, and a prefix filter) and text, where a term `field:value` matches records whose field has that value; it follows the newest line until the reader scrolls up; and it downloads the lines currently shown as NDJSON, one raw line each. Nothing about it is stored: a page reload starts the stream empty, the processes being the only source.
+
 ### Lifecycle and faults
 
 | Event | The process |
 | --- | --- |
 | the node is added, the scenario opens | a process starts on the node's volume |
 | `kill` | killed; the world marks the node down and closes its connections |
-| `restart` | a new process on the same volume |
+| `restart`, a change of the node's log level | a new process on the same volume (with the new `KRABKA_LOG` after a level change) |
 | `wipe`, an edit of the node (its configuration or its name; the world clears an edited node's durable state too) | the volume is forgotten, then a fresh process starts |
 | the node is removed | killed, and the volume is forgotten |
 | the process exits or traps | the page kills the node in the world (mirrored to the session's peers) and records the reason |
@@ -173,7 +202,7 @@ The dialer is a character device the guest writes to and reads from synchronousl
 
 The entry crate hands `KRABKA_CONFIG` to the broker's own parser for `broker.toml`, so the page sends that schema's JSON form rather than Kafka's dotted property names, and no mapping layer sits in the entry crate. The page offers only a handful of keys, each named after its Kafka property and checked against the broker's field types, so a configuration the page accepts is one the broker takes; the form's help text names where each key lands.
 
-### Isolation only for readers who use it
+### Isolation only for scenarios that need it
 
 The runtime blocks in `Atomics.wait` on a `SharedArrayBuffer`, which needs a cross-origin isolated page, and GitHub Pages cannot send the headers. The lab's service worker (`public/docs/lab/coi-sw.js`, scope `/docs/lab/`) adds them, at the cost of one reload. The page asks for it only when a scenario this tab runs contains a real broker, when one is added or a scenario with one is opened, and only when the broker build is on the site. Before the reload it saves the scenario with its identity as the last one and drops a `#s=` share code from the address, so the reload reopens the same scenario with its stored state.
 
@@ -194,11 +223,11 @@ The broker's `wasm32-wasip1` entry point is `playground/broker-wasi`, a binary c
 5. **Formats its log directory in process** with `krabka_format::run_from_args(["krabka-format", "--log-dir", "/data/log", "--cluster-id", <the cluster id as a UUID>, "--node-id", $KRABKA_NODE_ID, "--ignore-formatted"])`, which returns 0 whether it formatted the directory or found it formatted, and whose own exit code the process takes when it is not 0. With no quorum flag the log carries no voter set of its own, and the node runs the static KIP-595 quorum it is configured with. It then reads `meta.properties` back with `krabka_broker::bootstrap::read_and_validate_meta_properties` and the cluster id, so a volume formatted for another cluster does not boot, and boots in `Rejoin` mode when `krabka_raft::metadata_log_nonempty` finds raft state in the metadata log, in `Bootstrap` mode otherwise, as the broker binary does.
 6. **Builds its `BrokerConfig`** from the environment: the node id as `broker_id` and `node_id`; the roles `[Controller, Broker]` on a voter and `[Broker]` otherwise; `listen_addr` `$KRABKA_HOST:9092`, advertised as `127.0.0.1:(9091 + n)`; `controller_listen_addr` `$KRABKA_HOST:9093`; `controller_quorum_voters` from `KRABKA_VOTERS`; `log_dir` `/data/log`; the cluster id and directory id from `meta.properties`; and the boot mode. It keeps the default `heartbeat_timeout`, which works because the lab answers the node's dials to itself, and sets no metrics, OTLP, JWKS, OPA, schema registry or tiered storage over the topic-based RLMM, none of which runs on `wasm32-wasip1`. Then it applies `KRABKA_CONFIG` on top with `FileConfig::apply_to`, after adding an `[audit]` table with `enabled = false` when `KRABKA_CONFIG` has none: the broker reads a missing table as its secure default, audit on, and the lab runs without the audit log. A value the broker refuses exits with code 2.
 7. **Hands over the listeners** it adopted with `std::net::TcpListener::from_raw_fd`, `set_nonblocking(true)` and `tokio::net::TcpListener::from_std`: port 9093 as the controller listener on a voter, and every other port, in order, as the data-plane listeners that `config.effective_listeners()` describes. A broker-only node closes its 9093 listener, so a connection to it is refused, as on a Kafka broker without the controller role. Preview 1 has no `local_addr`, so the addresses come from `KRABKA_HOST` and the ports.
-8. **Starts** with `Broker::start_with_listeners(config, controller, data)` and serves until the broker stops on its own, which it does only when every log directory went offline (KIP-112); it then shuts the broker down and exits with code 1, as it does when the broker does not start. It relies on its log recovery after a kill or a reload, since the volume's durability is write-behind. It logs one event per line to stderr, stamped with the time since the process started, which the lab's clock drives, at `INFO` and above, but for `krabka_broker::network::dispatch`: that module logs every request it dispatches and every connection it accepts at `INFO`, where Kafka's default logging configuration keeps its request logger (`kafka.request.logger`) at `WARN` and logs accepted connections at `DEBUG`, so the process keeps it at `WARN` and the inspector's tail of the log stays readable.
+8. **Starts** with `Broker::start_with_listeners(config, controller, data)` and serves until the broker stops on its own, which it does only when every log directory went offline (KIP-112); it then shuts the broker down and exits with code 1, as it does when the broker does not start. It relies on its log recovery after a kill or a reload, since the volume's durability is write-behind. It logs one JSON object per event to stderr (see [Logs](#logs)), stamped with the time since the process started, which the lab's clock drives. The level comes from `KRABKA_LOG`. Without it the process logs at `INFO` and above, but for `krabka_broker::network::dispatch`: that module logs every request it dispatches and every connection it accepts at `INFO`, where Kafka's default logging configuration keeps its request logger (`kafka.request.logger`) at `WARN` and logs accepted connections at `DEBUG`, so the process keeps it at `WARN` and the log stays readable. A `KRABKA_LOG` that does not parse is reported as one `ERROR` line and the default applies, so a typo never stops a broker from starting.
 
 ### The world and the rest of the lab
 
-A real broker is a node of the world like any other: simulated clients, the admin node and other real brokers reach it through links, and its snapshot is what the inspector shows. A session of several tabs keeps it on the hub; the other tabs see its snapshot and send it frames through the hub like any node's.
+A real broker is a node of the world like any other: the lab's clients, the admin node and other real brokers reach it through links, and its snapshot is what the inspector shows. A session of several tabs keeps it on the hub; the other tabs see its snapshot and send it frames through the hub like any node's.
 
 ## Kafka / KIP Compliance
 
@@ -213,6 +242,8 @@ A real broker is a node of the world like any other: simulated clients, the admi
 
 `npm run check-real-broker` runs the real broker. It builds the module with `npm run build:broker` (a no-op for cargo when the build is fresh; `--no-build` takes the staged module as it is), serves the built site with it, and in headless Chromium checks that one real broker boots, formats its volume and serves on its virtual address; that three voters form a quorum and serve, the lab's admin node creates a topic with three replicas on them, and the lab's own producer, a classic consumer group and a KIP-848 member produce and consume through them; that the inspector shows the brokers' metadata as the clients got it (brokers, controller, cluster id, partition leaders and ISR); that killing the leader of a partition moves the leadership while the consumer keeps consuming, and a restart brings the broker back on its volume, in `Rejoin` mode, and into every ISR; and that a page reload restores the brokers from their IndexedDB volumes, with every record still there for a new group and both groups resuming from their committed offsets. It takes about 40 s of browser time; the fault part runs the lab at 5x, which the processes keep up with.
 
-`npm run check-lab-external` builds the WASI test guest and runs it as a `krabka-broker` node in headless Chromium. In Node it first checks the contract's pure parts on the `external.js` that ships: the virtual addresses both ways, the configuration's mapping onto `FileConfig` and its fixed key order, the refusal of bad values, the voter list, the environment, the cluster id, and the Kafka framing. In the browser it covers the missing-build state without a reload; the isolation reload on add and on open with the scenario kept; the download progress; the whole environment as the process sees it; the dials a node makes to itself at boot and on command; a pinger's round trip through the process over a 200 ms link (exactly the 400 ms a simulated echo gives); a dial through the world over a 300 ms link (600 ms, counted by the echo node) and 1.8 MB relayed back byte for byte, one lab frame per Kafka frame; unreachable and refused dials; a dial across a cut link that connects when the link heals and one that fails with `ETIMEDOUT` after exactly 30 s of lab time; kill, restart on the same volume, wipe, and a configuration change; pause; exit and trap; the Storage panel; and pinning in a session. `npm run check-wasi` covers the runtime, `quiesce()` included. `npm run check-lab` covers the lab without real brokers, unchanged.
+`npm run check-lab-external` builds the WASI test guest and runs it as a `krabka-broker` node in headless Chromium. The guest logs like the broker (`log.rs`): JSON lines on stderr with the same keys and the same `KRABKA_LOG` syntax, one line per level at every boot and an `INFO` heartbeat line per second of lab time, so the Logs tab and its level changes can be tested without the broker's module. In Node it first checks the contract's pure parts on the `external.js` that ships: the virtual addresses both ways, the configuration's mapping onto `FileConfig` and its fixed key order, the refusal of bad values, the voter list, the environment, the cluster id, and the Kafka framing. In the browser it covers the missing-build state without a reload; the isolation reload on add and on open with the scenario kept; the download progress; the whole environment as the process sees it; the dials a node makes to itself at boot and on command; a pinger's round trip through the process over a 200 ms link (exactly the 400 ms a simulated echo gives); a dial through the world over a 300 ms link (600 ms, counted by the echo node) and 1.8 MB relayed back byte for byte, one lab frame per Kafka frame; unreachable and refused dials; a dial across a cut link that connects when the link heals and one that fails with `ETIMEDOUT` after exactly 30 s of lab time; kill, restart on the same volume, wipe, and a configuration change; pause; exit and trap; the Storage panel; and pinning in a session. `npm run check-wasi` covers the runtime, `quiesce()` included.
 
-The entry crate's unit tests (`cargo test` in `playground/broker-wasi`) run natively and cover the environment's checks, the configuration profile with `KRABKA_CONFIG` applied, and the dialer's line protocol.
+`npm run check-lab` needs no broker: it drives the page on an echo and pinger scenario, so the preset runs, faults, persistence, share links and WebRTC hosting are covered without the module (`--no-webrtc` skips the hosting part). `npm run check-lab-clusters` runs the cluster scenarios of the shipped presets on real brokers, at 5x: consumers sharing partitions and the command bars, the schema registry electing a primary and replaying `_schemas`, a streams word count, and five brokers under a network partition. It needs the broker module in `dist/playground/broker/` (`npm run build:broker`, then `npm run build`) and exits 2 without it.
+
+The entry crate's unit tests (`cargo test` in `playground/broker-wasi`) run natively and cover the environment's checks, the configuration profile with `KRABKA_CONFIG` applied, the dialer's line protocol, and the log (the directive choice, the line shape). The logging module needs nothing of the broker's graph: where the crate does not build natively (`fds.rs` needs Unix descriptors, so not on Windows), `#[path]`-include `src/logging.rs` in a scratch crate that depends on `serde_json`, `tracing` and `tracing-subscriber` and run its tests there.

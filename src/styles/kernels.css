@@ -70,11 +70,12 @@
 
 #krabka-kernels .kx-sidebar {
   position: sticky;
-  top: 1rem;
+  /* Clears the sticky site header (65px). */
+  top: 5rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100vh - 6rem);
   min-width: 0;
 }
 
@@ -191,7 +192,8 @@
 }
 
 #krabka-kernels .kx-input::placeholder {
-  color: rgba(156, 163, 175, 0.55);
+  color: var(--kx-muted);
+  opacity: 1; /* Firefox dims placeholders; the muted colour is already 7:1 */
 }
 
 #krabka-kernels .kx-input:focus,
@@ -264,6 +266,22 @@
   color: var(--kx-muted);
   font-weight: 700;
 }
+
+/* The result label is the kernel's own wording (a list of enum variants), so
+ * capitals would run CamelCase names together. */
+#krabka-kernels .kx-result.kx-ok > .kx-label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Syntax colour for the signature, clauses and JSON: the krabka-dark Shiki
+ * palette (src/utils/krabka-shiki-theme.mjs), set by highlight() in kernels.js. */
+#krabka-kernels .kx-hl-keyword { color: #ff8466; }
+#krabka-kernels .kx-hl-type { color: #fcd9a8; }
+#krabka-kernels .kx-hl-call { color: #93c5fd; }
+#krabka-kernels .kx-hl-string { color: #86efac; }
+#krabka-kernels .kx-hl-number { color: #fdba74; }
+#krabka-kernels .kx-hl-const { color: #ffb39e; }
 
 /* ---- detail pane: header --------------------------------------------------- */
 
@@ -744,6 +762,15 @@
   font-size: 0.74rem;
   font-weight: 500;
   color: var(--kx-muted);
+}
+
+/* On the narrowest phones 38% is under nine characters wide, so `survivors`
+ * and `available` split mid-word. */
+@media (max-width: 350px) {
+  #krabka-kernels .kx-kv th {
+    width: 46%;
+    max-width: 50%;
+  }
 }
 
 #krabka-kernels .kx-rows th {

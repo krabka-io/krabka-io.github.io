@@ -63,7 +63,7 @@ spec:
       </p>
     </div>
 
-    <div class="space-y-8">
+    <div class="space-y-8 [&>div>p]:max-w-3xl [&>div>ul]:max-w-3xl">
       
       <!-- Section A: CRD Architecture -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
@@ -127,21 +127,3 @@ spec:
     </div>
   </div>
 </BaseLayout>
-
-<script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
-        const span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          setTimeout(() => {
-            span.textContent = 'Copy CRD';
-          }, 2000);
-        }
-      }
-    });
-  });
-</script>

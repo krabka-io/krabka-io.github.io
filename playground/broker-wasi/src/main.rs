@@ -21,27 +21,21 @@
 //!    then runs until the broker stops on its own, and exits with code 1
 //!    then, or when it cannot start.
 //!
-//! The process logs one event per line to stderr, stamped with the time
-//! since it started, which the lab's clock drives: added to the process's
-//! start in the inspector, it gives the lab time of the event. After a kill
-//! or a page reload the broker recovers its log from the volume, as it does
-//! after a crash.
+//! The process logs one JSON object per line to stderr ([`logging`]), stamped
+//! with the time since it started, which the lab's clock drives: added to the
+//! process's start in the inspector, it gives the lab time of the event.
+//! `KRABKA_LOG` sets the levels. After a kill or a page reload the broker
+//! recovers its log from the volume, as it does after a crash.
 
 mod contract;
 mod fds;
+mod logging;
 mod profile;
 
-use std::{fmt, net::TcpListener, path::Path, process::ExitCode, time::Instant};
+use std::{net::TcpListener, path::Path, process::ExitCode, time::Instant};
 
 use krabka_broker::{BootstrapMode, Broker, bootstrap::read_and_validate_meta_properties};
 use krabka_client_core::transport::install_connector;
-use tracing::Level;
-use tracing_subscriber::{
-    filter::Targets,
-    fmt::{format::Writer, time::FormatTime},
-    layer::SubscriberExt as _,
-    util::SubscriberInitExt as _,
-};
 
 use crate::{
     contract::{CONTROLLER_PORT, Contract},
@@ -53,11 +47,9 @@ use crate::{
 const EXIT_CONTRACT: u8 = 2;
 /// The exit code for a broker that cannot start, or that stopped on its own.
 const EXIT_FATAL: u8 = 1;
-/// The broker's module that logs each request and connection.
-const REQUEST_LOG: &str = "krabka_broker::network::dispatch";
 
 fn main() -> ExitCode {
-    init_logging(Instant::now());
+    logging::init(Instant::now());
     let contract = match Contract::from_env() {
         Ok(contract) => contract,
         Err(err) => {
@@ -215,43 +207,5 @@ impl Listeners {
             .map(tokio::net::TcpListener::from_std)
             .collect::<std::io::Result<Vec<_>>>()?;
         Ok((controller, data))
-    }
-}
-
-/// One line per event on stderr, at `INFO` and above, but for the broker's
-/// request and connection log, which stays at `WARN`: the broker logs every
-/// request it dispatches and every connection it accepts at `INFO`, where
-/// Kafka's default logging configuration keeps its request logger
-/// (`kafka.request.logger`) at `WARN` and logs accepted connections at
-/// `DEBUG`. Left in, they would fill the inspector's tail of the log.
-fn init_logging(started: Instant) {
-    let filter = Targets::new()
-        .with_default(Level::INFO)
-        .with_target(REQUEST_LOG, Level::WARN);
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
-                .with_ansi(false)
-                .with_timer(Uptime(started))
-                .compact(),
-        )
-        .with(filter)
-        .init();
-}
-
-/// Stamps a log line with the time since the process started, in seconds to
-/// the millisecond.
-struct Uptime(Instant);
-
-impl FormatTime for Uptime {
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-        let elapsed = self.0.elapsed();
-        write!(
-            w,
-            "{:>4}.{:03}s",
-            elapsed.as_secs(),
-            elapsed.subsec_millis()
-        )
     }
 }

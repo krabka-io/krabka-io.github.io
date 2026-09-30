@@ -44,7 +44,6 @@
 
   margin: 1rem 0;
   padding: 1rem;
-  container-type: inline-size;
   border: 1px solid var(--px-border);
   border-radius: 12px;
   background: var(--px-bg);
@@ -106,7 +105,7 @@
 }
 
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -159,7 +158,7 @@
   content: '−';
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-sidebar.px-folded > .px-sidebar-controls {
     display: none;
   }
@@ -190,17 +189,30 @@
 }
 
 #krabka-proofs .px-input::placeholder {
-  color: rgba(156, 163, 175, 0.55);
+  color: var(--px-muted);
+  opacity: 1;
 }
 
+/* A solid ring: the old 25% halo was about 1.4:1 against the panel. Rows and
+ * summaries sit in boxes that clip an outer ring, so theirs is drawn inside. */
 #krabka-proofs .px-input:focus,
 #krabka-proofs .px-btn:focus-visible,
 #krabka-proofs .px-chip:focus-visible,
 #krabka-proofs .px-item:focus-visible,
 #krabka-proofs summary:focus-visible {
-  outline: none;
+  outline: 2px solid var(--px-accent);
+  outline-offset: 2px;
   border-color: var(--px-accent);
-  box-shadow: 0 0 0 2px rgba(255, 77, 46, 0.25);
+}
+
+#krabka-proofs .px-item:focus-visible,
+#krabka-proofs summary:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The selected row already has an accent border, so its ring is the text colour. */
+#krabka-proofs .px-item.px-active:focus-visible {
+  outline-color: var(--px-text);
 }
 
 #krabka-proofs .px-btn {
@@ -218,7 +230,8 @@
   transform: translateY(1px);
 }
 
-#krabka-proofs .px-btn:disabled {
+#krabka-proofs .px-btn:disabled,
+#krabka-proofs .px-btn[aria-disabled='true'] {
   cursor: default;
   opacity: 0.55;
   border-color: var(--px-border);
@@ -296,7 +309,7 @@
   min-height: 0;
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs .px-list {
     max-height: 280px;
     border: 1px solid var(--px-border);
@@ -604,7 +617,9 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.2rem 0.6rem;
-  padding: 0.18rem 0.25rem;
+  /* The chevron sits in the left padding, so a name that wraps cannot strand it on a line of its own. */
+  position: relative;
+  padding: 0.18rem 0.25rem 0.18rem 1.25rem;
   border-radius: 6px;
   cursor: pointer;
   list-style: none;
@@ -624,8 +639,9 @@
 #krabka-proofs .px-goal > summary::before,
 #krabka-proofs .px-node > summary::before {
   content: '';
-  flex: none;
-  align-self: center;
+  position: absolute;
+  top: 0.6rem;
+  left: 0.25rem;
   width: 0.4rem;
   height: 0.4rem;
   border-right: 1.6px solid var(--px-muted);
@@ -775,19 +791,33 @@
   background: var(--px-pink);
 }
 
-/* Live status cell, filled by the browser re-check. */
+/* Live status cell, filled by the browser re-check. A fixed width on one line
+ * (the full text is its tooltip), so the bar beside it does not change length
+ * as the statuses stream in. Empty, it takes no room. */
 #krabka-proofs .px-live {
   flex: none;
-  min-width: 5.5rem;
+  width: 14rem;
   font-family: var(--px-mono);
   font-size: 0.6875rem;
   color: var(--px-muted);
-  overflow-wrap: anywhere;
-  word-break: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-#krabka-proofs .px-live:empty::before {
-  content: '';
+#krabka-proofs .px-live:empty {
+  display: none;
+}
+
+/* On a phone the row wraps, so the status takes a line of its own and wraps too. */
+@media (max-width: 40rem) {
+  #krabka-proofs .px-live {
+    flex: 1 1 100%;
+    width: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
 }
 
 #krabka-proofs .px-live-proved {
@@ -898,12 +928,12 @@
   word-break: normal;
 }
 
+/* Fixed, so the panel's scroll box cannot clip it; explorer.js sets top and
+ * left from the pill (under it, or above when there is no room below). */
 #krabka-proofs .px-prover-help {
   display: none;
-  position: absolute;
+  position: fixed;
   z-index: 10;
-  bottom: 100%;
-  left: 0;
   width: min(18rem, 55vw);
   padding: 0.65rem;
   border: 1px solid var(--px-border-strong);
@@ -914,8 +944,8 @@
   white-space: normal;
 }
 
-#krabka-proofs .px-prover:hover .px-prover-help,
-#krabka-proofs .px-prover:focus .px-prover-help {
+#krabka-proofs .px-prover:not([data-dismissed]):hover .px-prover-help,
+#krabka-proofs .px-prover:not([data-dismissed]):focus .px-prover-help {
   display: block;
 }
 
@@ -1108,11 +1138,15 @@
  * Once the script has run, the explorer is an app that fills the window under
  * the site header: the session list on the left, one session on the right with
  * its own header, tabs and scrolling body. The page text follows it. In a
- * narrow container everything stacks and the page scrolls as before. */
+ * narrow window everything stacks and the page scrolls as before. The switch is
+ * a viewport query, not a container query: the root itself has to drop its fixed
+ * height, and a container cannot style itself. The app fills the window, so the
+ * two widths are the same. */
 
 #krabka-proofs.px-app {
   display: flex;
-  height: max(620px, calc(100dvh - 8.5rem));
+  /* --px-top is the header's measured height (explorer.js); the fallback is its usual one. */
+  height: max(620px, calc(100dvh - var(--px-top, 8.5rem) - 0.5rem));
   margin: 0;
   padding: 0.6rem;
   border-radius: 0;
@@ -1211,7 +1245,8 @@
   gap: 0.15rem;
   padding: 0 0.7rem;
   border-bottom: 1px solid var(--px-border);
-  overflow-x: auto;
+  /* Wraps rather than scrolling: a cut-off last tab gave no cue that it was there. */
+  flex-wrap: wrap;
   flex: none;
 }
 
@@ -1253,7 +1288,7 @@
   background: rgba(255, 255, 255, 0.08);
   color: var(--px-muted);
   font-family: var(--px-mono);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 500;
 }
 
@@ -1272,7 +1307,7 @@
   margin-top: 0;
 }
 
-@container (max-width: 48rem) {
+@media (max-width: 60rem) {
   #krabka-proofs.px-app {
     display: block;
     height: auto;
@@ -1296,6 +1331,8 @@
   }
   #krabka-proofs.px-app .px-detail {
     overflow: visible;
+    /* Picking a session scrolls here; keep the top clear of the site header. */
+    scroll-margin-top: 5rem;
   }
   #krabka-proofs.px-app .px-panels {
     overflow: visible;
@@ -1313,12 +1350,19 @@
   margin: 0.5rem 0 0;
 }
 
+/* The basis keeps the message readable: Retry, Wrap and Copy wrap onto the next line instead of squeezing it. */
 #krabka-proofs .px-code-status {
-  flex: 1;
+  flex: 1 1 12rem;
   min-width: 0;
   font-size: 0.78rem;
   color: var(--px-muted);
   overflow-wrap: anywhere;
+}
+
+/* After the rule above, which would otherwise win the colour at equal specificity. */
+#krabka-proofs .px-code-status.px-error {
+  margin: 0;
+  color: var(--px-error);
 }
 
 #krabka-proofs .px-btn-sm {
@@ -1328,7 +1372,9 @@
 
 #krabka-proofs .px-pre.px-code {
   counter-reset: px-line;
-  max-height: none;
+  /* Sized to fit under the note and bar in the app's scrolling panel, so the
+   * block scrolls on both axes and its horizontal scrollbar is in view. */
+  max-height: max(10rem, calc(100dvh - var(--px-top, 8.5rem) - 19.5rem));
   padding: 0.6rem 0;
   overflow: auto;
   white-space: pre;
@@ -1341,6 +1387,21 @@
 #krabka-proofs .px-pre.px-code.px-wrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Stacked, the page scrolls and the panel is not a box of its own. */
+@media (max-width: 60rem) {
+  #krabka-proofs .px-pre.px-code {
+    max-height: 70dvh;
+  }
+}
+
+/* Wrapped text hangs under the code, not the line number: the padding is the
+ * gutter (3.4rem number + 0.7rem margin) and the negative indent pulls the
+ * number back out into it. */
+#krabka-proofs .px-code.px-wrap .px-line {
+  padding-left: 4.1rem;
+  text-indent: -4.1rem;
 }
 
 #krabka-proofs .px-code .px-line {
@@ -1357,7 +1418,8 @@
   padding-right: 0.9rem;
   margin-right: 0.7rem;
   text-align: right;
-  color: #6b7280;
+  text-indent: 0;
+  color: #8b949e;
   border-right: 1px solid var(--px-border);
   user-select: none;
 }
@@ -1375,3 +1437,77 @@
 #krabka-proofs .px-hl-comment { color: #8b949e; }
 #krabka-proofs .px-hl-attr { color: #9ca3af; }
 #krabka-proofs .px-hl-expl { color: #c4b5fd; font-weight: 600; }
+
+/* ---- touch ------------------------------------------------------------------ */
+
+/* A coarse pointer needs controls of at least 32px. Rows grow by padding, so
+ * the list keeps its look; fields go to 16px so iOS does not zoom on focus. */
+@media (pointer: coarse) {
+  #krabka-proofs .px-item {
+    padding-block: 0.4rem;
+  }
+  #krabka-proofs .px-group-title {
+    padding-block: 0.5rem;
+  }
+  #krabka-proofs .px-chip {
+    padding-block: 0.4rem;
+  }
+  #krabka-proofs .px-btn,
+  #krabka-proofs .px-input,
+  #krabka-proofs .px-formula-toggle {
+    min-height: 2rem;
+  }
+  #krabka-proofs .px-input,
+  #krabka-proofs .px-obfilter {
+    font-size: 1rem;
+  }
+  #krabka-proofs .px-sidebar-toggle,
+  #krabka-proofs .px-ob-source > summary {
+    padding-block: 0.5rem;
+  }
+  #krabka-proofs .px-goal > summary,
+  #krabka-proofs .px-node > summary {
+    padding-block: 0.48rem;
+  }
+  #krabka-proofs .px-goal > summary::before,
+  #krabka-proofs .px-node > summary::before {
+    top: 0.9rem;
+  }
+  #krabka-proofs .px-prover {
+    padding-block: 0.45rem;
+  }
+  /* The dotted underline is a border on desktop; here it is text decoration so it stays with the text. */
+  #krabka-proofs .px-link,
+  #krabka-proofs a.px-ob-span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    border-bottom: 0;
+    text-decoration: underline dotted var(--px-border-strong);
+    text-underline-offset: 0.25em;
+  }
+}
+
+/* ---- forced colours ---------------------------------------------------------- */
+
+/* Shadows, backgrounds and accent colours are dropped: the selected row needs
+ * a ring and the selected tab a line in system colours, and the time bars a
+ * fill that survives. */
+@media (forced-colors: active) {
+  #krabka-proofs .px-item.px-active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+    font-weight: 700;
+  }
+  #krabka-proofs .px-tab-active {
+    border-bottom-color: Highlight;
+  }
+  #krabka-proofs .px-bar {
+    border: 1px solid CanvasText;
+  }
+  #krabka-proofs .px-bar > span {
+    forced-color-adjust: none;
+    background: CanvasText;
+    opacity: 1;
+  }
+}

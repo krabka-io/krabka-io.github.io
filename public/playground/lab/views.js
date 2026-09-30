@@ -11,7 +11,7 @@
 // Tables carry `data-row` and `data-col` and key/value rows `data-field`, the
 // hooks `scripts/check-lab.mjs` reads the page by.
 
-import { el, fmtNum, fmtBytes, shortJson } from "./dom.js";
+import { el, fmtNum, fmtBytes, plural, shortJson } from "./dom.js";
 import { jsonTree } from "./json-tree.js";
 
 // Render the view for `kind`; `ctx` gives `nodeName(id)` and the tree state.
@@ -36,7 +36,6 @@ export function renderView(kind, state, ctx) {
 }
 
 const VIEWS = {
-  broker: renderBroker,
   "krabka-broker": renderRealBroker,
   "schema-registry": renderRegistry,
   producer: renderProducer,
@@ -46,301 +45,6 @@ const VIEWS = {
   pinger: renderCounters,
   admin: renderAdmin,
 };
-
-// ---- broker -----------------------------------------------------------------------
-
-// The simulated broker (`lab::broker`): its lifecycle, its share of the
-// KRaft quorum, the channels to the active controller, its pending ISR
-// changes and producer-id blocks, the groups it coordinates, and the
-// partitions it hosts.
-function renderBroker(root, s, used, ctx) {
-  const q = pickObj(s, used, "quorum") || {};
-  const life = pickObj(s, used, "lifecycle") || {};
-  const me = take(s, used, "broker_id");
-  const brokers = asList(take(s, used, "brokers"), "id") || [];
-  const self = brokers.find((b) => b.id === me);
-  const controller = take(s, used, "controller_id");
-  const brokerLabel = (id) => (id == null ? null : ctx.nodeLabelForBroker(id));
-
-  const rows = [];
-  addRow(rows, "broker id", me, "broker_id");
-  addRow(rows, "state", take(s, used, "state") ?? life.state, "state");
-  addRow(rows, "fenced", life.fenced, "fenced");
-  addRow(rows, "registered", life.registered, "registered");
-  addRow(rows, "broker epoch", life.broker_epoch, "broker_epoch");
-  addRow(rows, "incarnation", shortText(life.incarnation_id, 13), "incarnation");
-  addRow(rows, "rack", self?.rack, "rack");
-  addRow(rows, "cluster id", take(s, used, "cluster_id"), "cluster_id");
-  addRow(rows, "client connections", take(s, used, "connections"), "connections");
-  addRow(rows, "controller connections", take(s, used, "controller_connections"), "controller_connections");
-  addRow(rows, "held requests", take(s, used, "held_requests"), "held_requests");
-  root.appendChild(section("Broker", kv(rows)));
-
-  const qr = [];
-  addRow(qr, "role", q.role, "quorum_role");
-  addRow(qr, "votes", q.voter === false ? "no: an observer" : q.voter === true ? "yes: a voter" : null, "quorum_votes");
-  addRow(qr, "epoch", q.epoch, "quorum_epoch");
-  addRow(qr, "leader", q.leader != null ? brokerLabel(q.leader) : "none", "quorum_leader");
-  addRow(qr, "voters", Array.isArray(q.voters) ? q.voters.join(", ") : null, "quorum_voters");
-  if (Array.isArray(q.observers) && q.observers.length) addRow(qr, "observers", q.observers.join(", "), "quorum_observers");
-  addRow(qr, "high watermark", q.hwm, "quorum_hwm");
-  addRow(qr, "log end", q.leo, "quorum_leo");
-  addRow(qr, "applied up to", q.metadata_offset, "quorum_applied");
-  addRow(qr, "active controller", q.active ? "this broker" : controller != null ? brokerLabel(controller) : "none known", "controller");
-  const quorumBody = el("div");
-  quorumBody.appendChild(kv(qr));
-  const why = observerNote(q, ctx.spec);
-  if (why) quorumBody.appendChild(note(why, "observer-note"));
-  root.appendChild(section("KRaft quorum", quorumBody));
-
-  const channels = take(s, used, "channels");
-  if (channels && typeof channels === "object") {
-    const list = Object.entries(channels).map(([name, c]) => ({ name, ...(c || {}) }));
-    root.appendChild(
-      section(
-        "Controller channels",
-        table(
-          [
-            { key: "name", label: "channel" },
-            { key: "controller", label: "controller", render: (v) => (v == null ? "–" : String(v)) },
-            { key: "connected", label: "connected", render: bool },
-            { key: "queued", label: "queued" },
-            { key: "in_flight", label: "in flight", render: (v) => v ?? "–" },
-          ],
-          list,
-          { rowKey: (r) => r.name },
-        ),
-        { open: false },
-      ),
-    );
-  }
-
-  const topics = asList(take(s, used, "topics"), "name") || [];
-  const isr = take(s, used, "isr_changes");
-  const pending = [];
-  for (const t of topics) for (const p of t.partitions || []) if (Array.isArray(p.pending_isr)) pending.push({ partition: `${t.name}-${p.index}`, isr: p.isr, proposed: p.pending_isr });
-  if (isr && typeof isr === "object") {
-    const body = el("div");
-    const ir = [];
-    addRow(ir, "queued", Array.isArray(isr.queued) && isr.queued.length ? isr.queued.join(", ") : "none", "isr_queued");
-    addRow(ir, "AlterPartition in flight", Boolean(isr.in_flight), "isr_in_flight");
-    body.appendChild(kv(ir));
-    if (pending.length) {
-      body.appendChild(
-        table(
-          [
-            { key: "partition", label: "partition" },
-            { key: "isr", label: "ISR", render: idList },
-            { key: "proposed", label: "proposed", render: idList },
-          ],
-          pending,
-          { rowKey: (r) => r.partition },
-        ),
-      );
-    }
-    root.appendChild(section(`Pending ISR changes (${pending.length})`, body, { open: pending.length > 0 }));
-  }
-
-  const pids = take(s, used, "producer_ids");
-  if (pids && typeof pids === "object") {
-    const pr = [];
-    addRow(pr, "next id", pids.next_id ?? "none: no block yet", "pid_next");
-    addRow(pr, "block ends at", pids.block_end, "pid_block_end");
-    addRow(pr, "next block", pids.next_block, "pid_next_block");
-    addRow(pr, "asking the controller", Boolean(pids.requesting), "pid_requesting");
-    root.appendChild(section("Producer-id blocks", kv(pr), { open: false }));
-  }
-
-  const groups = take(s, used, "groups");
-  if (groups && typeof groups === "object") root.appendChild(renderCoordinator(groups, ctx));
-
-  if (brokers.length) {
-    root.appendChild(
-      section(
-        `Registered brokers (${brokers.length})`,
-        table(
-          [
-            { key: "id", label: "broker", render: (v) => brokerLabel(v) },
-            { key: "rack", label: "rack", render: (v) => v ?? "–" },
-            { key: "fenced", label: "fenced", render: bool },
-          ],
-          brokers,
-          { rowKey: (r) => String(r.id) },
-        ),
-        { open: false },
-      ),
-    );
-  }
-
-  const user = topics.filter((t) => !t.internal);
-  const internal = topics.filter((t) => t.internal);
-  // Kafka's `kafka-topics --describe` columns, with this broker's copy of
-  // the log: its high watermark and log end, and, where it leads, each
-  // follower's log end and lag.
-  const partitionTable = (t) => {
-    const parts = t.partitions || [];
-    const columns = [
-      { key: "index", label: "p" },
-      { key: "leader", label: "leader", render: (v) => (v == null ? "none" : String(v)) },
-      { key: "leader_epoch", label: "ep" },
-      { key: "replicas", label: "replicas", render: idList },
-      { key: "isr", label: "ISR", render: (v, p) => (Array.isArray(p.pending_isr) ? `${idList(v)} → ${idList(p.pending_isr)}` : idList(v)) },
-      { key: "hwm", label: "HWM", render: (v) => (v == null ? "–" : fmtNum(v)) },
-      { key: "log_end", label: "LEO", render: (v, p) => logEnd(v, p) },
-    ];
-    if (parts.some((p) => Array.isArray(p.followers) && p.followers.length)) columns.push({ key: "followers", label: "followers", render: followerList });
-    return table(columns, parts, { rowKey: (p) => `${t.name}-${p.index}` });
-  };
-  if (user.length) {
-    const body = el("div");
-    for (const t of user) {
-      const parts = t.partitions || [];
-      const led = parts.filter((p) => p.leader === me).length;
-      const title = `${t.name} · ${parts.length} partition${parts.length === 1 ? "" : "s"} · leads ${led}`;
-      body.appendChild(section(title, partitionTable(t), { open: user.length <= 3, nested: true }));
-    }
-    root.appendChild(section(`Topics (${user.length})`, body));
-  }
-  if (internal.length) {
-    const body = el("div");
-    for (const t of internal) {
-      const parts = t.partitions || [];
-      const led = parts.filter((p) => p.leader === me).length;
-      body.appendChild(section(`${t.name} · ${parts.length} partitions · leads ${led}`, partitionTable(t), { open: false, nested: true }));
-    }
-    root.appendChild(section(`Internal topics (${internal.length})`, body, { open: false }));
-  }
-
-  const requests = take(s, used, "requests");
-  if (requests && typeof requests === "object") {
-    root.appendChild(section("Requests served", bars(Object.entries(requests).map(([label, value]) => ({ label, value: Number(value) || 0 }))), { open: false }));
-  }
-}
-
-// Why a broker observes the quorum instead of voting, or null when it votes.
-function observerNote(q, spec) {
-  if (!q || q.voter !== false) return null;
-  const voters = Array.isArray(q.voters) && q.voters.length ? q.voters.join(", ") : "none";
-  if (spec && spec.config && spec.config.voter === false) {
-    return "An observer by configuration (voter unchecked): it replicates the metadata log and never votes.";
-  }
-  return `An observer because it joined a running scenario. A KRaft quorum without KIP-853 is static: its voters (${voters}) were fixed when the scenario loaded. This broker replicates the metadata log without a vote, and becomes a voter the next time the scenario loads (a page reload, or reopening it from Saved).`;
-}
-
-// The group coordinator's part of a broker snapshot: the groups it
-// coordinates, their members and their committed offsets.
-function renderCoordinator(g, ctx) {
-  const groups = g.groups && typeof g.groups === "object" ? Object.entries(g.groups) : [];
-  const offsets = g.offsets && typeof g.offsets === "object" ? g.offsets : {};
-  const body = el("div");
-  const loaded = Array.isArray(g.loaded_partitions) ? g.loaded_partitions : [];
-  const gr = [];
-  addRow(gr, "__consumer_offsets partitions it leads", loaded.length ? `${loaded.length} of 50` : "none", "coordinator_partitions");
-  addRow(gr, "held requests", g.held_requests, "coordinator_held");
-  body.appendChild(kv(gr));
-  if (!groups.length) body.appendChild(el("p", "lab-muted lab-small", "No group lives on the partitions this broker leads."));
-  for (const [id, group] of groups) {
-    const inner = el("div");
-    const rows = [];
-    addRow(rows, "type", group.type, "group_type");
-    addRow(rows, "state", group.state, "group_state");
-    addRow(rows, group.type === "classic" ? "generation" : "group epoch", group.generation ?? group.group_epoch, "group_epoch");
-    addRow(rows, "assignment epoch", group.assignment_epoch, "group_assignment_epoch");
-    addRow(rows, "topology epoch", group.topology_epoch, "group_topology_epoch");
-    if (group.status && typeof group.status === "object") addRow(rows, "status", group.status.detail ?? group.status.code, "group_status");
-    if (group.protocol_name) addRow(rows, "protocol", group.protocol_name, "group_protocol");
-    inner.appendChild(kv(rows));
-    const members = Array.isArray(group.members) ? group.members : [];
-    inner.appendChild(
-      table(
-        [
-          { key: "client_id", label: "member", render: (v, m) => titled(v ?? shortText(m.member_id, 10), `member id ${m.member_id}`) },
-          { key: "epoch", label: "epoch", get: (m) => m.member_epoch ?? (group.type === "classic" ? group.generation : null) },
-          { key: "state", label: "state", get: (m) => m.state ?? (m.awaiting_join ? "awaiting join" : m.awaiting_sync ? "awaiting sync" : "stable") },
-          {
-            key: "assigned",
-            label: "assigned",
-            get: (m) => m.assigned ?? m.tasks,
-            render: (v, m) => {
-              const revoking = assignedText(m.pending_revocation);
-              return revoking && revoking !== "none" && revoking !== "–" ? `${assignedText(v)}, revoking ${revoking}` : assignedText(v);
-            },
-          },
-        ],
-        members,
-        { rowKey: (m) => String(m.member_id) },
-      ),
-    );
-    const committed = Array.isArray(offsets[id]) ? offsets[id] : [];
-    if (committed.length) {
-      inner.appendChild(
-        section(
-          `Committed offsets (${committed.length})`,
-          table(
-            [
-              { key: "topic", label: "topic" },
-              { key: "partition", label: "p" },
-              { key: "offset", label: "offset" },
-              { key: "leader_epoch", label: "epoch" },
-              { key: "commit_timestamp", label: "at", render: (v) => (v == null ? "–" : `${fmtNum(v)} ms`) },
-            ],
-            committed,
-            { rowKey: (o) => `${o.topic}-${o.partition}` },
-          ),
-          { open: false, nested: true },
-        ),
-      );
-    }
-    body.appendChild(section(`${id} · ${group.type ?? "group"} · ${group.state ?? "?"} · ${members.length} member${members.length === 1 ? "" : "s"}`, inner, { open: groups.length <= 2, nested: true }));
-  }
-  return section(`Groups it coordinates (${groups.length})`, body);
-}
-
-// `{topic: [partitions]}` or a streams member's `{active, standby, warmup}`
-// task maps, as one line.
-function assignedText(v) {
-  if (v == null) return "–";
-  if (typeof v !== "object") return String(v);
-  if ("active" in v || "standby" in v || "warmup" in v) {
-    const parts = [];
-    for (const role of ["active", "standby", "warmup"]) {
-      const tasks = v[role];
-      if (!tasks || typeof tasks !== "object") continue;
-      const ids = Object.entries(tasks).flatMap(([sub, ps]) => (Array.isArray(ps) ? ps.map((p) => `${sub}_${p}`) : []));
-      if (ids.length) parts.push(`${role} ${ids.join(" ")}`);
-    }
-    return parts.length ? parts.join("; ") : "none";
-  }
-  const parts = Object.entries(v).map(([t, ps]) => `${t}[${Array.isArray(ps) ? ps.join(",") : ps}]`);
-  return parts.length ? parts.join(" ") : "none";
-}
-
-// The followers a leader tracks: `id:leo` with the lag when there is one.
-function followerList(v) {
-  if (!Array.isArray(v) || !v.length) return "–";
-  return v.map((f) => `${f.id}:${f.leo}${f.lag_ms ? ` (${fmtNum(f.lag_ms)} ms)` : ""}`).join(" ");
-}
-
-// This broker's log end, with the log start in the tooltip; a partition the
-// broker holds no replica of has none.
-function logEnd(v, p) {
-  if (v == null) return titled("–", "no replica on this broker");
-  return titled(fmtNum(v), `log ${fmtNum(p.log_start)}–${fmtNum(v)} · ${fmtNum(p.batches)} batches · ${fmtBytes(p.size_bytes)} · fetch ${p.fetch_state}`);
-}
-
-// Text with a tooltip.
-function titled(text, title) {
-  const span = el("span", null, String(text));
-  span.title = title;
-  return span;
-}
-
-// A sentence under a section, with a hook for the end-to-end check.
-function note(text, field) {
-  const p = el("p", "lab-note lab-small", text);
-  if (field) p.dataset.field = field;
-  return p;
-}
 
 // ---- real broker ------------------------------------------------------------------
 
@@ -380,7 +84,7 @@ function renderRealBroker(root, s, used, ctx) {
   }
   for (const stream of ["stdout", "stderr"]) {
     const lines = take(s, used, stream);
-    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${lines.length} lines)`, logBlock(lines, stream), { open: false }));
+    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${plural(lines.length, "line")})`,logBlock(lines, stream), { open: false }));
   }
   const runtime = take(s, used, "runtime");
   if (runtime && typeof runtime === "object") {
@@ -1072,14 +776,6 @@ function withUnit(v, unit) {
   return v == null ? null : `${v}${unit}`;
 }
 
-function countValue(v) {
-  if (v == null) return null;
-  if (typeof v === "number") return v;
-  if (Array.isArray(v)) return v.length;
-  if (typeof v === "object") return Object.keys(v).length;
-  return v;
-}
-
 // Take the first present key out of `state`, marking every alias used.
 function take(s, used, ...keys) {
   let found;
@@ -1101,26 +797,6 @@ function omit(s, used) {
   const out = {};
   for (const [k, v] of Object.entries(s)) if (!used.has(k)) out[k] = v;
   return out;
-}
-
-// A list from an array or from a map keyed by `keyName`.
-function asList(v, keyName) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? x : { [keyName]: x }));
-  if (typeof v === "object") {
-    return Object.entries(v).map(([k, x]) => (x && typeof x === "object" && !Array.isArray(x) ? { [keyName]: keyOrNumber(k), ...x } : { [keyName]: keyOrNumber(k), value: x }));
-  }
-  return null;
-}
-
-function keyOrNumber(k) {
-  return /^\d+$/.test(k) ? Number(k) : k;
-}
-
-function idList(v) {
-  if (v == null) return "–";
-  const list = Array.isArray(v) ? v : [v];
-  return list.map((r) => (r && typeof r === "object" ? (r.id ?? r.broker ?? "?") : String(r))).join(" ");
 }
 
 function valueText(v) {

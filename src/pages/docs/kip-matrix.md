@@ -205,7 +205,7 @@ invented to pad a one-row-per-integer table.
 
 > The streams sub-KIPs below are implemented in `krabka-client-streams`, which
 > is itself ⚠️ partial versus the JVM Kafka Streams library (see
-> [§2](#2-partially-implemented--what-is-left)). They are listed here because the
+> [§2](#2-partially-implemented-%EF%B8%8F--what-is-left)). They are listed here because the
 > individual DSL/runtime features exist and are golden-tested against JVM
 > capture.
 

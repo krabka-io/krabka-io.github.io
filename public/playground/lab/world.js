@@ -19,6 +19,8 @@
 // and blocked again before time moves on. That keeps a real process on the
 // lab's logical clock, like the nodes the module runs.
 
+import { REAL_BROKER_KIND, realConfigFromSimulated } from "./external.js";
+
 export const SPEEDS = [0.1, 0.5, 1, 2, 5, 20];
 const SNAPSHOT_INTERVAL_MS = 50;
 // A background tab stops its animation frames; when it comes back, do not
@@ -142,7 +144,8 @@ export class LabWorld {
   // `onSnapshot(snapshot)`, `onEvents(events)`, `onEgress(timedFrames)` (due
   // frames for nodes hosted elsewhere), `onDurable(ops)`, `onLoad(doc,
   // images)` (a new world was built, from these durable images) and
-  // `onChange()` (the scenario document changed).
+  // `onChange()` (the scenario document changed) and `onUpgrade(ids)` (a
+  // loaded scenario's simulated brokers, by node id, now run the real one).
   constructor(Lab, hooks) {
     this.Lab = Lab;
     this.hooks = hooks;
@@ -219,7 +222,10 @@ export class LabWorld {
   // this peer hosts. `images` is the durable state per node id, as
   // `storage.js` folded it, handed to the nodes before they start.
   load(scenario, hostedIds = null, images = null) {
-    const doc = normalizeScenario(scenario);
+    const up = upgradeSimulatedBrokers(scenario);
+    const doc = normalizeScenario(up.doc);
+    // A simulated broker's durable image means nothing to the real broker.
+    if (images && up.ids.length) images = Object.fromEntries(Object.entries(images).filter(([id]) => !up.ids.includes(Number(id))));
     const json = JSON.stringify(doc);
     if (!this.lab) this.lab = this.guard("create world", () => new this.Lab(u64(doc.seed)));
     if (!this.lab) return false;
@@ -246,6 +252,7 @@ export class LabWorld {
     this.hooks.onLoad?.(doc, images || {});
     this.afterReset();
     this.external?.sync();
+    if (up.ids.length) this.hooks.onUpgrade?.(up.ids);
     return true;
   }
 
@@ -254,7 +261,8 @@ export class LabWorld {
   // positions are copied. Anything the crate cannot change in place (seed,
   // link defaults, topics) forces a full reload.
   reconcile(scenario, hostedIds) {
-    const next = normalizeScenario(scenario);
+    const up = upgradeSimulatedBrokers(scenario);
+    const next = normalizeScenario(up.doc);
     const cur = this.scenario();
     if (
       !this.lab ||
@@ -263,7 +271,9 @@ export class LabWorld {
       cur.links.default_latency_ms !== next.links.default_latency_ms ||
       JSON.stringify(cur.topics) !== JSON.stringify(next.topics)
     ) {
-      return this.load(next, hostedIds);
+      const ok = this.load(next, hostedIds);
+      if (ok && up.ids.length) this.hooks.onUpgrade?.(up.ids);
+      return ok;
     }
     const curById = new Map(cur.nodes.map((n) => [n.id, n]));
     const nextById = new Map(next.nodes.map((n) => [n.id, n]));
@@ -295,6 +305,7 @@ export class LabWorld {
     if (hostedIds !== undefined) this.setHosted(hostedIds);
     else this.external?.sync();
     this.hooks.onChange();
+    if (up.ids.length) this.hooks.onUpgrade?.(up.ids);
     return true;
   }
 
@@ -713,6 +724,26 @@ export class LabWorld {
   }
 }
 
+// Scenarios saved, shared or exported before the simulated broker was removed
+// still say `kind: "broker"`. The crate rejects that kind, so the page turns
+// each into a real broker on the same node id (links, clients and bootstrap
+// references stay valid) with the settings the real broker has. Idempotent:
+// a document without simulated brokers comes back as it is, with no ids.
+export function upgradeSimulatedBrokers(scenario) {
+  const nodes = scenario?.nodes;
+  if (!Array.isArray(nodes) || !nodes.some((n) => n?.kind === "broker")) return { doc: scenario, ids: [] };
+  const ids = [];
+  const doc = {
+    ...scenario,
+    nodes: nodes.map((n) => {
+      if (n?.kind !== "broker") return n;
+      ids.push(Number(n.id));
+      return { ...n, kind: REAL_BROKER_KIND, config: realConfigFromSimulated(n.config) };
+    }),
+  };
+  return { doc, ids };
+}
+
 // Fill the defaults of a scenario document so the crate, which rejects unknown
 // keys and needs `version`, accepts what the page hands it.
 export function normalizeScenario(input) {
@@ -723,15 +754,17 @@ export function normalizeScenario(input) {
     name: typeof s.name === "string" ? s.name : "",
     links: { default_latency_ms: Number(s.links?.default_latency_ms ?? 5) },
     link_overrides: Array.isArray(s.link_overrides) ? s.link_overrides : [],
-    nodes: (Array.isArray(s.nodes) ? s.nodes : []).map((n) => ({
+    nodes: (Array.isArray(s.nodes) ? s.nodes : []).map((n, i) => ({
       id: Number(n.id) || 0,
       kind: String(n.kind || ""),
-      name: typeof n.name === "string" ? n.name : "",
-      x: Number(n.x) || 0,
-      y: Number(n.y) || 0,
+      // A blank name would leave a card with no title; the Add dialog falls back the same way.
+      name: (typeof n.name === "string" && n.name.trim()) || (n.kind && Number(n.id) ? `${n.kind}-${Number(n.id)}` : ""),
+      // A file without positions gets a grid instead of one stacked point.
+      x: n.x == null ? 140 + (i % 5) * 210 : Number(n.x) || 0,
+      y: n.y == null ? 100 + Math.floor(i / 5) * 140 : Number(n.y) || 0,
       config: n.config && typeof n.config === "object" ? n.config : {},
     })),
-    topics: (Array.isArray(s.topics) ? s.topics : []).map((t) => {
+    topics: (Array.isArray(s.topics) ? s.topics : []).filter((t) => t && typeof t === "object").map((t) => {
       const topic = {
         name: String(t.name || ""),
         partitions: Number(t.partitions) || 1,

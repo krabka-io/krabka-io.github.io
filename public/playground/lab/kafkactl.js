@@ -2,6 +2,7 @@
 // It sends complete Kafka frames; the world applies the same link rules as
 // for every other external node before they reach a broker.
 export const LOCAL_CLIENT_KIND = "local-client";
+export const NO_CLIENT_NODE = "Add a local kafkactl client node to this lab scenario";
 const ADDRESS = "ws://127.0.0.1:19092/bridge";
 
 export class KafkactlBridge {
@@ -23,8 +24,8 @@ export class KafkactlBridge {
   }
 
   connect(token) {
-    this.disconnect();
     if (!token) throw new Error("Enter the token printed by kafkactl lab bridge.");
+    this.disconnect();
     this.status("connecting", "Waiting for the local bridge and browser permission");
     const socket = new WebSocket(ADDRESS);
     this.socket = socket;
@@ -42,7 +43,7 @@ export class KafkactlBridge {
         } else if (message.type === "configured") {
           configured = true;
           if (this.invalidBroker) this.status("error", "A real broker ID must be between 1 and 10000 to use the local bridge");
-          else if (this.node == null) this.status("error", "Add a local kafkactl client node to this lab scenario");
+          else if (this.node == null) this.status("error", NO_CLIENT_NODE);
           else if (message.brokers.length === 0) this.status("error", "Add a real broker to this lab scenario");
           else this.status("connected", `Listening for ${message.brokers.length} real broker${message.brokers.length === 1 ? "" : "s"}`);
           if (this.state === "error") reject(new Error(this.reason));

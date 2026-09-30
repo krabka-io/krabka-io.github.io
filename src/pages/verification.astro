@@ -59,9 +59,8 @@ const localEvidence: EvidenceItem[] = [
     title: 'Mutation testing with cargo-mutants',
     kind: 'Mutation testing',
     area: 'Independent failure signals',
-    claim: 'cargo-mutants inserts faults into production code and the suite must detect each one; sweeps run weekly per crate.',
+    claim: 'cargo-mutants inserts faults into production code and the suite must detect each one; sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.',
     body_html: [
-      `<p><code>cargo-mutants</code> inserts faults into production code and the suite must detect each one. Sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.</p>`,
       `<p>A proof can have a bad adapter and a test can repeat the implementation's mistake, so Krabka layers checks whose failure modes are independent of each other. A surviving mutant is a fault the test suite did not detect, whatever the proofs and the models say about the same code.</p>`,
       `<p>Mutation testing stands in for authorship only while it is actually running. The <a href="${mutantsBaselinePath}">mutation sweep baseline</a> records the last run in which each swept crate came back with no survivor.</p>`,
     ].join(''),
@@ -431,6 +430,9 @@ const articleSchema = {
   .drill-body a {
     font-weight: 600;
     color: #ff8466;
+    /* A link in a sentence is told apart from the text by more than its colour. */
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
     overflow-wrap: anywhere;
   }
 

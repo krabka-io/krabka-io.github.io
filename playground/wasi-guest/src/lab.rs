@@ -7,8 +7,11 @@
 //! its volume, runs a 100 ms heartbeat, and serves every listener. Like a
 //! combined-mode broker that reaches its own controller over the network, it
 //! dials its own controller listener at every boot and reports on stdout
-//! whether a Kafka frame came back ([`self_dial`]). The first bytes of a
-//! connection decide what it is:
+//! whether a Kafka frame came back ([`self_dial`]). It logs JSON lines on
+//! stderr like the broker does ([`crate::log`]): one line per level at every
+//! boot, then an `INFO` heartbeat line per second of guest time, all
+//! filtered by `KRABKA_LOG`. The first bytes of a connection decide what it
+//! is:
 //!
 //! | First line | Effect |
 //! | --- | --- |
@@ -33,6 +36,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::log::{self, Level};
 use crate::{control, net};
 
 /// The heartbeat period, in guest time.
@@ -181,6 +185,7 @@ struct Lab {
 /// Runs the lab mode: checks the contract, records the boot, then serves
 /// until the process is stopped.
 pub async fn run(started: Instant) {
+    log::init(started);
     let contract = Contract::from_env().unwrap_or_else(|err| {
         eprintln!("[lab-guest] bad process contract: {err}");
         std::process::exit(2);
@@ -200,6 +205,14 @@ pub async fn run(started: Instant) {
             std::process::exit(2);
         });
         tokio::spawn(serve(listener, Arc::clone(&lab)));
+    }
+    for level in [Level::Trace, Level::Debug, Level::Info, Level::Warn, Level::Error] {
+        log::log(
+            level,
+            "lab_guest::boot",
+            &format!("boot {boots} logs at {}", level.name()),
+            &[("node_id", contract.node_id.to_string())],
+        );
     }
     tokio::spawn(heartbeat(Arc::clone(&lab)));
     tokio::spawn(self_dial(contract.host, contract.dial));
@@ -274,7 +287,15 @@ async fn heartbeat(lab: Arc<Lab>) {
     let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT, HEARTBEAT);
     loop {
         interval.tick().await;
-        lab.ticks.fetch_add(1, Ordering::Relaxed);
+        let ticks = lab.ticks.fetch_add(1, Ordering::Relaxed) + 1;
+        if ticks.is_multiple_of(10) {
+            log::log(
+                Level::Info,
+                "lab_guest::heartbeat",
+                "heartbeat",
+                &[("ticks", ticks.to_string())],
+            );
+        }
     }
 }
 

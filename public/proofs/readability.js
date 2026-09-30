@@ -48,8 +48,10 @@ export function tokenText(token, useWords) {
   return useWords && token.kind === "operator" ? ` ${readableOperators.get(token.text) ?? operators.get(token.text)} ` : token.text;
 }
 
+// A digit right after an identifier or a prime (Missing'0) is Why3's name
+// suffix, not a literal, so the last alternative skips it.
 function basicTokens(formula) {
-  return formula.split(/("(?:\\.|[^"\\])*"|\[@[^\]]*\]|\[%#[^\]]*\]|\b(?:gt|ge)_log_Int\s+\(UInt(?:8|16|32|64|128)\.t'int\s+\w+\)\s+-?\d+(?![\w'.])|\bUInt(?:8|16|32|64|128)\.t'int\s+\w+(?![\w'.])|\b(?:gt_log_Int|ge_log_Int|cmp_log_Int|UInt(?:8|16|32|64|128)\.t(?:'int)?)(?![\w'.])|<->|->|\/\\|\\\/|<>|<=|>=|[=<>]|\b(?:not|forall|exists|true|false|bool|int)\b|\b\d+\b)/g).filter(Boolean).map((text) => ({
+  return formula.split(/("(?:\\.|[^"\\])*"|\[@[^\]]*\]|\[%#[^\]]*\]|\b(?:gt|ge)_log_Int\s+\(UInt(?:8|16|32|64|128)\.t'int\s+\w+\)\s+-?\d+(?![\w'.])|\bUInt(?:8|16|32|64|128)\.t'int\s+\w+(?![\w'.])|\b(?:gt_log_Int|ge_log_Int|cmp_log_Int|UInt(?:8|16|32|64|128)\.t(?:'int)?)(?![\w'.])|<->|->|\/\\|\\\/|<>|<=|>=|[=<>]|\b(?:not|forall|exists|true|false|bool|int)\b|(?<![\w'])\d+\b)/g).filter(Boolean).map((text) => ({
     text,
     kind: text.startsWith("[@") || text.startsWith("[%#") ? "annotation" : comparisonPattern.test(text) ? "comparison" : projectionPattern.test(text) ? "projection" : operators.has(text) ? "operator" : /^(?:\d+|true|false)$/.test(text) ? "literal" : "plain",
     dataType: comparisonPattern.test(text) || projectionPattern.test(text) || integerFunctions.has(text) || /^UInt\d+\.t'int$/.test(text) || /^\d+$/.test(text) || text === "int" ? "integer" : /^(true|false|bool)$/.test(text) ? "boolean" : /^UInt\d+\.t$/.test(text) ? "unsigned" : null,
@@ -80,8 +82,9 @@ function integerApplication(text, start) {
       const inner = formulaTokens(text.slice(offset + 1, end - 1)).map((t) => tokenText(t, true)).join('').trim();
       return { end, readable: /^[\w']+$/.test(inner) ? inner : `(${inner})` };
     }
-    const value = /^(?:-?\d+|[A-Za-z_][\w']*)(?![\w'.])/.exec(text.slice(offset));
-    return value ? { end: offset + value[0].length, readable: value[0] } : null;
+    // Dotted paths (facts.consumed_at_ms) are one value; `result` reads as in the rest of the formula.
+    const value = /^(?:-?\d+|[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*)(?![\w'.])/.exec(text.slice(offset));
+    return value ? { end: offset + value[0].length, readable: value[0].replace(/^result(?![\w'])/, "returned value") } : null;
   };
   const left = atom(start + fn[0].length);
   if (!left) return null;
@@ -114,10 +117,12 @@ export function readableTokens(tokens) {
   const parts = tokens.flatMap((token) => {
     const display = tokenText(token, true);
     if (!display) return [];
-    const chunks = token.kind === "plain" && token.readable === undefined ? display.split(/("(?:\\.|[^"\\])*"|\b(?:match|with|end|result|Some|None)\b|\.(?=\s|$)|[()|])/g) : [display];
+    // Some'0 and None'1 are the same constructors typed for different Option
+    // types; the suffix tells a reader nothing, so it is dropped from the display.
+    const chunks = token.kind === "plain" && token.readable === undefined ? display.split(/("(?:\\.|[^"\\])*"|\b(?:match|with|end|result|(?:Some|None)(?:'\d+)?)\b|\.(?=\s|$)|[()|])/g) : [display];
     return chunks.filter((text) => text.trim()).map((text) => ({
       ...token,
-      display: text.startsWith('"') ? text : text.trim().replace(/\s+/g, " "),
+      display: text.startsWith('"') ? text : text.trim().replace(/\s+/g, " ").replace(/^(Some|None)'\d+$/, "$1"),
     }));
   });
   const stack = [];

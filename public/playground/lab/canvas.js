@@ -12,21 +12,24 @@
 // The canvas keeps one `<g>` per node, topic and edge and updates it in
 // place, so the reader's focus and the hover state survive snapshots.
 
-import { svg, el, button, setAttrs, clamp } from "./dom.js";
+import { svg, el, button, setAttrs, clamp, plural } from "./dom.js";
 import { kindOf, derivedEdges, topicNames, internalTopics, statusLine } from "./kinds.js";
 
-const CARD_W = 172;
-const CARD_H = 60;
-const GHOST_W = 120;
-const GHOST_H = 34;
-const TOPIC_W = 132;
-const TOPIC_H = 34;
+const CARD_W = 184;
+const CARD_H = 64;
+const GHOST_W = 132;
+const GHOST_H = 36;
+const TOPIC_W = 148;
+const TOPIC_H = 36;
 const MAX_DOTS = 200;
 const MAX_LABELLED_DOTS = 40;
 const DRAG_THRESHOLD = 4;
 const LONG_PRESS_MS = 500;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
+// Fit never zooms out below this: card text stays about 8px or more, and a
+// graph wider than the box is panned instead (the Fit button still shows all).
+const MIN_FIT_ZOOM = 0.7;
 // Edges drawn faint: connections and a streams app's internal topics, not
 // the data flow of the scenario's own topics.
 const FAINT_EDGES = new Set(["bootstrap", "ping", "registry", "changelog", "repartition"]);
@@ -54,6 +57,9 @@ export class Canvas {
     this.userMovedView = false;
     this.drag = null;
     this.longPress = null;
+    // Fingers on the canvas, and the two-finger gesture they make.
+    this.touches = new Map();
+    this.pinch = null;
 
     this.wrap = el("div", "lab-canvas-wrap");
     this.svg = svg("svg", { class: "lab-canvas", tabindex: "0", role: "application", "aria-label": "Cluster canvas" });
@@ -70,7 +76,7 @@ export class Canvas {
 
     this.tools = el("div", "lab-canvas-tools");
     this.tools.append(
-      button("Fit", "lab-btn-sm", () => this.fit(), { title: "Fit every node in view (F)" }),
+      button("Fit", "lab-btn-sm", () => this.fit({ whole: true }), { title: "Fit every node in view (F)" }),
       button("−", "lab-btn-sm", () => this.zoomBy(1 / 1.25), { ariaLabel: "Zoom out" }),
       button("+", "lab-btn-sm", () => this.zoomBy(1.25), { ariaLabel: "Zoom in" }),
       button("?", "lab-btn-sm lab-help-btn", () => hooks.onHelp?.(), { title: "Shortcuts and tips (?)", ariaLabel: "Shortcuts and tips" }),
@@ -92,21 +98,42 @@ export class Canvas {
     this.empty.appendChild(card);
     this.wrap.appendChild(this.empty);
 
-    // The gestures a reader would not guess, always on screen.
+    // The gestures a reader would not guess, always on screen. A touch screen
+    // has no Shift or wheel: its second node comes from the long-press menu.
+    // Stacked, the canvas sits in a page that scrolls: the wheel scrolls it and
+    // only Ctrl+wheel (or a trackpad pinch) zooms.
     this.hint = el("ul", "lab-canvas-hint");
     this.hint.setAttribute("aria-label", "Canvas gestures");
-    for (const [keys, what] of [
-      ["Click", "inspect a node"],
-      ["Shift+click", "a second node for link controls"],
-      ["Drag", "move a card or pan"],
-      ["Right-click", "more actions"],
-      ["Wheel", "zoom"],
-    ]) {
-      const li = el("li");
-      li.append(el("kbd", null, keys), ` ${what}`);
-      this.hint.appendChild(li);
-    }
+    this.stacked = window.matchMedia("(max-width: 1024px)");
+    this.coarse = window.matchMedia("(pointer: coarse)");
+    const labelHint = () => {
+      const gestures = this.coarse.matches
+        ? // Most useful first: the strip drops its later items as it narrows.
+          [["Long-press", "a card: second node, more"], ["Pinch", "zoom"], ["Drag", "move or pan"], ["Tap", "inspect a node"]]
+        : [
+            ["Click", "inspect a node"],
+            ["Shift+click", "a second node for a link"],
+            ["Drag", "move or pan"],
+            ["Right-click", "more actions"],
+            [this.stacked.matches ? "Ctrl+wheel" : "Wheel", "zoom"],
+          ];
+      this.hint.replaceChildren(
+        ...gestures.map(([keys, what]) => {
+          const li = el("li");
+          li.append(el("kbd", null, keys), ` ${what}`);
+          return li;
+        }),
+      );
+    };
+    labelHint();
+    this.stacked.addEventListener("change", labelHint);
+    this.coarse.addEventListener("change", labelHint);
     this.wrap.appendChild(this.hint);
+
+    // Said while the view is zoomed in past what fits, until the reader moves it.
+    this.note = el("div", "lab-canvas-note", "Zoomed in to stay readable: drag to pan, Fit shows all.");
+    this.note.hidden = true;
+    this.wrap.appendChild(this.note);
 
     this.menu = el("div", "lab-menu");
     this.menu.setAttribute("role", "menu");
@@ -117,6 +144,24 @@ export class Canvas {
     this.bindPointer();
     this.bindKeys();
     this.applyView();
+    // The box changes with the window, Expand and Close: refit, unless the
+    // reader has moved the view. The fault bar's second row only nudges the
+    // height (selecting a link must not move the cards), so a small height
+    // change alone is ignored, measured from the last fit.
+    let refit = 0;
+    new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (!this.fitted || this.userMovedView || width <= 0) return;
+      const last = this.fitBox;
+      if (last && Math.abs(width - last.w) < 1 && Math.abs(height - last.h) < 60) return;
+      // Fitting can show or hide the note strip, which resizes this box again:
+      // do it after the observer's own delivery, once per frame.
+      if (refit) return;
+      refit = requestAnimationFrame(() => {
+        refit = 0;
+        if (!this.userMovedView) this.fit({ whole: this.whole });
+      });
+    }).observe(this.svg);
   }
 
   defs() {
@@ -164,8 +209,13 @@ export class Canvas {
     const visible = nodes.filter((n) => !kindOf(n.kind).hidden).length;
     this.empty.hidden = visible > 0;
     this.hint.hidden = visible === 0;
-    if (visible > 0 && !this.userMovedView && !this.fitted) {
-      this.fit();
+    // A node added or removed moves the graph's edges (and its topic pills):
+    // keep everything in view until the reader takes the view over.
+    const ids = nodes.map((n) => n.id).sort().join();
+    const changed = ids !== this.nodeIds;
+    this.nodeIds = ids;
+    if (visible > 0 && !this.userMovedView && (!this.fitted || changed)) {
+      this.fit({ whole: this.fitted && this.whole });
       this.fitted = true;
     }
     if (visible === 0) this.fitted = false;
@@ -182,9 +232,17 @@ export class Canvas {
       const spec = this.scenario?.nodes?.find((s) => s.id === n.id);
       const target = spec?.config?.bootstrap?.[0];
       const anchor = target != null ? this.positions.get(Number(target)) : null;
-      const brokers = nodes.filter((b) => b.kind === "broker" || b.kind === "krabka-broker");
+      const brokers = nodes.filter((b) => b.kind === "krabka-broker");
       const base = anchor || (brokers.length ? this.positions.get(brokers[0].id) : null) || { x: 60, y: 60 };
-      this.positions.set(n.id, { x: base.x - 40, y: base.y + 96 });
+      // The nearest row under the broker that no card is on: where cards sit
+      // close together the gap is narrower than the usual 96.
+      const x = base.x - 40;
+      const free = (y) => !nodes.some((o) => {
+        const p = o.id !== n.id && this.positions.get(o.id);
+        return p && Math.abs(p.x - x) < (CARD_W + GHOST_W) / 2 + 8 && Math.abs(p.y - y) < (CARD_H + GHOST_H) / 2 + 8;
+      });
+      const dy = [96, 88, 104, 80, 112, 72, 120, 64].find((d) => free(base.y + d)) ?? 96;
+      this.positions.set(n.id, { x, y: base.y + dy });
     }
   }
 
@@ -226,16 +284,17 @@ export class Canvas {
     glyph.textContent = k.glyph;
     g.append(glyphBg, glyph);
     const tx = -w / 2 + (ghost ? 30 : 44);
-    const name = svg("text", { class: "lab-card-name", x: tx, y: ghost ? 4 : -8 });
+    const name = svg("text", { class: "lab-card-name", x: tx, y: ghost ? 4 : -9 });
     g.appendChild(name);
     let kind = null;
     let status = null;
     if (!ghost) {
       kind = svg("text", { class: "lab-card-kind", x: tx, y: 6 });
-      status = svg("text", { class: "lab-card-status", x: tx, y: 20 });
+      status = svg("text", { class: "lab-card-status", x: tx, y: 22 });
       g.append(kind, status);
     }
-    const badges = svg("g", { class: "lab-badges", transform: `translate(${w / 2 - 6}, ${-h / 2 + 2})` });
+    // Badges straddle the top edge, above the title, so a long name is never covered.
+    const badges = svg("g", { class: "lab-badges", transform: `translate(${w / 2 - 6}, ${-h / 2 - 7})` });
     g.appendChild(badges);
     const halo = svg("rect", { class: "lab-card-halo", x: -w / 2 - 4, y: -h / 2 - 4, width: w + 8, height: h + 8, rx: ghost ? 11 : 15 });
     g.insertBefore(halo, rect);
@@ -253,14 +312,18 @@ export class Canvas {
     const key = [n.name, st, n.alive, n.isolated, n.hosted, peerLabel, offline, sel].join("|");
     if (key === entry.lastKey) return;
     entry.lastKey = key;
-    entry.name.textContent = truncate(n.name || `${n.kind}-${n.id}`, entry.ghost ? 14 : 18);
-    if (entry.kind) entry.kind.textContent = `${k.label.toLowerCase()} · #${n.id}`;
-    if (entry.status) entry.status.textContent = truncate(st, 26);
+    // Text is cut to the card's measured room; the status drops whole fields
+    // from the end first. The full text stays in the title and aria-label.
+    const room = entry.w - (entry.ghost ? 38 : 52);
+    fitText(entry.name, [n.name || `${n.kind}-${n.id}`], "", room, entry.ghost ? 14 : 16);
+    if (entry.kind) fitText(entry.kind, [k.label.toLowerCase(), `#${n.id}`], " · ", room, 22);
+    if (entry.status) fitText(entry.status, st.split(" · "), " · ", room, 18);
     const g = entry.g;
     g.classList.toggle("lab-down", !n.alive);
     g.classList.toggle("lab-isolated", n.isolated);
     g.classList.toggle("lab-remote", remote);
     g.classList.toggle("lab-offline", offline);
+    g.setAttribute("aria-pressed", String(sel >= 0));
     g.classList.toggle("lab-selected", sel === 0);
     g.classList.toggle("lab-pick-b", sel === 1);
     g.classList.toggle("lab-real", Boolean(k.real));
@@ -269,10 +332,13 @@ export class Canvas {
     g.dataset.alive = String(Boolean(n.alive));
     g.dataset.isolated = String(Boolean(n.isolated));
     g.dataset.status = st;
-    const bits = [n.name, k.label, n.alive ? "up" : "down"];
+    // A node whose host tab dropped off is not "up", whatever its last snapshot says.
+    const bits = [n.name, k.label];
+    if (!n.alive) bits.push("down");
+    else if (!offline) bits.push("up");
     if (k.real) bits.push("runs the real code");
     if (n.isolated) bits.push("isolated");
-    if (remote) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
+    if (remote && hostedBy != null) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
     if (st) bits.push(st);
     g.setAttribute("aria-label", bits.join(", "));
     let title = g.querySelector(":scope > title");
@@ -281,7 +347,7 @@ export class Canvas {
       g.prepend(title);
     }
     title.textContent = bits.join(", ");
-    // Badges, right-aligned from the card's top-right corner.
+    // Badges, right-aligned from the card's top-right corner (see makeNode).
     entry.badges.innerHTML = "";
     const badges = [];
     // A node that runs the real code, not the lab's model of it.
@@ -289,15 +355,17 @@ export class Canvas {
     if (!n.alive) badges.push(["down", "lab-badge-down"]);
     if (n.isolated) badges.push(["isolated", "lab-badge-isolated"]);
     if (offline) badges.push(["host offline", "lab-badge-offline"]);
-    else if (remote) badges.push([`@${peerLabel}`, "lab-badge-remote"]);
+    // A node with no known host (the admin before hosting is settled) has no one to name.
+    else if (remote && hostedBy != null) badges.push([`@${peerLabel}`, "lab-badge-remote"]);
     let x = 0;
     for (const [text, cls] of badges) {
-      const w = text.length * 5.6 + 10;
+      const t = svg("text", { class: "lab-badge-text", y: 11, "text-anchor": "middle" });
+      entry.badges.appendChild(t);
+      fitText(t, [text], "", 84, 14);
+      const w = (t.getComputedTextLength() || text.length * 6.2) + 10;
       x -= w;
-      const bg = svg("rect", { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 13, rx: 6 });
-      const t = svg("text", { class: "lab-badge-text", x: x + w / 2, y: 9.5, "text-anchor": "middle" });
-      t.textContent = text;
-      entry.badges.append(bg, t);
+      t.setAttribute("x", x + w / 2);
+      entry.badges.insertBefore(svg("rect", { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 15, rx: 7 }), t);
       x -= 4;
     }
   }
@@ -326,13 +394,19 @@ export class Canvas {
       const spec = specs.get(name);
       const role = internal.get(name);
       g.classList.toggle("lab-topic-internal", Boolean(role) && !spec);
-      g.querySelector(".lab-topic-name").textContent = truncate(name, 18);
-      g.querySelector(".lab-topic-sub").textContent = spec
-        ? `${spec.partitions} partitions · rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}`
+      const sub = spec
+        ? [plural(spec.partitions, "partition"), `rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}`]
         : role
-          ? `${role} · made by the group`
-          : "topic";
-      g.querySelector("title").textContent = role && !spec ? `${name}: the streams app's ${role} topic, which the streams group creates` : name;
+          ? [role, "internal"]
+          : ["topic"];
+      // Measuring forces layout: only when the words changed.
+      const text = [name, ...sub].join("|");
+      if (g.dataset.text !== text) {
+        g.dataset.text = text;
+        fitText(g.querySelector(".lab-topic-name"), [name], "", TOPIC_W - 20, 17);
+        fitText(g.querySelector(".lab-topic-sub"), sub, " · ", TOPIC_W - 20, 24);
+      }
+      g.querySelector("title").textContent = role && !spec ? `${name}: the streams app's ${role} topic, which the streams group creates` : spec ? `${name}: ${sub.join(" · ")}` : name;
     }
     for (const [name, g] of this.topicEls) {
       if (!seen.has(name)) {
@@ -361,9 +435,6 @@ export class Canvas {
         y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
         const producers = pts.length === 1 || pts.every((p) => Math.abs(p.y - pts[0].y) < 1 && Math.abs(p.x - pts[0].x) < 1);
         if (producers) y += 100;
-        for (const p of [...this.positions.values()]) {
-          if (Math.abs(p.x - x) < CARD_W / 2 + TOPIC_W / 2 && Math.abs(p.y - y) < CARD_H / 2 + TOPIC_H / 2) y = p.y + CARD_H / 2 + TOPIC_H / 2 + 24;
-        }
       } else {
         const all = [...this.positions.values()];
         const maxY = all.length ? Math.max(...all.map((p) => p.y)) : 0;
@@ -371,8 +442,13 @@ export class Canvas {
         x = minX + placed.length * (TOPIC_W + 20);
         y = maxY + 120;
       }
-      for (const q of placed) {
-        if (Math.abs(q.x - x) < TOPIC_W + 8 && Math.abs(q.y - y) < TOPIC_H + 8) y = q.y + TOPIC_H + 12;
+      // Step down past whatever the pill sits on, cards and pills placed before
+      // it alike, until nothing is left under it. Each step clears one obstacle
+      // for good, so this ends.
+      const blocks = [...this.positions.values()].map((p) => ({ ...p, w: CARD_W, h: CARD_H }));
+      for (const q of placed) blocks.push({ ...q, w: TOPIC_W, h: TOPIC_H });
+      for (let hit; (hit = blocks.find((b) => Math.abs(b.x - x) < (b.w + TOPIC_W) / 2 + 4 && Math.abs(b.y - y) < (b.h + TOPIC_H) / 2 + 4)); ) {
+        y = hit.y + (hit.h + TOPIC_H) / 2 + 16;
       }
       const pos = { x, y };
       placed.push(pos);
@@ -558,6 +634,7 @@ export class Canvas {
     const ratio = k / this.view.k;
     this.view = { x: px - (px - this.view.x) * ratio, y: py - (py - this.view.y) * ratio, k };
     this.userMovedView = true;
+    this.note.hidden = true;
     this.applyView();
   }
 
@@ -567,7 +644,10 @@ export class Canvas {
     this.zoomAt(r.left + w / 2, r.top + h / 2, factor);
   }
 
-  fit() {
+  // Every node in view, but never smaller than MIN_FIT_ZOOM unless `whole`
+  // (the Fit button): a graph that does not fit then starts at the top left.
+  fit({ whole = false } = {}) {
+    this.whole = whole;
     const pts = [];
     for (const [id, p] of this.positions) {
       const entry = this.nodeEls.get(id);
@@ -578,6 +658,7 @@ export class Canvas {
     for (const p of this.topicPositions.values()) pts.push({ x: p.x - TOPIC_W / 2, y: p.y - TOPIC_H / 2 }, { x: p.x + TOPIC_W / 2, y: p.y + TOPIC_H / 2 });
     if (!pts.length) {
       this.view = { x: 40, y: 40, k: 1 };
+      this.note.hidden = true;
       this.applyView();
       return;
     }
@@ -586,11 +667,24 @@ export class Canvas {
     const minY = Math.min(...pts.map((p) => p.y));
     const maxY = Math.max(...pts.map((p) => p.y));
     const { w, h } = this.size();
-    const pad = 36;
+    // More room above the cards: the canvas tools float there, and the status badges rise above a card.
+    const padX = 36;
+    const padTop = 46;
+    const padBottom = 30;
     const bw = Math.max(1, maxX - minX);
     const bh = Math.max(1, maxY - minY);
-    const k = clamp(Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh), MIN_ZOOM, 1.4);
-    this.view = { x: (w - bw * k) / 2 - minX * k, y: (h - bh * k) / 2 - minY * k, k };
+    const roomX = w - 2 * padX;
+    const roomY = h - padTop - padBottom;
+    const snug = Math.min(roomX / bw, roomY / bh);
+    const k = clamp(whole ? snug : Math.max(snug, MIN_FIT_ZOOM), MIN_ZOOM, 1.4);
+    const cropped = bw * k > roomX + 0.5 || bh * k > roomY + 0.5;
+    this.view = {
+      x: padX + Math.max(0, roomX - bw * k) / 2 - minX * k,
+      y: padTop + Math.max(0, roomY - bh * k) / 2 - minY * k,
+      k,
+    };
+    this.fitBox = { w, h };
+    this.note.hidden = !cropped;
     this.userMovedView = false;
     this.applyView();
   }
@@ -607,6 +701,14 @@ export class Canvas {
     s.addEventListener("pointerdown", (e) => {
       this.closeMenu();
       if (e.button === 2) return;
+      if (e.pointerType === "touch") {
+        this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // A second finger turns whatever the first was doing into a pinch.
+        if (this.touches.size > 1) {
+          if (!this.pinch) this.startPinch();
+          return;
+        }
+      }
       const nodeG = e.target.closest?.(".lab-node");
       const start = { x: e.clientX, y: e.clientY };
       if (nodeG) {
@@ -640,6 +742,11 @@ export class Canvas {
       }
     });
     s.addEventListener("pointermove", (e) => {
+      if (this.touches.has(e.pointerId)) this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pinch) {
+        this.movePinch();
+        return;
+      }
       const d = this.drag;
       if (!d || d.pointerId !== e.pointerId) return;
       const dx = e.clientX - d.start.x;
@@ -654,6 +761,7 @@ export class Canvas {
         this.view.x = d.origin.x + dx;
         this.view.y = d.origin.y + dy;
         this.userMovedView = true;
+        this.note.hidden = true;
         this.applyView();
       } else {
         const p = { x: d.origin.x + dx / this.view.k, y: d.origin.y + dy / this.view.k };
@@ -661,7 +769,12 @@ export class Canvas {
         this.layout();
       }
     });
+    const release = (e) => {
+      this.touches.delete(e.pointerId);
+      if (this.pinch && this.touches.size < 2) this.pinch = null;
+    };
     const finish = (e) => {
+      release(e);
       const d = this.drag;
       if (!d || d.pointerId !== e.pointerId) return;
       if (this.longPress) {
@@ -684,7 +797,10 @@ export class Canvas {
       }
     };
     s.addEventListener("pointerup", finish);
-    s.addEventListener("pointercancel", () => this.cancelDrag());
+    s.addEventListener("pointercancel", (e) => {
+      release(e);
+      this.cancelDrag();
+    });
     s.addEventListener("contextmenu", (e) => {
       const nodeG = e.target.closest?.(".lab-node");
       e.preventDefault();
@@ -694,6 +810,7 @@ export class Canvas {
     s.addEventListener(
       "wheel",
       (e) => {
+        if (this.stacked.matches && !e.ctrlKey && !e.metaKey && !this.wrap.classList.contains("lab-expanded")) return;
         e.preventDefault();
         const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015));
         this.zoomAt(e.clientX, e.clientY, factor);
@@ -706,9 +823,40 @@ export class Canvas {
     });
   }
 
+  startPinch() {
+    if (this.longPress) {
+      clearTimeout(this.longPress);
+      this.longPress = null;
+    }
+    this.cancelDrag();
+    this.pinch = this.pinchState();
+  }
+
+  // Distance and midpoint of the first two fingers.
+  pinchState() {
+    const [a, b] = [...this.touches.values()];
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  }
+
+  // Zoom by the change in finger distance around the midpoint, and follow the midpoint.
+  movePinch() {
+    const now = this.pinchState();
+    this.zoomAt(now.cx, now.cy, now.dist / this.pinch.dist);
+    this.view.x += now.cx - this.pinch.cx;
+    this.view.y += now.cy - this.pinch.cy;
+    this.applyView();
+    this.pinch = now;
+  }
+
   cancelDrag() {
     const d = this.drag;
     this.drag = null;
+    if (d?.pan && d.moved) {
+      // The browser took the gesture to scroll the page, or a second finger made it a pinch.
+      this.view.x = d.origin.x;
+      this.view.y = d.origin.y;
+      this.applyView();
+    }
     if (d && !d.pan) {
       const entry = this.nodeEls.get(d.id);
       if (entry) entry.g.classList.remove("lab-dragging");
@@ -863,7 +1011,29 @@ function trim(a, b, size) {
   return { x: a.x + dx * t, y: a.y + dy * t };
 }
 
+// By code point, so an emoji is never split in two.
 function truncate(s, n) {
-  const t = String(s ?? "");
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+  const chars = Array.from(String(s ?? ""));
+  return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : chars.join("");
+}
+
+// Puts as many of `parts` (joined by `sep`) into the SVG text `node` as fit in
+// `maxW` canvas units, dropping whole parts from the end; when the first part
+// alone is too long it is cut, starting from `n` characters. Where nothing can
+// be measured (the canvas is not laid out) it falls back to `n` characters.
+function fitText(node, parts, sep, maxW, n) {
+  for (let i = parts.length; i > 0; i--) {
+    node.textContent = parts.slice(0, i).join(sep);
+    const w = node.getComputedTextLength();
+    if (!w) {
+      node.textContent = truncate(parts.join(sep), n);
+      return;
+    }
+    if (w <= maxW) return;
+  }
+  const chars = Array.from(parts[0]);
+  for (let m = Math.min(chars.length, n) - 1; m > 0; m--) {
+    node.textContent = `${chars.slice(0, m).join("").trimEnd()}…`;
+    if (node.getComputedTextLength() <= maxW) return;
+  }
 }

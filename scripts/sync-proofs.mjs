@@ -123,6 +123,7 @@ function parseHeaderSpan(coma) {
 function parseObligations(coma, spans) {
   const obligations = [];
   const re = /\[@expl:([^\]]*)\]/g;
+  const keyword = /(?<![\w'])(if|else)(?![\w'])/y;
   for (const m of coma.matchAll(re)) {
     const expl = m[1].trim();
     let i = m.index + m[0].length;
@@ -143,8 +144,10 @@ function parseObligations(coma, spans) {
       }
       break;
     }
-    // Formula: until the brace that closes the enclosing `{`.
+    // Formula: until the brace that closes the enclosing `{`, or the `else` of
+    // an `if` that opened before the formula (it was the `then` branch).
     let depth = 0;
+    let openIfs = 0;
     let j = i;
     while (j < coma.length) {
       const ch = coma[j];
@@ -152,6 +155,14 @@ function parseObligations(coma, spans) {
       else if (ch === '}' || ch === ']' || ch === ')') {
         if (depth === 0) break;
         depth -= 1;
+      } else if (depth === 0) {
+        keyword.lastIndex = j;
+        const word = keyword.exec(coma)?.[1];
+        if (word === 'if') openIfs += 1;
+        else if (word === 'else') {
+          if (openIfs === 0) break;
+          openIfs -= 1;
+        }
       }
       j += 1;
     }
@@ -192,8 +203,8 @@ if (fs.existsSync(CATALOG)) {
   for (const row of catalog.ledger) {
     for (const k of row.kernels) kernelNames.add(k.label);
     for (const proof of row.proofs) {
-      const m = /verif\/krabka_verified_rlib\/([^/]+)\/([^/]+)\/proof\.json/.exec(proof.url);
-      if (m) ledgerByProof.set(`${m[1]}/${m[2]}`, { row: row.id, label: proof.label, kernels: row.kernels.map((k) => k.label) });
+      const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json/.exec(proof.url);
+      if (m) ledgerByProof.set(m[1], { row: row.id, label: proof.label, kernels: row.kernels.map((k) => k.label) });
     }
   }
 }
@@ -202,8 +213,9 @@ fs.rmSync(COMA_OUT, { recursive: true, force: true });
 fs.mkdirSync(COMA_OUT, { recursive: true });
 
 // A session is a directory holding `proof.json`, with the Coma file beside the
-// directory: `<module>/<name>/proof.json` and `<module>/<name>.coma`. A derived
-// impl nests one level deeper, `<module>/impl_Clone_for_X/clone/proof.json`.
+// directory: `<module>/<name>/proof.json` and `<module>/<name>.coma`. A module
+// split across files nests one level deeper, `<module>/<file>/<name>/proof.json`,
+// and so does a derived impl, `<module>/impl_Clone_for_X/clone/proof.json`.
 function sessionDirs(dir, rel = '') {
   const found = [];
   for (const entry of fs.readdirSync(dir).sort()) {
@@ -222,7 +234,8 @@ for (const id of sessionDirs(verifDir)) {
     const parts = id.split('/');
     const module = parts[0];
     const name = parts[parts.length - 1];
-    const impl = parts.length > 2 ? parts.slice(1, -1).join('/') : null;
+    const implAt = parts.findIndex((p) => p.startsWith('impl_'));
+    const impl = implAt > 0 ? parts.slice(implAt, -1).join('/') : null;
     const proofFile = path.join(verifDir, id, 'proof.json');
     const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
     const comaFile = path.join(verifDir, `${id}.coma`);

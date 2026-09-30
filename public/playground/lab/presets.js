@@ -241,7 +241,8 @@ export const PRESETS = [
       links: { default_latency_ms: 5 },
       link_overrides: [{ a: 1, b: 3, latency_ms: 200 }, { a: 2, b: 3, latency_ms: 200 }],
       nodes: [
-        broker(1, 120, 80, "a"), broker(2, 400, 80, "b"), broker(3, 680, 80, "c"),
+        // Broker 2 sits below the row: on it, the 1-3 link would run behind its card.
+        broker(1, 120, 80, "a"), broker(2, 400, 170, "b"), broker(3, 680, 80, "c"),
         { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2], topic: "orders", rate_per_sec: 3, value: ORDERS } },
         consumer(5, "billing", 620, 330, [1, 2], "billing", ["orders"], { protocol: "classic" }),
       ],
@@ -257,7 +258,8 @@ export const PRESETS = [
       links: { default_latency_ms: 5 },
       link_overrides: [{ a: 1, b: 3, cut: true }, { a: 2, b: 3, cut: true }],
       nodes: [
-        broker(1, 120, 80, "a"), broker(2, 400, 80, "a"), broker(3, 680, 80, "b"),
+        // Broker 2 sits below the row: on it, the cut 1-3 link would run behind its card.
+        broker(1, 120, 80, "a"), broker(2, 400, 170, "a"), broker(3, 680, 80, "b"),
         { id: 4, kind: "producer", name: "orders-producer", x: 180, y: 330, config: { bootstrap: [1, 2], topic: "orders", rate_per_sec: 3, value: ORDERS } },
         consumer(5, "billing", 620, 330, [1, 2], "billing", ["orders"], { protocol: "classic" }),
       ],

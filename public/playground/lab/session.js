@@ -18,8 +18,10 @@
 // hub. One invite admits one spoke; make another for the next tab.
 //
 // Messages on the channel are JSON with a `t` tag:
-//   hello     { name }                        both ways on open
+//   hello     { name, id }                    both ways on open, and when a tab renames
 //   scenario  { doc, hosting: {node: peer} } hub → spoke on every change
+//   roster    { peers: [{ id, name, state }] } hub → spoke: every tab in the session,
+//                                             so a spoke can name the other spokes
 //   frames    { frames: [Frame] }             egress, routed by destination; the
 //                                             sender's world holds each frame until
 //                                             its clock reaches `deliver_at`, and the
@@ -35,6 +37,12 @@ import { kindOf } from "./kinds.js";
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const GATHER_TIMEOUT_MS = 4000;
 const SNAPSHOT_PERIOD_MS = 250;
+// ICE reports "disconnected" for a Wi-Fi roam or a throttled tab and often
+// recovers by itself; only "failed" is final.
+const DISCONNECT_GRACE_MS = 8000;
+// An accepted answer that never opens the channel (a stale or lost answer).
+const CONNECT_TIMEOUT_MS = 30000;
+export const NAME_MAX = 24;
 const JOIN_RE = /[?&]join=([^&#]+)/;
 
 const ADJECTIVES = ["amber", "brisk", "coral", "dusky", "eager", "flint", "gilt", "hazel", "ivory", "jade", "kelp", "lunar", "misty", "north", "ochre", "pearl", "quiet", "rusty", "sable", "tidal"];
@@ -49,6 +57,11 @@ export function randomPeerName() {
 export function randomPeerId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID().slice(0, 8);
   return Math.random().toString(36).slice(2, 10);
+}
+
+// A name from the other tab: text, trimmed, at most NAME_MAX characters.
+function cleanName(name) {
+  return typeof name === "string" ? name.trim().slice(0, NAME_MAX) : "";
 }
 
 export function joinCodeFromUrl(search) {
@@ -96,6 +109,7 @@ class Peer {
   }
 
   close() {
+    clearTimeout(this.graceTimer);
     this.state = "closed";
     try {
       this.channel?.close();
@@ -113,7 +127,8 @@ class Peer {
 export class Session {
   // hooks: onPeers(), onScenario(doc, hosting), onIngress(frames),
   // onRemoteSnapshot(nodeId, state), onFault(fault), onTakeover(nodeId, peerId),
-  // onError(err, context), onLog(text), hostedSnapshots() → [{ id, state }],
+  // onError(err, context), onLog(text), onHubLost() (a spoke's hub left or dropped),
+  // hostedSnapshots() → [{ id, state }],
   // scenario() → doc
   constructor(hooks) {
     this.hooks = hooks;
@@ -126,15 +141,23 @@ export class Session {
     this.pending = null; // the invite waiting for its answer
     this.snapshotTimer = 0;
     this.lastHosting = "";
+    this.hostingFor = null; // the scenario id the hosting map is for
+    this.roster = []; // a spoke's view of the other spokes, relayed by the hub
   }
 
   get available() {
     return webrtcAvailable();
   }
 
-  // Peers as the panels list them, this tab first.
+  // Peers as the panels list them, this tab first. A spoke also lists the
+  // other spokes the hub told it about; with the hub gone their state is unknown.
   peerList() {
-    return [{ id: this.me, name: this.name, state: "connected", self: true }, ...this.peers.map((p) => ({ id: p.remoteId || p.id, name: p.name, state: p.state, self: false }))];
+    const out = [{ id: this.me, name: this.name, state: "connected", self: true }, ...this.peers.map((p) => ({ id: p.remoteId || p.id, name: p.name, state: p.state, self: false }))];
+    if (this.role === "spoke") {
+      const hubUp = this.hub?.state === "connected";
+      for (const r of this.roster) if (!out.some((p) => p.id === r.id)) out.push({ id: r.id, name: r.name, state: hubUp ? r.state : "closed", self: false });
+    }
+    return out;
   }
 
   get peersKey() {
@@ -146,14 +169,30 @@ export class Session {
   peerName(id) {
     if (id == null) return "?";
     if (id === this.me) return `${this.name} (this tab)`;
-    const p = this.peers.find((x) => (x.remoteId || x.id) === id);
+    const p = this.peerList().find((x) => x.id === id);
     return p ? p.name : `peer ${String(id).slice(0, 6)}`;
   }
 
   offlinePeers() {
     const out = new Set();
-    for (const p of this.peers) if (p.state !== "connected") out.add(p.remoteId || p.id);
+    for (const p of this.peerList()) if (!p.self && p.state !== "connected") out.add(p.id);
     return out;
+  }
+
+  // Every tab's peer list changed: tell the panels, and on the hub tell the
+  // spokes, which only know the hub.
+  changed() {
+    this.hooks.onPeers();
+    if (this.role !== "hub") return;
+    const peers = this.peerList().map(({ id, name, state }) => ({ id, name, state }));
+    for (const p of this.peers) p.send({ t: "roster", peers });
+  }
+
+  // Rename this tab and tell everyone; the hub relays the name to the spokes.
+  setName(name) {
+    this.name = String(name).trim().slice(0, NAME_MAX) || this.name;
+    for (const p of this.peers) p.send({ t: "hello", name: this.name, id: this.me });
+    this.changed();
   }
 
   // The ids this tab runs, or null for every node in solo mode.
@@ -194,7 +233,7 @@ export class Session {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await gathered(pc);
-    const code = await encodeShare({ t: "offer", sdp: pc.localDescription.sdp, hub: this.name, id: this.me });
+    const code = await encodeShare({ t: "offer", sdp: pc.localDescription.sdp, hub: this.name, id: this.me, oid: peer.id });
     if (this.pending) this.pending.close();
     this.pending = peer;
     const url = new URL(baseUrl || window.location.href);
@@ -209,12 +248,24 @@ export class Session {
     if (!peer) throw new Error("no invite is waiting for an answer");
     const msg = await decodeShare(code);
     if (msg.t !== "answer" || !msg.sdp) throw new Error("that is not an answer code");
-    peer.name = msg.name || peer.name;
+    // Answers carry the id of the invite they answer; older ones have none.
+    if (msg.oid && msg.oid !== peer.id) throw new Error("that answer belongs to an older invite; paste the answer for the newest link");
+    peer.name = cleanName(msg.name) || peer.name;
     peer.remoteId = msg.id || peer.id;
-    await peer.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+    try {
+      await peer.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+    } catch {
+      throw new Error("that answer does not match this invite; paste the answer for the newest link");
+    }
     this.pending = null;
     this.peers.push(peer);
-    this.hooks.onPeers();
+    setTimeout(() => {
+      if (peer.state !== "connecting") return;
+      peer.close();
+      this.hooks.onError(new Error(`${peer.name} did not connect; make a new invite`), "session");
+      this.changed();
+    }, CONNECT_TIMEOUT_MS);
+    this.changed();
   }
 
   // Whether a node must stay in the tab that hosts it now: its kind is pinned.
@@ -233,15 +284,27 @@ export class Session {
     }
     this.hosting.set(nodeId, peerId);
     this.broadcastScenario();
-    this.hooks.onPeers();
+    this.changed();
     return true;
   }
 
+  // A closed tab's nodes come back to the hub and the tab leaves the list.
+  forgetPeer(peerId) {
+    if (this.role !== "hub") return;
+    for (const [node, peer] of this.hosting) if (peer === peerId) this.hosting.set(node, this.me);
+    this.peers = this.peers.filter((p) => (p.remoteId || p.id) !== peerId || p.state !== "closed");
+    this.broadcastScenario();
+    this.changed();
+  }
+
   // Every node the hub does not know yet is hosted by the hub; nodes that
-  // left the scenario are forgotten. Called when the scenario changes.
+  // left the scenario are forgotten. Called when the scenario changes. A
+  // different scenario starts on the hub again: its node ids mean other nodes.
   syncHosting() {
     if (this.role !== "hub") return;
     const doc = this.hooks.scenario();
+    if (doc.id && this.hostingFor && doc.id !== this.hostingFor) this.hosting.clear();
+    if (doc.id) this.hostingFor = doc.id;
     const ids = new Set((doc.nodes || []).map((n) => n.id));
     for (const n of doc.nodes || []) {
       if (!this.hosting.has(n.id) || kindOf(n.kind).pinned) this.hosting.set(n.id, this.me);
@@ -283,11 +346,12 @@ export class Session {
     this.peers = [peer];
     this.startSnapshots();
     this.hooks.onPeers();
-    return encodeShare({ t: "answer", sdp: pc.localDescription.sdp, name: this.name, id: this.me });
+    return encodeShare({ t: "answer", sdp: pc.localDescription.sdp, name: this.name, id: this.me, oid: msg.oid });
   }
 
+  // Whether the request reached the hub.
   requestTakeover(nodeId) {
-    if (this.role === "spoke" && this.hub && !this.pinned(nodeId)) this.hub.send({ t: "takeover", node: nodeId });
+    return this.role === "spoke" && this.hub && !this.pinned(nodeId) ? this.hub.send({ t: "takeover", node: nodeId }) : false;
   }
 
   // ---- the channel --------------------------------------------------------------------------------
@@ -302,15 +366,9 @@ export class Session {
         peer.send({ t: "scenario", doc: this.hooks.scenario(), hosting: Object.fromEntries(this.hosting) });
       }
       this.hooks.onLog(`${peer.name} connected`);
-      this.hooks.onPeers();
+      this.changed();
     });
-    channel.addEventListener("close", () => {
-      if (peer.state !== "closed") {
-        peer.state = "closed";
-        this.hooks.onLog(`${peer.name} disconnected`);
-        this.hooks.onPeers();
-      }
-    });
+    channel.addEventListener("close", () => this.lost(peer, "disconnected"));
     channel.addEventListener("message", (e) => {
       let msg;
       try {
@@ -322,21 +380,36 @@ export class Session {
     });
   }
 
+  // The peer is gone for good: say so, and tell the spoke its hub is gone.
+  lost(peer, why) {
+    clearTimeout(peer.graceTimer);
+    if (peer.state === "closed") return;
+    peer.state = "closed";
+    this.hooks.onLog(`${peer.name} ${why}`);
+    if (this.role === "spoke" && peer === this.hub) this.hooks.onHubLost();
+    peer.close();
+    this.changed();
+  }
+
   watch(peer, pc) {
     pc.addEventListener("connectionstatechange", () => {
-      if (["failed", "closed", "disconnected"].includes(pc.connectionState) && peer.state !== "closed") {
-        peer.state = "closed";
-        this.hooks.onLog(`${peer.name} ${pc.connectionState}`);
-        this.hooks.onPeers();
-      }
+      const state = pc.connectionState;
+      clearTimeout(peer.graceTimer);
+      if (state === "failed" || state === "closed") this.lost(peer, state);
+      else if (state === "disconnected") peer.graceTimer = setTimeout(() => this.lost(peer, state), DISCONNECT_GRACE_MS);
     });
   }
 
   receive(from, msg) {
     switch (msg.t) {
       case "hello":
-        from.name = msg.name || from.name;
+        from.name = cleanName(msg.name) || from.name;
         if (msg.id) from.remoteId = msg.id;
+        this.changed();
+        break;
+      case "roster":
+        if (this.role !== "spoke" || !Array.isArray(msg.peers)) return;
+        this.roster = msg.peers.filter((p) => p && typeof p.id === "string").map((p) => ({ id: p.id, name: cleanName(p.name) || `peer ${p.id.slice(0, 6)}`, state: p.state === "connected" ? "connected" : "closed" }));
         this.hooks.onPeers();
         break;
       case "scenario":
@@ -364,8 +437,7 @@ export class Session {
         }
         break;
       case "bye":
-        from.close();
-        this.hooks.onPeers();
+        this.lost(from, "left");
         break;
       default:
     }
@@ -439,6 +511,8 @@ export class Session {
     this.peers = [];
     this.hub = null;
     this.hosting = new Map();
+    this.hostingFor = null;
+    this.roster = [];
     this.role = "solo";
     if (this.snapshotTimer) clearInterval(this.snapshotTimer);
     this.snapshotTimer = 0;

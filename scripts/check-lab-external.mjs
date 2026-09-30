@@ -40,40 +40,33 @@
 // Usage:  npm run build && npm run check-lab-external [-- --headed]
 // Needs cargo with the wasm32-wasip1 target (the guest builds in
 // $CARGO_TARGET_DIR, or the crate's target/), Playwright (`playwright` or
-// `playwright-core`, local or global) and a Chromium, found as `check-lab`
-// finds it. Uses `wasm-opt` when node_modules or the PATH has one. Exits 2
-// when a tool is missing, 1 when a check fails.
+// `playwright-core`, local or global) and a Chromium, found as
+// lab-check-lib.mjs finds them. Uses `wasm-opt` when node_modules or the PATH
+// has one. Exits 2 when a tool is missing, 1 when a check fails.
 
 import crypto from 'crypto';
 import fs from 'fs';
-import http from 'http';
 import path from 'path';
-import { createRequire } from 'module';
-import { execFileSync, execSync, spawnSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
-import { PRESETS as SIMULATED_PRESETS } from './lab-simulated-presets.js';
+import { pathToFileURL } from 'url';
+import {
+  NETWORK_PROBE,
+  ROOT,
+  DIST_DIR,
+  STEP_TIMEOUT,
+  buildGuest,
+  checker,
+  launchOrExit,
+  newLabContext,
+  openLab as openLabPage,
+  openScenario,
+  serve,
+  waitFor,
+  watchErrors as watchPageErrors,
+} from './lab-check-lib.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
-const DIST_DIR = path.join(ROOT, 'dist');
-const CRATE = path.join(ROOT, 'playground', 'wasi-guest');
-const args = new Set(process.argv.slice(2));
-const HEADLESS = !args.has('--headed');
-const STEP_TIMEOUT = 30_000;
+const t = checker({ detail: true });
+const { check, failures } = t;
 
-// A fresh browser context that has already seen the lab tour, which would
-// otherwise open over the canvas and take the checks' clicks.
-async function newLabContext(browser, viewport) {
-  const context = await browser.newContext({ viewport });
-  await context.addInitScript(() => {
-    try {
-      localStorage.setItem('krabka-lab.tour', 'done');
-    } catch {
-      // No storage: the tour opens, and the check reports what it finds.
-    }
-  });
-  return context;
-}
 const GUEST_URL = '/lab-test/krabka-wasi-guest.wasm';
 // The guest again, sent 16 KiB at a time, a piece every 60 ms.
 const SLOW_GUEST_URL = '/lab-test/slow/krabka-wasi-guest.wasm';
@@ -86,107 +79,6 @@ const BROKER_BUILD = '/playground/broker/krabka-broker.wasm';
 const RECONFIGURED = { replica_lag_time_max_ms: 10000, min_insync_replicas: 1, rack: 'a', num_partitions: 3 };
 const RECONFIGURED_FILE_CONFIG = '{"rack":"a","runtime":{"num_partitions":3,"default_min_insync_replicas":1},"replica_lag_time_max":"10000ms"}';
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/opt/pw-browsers';
-
-// ---- the guest ------------------------------------------------------------------------------
-
-function run(cmd, cmdArgs, options = {}) {
-  const result = spawnSync(cmd, cmdArgs, { stdio: 'inherit', ...options });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${cmd} ${cmdArgs.join(' ')} exited with ${result.status}`);
-}
-
-function wasmOpt() {
-  if (process.argv.includes('--no-opt')) return null;
-  const local = path.join(ROOT, 'node_modules', '.bin', 'wasm-opt');
-  if (fs.existsSync(local)) return local;
-  try {
-    execFileSync('wasm-opt', ['--version'], { stdio: 'ignore' });
-    return 'wasm-opt';
-  } catch {
-    return null;
-  }
-}
-
-// Builds the guest the way `check-wasi` does: cargo from inside the crate (its
-// `.cargo/config.toml` sets the target and `--cfg tokio_unstable`), then
-// `wasm-opt -Oz` when there is one.
-function buildGuest() {
-  const targetDir = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(CRATE, 'target');
-  run('cargo', ['build', '--release', '--target', 'wasm32-wasip1'], { cwd: CRATE, env: { ...process.env, CARGO_TARGET_DIR: targetDir } });
-  const raw = path.join(targetDir, 'wasm32-wasip1', 'release', 'krabka-wasi-guest.wasm');
-  const opt = wasmOpt();
-  if (!opt) return raw;
-  const optimised = path.join(targetDir, 'wasm32-wasip1', 'release', 'krabka-wasi-guest.lab.wasm');
-  run(opt, ['-Oz', '--enable-bulk-memory', '--enable-sign-ext', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-reference-types', '--enable-multivalue', raw, '-o', optimised]);
-  return optimised;
-}
-
-// ---- Playwright and Chromium, as check-lab finds them ------------------------------------------
-
-async function loadPlaywright() {
-  const require = createRequire(import.meta.url);
-  const candidates = ['playwright', 'playwright-core'];
-  try {
-    const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
-    candidates.push(path.join(globalRoot, 'playwright'), path.join(globalRoot, 'playwright-core'));
-  } catch {
-    // No npm on the path; the local package is the only candidate.
-  }
-  for (const c of candidates) {
-    try {
-      return require(c);
-    } catch {
-      // try the next
-    }
-  }
-  return null;
-}
-
-function installedChromium() {
-  const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!base || !fs.existsSync(base)) return undefined;
-  const builds = [['chromium', ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-win/chrome.exe']]];
-  if (HEADLESS) builds.unshift(['chromium_headless_shell', ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell']]);
-  const entries = fs.readdirSync(base);
-  for (const [name, executables] of builds) {
-    const pattern = new RegExp(`^${name}-(\\d+)$`);
-    const dirs = entries.filter((d) => pattern.test(d)).sort((a, b) => Number(b.match(pattern)[1]) - Number(a.match(pattern)[1]));
-    for (const dir of dirs) {
-      for (const executable of executables) {
-        const candidate = path.join(base, dir, executable);
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
-async function launchChromium(pw) {
-  try {
-    return await pw.chromium.launch({ headless: HEADLESS });
-  } catch (err) {
-    const executablePath = installedChromium();
-    if (!executablePath) throw err;
-    return pw.chromium.launch({ headless: HEADLESS, executablePath });
-  }
-}
-
-// ---- the site: dist/ and the guest, without isolation headers ---------------------------------------
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.wasm': 'application/wasm',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain',
-  '.xml': 'application/xml',
-};
 
 // Sends the guest in small pieces, with its length, so that the page has a
 // download to show the progress of.
@@ -212,83 +104,33 @@ function serveSlowly(res, file, head) {
   next();
 }
 
-function serve(dir, guest) {
-  const server = http.createServer((req, res) => {
-    const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+// The site this check serves: `dist/`, the guest at GUEST_URL (and again, slowly,
+// at SLOW_GUEST_URL), and no broker build, whatever `dist/` holds: after
+// `npm run build:broker` it holds the real module, and the missing-build flow
+// needs it absent. Every other flow runs the guest through `useModule`.
+function serveSite(dir, guest) {
+  return serve(dir, (req, res, p) => {
     if (p === SLOW_GUEST_URL) {
       serveSlowly(res, guest, req.method === 'HEAD');
-      return;
+      return true;
     }
-    // The site this check serves has no broker build, whatever `dist/` holds:
-    // after `npm run build:broker` it holds the real module, and the
-    // missing-build flow needs it absent. Every other flow runs the guest
-    // through `useModule`.
     if (p === BROKER_BUILD) {
       res.writeHead(404).end('not found');
-      return;
+      return true;
     }
-    let file = p === GUEST_URL ? guest : path.join(dir, p);
-    if (file !== guest && !file.startsWith(dir)) {
-      res.writeHead(403).end();
-      return;
+    if (p === GUEST_URL) {
+      res.writeHead(200, { 'content-type': 'application/wasm', 'cache-control': 'no-store' });
+      fs.createReadStream(guest).pipe(res);
+      return true;
     }
-    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
-    else if (!fs.existsSync(file) && fs.existsSync(`${file}.html`)) file = `${file}.html`;
-    if (!fs.existsSync(file)) {
-      res.writeHead(404).end('not found');
-      return;
-    }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
-    fs.createReadStream(file).pipe(res);
+    return false;
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
-}
-
-// ---- checks ---------------------------------------------------------------------------------------
-
-let passed = 0;
-const failures = [];
-function check(name, ok, detail) {
-  if (ok) {
-    passed += 1;
-    console.log(`  ok   ${name}${detail ? `: ${detail}` : ''}`);
-  } else {
-    failures.push(`${name}${detail ? ` (${detail})` : ''}`);
-    console.error(`  FAIL ${name}${detail ? ` (${detail})` : ''}`);
-  }
-}
-
-// Polls `fn` in the page until it returns something truthy. A navigation in
-// between (the isolation reload) is not an error: the poll goes on.
-async function waitFor(page, fn, label, timeout = STEP_TIMEOUT, arg) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const value = await page.evaluate(fn, arg);
-      if (value) return value;
-    } catch {
-      // The page is navigating; ask again.
-    }
-    await page.waitForTimeout(100);
-  }
-  throw new Error(`timed out waiting for ${label}`);
 }
 
 // Page errors and console errors from the site's own origin. Chromium logs
 // every 404 as a console error, and the missing broker build is one on
 // purpose: that one is left out, like a font from another origin.
-function watchErrors(page, name, base) {
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() !== 'error') return;
-    const url = (m.location() && m.location().url) || '';
-    if (url && !url.startsWith(base)) return;
-    if (url === `${base}${BROKER_BUILD}` && /404/.test(m.text())) return;
-    errors.push(`${name}: console.error ${m.text()}${url ? ` @ ${url}` : ''}`);
-  });
-  return errors;
-}
+const watchErrors = (page, name, base) => watchPageErrors(page, name, base, { ignore: (m, url) => url === `${base}${BROKER_BUILD}` && /404/.test(m.text()) });
 
 // JSON with every object's keys sorted: snapshots pass through the crate's
 // `serde_json::Value`, whose maps sort their keys.
@@ -432,11 +274,11 @@ async function windowedRtt(page, pinger, window = 10) {
 }
 
 async function openLab(page, base) {
-  await page.goto(`${base}/docs/lab/`, { waitUntil: 'load' });
-  await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-  await page.evaluate((scenario) => window.krabkaLab.openScenario(scenario), SIMULATED_PRESETS.find((p) => p.id === 'network-probe').scenario);
+  await openLabPage(page, base);
+  await openScenario(page, NETWORK_PROBE.scenario);
   await page.locator('#krabka-lab .lab-dtab[data-tab="build"]').click();
 }
+
 
 // ---- the flows --------------------------------------------------------------------------------------
 
@@ -503,7 +345,7 @@ async function realBroker(context, base, errors) {
   }
   const progress = loading.filter((r) => /^downloading the broker: \d+\.\d MB of 0\.3 MB$/.test(r));
   check('while the module downloads the node shows how much has arrived', progress.length > 0, loading.join(' → '));
-  const told =await waitFor(page, `[...document.querySelectorAll('#krabka-lab .lab-toast-text')].map((t) => t.textContent).find((t) => t.startsWith('The page reloaded once')) || null`, 'the reload notice', 5000).catch(() => null);
+  const told =await waitFor(page, `[...document.querySelectorAll('#krabka-lab .lab-toast-text')].map((t) => t.textContent).find((t) => t.startsWith('Reloaded once')) || null`, 'the reload notice', 5000).catch(() => null);
   check('after the reload the page says why it reloaded', Boolean(told), told);
   await page.waitForTimeout(1000);
   const after = await page.evaluate(() => ({ id: window.krabkaLab.world.id, nodes: window.krabkaLab.world.scenario().nodes.map((n) => `${n.id}:${n.kind}:${n.name}`) }));
@@ -546,7 +388,7 @@ async function realBroker(context, base, errors) {
   const card = await page.locator('#krabka-lab .lab-node[data-node-id="4"]').evaluate((g) => ({ real: g.classList.contains('lab-real'), badge: [...g.querySelectorAll('.lab-badge-text')].map((t) => t.textContent) }));
   check('the canvas marks the node as real code', card.real && card.badge.includes('real'), JSON.stringify(card));
 
-  // A pinger across a 200 ms link: first to the simulated echo, then to the process.
+  // A pinger across a 200 ms link: first to the echo node, then to the process.
   // A fresh snapshot right after each change, so no sample of the pinger's
   // earlier self (its echoes over the 5 ms default link) enters the window.
   await page.evaluate(() => {
@@ -556,7 +398,7 @@ async function realBroker(context, base, errors) {
     window.krabkaLab.world.flush(performance.now(), true);
   });
   const sameTab = await windowedRtt(page, 3);
-  check(`a pinger to the simulated echo over a 200 ms link: ${sameTab} ms`, Math.abs(sameTab - 400) <= 5, `${sameTab} ms`);
+  check(`a pinger to the echo node over a 200 ms link: ${sameTab} ms`, Math.abs(sameTab - 400) <= 5, `${sameTab} ms`);
   await page.evaluate(() => {
     const spec = window.krabkaLab.world.spec(3);
     window.krabkaLab.world.updateNode(3, { ...spec, config: { ...spec.config, target: 4 } });
@@ -823,7 +665,7 @@ async function checkContract() {
       { id: 3, kind: 'krabka-broker', config: {} },
       { id: 1, kind: 'krabka-broker', config: { voter: false } },
       { id: 2, kind: 'krabka-broker', config: { voter: true, rack: 'b' } },
-      { id: 5, kind: 'broker', config: { broker_id: 5 } },
+      { id: 5, kind: 'echo', config: {} },
       { id: 6, kind: 'krabka-broker', config: { unknown: 1 } },
     ],
   };
@@ -912,19 +754,8 @@ async function main() {
     process.exit(2);
   }
   console.log(`  guest: ${path.relative(ROOT, guest).startsWith('..') ? guest : path.relative(ROOT, guest)} (${fs.statSync(guest).size.toLocaleString('en')} bytes)`);
-  const pw = await loadPlaywright();
-  if (!pw) {
-    console.error('Playwright is not installed (neither in node_modules nor globally).');
-    process.exit(2);
-  }
-  let browser;
-  try {
-    browser = await launchChromium(pw);
-  } catch (err) {
-    console.error(`Playwright could not launch Chromium: ${err.message.split('\n')[0]}`);
-    process.exit(2);
-  }
-  const { server, port } = await serve(DIST_DIR, guest);
+  const browser = await launchOrExit();
+  const { server, port } = await serveSite(DIST_DIR, guest);
   const base = `http://127.0.0.1:${port}`;
   const errors = [];
   try {
@@ -945,7 +776,7 @@ async function main() {
     server.close();
   }
   check('no page errors or console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-  console.log(`\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
+  console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
   if (failures.length) {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);

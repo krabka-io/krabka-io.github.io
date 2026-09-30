@@ -46,18 +46,20 @@ export async function encodeShare(value) {
   return `p${toBase64Url(bytes)}`;
 }
 
+// What a person sees for a code that does not decode: a truncated or edited
+// link, not the browser's own error.
+const BAD_CODE = "that code is damaged or cut short; copy it again in full";
+
 export async function decodeShare(code) {
   const text = String(code || "").trim();
   if (!text) throw new Error("empty code");
   const tag = text[0];
-  const bytes = fromBase64Url(text.slice(1));
-  let json;
-  if (tag === "d") {
-    json = typeof DecompressionStream === "function" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : inflateRaw(bytes);
-  } else if (tag === "p") {
-    json = bytes;
-  } else {
-    throw new Error("unknown code format");
+  if (tag !== "d" && tag !== "p") throw new Error(BAD_CODE);
+  try {
+    const bytes = fromBase64Url(text.slice(1));
+    const json = tag === "d" ? (typeof DecompressionStream === "function" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : inflateRaw(bytes)) : bytes;
+    return JSON.parse(new TextDecoder().decode(json));
+  } catch {
+    throw new Error(BAD_CODE);
   }
-  return JSON.parse(new TextDecoder().decode(json));
 }

@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { rewriteDocLinks } from './rewrite-doc-links.mjs';
 
 const ROOT_DIR = process.cwd();
 const CONTENT_DOCS_DIR = path.join(ROOT_DIR, 'src', 'content', 'docs');
@@ -71,30 +72,7 @@ for (const comp of COMPONENTS) {
         let content = fs.readFileSync(srcFile, 'utf8');
 
         // Rewrite relative markdown links and code links to prevent 404 errors
-        content = content.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, target) => {
-          // Ignore absolute URLs, anchors, and protocols
-          if (target.startsWith('http://') || target.startsWith('https://') || target.startsWith('mailto:') || target.startsWith('#')) {
-            return match;
-          }
-
-          const [rawPath, anchor] = target.split('#');
-          const anchorSuffix = anchor ? `#${anchor}` : '';
-
-          // 1. Link to sibling markdown guide in the same docs collection
-          if (rawPath.endsWith('.md') && !rawPath.includes('/')) {
-            const slug = rawPath.replace(/\.md$/, '');
-            const destUrl = slug === 'index' ? `/docs/${comp.docsSubdir}` : `/docs/${comp.docsSubdir}/${slug}`;
-            return `[${label}](${destUrl}${anchorSuffix})`;
-          }
-
-          // 2. Relative link to repository code/files (crates/, tests/, examples/, root docs, etc.)
-          const cleanPath = rawPath.replace(/^(\.\.\/)+/, '').replace(/^\.\//, '');
-          const isDocsSibling = fs.existsSync(path.join(sourceDocsDir, cleanPath));
-          const repoPath = isDocsSibling ? `docs/${cleanPath}` : cleanPath;
-          const githubUrl = `https://github.com/krabka-io/${comp.repo}/blob/main/${repoPath}${anchorSuffix}`;
-
-          return `[${label}](${githubUrl})`;
-        });
+        content = rewriteDocLinks(content, { docsSubdir: comp.docsSubdir, repo: comp.repo, sourceDocsDir });
 
         fs.writeFileSync(destFile, content);
         copiedCount++;

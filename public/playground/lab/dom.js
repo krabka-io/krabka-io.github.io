@@ -56,12 +56,21 @@ export function select(options, value, onChange, cls) {
   return s;
 }
 
-// A labelled form row.
+// A labelled form row. The control is named by the label text alone; the help
+// line sits inside the label for layout but is a description, not part of the name.
+let fieldCount = 0;
 export function labelled(text, control, help) {
   const wrap = el("label", "lab-field");
   const span = el("span", "lab-field-label", text);
+  span.id = `lab-field-${++fieldCount}`;
+  control.setAttribute("aria-labelledby", span.id);
   wrap.append(span, control);
-  if (help) wrap.appendChild(el("small", "lab-field-help", help));
+  if (help) {
+    const small = el("small", "lab-field-help", help);
+    small.id = `${span.id}-help`;
+    control.setAttribute("aria-describedby", small.id);
+    wrap.appendChild(small);
+  }
   return wrap;
 }
 
@@ -88,6 +97,11 @@ export function fmtMs(ms) {
 export function fmtNum(n) {
   if (n == null || Number.isNaN(Number(n))) return "–";
   return Number(n).toLocaleString("en-US");
+}
+
+// "1 partition", "3 partitions".
+export function plural(n, word, many = `${word}s`) {
+  return `${fmtNum(n)} ${Number(n) === 1 ? word : many}`;
 }
 
 export function fmtBytes(n) {
@@ -190,17 +204,48 @@ export class Toasts {
     container.appendChild(this.root);
   }
 
-  show(message, { level = "info", ttl = 5000 } = {}) {
+  // `action`: { label, run }, a button that does something (Undo) and dismisses
+  // the toast. A toast with an action stays longer, and every toast waits
+  // while the pointer is over it or focus is in it, so there is time to reach it.
+  show(message, { level = "info", action = null, ttl = action ? 15_000 : 5000 } = {}) {
     const t = el("div", `lab-toast lab-toast-${level}`);
     const text = el("span", "lab-toast-text", message);
     const close = button("×", "lab-toast-close", () => t.remove(), {
       ariaLabel: "Dismiss",
     });
-    t.append(text, close);
+    t.append(text);
+    if (action) {
+      t.appendChild(
+        button(action.label, "lab-btn-sm lab-toast-action", () => {
+          t.remove();
+          action.run();
+        }),
+      );
+    }
+    t.append(close);
     this.root.appendChild(t);
     while (this.root.children.length > 5) this.root.firstChild.remove();
-    if (ttl > 0) setTimeout(() => t.remove(), ttl);
+    if (ttl > 0) {
+      let timer = 0;
+      const arm = () => {
+        clearTimeout(timer);
+        if (!t.matches(":hover, :focus-within")) timer = setTimeout(() => t.remove(), ttl);
+      };
+      for (const ev of ["pointerenter", "focusin"]) t.addEventListener(ev, () => clearTimeout(timer));
+      for (const ev of ["pointerleave", "focusout"]) t.addEventListener(ev, arm);
+      arm();
+    }
+    t.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      t.remove();
+    });
     return t;
+  }
+
+  // An Undo that belongs to a scenario that is gone must not be offered.
+  dropActions() {
+    for (const a of this.root.querySelectorAll(".lab-toast-action")) a.closest(".lab-toast").remove();
   }
 
   info(message) {

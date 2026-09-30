@@ -12,7 +12,9 @@ let counter = 0;
 
 export class TabSet {
   // `tabs`: [{ id, label, title }]. `hooks.onShow(id)` runs after a tab opens.
-  constructor(container, { label, tabs, active, className = "", hooks = {} }) {
+  // `tools`: true adds `this.tools` beside the strip for buttons that are not
+  // tabs; a tablist may hold only tabs, so they cannot go inside `bar`.
+  constructor(container, { label, tabs, active, className = "", tools = false, hooks = {} }) {
     this.hooks = hooks;
     this.uid = `lab-tabset-${++counter}`;
     this.root = el("div", `lab-tabset ${className}`.trim());
@@ -20,7 +22,14 @@ export class TabSet {
     this.bar.setAttribute("role", "tablist");
     this.bar.setAttribute("aria-label", label);
     this.body = el("div", "lab-tabset-body");
-    this.root.append(this.bar, this.body);
+    if (tools) {
+      this.head = el("div", "lab-tabset-head");
+      this.tools = el("div", "lab-tabset-tools");
+      this.head.append(this.bar, this.tools);
+      this.root.append(this.head, this.body);
+    } else {
+      this.root.append(this.bar, this.body);
+    }
     this.tabs = new Map();
     this.order = tabs.map((t) => t.id);
     for (const t of tabs) {

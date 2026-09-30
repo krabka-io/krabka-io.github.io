@@ -1,7 +1,7 @@
 //! The test harness, and two diagnostic node kinds every scenario can use.
 //!
 //! [`TestWorld`] wraps a [`World`] with the run-until helpers the module tests
-//! and the integration tests share. [`EchoNode`] and [`PingerNode`] exercise
+//! share. [`EchoNode`] and [`PingerNode`] exercise
 //! the network without any protocol: `echo` answers every data frame with the
 //! same bytes; `pinger` opens a connection to a target and pings it on a
 //! period. They also serve the page as a latency probe.
