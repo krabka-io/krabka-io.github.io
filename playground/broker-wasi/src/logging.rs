@@ -293,7 +293,10 @@ mod tests {
         for bad in ["info,krabka=loud", "verbose", "debug,a=b=c"] {
             let (targets, why) = filter(Some(bad));
             let why = why.unwrap_or_else(|| panic!("{bad:?} was accepted"));
-            assert!(why.contains(bad) && why.contains("default applies"), "{why}");
+            assert!(
+                why.contains(bad) && why.contains("default applies"),
+                "{why}"
+            );
             assert!(targets.would_enable("x", &Level::INFO));
             assert!(!targets.would_enable("x", &Level::DEBUG));
         }
@@ -313,7 +316,9 @@ mod tests {
                 "starting the \"broker\""
             );
         });
-        let [line] = &lines[..] else { panic!("{lines:?}") };
+        let [line] = &lines[..] else {
+            panic!("{lines:?}")
+        };
         assert_eq!(line["level"], "INFO");
         assert_eq!(line["target"], module_path!());
         assert_eq!(line["mode"], "Level(Info)");
