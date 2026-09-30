@@ -154,8 +154,9 @@ export class StoragePanel {
     this.root.addEventListener("toggle", () => {
       if (this.root.open) this.refresh();
     });
+    // The dock keeps the disclosure open, so poll only while its tab is showing.
     this.timer = setInterval(() => {
-      if (this.root.open) this.refresh();
+      if (this.root.open && this.root.offsetParent !== null) this.refresh();
     }, REFRESH_MS);
     this.refresh();
   }

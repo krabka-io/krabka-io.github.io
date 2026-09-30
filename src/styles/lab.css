@@ -707,6 +707,10 @@
 /* ---- toasts float over the canvas corner ---- */
 #krabka-lab .lab-toasts { position: absolute; left: 1rem; bottom: 1rem; z-index: 30; display: flex; flex-direction: column; gap: 0.3rem; width: min(24rem, calc(100% - 2rem)); pointer-events: none; }
 #krabka-lab .lab-toasts:empty { display: none; }
+/* Stacked, the lab is several screens tall: pin notices to the viewport. */
+@media (max-width: 1024px) {
+  #krabka-lab .lab-toasts { position: fixed; left: 0.75rem; right: 0.75rem; bottom: 0.75rem; width: auto; }
+}
 #krabka-lab .lab-toast {
   display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 8px; pointer-events: auto;
   background: var(--lab-panel-2); border: 1px solid var(--lab-border-strong); font-size: 0.78rem;

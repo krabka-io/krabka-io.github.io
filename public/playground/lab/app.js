@@ -268,7 +268,11 @@ class LabApp {
     const nodes = this.world.scenario().nodes.filter((n) => !kindOf(n.kind).hidden);
     const broker = nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
     const client = nodes.find((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams");
-    if (key === "consumer") return this.addNodeDialog("consumer");
+    if (key === "consumer") {
+      // Only the host edits the scenario; a spoke's node would exist in this tab alone.
+      if (this.session.role === "spoke") return this.toasts.warn("Only the host tab can add nodes; ask it to add the consumer.");
+      return this.addNodeDialog("consumer");
+    }
     if (!broker) return this.toasts.warn("This scenario has no broker to break; load a preset from Scenarios.");
     this.world.setPaused(false);
     if (key === "kill") {
@@ -733,6 +737,7 @@ class LabApp {
       peers: this.session.peerList(),
       me: this.session.me,
       peersKey: this.session.peersKey,
+      offline: this.session.offlinePeers(),
     };
     this.canvas.setData({
       snapshot: snap,
@@ -814,7 +819,8 @@ class LabApp {
     this.inspector.setSelection(this.selection[0] ?? null);
     this.pushPanels();
     // Stacked, the inspector is below the canvas: bring it into view.
-    if (id != null && this.stacked?.matches) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // The tour's own card would scroll out of sight, so leave the page alone then.
+    if (id != null && this.stacked?.matches && !this.tour?.active) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   nodeList() {

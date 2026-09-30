@@ -163,7 +163,13 @@ export class Inspector {
   renderOverview() {
     const snapshot = this.data?.snapshot;
     const nodes = (snapshot?.nodes || []).filter((n) => !kindOf(n.kind).hidden);
-    const key = nodes.map((n) => [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, statusLine(n)].join(":")).join("|");
+    // A node whose host tab has dropped off is as good as down, like on the canvas.
+    const session = this.data?.session;
+    const hostOffline = (n) => {
+      const host = session?.hosting?.get(n.id);
+      return !n.hosted && host != null && Boolean(session.offline?.has(host));
+    };
+    const key = nodes.map((n) => [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, hostOffline(n), statusLine(n)].join(":")).join("|");
     if (key === this.overviewKey) return;
     this.overviewKey = key;
     const box = this.emptyMsg;
@@ -179,7 +185,7 @@ export class Inspector {
       box.appendChild(row);
       return;
     }
-    const up = nodes.filter((n) => n.alive).length;
+    const up = nodes.filter((n) => n.alive && !hostOffline(n)).length;
     box.appendChild(el("p", "lab-rail-help", `${up} of ${nodes.length} nodes up. Select a node to see its state, edit its configuration or send it commands.`));
     const list = el("ul", "lab-overview-list");
     for (const n of nodes) {
@@ -192,7 +198,8 @@ export class Inspector {
       glyph.style.background = k.color;
       const text = el("span", "lab-overview-text");
       const chips = el("span", "lab-overview-chips");
-      chips.appendChild(el("span", `lab-chip ${n.alive ? "lab-chip-ok" : "lab-chip-err"}`, n.alive ? "up" : "down"));
+      if (hostOffline(n)) chips.appendChild(el("span", "lab-chip lab-chip-err", "host offline"));
+      else chips.appendChild(el("span", `lab-chip ${n.alive ? "lab-chip-ok" : "lab-chip-err"}`, n.alive ? "up" : "down"));
       if (n.isolated) chips.appendChild(el("span", "lab-chip lab-chip-warn", "isolated"));
       const head = el("span", "lab-overview-name");
       head.append(el("strong", null, n.name), chips);
