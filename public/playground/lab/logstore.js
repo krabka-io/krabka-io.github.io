@@ -24,6 +24,7 @@ export class LogStore {
 
   reset() {
     this.all = [];
+    this.head = 0;
     this.dead = 0;
     this.queues = new Map(); // node id → its live entries, oldest first
     this.levels = { TRACE: 0, DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0 }; // lines only, not markers
@@ -73,10 +74,15 @@ export class LogStore {
     this.count(entry, 1);
     if (queue.length > this.perNode) this.drop(queue.shift());
     if (this.all.length - this.dead > this.total) {
-      this.compact();
-      const oldest = this.all.shift();
+      // Evict from a moving head, not with shift(): reindexing 20,000 lines
+      // per new line would be quadratic. The array is compacted in batches.
+      while (this.all[this.head].dead) this.head++;
+      const oldest = this.all[this.head++];
+      oldest.dead = true;
+      this.dead++;
       this.queues.get(oldest.node).shift();
       this.count(oldest, -1);
+      if (this.dead > COMPACT_AT) this.compact();
     }
     this.notify();
     return entry;
@@ -102,6 +108,7 @@ export class LogStore {
     if (!this.dead) return;
     this.all = this.all.filter((e) => !e.dead);
     this.dead = 0;
+    this.head = 0;
   }
 
   /** Every live entry, oldest first. The array is the store's own: do not change it. */

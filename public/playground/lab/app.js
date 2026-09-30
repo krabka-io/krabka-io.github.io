@@ -1130,6 +1130,8 @@ class LabApp {
   // Saves the level, then restarts the brokers that run at another one: a kill
   // and a boot on the same disk, the path of the Kill and Restart buttons.
   applyLogLevels({ scope, directive, restart }) {
+    // The brokers run on the hub, so a spoke's setting would change nothing.
+    if (this.session.role === "spoke") return this.toasts.warn("Only the host tab runs the brokers; change their log level there.");
     this.logLevels.set(this.world.id ?? "", scope, directive);
     for (const id of restart) {
       this.fault(FAULT.kill(id), { quiet: true });

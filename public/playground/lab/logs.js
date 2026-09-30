@@ -404,7 +404,8 @@ export class LogsPanel {
       row.label.hidden = Boolean(this.filter.prefix) && !target.startsWith(this.filter.prefix);
     }
     for (const [target, row] of this.targetRows) {
-      if (targets.has(target)) continue;
+      // A chosen target keeps its row at zero, so the reader can unchoose it.
+      if (targets.has(target) || this.filter.targets.has(target)) continue;
       row.label.remove();
       this.targetRows.delete(target);
     }
