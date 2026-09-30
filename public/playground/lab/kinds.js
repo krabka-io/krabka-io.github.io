@@ -34,6 +34,7 @@
 // command object, and `enabled(state)`; `bar: false` keeps a command out of
 // the inspector's command bar, for the dialog's `example` only.
 
+import { plural } from "./dom.js";
 import { renderView } from "./views.js";
 import { MISSING_BUILD, REAL_BROKER_KIND } from "./external.js";
 import { TEMPLATE_HELP } from "./forms.js";
@@ -148,10 +149,10 @@ export const KINDS = {
     fields: [
       { key: "voter", label: "KRaft voter", type: "boolean", default: true, emitDefault: false, help: "Listed in KRABKA_VOTERS: a controller and a broker. Unchecked, it runs the broker role only." },
       { key: "rack", label: "Rack", type: "text", placeholder: "a", help: "The broker's rack (KIP-392). Sent as rack." },
-      { key: "num_partitions", label: "Default partitions", type: "number", min: 1, max: 2147483647, step: 1, help: "Kafka's num.partitions. Sent as runtime.num_partitions." },
-      { key: "default_replication_factor", label: "Default replication factor", type: "number", min: 1, max: 32767, step: 1, help: "Kafka's default.replication.factor. Sent as runtime.default_replication_factor." },
-      { key: "min_insync_replicas", label: "min.insync.replicas", type: "number", min: 1, max: 2147483647, step: 1, help: "The broker's default min.insync.replicas. Sent as runtime.default_min_insync_replicas." },
-      { key: "replica_lag_time_max_ms", label: "Replica lag time max (ms)", type: "number", min: 1, max: 2147483647, step: 1, help: "Kafka's replica.lag.time.max.ms. Sent as replica_lag_time_max." },
+      { key: "num_partitions", label: "Default partitions", type: "number", min: 1, max: 2147483647, step: 1, placeholder: "broker default", help: "Kafka's num.partitions. Blank keeps the broker's default. Sent as runtime.num_partitions." },
+      { key: "default_replication_factor", label: "Default replication factor", type: "number", min: 1, max: 32767, step: 1, placeholder: "broker default", help: "Kafka's default.replication.factor. Blank keeps the broker's default. Sent as runtime.default_replication_factor." },
+      { key: "min_insync_replicas", label: "min.insync.replicas", type: "number", min: 1, max: 2147483647, step: 1, placeholder: "broker default", help: "The broker's default min.insync.replicas. Blank keeps the broker's default. Sent as runtime.default_min_insync_replicas." },
+      { key: "replica_lag_time_max_ms", label: "Replica lag time max (ms)", type: "number", min: 1, max: 2147483647, step: 1, placeholder: "broker default", help: "Kafka's replica.lag.time.max.ms. Blank keeps the broker's default. Sent as replica_lag_time_max." },
     ],
     commands: [],
     noCommands: "A real broker runs in a process; the lab sends it no control commands.",
@@ -729,7 +730,7 @@ function realBrokerStatus(s) {
   switch (p.state) {
     case "running": {
       const c = s.connections || {};
-      return `real · ${(c.inbound ?? 0) + (c.outbound ?? 0)} conns${p.lagging ? " · lagging" : ""}`;
+      return `real · ${plural((c.inbound ?? 0) + (c.outbound ?? 0), "conn")}${p.lagging ? " · lagging" : ""}`;
     }
     case "unavailable":
       return p.reason === MISSING_BUILD ? "no build on this site" : "unavailable";

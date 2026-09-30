@@ -143,6 +143,7 @@ function makeControl(spec, value, ctx) {
       if (spec.min != null) input.min = String(spec.min);
       if (spec.max != null) input.max = String(spec.max);
       if (spec.step != null) input.step = String(spec.step);
+      if (spec.placeholder) input.placeholder = spec.placeholder;
       input.value = initial == null ? "" : String(initial);
       wrap.appendChild(labelled(label, input, help));
       read = () => {

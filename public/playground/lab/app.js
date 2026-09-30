@@ -11,7 +11,7 @@
 // first time a scenario with one runs here.
 
 import init, { Lab } from "../krabka_playground.js";
-import { el, button, select, labelled, fmtMs, fmtNum, copyToClipboard, debounce, Toasts } from "./dom.js";
+import { el, button, select, labelled, fmtMs, fmtNum, plural, copyToClipboard, debounce, Toasts } from "./dom.js";
 import { LabWorld, SPEEDS } from "./world.js";
 import { Canvas } from "./canvas.js";
 import { Inspector } from "./inspector.js";
@@ -157,7 +157,7 @@ class LabApp {
       nodeName: (id) => this.nodeName(id),
     });
     this.canvas = new Canvas(stage, {
-      onSelect: (id, { additive }) => this.select(id, additive),
+      onSelect: (id, { additive }) => this.select(id, additive, { scroll: false }),
       onDeselect: () => this.select(null),
       onMove: (id, x, y) => this.world.setPosition(id, x, y),
       onCommand: (id, command) => this.command(id, command),
@@ -172,6 +172,7 @@ class LabApp {
       label: "Cluster details",
       active: "events",
       className: "lab-dock",
+      tools: true,
       tabs: [
         { id: "events", label: "Events", title: "Everything the cluster recorded, newest at the bottom" },
         { id: "network", label: "Network bytes", title: "Frames and payload bytes on a link between two nodes" },
@@ -189,7 +190,7 @@ class LabApp {
       title: "Collapse or restore the details panel",
     });
     this.dockToggle.setAttribute("aria-expanded", "true");
-    this.dock.bar.appendChild(this.dockToggle);
+    this.dock.tools.appendChild(this.dockToggle);
     // Choosing a tab, even the active one, opens a folded dock.
     this.dock.bar.addEventListener("click", (e) => {
       if (e.target.closest(".lab-dtab") && this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
@@ -216,6 +217,8 @@ class LabApp {
       onOpenTab: (tab) => this.palette.show(tab),
       onTry: (key) => this.tryIt(key),
       onBrowseVolume: async (id) => {
+        // Showing the tab it is already on does not unfold a folded dock.
+        this.setDockCollapsed(false);
         this.dock.show("storage");
         await this.storagePanel.refresh();
         await this.storagePanel.browseVolume(volumeName(this.world.id, id));
@@ -259,15 +262,23 @@ class LabApp {
     this.stacked = window.matchMedia("(max-width: 1024px)");
     if (this.stacked.matches) this.setDockCollapsed(true);
 
-    root.addEventListener("keydown", (e) => this.onKey(e));
+    // The shortcuts answer while focus is in the lab or the pointer is over it:
+    // a click on a button that re-renders drops focus to the page.
+    this.pointerInLab = false;
+    root.addEventListener("pointerenter", () => (this.pointerInLab = true));
+    root.addEventListener("pointerleave", () => (this.pointerInLab = false));
+    document.addEventListener("keydown", (e) => this.onKey(e));
   }
 
   // The inspector's "Try this" buttons: break the running cluster in a way the
   // reader can watch.
   tryIt(key) {
     const nodes = this.world.scenario().nodes.filter((n) => !kindOf(n.kind).hidden);
-    const broker = nodes.find((n) => kindOf(n.kind).real || n.kind === "broker");
-    const client = nodes.find((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams");
+    // A live node when there is one, so pressing the button twice breaks a second node.
+    const up = (n) => this.world.snapshot()?.nodes?.find((s) => s.id === n.id)?.alive !== false;
+    const pick = (list) => list.find(up) || list[0];
+    const broker = pick(nodes.filter((n) => kindOf(n.kind).real || n.kind === "broker"));
+    const client = pick(nodes.filter((n) => n.kind === "producer" || n.kind === "consumer" || n.kind === "streams"));
     if (key === "consumer") {
       // Only the host edits the scenario; a spoke's node would exist in this tab alone.
       if (this.session.role === "spoke") return this.toasts.warn("Only the host tab can add nodes; ask it to add the consumer.");
@@ -294,17 +305,23 @@ class LabApp {
   }
 
   showNetwork() {
+    this.setDockCollapsed(false);
     this.dock.show("network");
     this.networkPanel.open();
   }
 
-  // Shortcuts that work anywhere in the lab except while typing or while a
-  // control has focus (Space would press it).
+  // Shortcuts that work anywhere in the lab, or with the pointer over it,
+  // except while typing, while a dialog is open or while a control has focus
+  // (Space would press it).
   onKey(e) {
-    if (e.target.closest("input, textarea, select, dialog")) return;
-    const onControl = e.target.closest("button, summary, a, [role=tab]");
+    const target = e.target instanceof Element ? e.target : document.body;
+    if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!this.root.contains(target) && !this.pointerInLab) return;
+    if (target.closest("input, textarea, select, dialog, [contenteditable]") || document.querySelector("dialog[open]")) return;
+    const onControl = target.closest("button, summary, a, [role=tab]");
     const key = e.key;
-    if (key === "?") {
+    if (key === "Escape" && this.tour.active) this.tour.close();
+    else if (key === "?") {
       e.preventDefault();
       this.helpDialog();
     } else if (key === " " && !onControl) {
@@ -336,6 +353,7 @@ class LabApp {
       table.append(el("dt", null, keys), el("dd", null, what));
     }
     body.appendChild(table);
+    body.appendChild(el("p", "lab-small lab-muted", "The keys answer while focus is in the lab or the pointer is over it."));
 
     // What the cards and lines on the canvas mean.
     body.appendChild(el("h4", "lab-rail-heading", "Reading the canvas"));
@@ -383,7 +401,7 @@ class LabApp {
       {
         title: "You control time",
         text: "Pause the clock, step forward in simulated milliseconds, or Settle until nothing is due. Raise the speed to watch slow things, like a broker session timeout, happen.",
-        target: ".lab-tb-clock",
+        target: ".lab-toolbar",
       },
       {
         title: "Inspect a node",
@@ -445,15 +463,18 @@ class LabApp {
         this.collapsePanel();
         this.expandedPanel = panel;
         panel.classList.add("lab-expanded");
+        // The old view was laid out for the old box: refit to the new one.
+        if (panel === this.canvas.wrap) this.canvas.userMovedView = false;
         if (panel === this.dock.root) this.setDockCollapsed(false);
-        control.textContent = "Close expanded view";
+        // Short, so the dock's tab strip keeps room on a phone.
+        control.textContent = "Close";
         control.setAttribute("aria-label", `Close expanded ${name}`);
         control.setAttribute("aria-expanded", "true");
         control.focus();
       }, { ariaLabel: `Expand ${name}` });
       control.setAttribute("aria-expanded", "false");
       if (panel === this.canvas.wrap) this.canvas.tools.appendChild(control);
-      else if (panel === this.dock.root) this.dock.bar.insertBefore(control, this.dockToggle);
+      else if (panel === this.dock.root) this.dock.tools.insertBefore(control, this.dockToggle);
       else panel.appendChild(control);
       panel._expandControl = control;
       panel._expandName = name;
@@ -470,6 +491,7 @@ class LabApp {
     const panel = this.expandedPanel;
     if (!panel) return;
     panel.classList.remove("lab-expanded");
+    if (panel === this.canvas.wrap) this.canvas.userMovedView = false;
     const control = panel._expandControl;
     control.textContent = "Expand";
     control.setAttribute("aria-label", `Expand ${panel._expandName}`);
@@ -503,7 +525,8 @@ class LabApp {
     body.appendChild(downloads);
     const command = (label, value) => {
       const row = el("div", "lab-bridge-command");
-      const code = el("code", "lab-code", value);
+      const code = el("code", "lab-code");
+      code.append(...commandTokens(value));
       row.append(code, button("Copy", "lab-btn-sm", async () => this.toasts.info((await copyToClipboard(value)) ? `${label} copied` : "Copy failed; select the command")));
       body.appendChild(row);
     };
@@ -731,6 +754,13 @@ class LabApp {
 
   pushPanels(snap = this.world.snapshot()) {
     const scenario = this.world.scenario();
+    // The hub can remove a node this tab has selected; a selection of nothing
+    // would leave live Kill and Isolate buttons for a node that is gone.
+    const gone = (id) => !scenario.nodes.some((n) => n.id === id) && !snap?.nodes?.some((n) => n.id === id);
+    if (this.selection.some(gone)) {
+      this.selection = this.selection.filter((id) => !gone(id));
+      this.inspector.setSelection(this.selection[0] ?? null);
+    }
     const session = {
       role: this.session.role,
       hosting: this.session.hosting,
@@ -767,10 +797,13 @@ class LabApp {
     this.timeEl.textContent = fmtMs(snap ? snap.now : this.world.now());
     if (snap) {
       const delivered = (snap.delivered || []).reduce((s, d) => s + (d[2] || 0), 0);
-      this.statsEl.textContent = `${snap.nodes.length} nodes · ${snap.in_flight.length} in flight · ${fmtNum(delivered)} delivered · ${fmtNum(snap.event_count)} events`;
+      // The hidden admin client is not a node the reader sees.
+      const shown = snap.nodes.filter((n) => !kindOf(n.kind).hidden).length;
+      this.statsEl.textContent = `${plural(shown, "node")} · ${snap.in_flight.length} in flight · ${fmtNum(delivered)} delivered · ${fmtNum(snap.event_count)} events`;
     }
     const r = this.session.role;
-    this.roleEl.textContent = r === "solo" ? "" : `${r} · ${this.session.peerList().filter((p) => p.state === "connected").length} peers`;
+    // Other tabs only: the list also carries this one.
+    this.roleEl.textContent = r === "solo" ? "" : `${r} · ${plural(this.session.peerList().filter((p) => p.state === "connected" && !p.self).length, "peer")}`;
   }
 
   onChange(opts = {}) {
@@ -812,15 +845,21 @@ class LabApp {
 
   // ---- selection and node commands -----------------------------------------------------------------------------
 
-  select(id, additive = false) {
+  // `scroll: false` for a click on the canvas: the reader is working there,
+  // and the fault bar already names the node.
+  select(id, additive = false, { scroll = true } = {}) {
     if (id == null) this.selection = [];
     else if (additive && this.selection.length && this.selection[0] !== id) this.selection = [this.selection[0], id];
     else this.selection = [id];
     this.inspector.setSelection(this.selection[0] ?? null);
     this.pushPanels();
-    // Stacked, the inspector is below the canvas: bring it into view.
-    // The tour's own card would scroll out of sight, so leave the page alone then.
-    if (id != null && this.stacked?.matches && !this.tour?.active) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // Stacked, the inspector is below the canvas: when a pick from a list
+    // leaves it out of sight altogether, bring it into view. The tour's own
+    // card would scroll out of sight, so leave the page alone then.
+    if (id != null && scroll && this.stacked?.matches && !this.tour?.active) {
+      const box = this.inspector.root.getBoundingClientRect();
+      if (box.bottom < 0 || box.top > window.innerHeight) this.inspector.root.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
 
   nodeList() {
@@ -864,8 +903,7 @@ class LabApp {
         break;
       case "remove":
         if (this.session.role === "spoke") return;
-        this.world.removeNode(id);
-        if (this.selection.includes(id)) this.select(null);
+        this.removeNode(id);
         break;
       case "control":
         this.controlDialog(id);
@@ -879,6 +917,24 @@ class LabApp {
         break;
       default:
     }
+  }
+
+  // Remove acts at once; the toast offers to put the node back. What comes
+  // back is its configuration, not the state it had stored.
+  removeNode(id) {
+    const spec = this.world.spec(id);
+    this.world.removeNode(id);
+    if (this.selection.includes(id)) this.select(null);
+    if (!spec) return;
+    this.toasts.show(`Removed ${spec.name}`, {
+      ttl: 8000,
+      action: {
+        label: "Undo",
+        run: () => {
+          if (this.session.role !== "spoke" && this.world.addNode(spec) != null) this.select(spec.id);
+        },
+      },
+    });
   }
 
   // A control command for a node, from the inspector's command bar or the
@@ -938,11 +994,11 @@ class LabApp {
     const { ensureCrossOriginIsolation } = await import(COI_URL);
     if (globalThis.crossOriginIsolated) {
       this.external.setIsolation(await ensureCrossOriginIsolation());
-      if (sessionFlag(RELOADED_KEY, false)) this.toasts.info("The page reloaded once to turn on cross-origin isolation: the real broker runs in this tab.");
+      if (sessionFlag(RELOADED_KEY, false)) this.toasts.show("Reloaded once so the real broker can run in this tab.", { ttl: 3000 });
       return false;
     }
     if (!(await this.external.moduleAvailable())) return false;
-    this.toasts.warn("This scenario runs a real Krabka broker, which needs cross-origin isolation: the page reloads once to turn it on. The scenario is kept.");
+    this.toasts.warn("A real Krabka broker needs one page reload before it can run in the browser. The scenario is kept.");
     await this.keepScenarioForReload();
     sessionFlag(RELOADED_KEY, true);
     const coi = await ensureCrossOriginIsolation();
@@ -1183,8 +1239,13 @@ class LabApp {
     this.openScenario(p.scenario);
   }
 
-  newScenario() {
-    this.openScenario({ version: 1, seed: 1, name: "", links: { default_latency_ms: 5 }, nodes: [], topics: [] });
+  // Clears at once; the toast offers to bring the scenario back.
+  async newScenario() {
+    const prev = this.world.scenario();
+    const cleared = await this.openScenario({ version: 1, seed: 1, name: "", links: { default_latency_ms: 5 }, nodes: [], topics: [] });
+    if (cleared && (prev.nodes.length || prev.topics.length)) {
+      this.toasts.show(`Cleared ${prev.name || "the scenario"}`, { ttl: 8000, action: { label: "Undo", run: () => this.openScenario(prev, { keepId: true }) } });
+    }
   }
 
   async openSaved(id) {
@@ -1342,6 +1403,37 @@ function sessionFlag(key, value) {
   } catch {
     return false;
   }
+}
+
+// A shell command line as text and colour spans: the program, its flags, the
+// values that follow them and the pipe. The text itself is unchanged, so what
+// the Copy button copies is the plain command.
+function commandTokens(value) {
+  const tok = (cls, text) => el("span", `lab-tok-${cls}`, text);
+  const out = [];
+  let program = true; // the next word is a program
+  let operand = false; // the next word is the value of a flag or of echo
+  for (const part of value.split(/(\s+)/)) {
+    const flag = /^(-[^=]+)(=)(.*)$/.exec(part);
+    if (!part.trim()) out.push(part);
+    else if (part === "|") {
+      out.push(tok("op", part));
+      program = true;
+    } else if (program) {
+      out.push(tok("cmd", part));
+      program = false;
+      operand = part === "echo";
+    } else if (flag) out.push(tok("flag", flag[1]), tok("op", flag[2]), tok("str", flag[3]));
+    else if (part.startsWith("-")) {
+      out.push(tok("flag", part));
+      operand = true;
+    } else if (part.startsWith("$")) out.push(tok("var", part));
+    else if (operand) {
+      out.push(tok("str", part));
+      operand = false;
+    } else out.push(part);
+  }
+  return out;
 }
 
 // A command of `kinds.js` as the JSON the Send command dialog starts from.

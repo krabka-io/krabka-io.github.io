@@ -503,7 +503,7 @@ async function realBroker(context, base, errors) {
   }
   const progress = loading.filter((r) => /^downloading the broker: \d+\.\d MB of 0\.3 MB$/.test(r));
   check('while the module downloads the node shows how much has arrived', progress.length > 0, loading.join(' → '));
-  const told =await waitFor(page, `[...document.querySelectorAll('#krabka-lab .lab-toast-text')].map((t) => t.textContent).find((t) => t.startsWith('The page reloaded once')) || null`, 'the reload notice', 5000).catch(() => null);
+  const told =await waitFor(page, `[...document.querySelectorAll('#krabka-lab .lab-toast-text')].map((t) => t.textContent).find((t) => t.startsWith('Reloaded once')) || null`, 'the reload notice', 5000).catch(() => null);
   check('after the reload the page says why it reloaded', Boolean(told), told);
   await page.waitForTimeout(1000);
   const after = await page.evaluate(() => ({ id: window.krabkaLab.world.id, nodes: window.krabkaLab.world.scenario().nodes.map((n) => `${n.id}:${n.kind}:${n.name}`) }));

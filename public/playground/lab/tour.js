@@ -35,32 +35,43 @@ export class Tour {
     this.index = -1;
     this.highlighted = null;
     this.root = el("aside", "lab-tour");
-    this.root.setAttribute("aria-label", "Cluster Lab tour");
+    // A dialog that leaves the page usable: focus moves into it on each step
+    // the reader asks for, so a screen reader announces the title and text.
+    this.root.setAttribute("role", "dialog");
+    this.root.setAttribute("aria-labelledby", "lab-tour-title");
+    this.root.setAttribute("aria-describedby", "lab-tour-text");
     this.root.hidden = true;
     container.appendChild(this.root);
     this.lab = container.closest("#krabka-lab");
+    this.opener = null;
   }
 
   get active() {
     return this.index >= 0;
   }
 
-  // Opens the tour the first time this browser sees the lab.
+  // Opens the tour the first time this browser sees the lab. It leaves focus
+  // where it is: taking it on page load would skip the reader past the page.
   maybeStart() {
-    if (!seen()) this.start();
+    if (!seen()) this.start({ focus: false });
   }
 
-  start() {
+  start({ focus = true } = {}) {
     this.index = 0;
-    this.render();
+    this.opener = document.activeElement;
+    this.render(focus);
   }
 
   close() {
+    const hadFocus = this.root.contains(document.activeElement);
     this.index = -1;
     this.root.hidden = true;
     this.clearHighlight();
     remember();
     this.hooks.onChange?.();
+    // The card that held focus is gone: give it back to what opened the tour.
+    if (hadFocus && this.opener?.isConnected && this.opener !== document.body) this.opener.focus();
+    this.opener = null;
   }
 
   go(delta) {
@@ -72,7 +83,7 @@ export class Tour {
       return;
     }
     this.index = next;
-    this.render();
+    this.render(true);
   }
 
   clearHighlight() {
@@ -80,7 +91,7 @@ export class Tour {
     this.highlighted = null;
   }
 
-  render() {
+  render(focus) {
     const steps = this.hooks.steps();
     const step = steps[this.index];
     if (!step) {
@@ -98,7 +109,11 @@ export class Tour {
     const last = this.index === steps.length - 1;
     const head = el("div", "lab-tour-head");
     head.append(el("span", "lab-tour-step", `Step ${this.index + 1} of ${steps.length}`), button("Skip tour", "lab-btn-sm lab-tour-skip", () => this.close()));
-    this.root.append(head, el("h3", "lab-tour-title", step.title), el("p", "lab-tour-text", step.text));
+    const title = el("h3", "lab-tour-title", step.title);
+    const text = el("p", "lab-tour-text", step.text);
+    title.id = "lab-tour-title";
+    text.id = "lab-tour-text";
+    this.root.append(head, title, text);
     if (step.action) {
       this.root.appendChild(
         button(step.action.label, "lab-btn-sm lab-tour-action", () => {
@@ -109,8 +124,17 @@ export class Tour {
     const nav = el("div", "lab-tour-nav");
     const back = button("Back", "lab-btn-sm", () => this.go(-1));
     back.disabled = this.index === 0;
-    nav.append(back, button(last ? "Done" : "Next", "lab-btn-sm lab-primary", () => this.go(1)));
+    const next = button(last ? "Done" : "Next", "lab-btn-sm lab-primary", () => this.go(1));
+    nav.append(back, next);
     this.root.appendChild(nav);
+    // Stacked, the part of the page a step points at can be screens away: when
+    // none of it shows above the card, bring it up under the site header.
+    const box = this.highlighted?.getBoundingClientRect();
+    const shown = Math.min(window.innerHeight, this.root.getBoundingClientRect().top);
+    if (box && (box.bottom < 64 || box.top > shown - 48)) this.highlighted.scrollIntoView({ block: "start", behavior: "smooth" });
+    // The buttons were rebuilt, so the one the reader pressed is gone; the
+    // next step's own button takes the focus.
+    if (focus) next.focus({ preventScroll: true });
     this.hooks.onChange?.();
   }
 }

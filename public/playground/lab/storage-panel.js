@@ -9,6 +9,13 @@
 
 import { el, button, select, fmtBytes, fmtNum } from "./dom.js";
 
+// The header of a column of buttons: empty to the eye, named for a screen reader.
+function actionsHeader() {
+  const th = el("th");
+  th.appendChild(el("span", "lab-sr", "actions"));
+  return th;
+}
+
 const REFRESH_MS = 2500;
 const HEX_PAGE_BYTES = 256;
 const MAX_ANNOTATED_BYTES = 65536;
@@ -189,7 +196,7 @@ export class StoragePanel {
     this.table.innerHTML = "";
     const thead = el("thead");
     const hr = el("tr");
-    for (const h of ["node", "bytes", "log entries", "keys", ""]) hr.appendChild(el("th", null, h));
+    for (const h of ["node", "bytes", "log entries", "keys", ""]) hr.appendChild(h ? el("th", null, h) : actionsHeader());
     thead.appendChild(hr);
     const tbody = el("tbody");
     const ids = new Set([...nodes.map((n) => String(n.id)), ...Object.keys(usage.nodes)]);
@@ -243,7 +250,7 @@ export class StoragePanel {
     );
     const table = el("table", "lab-table lab-storage-table");
     const head = el("tr");
-    for (const h of ["node", "bytes", "files", ""]) head.appendChild(el("th", null, h));
+    for (const h of ["node", "bytes", "files", ""]) head.appendChild(h ? el("th", null, h) : actionsHeader());
     const thead = el("thead");
     thead.appendChild(head);
     const tbody = el("tbody");

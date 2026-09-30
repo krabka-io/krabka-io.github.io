@@ -12,15 +12,15 @@
 // The canvas keeps one `<g>` per node, topic and edge and updates it in
 // place, so the reader's focus and the hover state survive snapshots.
 
-import { svg, el, button, setAttrs, clamp } from "./dom.js";
+import { svg, el, button, setAttrs, clamp, plural } from "./dom.js";
 import { kindOf, derivedEdges, topicNames, internalTopics, statusLine } from "./kinds.js";
 
-const CARD_W = 172;
-const CARD_H = 60;
-const GHOST_W = 120;
-const GHOST_H = 34;
-const TOPIC_W = 132;
-const TOPIC_H = 34;
+const CARD_W = 184;
+const CARD_H = 64;
+const GHOST_W = 132;
+const GHOST_H = 36;
+const TOPIC_W = 148;
+const TOPIC_H = 36;
 const MAX_DOTS = 200;
 const MAX_LABELLED_DOTS = 40;
 const DRAG_THRESHOLD = 4;
@@ -97,8 +97,8 @@ export class Canvas {
     this.hint.setAttribute("aria-label", "Canvas gestures");
     for (const [keys, what] of [
       ["Click", "inspect a node"],
-      ["Shift+click", "a second node for link controls"],
-      ["Drag", "move a card or pan"],
+      ["Shift+click", "a second node for a link"],
+      ["Drag", "move or pan"],
       ["Right-click", "more actions"],
       ["Wheel", "zoom"],
     ]) {
@@ -106,6 +106,13 @@ export class Canvas {
       li.append(el("kbd", null, keys), ` ${what}`);
       this.hint.appendChild(li);
     }
+    // Stacked, the canvas sits in a page that scrolls: the wheel scrolls it and
+    // only Ctrl+wheel (or a trackpad pinch) zooms.
+    this.stacked = window.matchMedia("(max-width: 1024px)");
+    const zoomKey = this.hint.lastChild.firstChild;
+    const labelZoomKey = () => (zoomKey.textContent = this.stacked.matches ? "Ctrl+wheel" : "Wheel");
+    labelZoomKey();
+    this.stacked.addEventListener("change", labelZoomKey);
     this.wrap.appendChild(this.hint);
 
     this.menu = el("div", "lab-menu");
@@ -117,6 +124,11 @@ export class Canvas {
     this.bindPointer();
     this.bindKeys();
     this.applyView();
+    // The box changes with the window, Expand and Close, and the fault bar's
+    // second row: refit, unless the reader has moved the view.
+    new ResizeObserver(([entry]) => {
+      if (this.fitted && !this.userMovedView && entry.contentRect.width > 0) this.fit();
+    }).observe(this.svg);
   }
 
   defs() {
@@ -226,16 +238,17 @@ export class Canvas {
     glyph.textContent = k.glyph;
     g.append(glyphBg, glyph);
     const tx = -w / 2 + (ghost ? 30 : 44);
-    const name = svg("text", { class: "lab-card-name", x: tx, y: ghost ? 4 : -8 });
+    const name = svg("text", { class: "lab-card-name", x: tx, y: ghost ? 4 : -9 });
     g.appendChild(name);
     let kind = null;
     let status = null;
     if (!ghost) {
       kind = svg("text", { class: "lab-card-kind", x: tx, y: 6 });
-      status = svg("text", { class: "lab-card-status", x: tx, y: 20 });
+      status = svg("text", { class: "lab-card-status", x: tx, y: 22 });
       g.append(kind, status);
     }
-    const badges = svg("g", { class: "lab-badges", transform: `translate(${w / 2 - 6}, ${-h / 2 + 2})` });
+    // Badges straddle the top edge, above the title, so a long name is never covered.
+    const badges = svg("g", { class: "lab-badges", transform: `translate(${w / 2 - 6}, ${-h / 2 - 7})` });
     g.appendChild(badges);
     const halo = svg("rect", { class: "lab-card-halo", x: -w / 2 - 4, y: -h / 2 - 4, width: w + 8, height: h + 8, rx: ghost ? 11 : 15 });
     g.insertBefore(halo, rect);
@@ -253,9 +266,10 @@ export class Canvas {
     const key = [n.name, st, n.alive, n.isolated, n.hosted, peerLabel, offline, sel].join("|");
     if (key === entry.lastKey) return;
     entry.lastKey = key;
-    entry.name.textContent = truncate(n.name || `${n.kind}-${n.id}`, entry.ghost ? 14 : 18);
-    if (entry.kind) entry.kind.textContent = `${k.label.toLowerCase()} · #${n.id}`;
-    if (entry.status) entry.status.textContent = truncate(st, 26);
+    entry.name.textContent = truncate(n.name || `${n.kind}-${n.id}`, entry.ghost ? 14 : 16);
+    // "(real)" is already a badge on the card; dropping it keeps the id on the line.
+    if (entry.kind) entry.kind.textContent = truncate(`${k.label.replace(/ \(real\)$/, "").toLowerCase()} · #${n.id}`, 22);
+    if (entry.status) entry.status.textContent = truncate(st, 18);
     const g = entry.g;
     g.classList.toggle("lab-down", !n.alive);
     g.classList.toggle("lab-isolated", n.isolated);
@@ -269,7 +283,10 @@ export class Canvas {
     g.dataset.alive = String(Boolean(n.alive));
     g.dataset.isolated = String(Boolean(n.isolated));
     g.dataset.status = st;
-    const bits = [n.name, k.label, n.alive ? "up" : "down"];
+    // A node whose host tab dropped off is not "up", whatever its last snapshot says.
+    const bits = [n.name, k.label];
+    if (!n.alive) bits.push("down");
+    else if (!offline) bits.push("up");
     if (k.real) bits.push("runs the real code");
     if (n.isolated) bits.push("isolated");
     if (remote) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
@@ -281,7 +298,7 @@ export class Canvas {
       g.prepend(title);
     }
     title.textContent = bits.join(", ");
-    // Badges, right-aligned from the card's top-right corner.
+    // Badges, right-aligned from the card's top-right corner (see makeNode).
     entry.badges.innerHTML = "";
     const badges = [];
     // A node that runs the real code, not the lab's model of it.
@@ -292,10 +309,10 @@ export class Canvas {
     else if (remote) badges.push([`@${peerLabel}`, "lab-badge-remote"]);
     let x = 0;
     for (const [text, cls] of badges) {
-      const w = text.length * 5.6 + 10;
+      const w = text.length * 6.2 + 10;
       x -= w;
-      const bg = svg("rect", { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 13, rx: 6 });
-      const t = svg("text", { class: "lab-badge-text", x: x + w / 2, y: 9.5, "text-anchor": "middle" });
+      const bg = svg("rect", { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 15, rx: 7 });
+      const t = svg("text", { class: "lab-badge-text", x: x + w / 2, y: 11, "text-anchor": "middle" });
       t.textContent = text;
       entry.badges.append(bg, t);
       x -= 4;
@@ -326,11 +343,11 @@ export class Canvas {
       const spec = specs.get(name);
       const role = internal.get(name);
       g.classList.toggle("lab-topic-internal", Boolean(role) && !spec);
-      g.querySelector(".lab-topic-name").textContent = truncate(name, 18);
+      g.querySelector(".lab-topic-name").textContent = truncate(name, 17);
       g.querySelector(".lab-topic-sub").textContent = spec
-        ? `${spec.partitions} partitions · rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}`
+        ? `${plural(spec.partitions, "partition")} · rf${spec.replication_factor === -1 ? "default" : spec.replication_factor}`
         : role
-          ? `${role} · made by the group`
+          ? `${role} · internal`
           : "topic";
       g.querySelector("title").textContent = role && !spec ? `${name}: the streams app's ${role} topic, which the streams group creates` : name;
     }
@@ -586,11 +603,14 @@ export class Canvas {
     const minY = Math.min(...pts.map((p) => p.y));
     const maxY = Math.max(...pts.map((p) => p.y));
     const { w, h } = this.size();
-    const pad = 36;
+    // More room above the cards: the canvas tools float there, and the status badges rise above a card.
+    const padX = 36;
+    const padTop = 46;
+    const padBottom = 30;
     const bw = Math.max(1, maxX - minX);
     const bh = Math.max(1, maxY - minY);
-    const k = clamp(Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh), MIN_ZOOM, 1.4);
-    this.view = { x: (w - bw * k) / 2 - minX * k, y: (h - bh * k) / 2 - minY * k, k };
+    const k = clamp(Math.min((w - 2 * padX) / bw, (h - padTop - padBottom) / bh), MIN_ZOOM, 1.4);
+    this.view = { x: (w - bw * k) / 2 - minX * k, y: padTop + (h - padTop - padBottom - bh * k) / 2 - minY * k, k };
     this.userMovedView = false;
     this.applyView();
   }
@@ -694,6 +714,7 @@ export class Canvas {
     s.addEventListener(
       "wheel",
       (e) => {
+        if (this.stacked.matches && !e.ctrlKey && !e.metaKey && !this.wrap.classList.contains("lab-expanded")) return;
         e.preventDefault();
         const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015));
         this.zoomAt(e.clientX, e.clientY, factor);

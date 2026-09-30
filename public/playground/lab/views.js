@@ -11,7 +11,7 @@
 // Tables carry `data-row` and `data-col` and key/value rows `data-field`, the
 // hooks `scripts/check-lab.mjs` reads the page by.
 
-import { el, fmtNum, fmtBytes, shortJson } from "./dom.js";
+import { el, fmtNum, fmtBytes, plural, shortJson } from "./dom.js";
 import { jsonTree } from "./json-tree.js";
 
 // Render the view for `kind`; `ctx` gives `nodeName(id)` and the tree state.
@@ -206,7 +206,7 @@ function renderBroker(root, s, used, ctx) {
     for (const t of internal) {
       const parts = t.partitions || [];
       const led = parts.filter((p) => p.leader === me).length;
-      body.appendChild(section(`${t.name} · ${parts.length} partitions · leads ${led}`, partitionTable(t), { open: false, nested: true }));
+      body.appendChild(section(`${t.name} · ${plural(parts.length, "partition")} · leads ${led}`, partitionTable(t), { open: false, nested: true }));
     }
     root.appendChild(section(`Internal topics (${internal.length})`, body, { open: false }));
   }
@@ -380,7 +380,7 @@ function renderRealBroker(root, s, used, ctx) {
   }
   for (const stream of ["stdout", "stderr"]) {
     const lines = take(s, used, stream);
-    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${lines.length} lines)`, logBlock(lines, stream), { open: false }));
+    if (Array.isArray(lines)) root.appendChild(section(`${stream} (last ${plural(lines.length, "line")})`,logBlock(lines, stream), { open: false }));
   }
   const runtime = take(s, used, "runtime");
   if (runtime && typeof runtime === "object") {

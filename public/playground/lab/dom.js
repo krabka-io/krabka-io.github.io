@@ -90,6 +90,11 @@ export function fmtNum(n) {
   return Number(n).toLocaleString("en-US");
 }
 
+// "1 partition", "3 partitions".
+export function plural(n, word, many = `${word}s`) {
+  return `${fmtNum(n)} ${Number(n) === 1 ? word : many}`;
+}
+
 export function fmtBytes(n) {
   const v = Number(n) || 0;
   if (v < 1024) return `${v} B`;
@@ -190,13 +195,23 @@ export class Toasts {
     container.appendChild(this.root);
   }
 
-  show(message, { level = "info", ttl = 5000 } = {}) {
+  // `action`: { label, run }, a button that does something (Undo) and dismisses the toast.
+  show(message, { level = "info", ttl = 5000, action = null } = {}) {
     const t = el("div", `lab-toast lab-toast-${level}`);
     const text = el("span", "lab-toast-text", message);
     const close = button("×", "lab-toast-close", () => t.remove(), {
       ariaLabel: "Dismiss",
     });
-    t.append(text, close);
+    t.append(text);
+    if (action) {
+      t.appendChild(
+        button(action.label, "lab-btn-sm lab-toast-action", () => {
+          t.remove();
+          action.run();
+        }),
+      );
+    }
+    t.append(close);
     this.root.appendChild(t);
     while (this.root.children.length > 5) this.root.firstChild.remove();
     if (ttl > 0) setTimeout(() => t.remove(), ttl);
