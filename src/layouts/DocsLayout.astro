@@ -52,7 +52,13 @@ const docSections = [
       { label: 'Overview & Quickstart', slug: '/docs/broker' },
       { label: 'Broker Configuration Reference', slug: '/docs/broker/config-reference' },
       { label: 'Verification', slug: '/docs/broker/verification' },
+      { label: 'Kafka KIP Matrix', slug: '/docs/kip-matrix' },
       { label: 'Kafka KIP Compatibility Matrix', slug: '/docs/broker/kip_matrix' },
+      { label: 'Kafka KIP Inventory', slug: '/docs/broker/kip_inventory' },
+      { label: 'Ecosystem Qualification', slug: '/docs/broker/qualification' },
+      { label: 'Format Divergences', slug: '/docs/broker/format-divergences' },
+      { label: 'Roadmap', slug: '/docs/broker/roadmap' },
+      { label: 'Mutation Sweep Baseline', slug: '/docs/broker/mutants-baseline' },
       { label: 'Docgen Contract', slug: '/docs/broker/docgen-contract' },
       { label: 'Release Process', slug: '/docs/broker/releasing' },
     ],
@@ -62,6 +68,9 @@ const docSections = [
     items: [
       { label: 'Overview & Quickstart', slug: '/docs/streams-java' },
       { label: 'Getting Started', slug: '/docs/streams-java/getting-started' },
+      { label: 'Architecture', slug: '/docs/streams-java/architecture' },
+      { label: 'Configuration', slug: '/docs/streams-java/configuration' },
+      { label: 'API Reference', slug: '/docs/streams-java/api-reference' },
       { label: 'Columnar Processing', slug: '/docs/streams-java/columnar' },
       { label: 'Columnar Operators', slug: '/docs/streams-java/columnar-operators' },
       { label: 'Serdes', slug: '/docs/streams-java/serdes' },
@@ -69,6 +78,7 @@ const docSections = [
       { label: 'Barrier Alignment', slug: '/docs/streams-java/barriers' },
       { label: 'Coordination', slug: '/docs/streams-java/coordination' },
       { label: 'Testing', slug: '/docs/streams-java/testing' },
+      { label: 'Runtime Constraints', slug: '/docs/streams-java/limitations' },
       { label: 'Troubleshooting', slug: '/docs/streams-java/troubleshooting' },
       { label: 'Build and Release', slug: '/docs/streams-java/build-and-release' },
     ],
@@ -78,6 +88,7 @@ const docSections = [
     items: [
       { label: 'Overview & Quickstart', slug: '/docs/streams-go' },
       { label: 'Getting Started', slug: '/docs/streams-go/getting-started' },
+      { label: 'Configuration', slug: '/docs/streams-go/configuration' },
       { label: 'Columnar Processing', slug: '/docs/streams-go/columnar' },
       { label: 'Serdes', slug: '/docs/streams-go/serdes' },
       { label: 'Schema Registry', slug: '/docs/streams-go/schema-registry' },
@@ -125,7 +136,11 @@ const isCategoryActive = (sec: typeof docSections[0]) => {
   });
 };
 
-const activeCategory = docSections.find((sec) => isCategoryActive(sec))?.category || 'Docs';
+const activeSection = docSections.find((sec) => isCategoryActive(sec));
+const activeCategory = activeSection?.category || 'Docs';
+// A synced guide's title carries its component, "Roadmap (Broker)"; the crumb
+// already names the category, so it matches the sidebar and the page heading.
+const crumbTitle = title.replace(/ \((Broker|Java Streams|Go Streams|Rust Streams|Connect|Operator|CLI)\)$/, '');
 
 const breadcrumbData = {
   "@context": "https://schema.org",
@@ -180,7 +195,9 @@ const breadcrumbData = {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
             </svg>
           </summary>
-        <div class="sticky top-24 mt-3 space-y-4 max-h-[calc(100vh-8rem)] overflow-y-auto pr-3 lg:mt-0">
+        <!-- Only from lg up is the menu a sticky column that scrolls on its own; on a phone it
+             is part of the page flow so it does not become a nested scroller. -->
+        <div class="mt-3 space-y-4 lg:sticky lg:top-24 lg:mt-0 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-3">
           <div class="pb-2 border-b border-white/10 flex items-center justify-between">
             <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">
               Documentation
@@ -224,7 +241,7 @@ const breadcrumbData = {
                         <li>
                           <a
                             href={itemUrl}
-                            class={`block px-2.5 py-1 rounded-md text-xs transition-colors ${
+                            class={`block px-2.5 py-1.5 lg:py-1 rounded-md text-xs transition-colors ${
                               activeItem
                                 ? 'bg-krab-500/15 text-krab-400 font-semibold'
                                 : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -238,12 +255,12 @@ const breadcrumbData = {
                               <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block pt-0.5 pb-1">
                                 On This Page
                               </span>
-                              <ul class="space-y-1">
+                              <ul>
                                 {toc.map((heading) => (
                                   <li class={heading.depth === 3 ? 'pl-2' : ''}>
                                     <a
                                       href={`#${heading.slug}`}
-                                      class="block py-0.5 text-[11px] text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                                      class="block py-1.5 text-[11px] text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
                                     >
                                       {heading.text}
                                     </a>
@@ -267,12 +284,12 @@ const breadcrumbData = {
               <span class="text-xs font-semibold uppercase tracking-wider text-gray-400 block pb-2">
                 On This Page
               </span>
-              <ul class="space-y-1 border-l border-krab-500/30 pl-2.5 ml-1">
+              <ul class="border-l border-krab-500/30 pl-2.5 ml-1">
                 {toc.map((heading) => (
                   <li class={heading.depth === 3 ? 'pl-2' : ''}>
                     <a
                       href={`#${heading.slug}`}
-                      class="block py-0.5 text-xs text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                      class="block py-1.5 text-xs text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
                     >
                       {heading.text}
                     </a>
@@ -294,20 +311,20 @@ const breadcrumbData = {
       </aside>
 
       <!-- Main Docs Content (Takes full remaining 9 columns) -->
-      <main class:list={['min-w-0 space-y-4', !Astro.props.wide && 'lg:col-span-9']}>
-        <!-- Breadcrumbs UI -->
-        <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-gray-400 pb-2">
-          <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
-          <span>/</span>
-          <a href={getPath('/docs')} class="hover:text-white transition-colors">Docs</a>
-          {activeCategory !== 'Docs' && (
+      <div class:list={['docs-page min-w-0 space-y-4', !Astro.props.wide && 'lg:col-span-9']}>
+        <!-- Breadcrumbs UI. The links pad out to a 28px hit area without growing the row. -->
+        <nav aria-label="Breadcrumb" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400 pb-2">
+          <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Home</a>
+          <span aria-hidden="true">/</span>
+          <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Docs</a>
+          {activeSection && (
             <>
-              <span>/</span>
-              <span class="text-gray-400">{activeCategory}</span>
+              <span aria-hidden="true">/</span>
+              <a href={getPath(activeSection.items[0].slug)} class="-my-1.5 py-1.5 hover:text-white transition-colors">{activeSection.category}</a>
             </>
           )}
-          <span>/</span>
-          <span class="text-gray-200 font-medium">{title}</span>
+          <span aria-hidden="true">/</span>
+          <span class="text-gray-200 font-medium" aria-current="page">{crumbTitle}</span>
         </nav>
 
         <div class:list={['frosted-card rounded-2xl border border-white/10 space-y-6', Astro.props.wide ? 'p-4 sm:p-6' : 'p-4 sm:p-8 lg:p-10']}>
@@ -334,26 +351,8 @@ const breadcrumbData = {
             <slot />
           )}
         </div>
-      </main>
+      </div>
 
     </div>
   </div>
 </BaseLayout>
-
-<script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
-        const span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          setTimeout(() => {
-            span.textContent = 'Copy';
-          }, 2000);
-        }
-      }
-    });
-  });
-</script>

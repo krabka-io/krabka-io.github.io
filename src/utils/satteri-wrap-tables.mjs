@@ -7,6 +7,12 @@
 // `data-cols` attribute lets the stylesheet give a wide table a minimum width
 // so its columns stay readable on a narrow screen.
 //
+// The plugin also gives the code in a table cell somewhere to break. Chrome
+// offers no line break at a slash or an underscore, so a long file path in a
+// narrow column can only split mid-word, or holds the column open at the width
+// of the whole path. A <wbr> after each `/`, `_` and `::` fixes both, and adds
+// nothing to copied text.
+//
 // Registered on the processor in astro.config.mjs. It is a plain plugin
 // object, so the site needs no import from the `satteri` package itself.
 
@@ -44,6 +50,23 @@ const wrapTables = {
         children: [],
       });
     },
+  },
+  text(node, ctx) {
+    const code = ctx.parent(node);
+    if (code?.tagName !== 'code') return;
+    // The cell holds the code directly, or through a link.
+    let cell = ctx.parent(code);
+    if (cell?.tagName === 'a') cell = ctx.parent(cell);
+    if (cell?.tagName !== 'td') return;
+    const parts = node.value.split(/(?<=[/_]|::)(?=\S)/);
+    if (parts.length < 2) return;
+    ctx.replaceNode(
+      node,
+      parts.flatMap((part, i) => [
+        ...(i ? [{ type: 'element', tagName: 'wbr', properties: {}, children: [] }] : []),
+        { type: 'text', value: part },
+      ]),
+    );
   },
 };
 

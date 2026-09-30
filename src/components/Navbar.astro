@@ -36,7 +36,7 @@ const navLinks = [
           if (link.hasDropdown) {
             const isFeaturesActive = currentPath.includes('/features');
             return (
-              <div class="relative group">
+              <div class="relative group" data-features-menu>
                 <a
                   href={getPath('/features')}
                   class={`inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
@@ -46,13 +46,14 @@ const navLinks = [
                   }`}
                 >
                   <span>Features</span>
-                  <svg class="h-3.5 w-3.5 opacity-70 transition-transform duration-200 group-hover:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg class="h-3.5 w-3.5 opacity-70 transition-transform duration-200 group-hover:rotate-180 group-focus-within:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                   </svg>
                 </a>
 
-                <!-- Solid Dropdown Menu -->
-                <div class="absolute left-0 top-full pt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 w-64">
+                <!-- Solid Dropdown Menu. Opens on hover or keyboard focus; Escape sets
+                     data-dismissed on the group to close it until the pointer or focus leaves. -->
+                <div class="absolute left-0 top-full pt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible group-data-[dismissed]:opacity-0 group-data-[dismissed]:invisible transition-all duration-150 w-64">
                   <div class="rounded-xl p-1.5 shadow-2xl border border-slate-700 bg-slate-900 divide-y divide-slate-800">
                     <div class="pb-1">
                       <a
@@ -114,6 +115,8 @@ const navLinks = [
         type="button"
         id="mobile-menu-button"
         aria-label="Toggle Menu"
+        aria-expanded="false"
+        aria-controls="mobile-menu"
         class="inline-flex lg:hidden items-center justify-center rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"
       >
         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -137,7 +140,7 @@ const navLinks = [
         {featureSubLinks.map((sub) => (
           <a
             href={sub.href}
-            class="block rounded-lg px-3 py-1.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
+            class="block rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
           >
             {sub.name}
           </a>
@@ -174,9 +177,28 @@ const navLinks = [
 <script>
   const btn = document.getElementById('mobile-menu-button');
   const menu = document.getElementById('mobile-menu');
-  if (btn && menu) {
-    btn.addEventListener('click', () => {
-      menu.classList.toggle('hidden');
-    });
-  }
+  const group = document.querySelector<HTMLElement>('[data-features-menu]');
+  const setOpen = (open: boolean) => {
+    menu?.classList.toggle('hidden', !open);
+    btn?.setAttribute('aria-expanded', String(open));
+  };
+  btn?.addEventListener('click', () => setOpen(menu?.classList.contains('hidden') ?? false));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (menu && !menu.classList.contains('hidden')) {
+      setOpen(false);
+      btn?.focus();
+    }
+    if (group?.contains(document.activeElement)) {
+      group.dataset.dismissed = '';
+      group.querySelector('a')?.focus();
+    }
+  });
+
+  const reopen = () => group && delete group.dataset.dismissed;
+  group?.addEventListener('mouseenter', reopen);
+  group?.addEventListener('focusout', (e) => {
+    if (!group.contains(e.relatedTarget as Node | null)) reopen();
+  });
 </script>

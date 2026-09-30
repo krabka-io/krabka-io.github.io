@@ -10,8 +10,7 @@ import versionsData from '../../data/versions.json';
 const activeRelease = versionsData['streams-java']?.activeRelease || 'v1.4.1';
 const releaseNumber = activeRelease.replace(/^v/, '');
 
-const javaGradle = `// Gradle Kotlin DSL
-dependencies {
+const javaGradle = `dependencies {
     implementation(platform("io.krabka:krabka-streams-bom:${releaseNumber}"))
     implementation("io.krabka:krabka-streams")
     implementation("io.krabka:krabka-streams-schema-serde")
@@ -66,6 +65,15 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
             <a href={getPath('/docs/streams-java/getting-started')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Getting Started:</a> Prerequisites, dependency coordinates, and your first streaming pipeline.
           </li>
           <li>
+            <a href={getPath('/docs/streams-java/architecture')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Architecture:</a> Module graph, dependencies, and how the pieces fit together.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/configuration')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Configuration:</a> KrabkaStreamsConfig defaults and the properties it applies.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/api-reference')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">API Reference:</a> Every public type, grouped by module.
+          </li>
+          <li>
             <a href={getPath('/docs/streams-java/columnar')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Columnar Processing:</a> VectorSchemaRoot batch execution, codecs, and topology lifecycle.
           </li>
           <li>
@@ -85,6 +93,9 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
           </li>
           <li>
             <a href={getPath('/docs/streams-java/testing')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Testing:</a> Mock topologies in-memory with ColumnarTestDriver and SchemaRegistryStub.
+          </li>
+          <li>
+            <a href={getPath('/docs/streams-java/limitations')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Runtime Constraints:</a> What comes from the runtime and the services the library talks to.
           </li>
           <li>
             <a href={getPath('/docs/streams-java/troubleshooting')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Troubleshooting:</a> Common JVM flags, buffer allocator diagnostics, and error resolutions.
@@ -138,8 +149,8 @@ const jvmFlag = `--add-opens=java.base/java.nio=ALL-UNNAMED`;
       <p class="text-sm text-gray-300">
         Arrow 19 needs this JVM option when it uses direct buffers:
       </p>
-      <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex items-center justify-between gap-3">
-        <span class="min-w-0 break-all">{jvmFlag}</span>
+      <div class="bg-black/50 p-3 rounded-lg border border-white/5 font-mono text-xs text-gray-300 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span class="min-w-0 [overflow-wrap:anywhere]">{jvmFlag}</span>
         <button type="button" class="copy-btn shrink-0 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors" data-copy={jvmFlag}>
           Copy Flag
         </button>

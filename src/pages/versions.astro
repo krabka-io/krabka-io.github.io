@@ -55,11 +55,11 @@ const pageSchema = {
   <script type="application/ld+json" set:html={JSON.stringify(pageSchema)} slot="head" />
 
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 font-sans">
-    <div class="text-left border-b border-white/10 pb-8 mb-16 max-w-3xl">
+    <div class="text-left border-b border-white/10 pb-8 mb-16">
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
         Release Status & Compatibility
       </h1>
-      <p class="mt-4 text-lg text-gray-300">
+      <p class="mt-4 text-lg text-gray-300 max-w-3xl">
         Krabka is in active greenfield development. This page tracks repository branch statuses, release milestones, and Apache Kafka wire-protocol compatibility targets across the ecosystem.
       </p>
     </div>
@@ -279,21 +279,3 @@ const pageSchema = {
 
   </div>
 </BaseLayout>
-
-<script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
-        const span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          setTimeout(() => {
-            span.textContent = 'Copy Snippet';
-          }, 2000);
-        }
-      }
-    });
-  });
-</script>

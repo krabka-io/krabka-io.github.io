@@ -177,17 +177,16 @@ spec:
     <div class="frosted-card rounded-2xl overflow-hidden shadow-2xl border border-white/10">
       <!-- Tabs Header -->
       <div class="flex flex-wrap items-center justify-between border-b border-white/10 bg-slate-950/80 px-4 py-2.5">
-        <div class="flex flex-wrap items-center gap-2" role="tablist">
+        <div class="flex flex-wrap items-center gap-2" role="tablist" id="code-tabs" aria-label="Code examples">
           {snippets.map((s, index) => (
             <button
+              type="button"
               role="tab"
-              data-target={s.id}
+              id={`tab-${s.id}`}
+              aria-controls={`panel-${s.id}`}
               aria-selected={index === 0 ? "true" : "false"}
-              class={`code-tab-btn rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all ${
-                index === 0
-                  ? 'bg-krab-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-              }`}
+              tabindex={index === 0 ? 0 : -1}
+              class="rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white aria-selected:shadow"
             >
               {s.label}
             </button>
@@ -204,7 +203,9 @@ spec:
         {snippets.map((s, index) => (
           <div
             id={`panel-${s.id}`}
-            class={`code-panel ${index === 0 ? 'block' : 'hidden'}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${s.id}`}
+            hidden={index !== 0}
             data-tag={s.tag}
           >
             <CodeBlock code={s.code} lang={s.lang} size="sm" class="code-block-bare" />
@@ -216,37 +217,13 @@ spec:
 </section>
 
 <script>
-  const tabBtns = document.querySelectorAll('.code-tab-btn');
-  const panels = document.querySelectorAll('.code-panel');
+  import { initTabs } from '../utils/tabs';
+
   const tagDisplay = document.getElementById('active-tag');
-
-  tabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const targetId = btn.getAttribute('data-target');
-
-      // Update button states
-      tabBtns.forEach((b) => {
-        b.classList.remove('bg-krab-600', 'text-white', 'shadow');
-        b.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
-        b.setAttribute('aria-selected', 'false');
-      });
-      btn.classList.add('bg-krab-600', 'text-white', 'shadow');
-      btn.classList.remove('text-gray-400', 'hover:text-white', 'hover:bg-white/5');
-      btn.setAttribute('aria-selected', 'true');
-
-      // Show matching panel
-      panels.forEach((p) => {
-        if (p.id === `panel-${targetId}`) {
-          p.classList.remove('hidden');
-          p.classList.add('block');
-          if (tagDisplay) {
-            tagDisplay.textContent = p.getAttribute('data-tag') || '';
-          }
-        } else {
-          p.classList.add('hidden');
-          p.classList.remove('block');
-        }
-      });
+  const list = document.getElementById('code-tabs');
+  if (list) {
+    initTabs(list, (_tab, panel) => {
+      if (tagDisplay) tagDisplay.textContent = panel.getAttribute('data-tag') || '';
     });
-  });
+  }
 </script>

@@ -34,7 +34,7 @@ krabka-connect-worker \\
       </p>
     </div>
 
-    <div class="space-y-8">
+    <div class="space-y-8 [&>div>p]:max-w-3xl [&>div>ul]:max-w-3xl">
       
       <!-- Section A: Connector Framework SPI -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
@@ -64,7 +64,7 @@ krabka-connect-worker \\
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           The PostgreSQL connector interfaces directly with PostgreSQL logical replication streams using the standard <code class="font-mono text-xs text-gray-200">pgoutput</code> decoding plugin:
         </p>
-        <ul class="list-disc list-inside text-sm text-gray-400 space-y-2 font-sans pl-2">
+        <ul class="list-disc list-outside text-sm text-gray-400 space-y-2 font-sans pl-5">
           <li><strong>Changes Only:</strong> There is no initial snapshot. The connector emits the changes that logical decoding makes available from its replication slot.</li>
           <li><strong>Transaction Metadata:</strong> Every record value carries the source LSN, transaction ID, and commit timestamp. Deletes are emitted as tombstones.</li>
           <li><strong>Schema Registry Framing:</strong> Keys and values are Protobuf, framed with schema IDs from a Confluent-compatible registry. The connector registers one shared change-record schema at startup, and the acceptance suite adds a column mid-stream without interrupting the flow.</li>
@@ -117,21 +117,3 @@ krabka-connect-worker \\
     </div>
   </div>
 </BaseLayout>
-
-<script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
-        const span = btn.querySelector('span');
-        if (span) {
-          span.textContent = 'Copied!';
-          setTimeout(() => {
-            span.textContent = 'Copy Command';
-          }, 2000);
-        }
-      }
-    });
-  });
-</script>

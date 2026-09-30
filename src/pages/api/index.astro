@@ -57,7 +57,7 @@ const apiModules = apiReference.map((entry) => {
             type="text"
             id="api-search"
             placeholder="Filter components..."
-            class="w-full rounded-lg bg-slate-900/90 border border-white/10 px-3.5 py-2 text-xs text-white placeholder-gray-500 focus:border-krab-500 focus:outline-none"
+            class="w-full rounded-lg bg-slate-900/90 border border-white/10 px-3.5 py-2 text-xs text-white placeholder-gray-400 focus:border-krab-500 focus:outline-none"
           />
           <svg class="absolute right-3 top-2.5 h-3.5 w-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -66,44 +66,45 @@ const apiModules = apiReference.map((entry) => {
       </div>
     </div>
 
-    <!-- API Reference Directory Table -->
+    <!-- API Reference Directory Table. Below lg each row is a card, so the
+         documentation links are never pushed off-screen. -->
     <div class="frosted-card rounded-xl overflow-hidden border border-white/10 mb-8">
-      <table class="w-full text-left text-xs border-collapse" id="api-table">
-        <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
+      <table class="block lg:table w-full text-left text-xs border-collapse" id="api-table">
+        <thead class="hidden lg:table-header-group bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
           <tr>
-            <th scope="col" class="py-3 px-5 min-w-[16rem]">Component</th>
+            <th scope="col" class="py-3 px-5 lg:w-full">Component</th>
             <th scope="col" class="py-3 px-4">Format</th>
             <th scope="col" class="py-3 px-4">Language</th>
             <th scope="col" class="py-3 px-4">Latest release</th>
             <th scope="col" class="py-3 px-5 text-right">Documentation</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-white/5">
+        <tbody class="block lg:table-row-group divide-y divide-white/5">
           {apiModules.map((mod) => (
-            <tr class="api-row hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.repo} ${mod.language} ${mod.format}`.toLowerCase()}>
-              <td class="py-3.5 px-5 min-w-[16rem]">
-                <div class="font-semibold text-white text-sm">
+            <tr class="api-row flex flex-wrap gap-x-4 gap-y-1 p-5 lg:table-row lg:p-0 hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.repo} ${mod.language} ${mod.format}`.toLowerCase()}>
+              <td class="w-full lg:w-auto lg:py-3.5 lg:px-5">
+                <a href={mod.apiHref} class="font-semibold text-white text-sm hover:text-krab-400 transition-colors">
                   {mod.name}
-                </div>
+                </a>
                 <p class="text-xs text-gray-400 mt-0.5 max-w-md">
                   {mod.summary}
                 </p>
               </td>
 
-              <td class="py-3.5 px-4 whitespace-nowrap text-gray-300 font-medium">
+              <td class="min-w-0! whitespace-nowrap text-gray-300 font-medium lg:py-3.5 lg:px-4">
                 {mod.format}
               </td>
 
-              <td class="py-3.5 px-4 whitespace-nowrap text-gray-400">
+              <td class="min-w-0! whitespace-nowrap text-gray-400 lg:py-3.5 lg:px-4">
                 {mod.language}
               </td>
 
-              <td class="py-3.5 px-4 whitespace-nowrap text-gray-300">
+              <td class="min-w-0! whitespace-nowrap text-gray-300 lg:py-3.5 lg:px-4">
                 {mod.release ?? 'main'}
               </td>
 
-              <td class="py-3.5 px-5 text-right whitespace-nowrap">
-                <div class="flex flex-col items-end gap-1">
+              <td class="w-full mt-1 lg:mt-0 lg:w-auto lg:py-3.5 lg:px-5 lg:text-right lg:whitespace-nowrap">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 lg:flex-col lg:items-end lg:gap-1">
                   <a
                     href={mod.apiHref}
                     class="font-semibold text-krab-400 hover:text-white transition-colors"
@@ -112,7 +113,7 @@ const apiModules = apiReference.map((entry) => {
                   </a>
                   <a
                     href={getPath(mod.guideHref)}
-                    class="text-gray-500 hover:text-gray-300 transition-colors"
+                    class="text-gray-400 hover:text-gray-200 transition-colors"
                   >
                     View Guides
                   </a>
@@ -122,6 +123,7 @@ const apiModules = apiReference.map((entry) => {
           ))}
         </tbody>
       </table>
+      <p id="api-empty" role="status" class="hidden px-5 py-8 text-center text-sm text-gray-400">No components match this filter.</p>
     </div>
 
     <!-- Editorial Explanation Text (Clean, no bubbles) -->
@@ -139,14 +141,19 @@ const apiModules = apiReference.map((entry) => {
 <script>
   const searchInput = document.getElementById('api-search') as HTMLInputElement | null;
   const rows = document.querySelectorAll<HTMLTableRowElement>('.api-row');
+  const empty = document.getElementById('api-empty');
 
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       const q = searchInput.value.toLowerCase().trim();
+      let shown = 0;
       rows.forEach((row) => {
         const text = row.getAttribute('data-search') || '';
-        row.style.display = text.includes(q) ? '' : 'none';
+        const match = text.includes(q);
+        row.style.display = match ? '' : 'none';
+        if (match) shown++;
       });
+      empty?.classList.toggle('hidden', shown > 0);
     });
   }
 </script>

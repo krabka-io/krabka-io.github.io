@@ -44,7 +44,7 @@ const structuredData = {
 ---
 
 <!doctype html>
-<html lang="en" class="dark scroll-smooth">
+<html lang="en" class="dark motion-safe:scroll-smooth scroll-pt-20">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -94,10 +94,59 @@ const structuredData = {
     <slot name="head" />
   </head>
   <body class="min-h-screen flex flex-col bg-ocean-950 text-gray-100 selection:bg-krab-500/30 selection:text-krab-200">
+    <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-krab-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">Skip to main content</a>
     <Navbar />
-    <main class="flex-grow">
+    <main id="main" tabindex="-1" class="flex-grow focus:outline-none">
       <slot />
     </main>
     <Footer />
+    <!-- One polite live region for every copy button on the page. -->
+    <div id="copy-status" role="status" class="sr-only"></div>
   </body>
 </html>
+
+<script>
+  // Copy buttons. Any `.copy-btn[data-copy]` works, and each code fence in a
+  // Markdown guide gets one injected, so hand-written and synced pages behave alike.
+  const status = document.getElementById('copy-status');
+  const timers = new WeakMap<HTMLElement, number>();
+
+  async function copy(btn: HTMLElement, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+    // Some buttons hold an icon plus a <span> label; others are bare text.
+    const label = btn.querySelector('span') ?? (btn.children.length ? null : btn);
+    if (label) {
+      // Pin the width so "Copied!" does not shift the header row.
+      btn.style.minWidth ||= `${btn.offsetWidth}px`;
+      btn.dataset.label ??= label.textContent?.trim() ?? 'Copy';
+      label.textContent = 'Copied!';
+      clearTimeout(timers.get(btn));
+      timers.set(btn, window.setTimeout(() => { label.textContent = btn.dataset.label ?? 'Copy'; }, 2000));
+    }
+    if (status) {
+      status.textContent = '';
+      window.setTimeout(() => { status.textContent = 'Copied to clipboard'; }, 50);
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = (e.target as Element).closest<HTMLElement>('.copy-btn[data-copy]');
+    if (btn) void copy(btn, btn.dataset.copy!);
+  });
+
+  document.querySelectorAll<HTMLElement>('.markdown-body pre.astro-code').forEach((pre) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'code-fence';
+    wrap.innerHTML =
+      '<div class="flex justify-end rounded-t-xl border border-b-0 border-white/12 bg-[#050811] px-2 pt-1.5">' +
+      '<button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Copy</button></div>';
+    const btn = wrap.querySelector<HTMLElement>('.copy-btn')!;
+    btn.dataset.copy = pre.textContent ?? '';
+    pre.replaceWith(wrap);
+    wrap.append(pre);
+  });
+</script>
