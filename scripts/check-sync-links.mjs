@@ -14,6 +14,11 @@ const code = [
 ].join('\n');
 assert.equal(rewriteDocLinks(code, opts), code, 'code must not be rewritten');
 
+// A shorter fence inside a longer one stays code, and an unclosed fence runs to the end.
+for (const sample of ['````markdown\n```go\nx[1](a.md)\n```\n````', 'text\n```\nunclosed\nf[T](y.md)']) {
+  assert.equal(rewriteDocLinks(sample, opts), sample, 'nested or unclosed fence must not be rewritten');
+}
+
 const links = 'See [serdes](serdes.md#avro) and [the tests](../tests/foo_test.go) and [site](https://x.io/a).';
 assert.equal(
   rewriteDocLinks(links, opts),

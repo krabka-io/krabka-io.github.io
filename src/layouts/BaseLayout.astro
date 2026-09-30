@@ -111,25 +111,38 @@ const structuredData = {
   const status = document.getElementById('copy-status');
   const timers = new WeakMap<HTMLElement, number>();
 
+  let statusTimer = 0;
+
   async function copy(btn: HTMLElement, text: string) {
+    let ok = true;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      return;
+      // No clipboard over plain http, in a sandboxed frame, or when permission is denied.
+      ok = false;
     }
     // Some buttons hold an icon plus a <span> label; others are bare text.
     const label = btn.querySelector('span') ?? (btn.children.length ? null : btn);
     if (label) {
-      // Pin the width so "Copied!" does not shift the header row.
-      btn.style.minWidth ||= `${btn.offsetWidth}px`;
       btn.dataset.label ??= label.textContent?.trim() ?? 'Copy';
-      label.textContent = 'Copied!';
+      if (!btn.style.minWidth) {
+        // Size the button for "Copied!" up front so the swap moves neither the row nor a sibling.
+        label.textContent = 'Copied!';
+        btn.style.minWidth = `${btn.offsetWidth}px`;
+      }
+      label.textContent = ok ? 'Copied!' : 'Copy failed';
       clearTimeout(timers.get(btn));
       timers.set(btn, window.setTimeout(() => { label.textContent = btn.dataset.label ?? 'Copy'; }, 2000));
     }
     if (status) {
+      // Clear first so the same message announces again, and clear after so it
+      // is not left behind as stray text for a screen reader in browse mode.
       status.textContent = '';
-      window.setTimeout(() => { status.textContent = 'Copied to clipboard'; }, 50);
+      clearTimeout(statusTimer);
+      statusTimer = window.setTimeout(() => {
+        status.textContent = ok ? 'Copied to clipboard' : 'Copy failed, select the text';
+        statusTimer = window.setTimeout(() => { status.textContent = ''; }, 4000);
+      }, 50);
     }
   }
 
@@ -146,6 +159,10 @@ const structuredData = {
       '<button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-xs text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Copy</button></div>';
     const btn = wrap.querySelector<HTMLElement>('.copy-btn')!;
     btn.dataset.copy = pre.textContent ?? '';
+    // Name each button for the section its code sits under; "Copy" alone repeats up to seven times a page.
+    let heading: Element | null = pre;
+    while (heading && !/^H[1-6]$/.test(heading.tagName)) heading = heading.previousElementSibling;
+    btn.setAttribute('aria-label', `Copy code${heading ? `: ${heading.textContent?.trim()}` : ''}`);
     pre.replaceWith(wrap);
     wrap.append(pre);
   });

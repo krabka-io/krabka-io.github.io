@@ -156,7 +156,7 @@ helm repo index "${out}" --url "${repo_url}/"
 # The page carries its own dark styling, because it is served outside the site
 # build. The colours are the site's code theme: .c is a command, .o an option.
 {
-  echo '<!doctype html><meta charset="utf-8">'
+  echo '<!doctype html><html lang="en"><meta charset="utf-8">'
   echo '<meta name="viewport" content="width=device-width, initial-scale=1">'
   echo '<title>Krabka Helm charts</title>'
   cat <<'CSS'
@@ -173,8 +173,9 @@ helm repo index "${out}" --url "${repo_url}/"
   .o { color: #fcd9a8; }
 </style>
 CSS
+  echo '<main>'
   echo '<h1>Krabka Helm chart repository</h1>'
-  echo "<pre><span class=\"c\">helm</span> repo add krabka ${repo_url}"
+  echo "<pre tabindex=\"0\"><span class=\"c\">helm</span> repo add krabka ${repo_url}"
   echo '<span class="c">helm</span> repo update</pre>'
   echo '<p>Repository index: <a href="index.yaml">index.yaml</a></p>'
   echo '<p>Documentation: <a href="/docs/helm-charts">Helm chart repository</a></p>'
@@ -192,11 +193,12 @@ CSS
   echo '<p>Key: <code>Krabka Charts &lt;charts@krabka.dev&gt;</code><br>'
   echo 'Fingerprint: <code>74A6 7D5C F9AE 199A 45D2&nbsp; 2E42 594B D543 4544 D339</code><br>'
   echo 'Check the fingerprint before you trust the key. Any earlier key is revoked.</p>'
-  echo '<pre><span class="c">curl</span> <span class="o">-fsSLO</span> https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc'
+  echo '<pre tabindex="0"><span class="c">curl</span> <span class="o">-fsSLO</span> https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc'
   echo '<span class="c">gpg</span> <span class="o">--import</span> krabka-charts.pub.asc'
   echo '<span class="c">gpg</span> <span class="o">--fingerprint</span> charts@krabka.dev'
   echo '<span class="c">gpg</span> <span class="o">--export</span> charts@krabka.dev &gt; krabka-keyring.gpg'
   echo '<span class="c">helm</span> install my-op krabka/krabka-operator <span class="o">--verify</span> <span class="o">--keyring</span> ./krabka-keyring.gpg</pre>'
+  echo '</main>'
 } > "${out}/index.html"
 
 echo "==> Done"

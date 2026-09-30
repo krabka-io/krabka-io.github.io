@@ -177,7 +177,8 @@ spec:
     <div class="frosted-card rounded-2xl overflow-hidden shadow-2xl border border-white/10">
       <!-- Tabs Header -->
       <div class="flex flex-wrap items-center justify-between border-b border-white/10 bg-slate-950/80 px-4 py-2.5">
-        <div class="flex flex-wrap items-center gap-2" role="tablist" id="code-tabs" aria-label="Code examples">
+        <!-- One row that scrolls on a phone, rather than four stacked rows that read as a list. -->
+        <div class="flex max-w-full items-center gap-2 overflow-x-auto sm:flex-wrap sm:overflow-visible" role="tablist" id="code-tabs" aria-label="Code examples">
           {snippets.map((s, index) => (
             <button
               type="button"
@@ -186,7 +187,7 @@ spec:
               aria-controls={`panel-${s.id}`}
               aria-selected={index === 0 ? "true" : "false"}
               tabindex={index === 0 ? 0 : -1}
-              class="rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white aria-selected:shadow"
+              class="shrink-0 whitespace-nowrap rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white aria-selected:shadow"
             >
               {s.label}
             </button>

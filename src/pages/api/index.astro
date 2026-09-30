@@ -31,9 +31,9 @@ const apiModules = apiReference.map((entry) => {
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 font-sans">
     <!-- Breadcrumb -->
     <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-gray-400 pb-4">
-      <a href={getPath('/')} class="hover:text-white transition-colors">Home</a>
+      <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Home</a>
       <span>/</span>
-      <a href={getPath('/docs')} class="hover:text-white transition-colors">Docs</a>
+      <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Docs</a>
       <span>/</span>
       <span class="text-gray-200 font-medium">API Reference Directory</span>
     </nav>
@@ -83,7 +83,7 @@ const apiModules = apiReference.map((entry) => {
           {apiModules.map((mod) => (
             <tr class="api-row flex flex-wrap gap-x-4 gap-y-1 p-5 lg:table-row lg:p-0 hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.repo} ${mod.language} ${mod.format}`.toLowerCase()}>
               <td class="w-full lg:w-auto lg:py-3.5 lg:px-5">
-                <a href={mod.apiHref} class="font-semibold text-white text-sm hover:text-krab-400 transition-colors">
+                <a href={mod.apiHref} class="inline-block py-1.5 font-semibold text-white text-sm hover:text-krab-400 transition-colors lg:py-0">
                   {mod.name}
                 </a>
                 <p class="text-xs text-gray-400 mt-0.5 max-w-md">
@@ -107,13 +107,13 @@ const apiModules = apiReference.map((entry) => {
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 lg:flex-col lg:items-end lg:gap-1">
                   <a
                     href={mod.apiHref}
-                    class="font-semibold text-krab-400 hover:text-white transition-colors"
+                    class="inline-block py-2 font-semibold text-krab-400 hover:text-white transition-colors lg:py-0"
                   >
                     Browse {mod.format} Reference
                   </a>
                   <a
                     href={getPath(mod.guideHref)}
-                    class="text-gray-400 hover:text-gray-200 transition-colors"
+                    class="inline-block py-2 text-gray-400 hover:text-gray-200 transition-colors lg:py-0"
                   >
                     View Guides
                   </a>
@@ -132,7 +132,7 @@ const apiModules = apiReference.map((entry) => {
         Every reference is generated from source docstrings by its own repository's build (Bazel <code class="text-gray-300">rust_doc</code> for Rust, Javadoc for Java, godoc for Go), rendered from the <code class="text-gray-300">main</code> branch, and published from that repository to <code class="text-gray-300">https://krabka.io/&lt;repository&gt;/</code>. The release column names the latest tagged release; the reference itself follows <code class="text-gray-300">main</code>.
       </p>
       <p>
-        For architectural overviews, memory management specifications, and runnable tutorials, consult the <a href={getPath('/docs')} class="text-krab-400 hover:underline">Documentation Hub</a>.
+        For architectural overviews, memory management specifications, and runnable tutorials, consult the <a href={getPath('/docs')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Documentation Hub</a>.
       </p>
     </div>
   </div>

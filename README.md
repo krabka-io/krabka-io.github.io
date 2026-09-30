@@ -198,6 +198,7 @@ krabka-io.github.io/
 │   ├── check-real-broker.mjs # Real broker in the Cluster Lab
 │   ├── check-wasi.mjs        # Browser WASI runtime and cross-origin isolation
 │   ├── check-proof-readability.mjs # Obligation summaries in the proof explorer
+│   ├── check-proof-highlight.mjs # Why3 highlighter keywords, line count and escaping
 │   ├── lab-simulated-presets.js # Simulated-broker presets the checks drive
 │   ├── verify-code-stubs.mjs # Markdown and Astro code snippet syntax checker
 │   └── build-helm-index.sh   # Rebuilds public/charts from component repositories

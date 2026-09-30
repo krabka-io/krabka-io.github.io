@@ -58,16 +58,19 @@ const colors = [
         </thead>
         <tbody class="block sm:table-row-group divide-y divide-white/5 font-sans">
           {marks.map((m) => (
-            <tr class="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-1 p-3 sm:table-row sm:p-0 hover:bg-white/5 transition-colors">
-              <td class="row-span-2 sm:py-3 sm:px-4">
-                <div class={`inline-flex h-14 w-20 items-center justify-center rounded-lg ${m.dark ? 'bg-black border border-white/10' : 'bg-white'}`}>
-                  <img src={getPath(m.file)} alt={m.file} class="max-h-12 max-w-16 object-contain" loading="lazy" />
+            <tr class="grid grid-cols-[5rem_minmax(0,1fr)] grid-rows-[auto_1fr] gap-x-3 gap-y-1 p-3 sm:table-row sm:p-0 hover:bg-white/5 transition-colors">
+              {/* min-w-0! because custom.css gives a table cell in a card a minimum width for scrolling, wider than these grid tracks. */}
+              <td class="row-span-2 min-w-0! sm:py-3 sm:px-4">
+                {/* A vertical lockup is taller than wide, so its tile is too; in a wide tile it shrank to a speck. */}
+                <div class={`inline-flex w-20 items-center justify-center rounded-lg ${m.file.includes('tall') ? 'h-24' : 'h-14'} ${m.dark ? 'bg-black border border-white/10' : 'bg-white'}`}>
+                  <img src={getPath(m.file)} alt={m.file} class={`max-w-16 object-contain ${m.file.includes('tall') ? 'max-h-[5.5rem]' : 'max-h-12'}`} loading="lazy" />
                 </div>
               </td>
-              <td class="break-all sm:py-3 sm:px-4">
+              {/* Below sm the path may break anywhere to fit its track; from sm up it stays whole, since the path is what people copy. */}
+              <td class="min-w-0! break-all sm:break-normal sm:whitespace-nowrap sm:py-3 sm:px-4">
                 <a class="font-mono text-krab-400 hover:text-krab-300 text-xs" href={getPath(m.file)}>{m.file}</a>
               </td>
-              <td class="text-gray-300 sm:py-3 sm:px-4">{m.use}</td>
+              <td class="min-w-0! text-gray-300 sm:py-3 sm:px-4">{m.use}</td>
             </tr>
           ))}
         </tbody>

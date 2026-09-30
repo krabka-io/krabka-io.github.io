@@ -21,17 +21,24 @@ const navLinks = [
   { name: 'Docs', href: getPath('/docs') },
   { name: 'API', href: getPath('/api') },
 ];
+
+// aria-current follows the highlight: a section link stays lit, and current, on its
+// sub-pages; a dropdown sub-link only on its own page.
+const isCurrent = (href: string) =>
+  currentPath === href || (href !== getPath('/') && currentPath.startsWith(href));
+const current = (href: string) => (isCurrent(href) ? 'page' : undefined);
+const exactly = (href: string) => (currentPath.replace(/\/$/, '') === href ? 'page' : undefined);
 ---
 
 <header class="sticky top-0 z-50 w-full border-b border-white/10 bg-ocean-950/95 backdrop-blur-md transition-colors">
-  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center gap-8">
-      <a href={getPath('/')} class="flex items-center gap-3 transition-opacity hover:opacity-90">
-        <Logo className="w-8 h-8" />
-        <span class="text-xl font-bold tracking-tight text-white">Krabka</span>
+  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+    <div class="flex min-w-0 items-center gap-8">
+      <a href={getPath('/')} class="flex min-w-0 items-center gap-3 lg:shrink-0 transition-opacity hover:opacity-90">
+        <Logo className="w-8 h-8 shrink-0" />
+        <span class="truncate text-xl font-bold tracking-tight text-white">Krabka</span>
       </a>
 
-      <nav class="hidden lg:flex items-center gap-1">
+      <nav aria-label="Main" class="hidden lg:flex items-center gap-1">
         {navLinks.map((link) => {
           if (link.hasDropdown) {
             const isFeaturesActive = currentPath.includes('/features');
@@ -39,6 +46,7 @@ const navLinks = [
               <div class="relative group" data-features-menu>
                 <a
                   href={getPath('/features')}
+                  aria-current={isFeaturesActive ? 'page' : undefined}
                   class={`inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
                     isFeaturesActive
                       ? 'text-krab-500 bg-white/5'
@@ -58,6 +66,7 @@ const navLinks = [
                     <div class="pb-1">
                       <a
                         href={getPath('/features')}
+                        aria-current={exactly(getPath('/features'))}
                         class="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-bold text-krab-400 hover:bg-slate-800 transition-colors"
                       >
                         <span>All Features Overview</span>
@@ -67,6 +76,7 @@ const navLinks = [
                       {featureSubLinks.slice(1).map((sub) => (
                         <a
                           href={sub.href}
+                          aria-current={exactly(sub.href)}
                           class="block rounded-lg px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-slate-800 hover:text-krab-400 transition-colors"
                         >
                           {sub.name}
@@ -79,10 +89,11 @@ const navLinks = [
             );
           }
 
-          const isActive = currentPath === link.href || (link.href !== getPath('/') && currentPath.startsWith(link.href));
+          const isActive = isCurrent(link.href);
           return (
             <a
               href={link.href}
+              aria-current={current(link.href)}
               class={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 isActive
                   ? 'text-krab-500 bg-white/5'
@@ -96,18 +107,20 @@ const navLinks = [
       </nav>
     </div>
 
-    <div class="flex items-center gap-3">
+    <div class="flex shrink-0 items-center gap-3">
+      <!-- Below 30rem (in rem, so a larger browser font gets it sooner) the link is the icon alone. -->
       <a
         href="https://github.com/krabka-io"
         target="_blank"
         rel="noopener noreferrer"
-        class="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3.5 py-1.5 text-sm font-medium text-gray-200 transition-all hover:border-white/30 hover:bg-white/10 hover:text-white"
+        aria-label="krabka-io on GitHub"
+        class="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3.5 py-1.5 max-[30rem]:p-2.5 text-sm font-medium text-gray-200 transition-all hover:border-white/30 hover:bg-white/10 hover:text-white"
       >
         <svg class="h-4 w-4 fill-current" viewBox="0 0 24 24">
           <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
         </svg>
-        <span>GitHub</span>
-        <span class="max-[380px]:hidden rounded bg-white/10 px-1.5 py-0.5 text-xs text-krab-400 font-semibold">krabka-io</span>
+        <span class="max-[30rem]:hidden">GitHub</span>
+        <span class="max-[30rem]:hidden whitespace-nowrap rounded bg-white/10 px-1.5 py-0.5 text-xs text-krab-400 font-semibold">krabka-io</span>
       </a>
 
       <!-- Mobile Menu Button -->
@@ -127,9 +140,12 @@ const navLinks = [
   </div>
 
   <!-- Mobile Menu Dropdown -->
-  <div id="mobile-menu" class="hidden lg:hidden border-t border-white/10 bg-slate-900 px-4 pt-2 pb-4 space-y-1">
+  <!-- On a short screen (a phone on its side) the menu scrolls inside the space under
+       the 4rem header instead of running off the bottom of the sticky bar. -->
+  <nav id="mobile-menu" aria-label="Main" class="hidden lg:hidden max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-t border-white/10 bg-slate-900 px-4 pt-2 pb-4 space-y-1">
     <a
       href={getPath('/get-started')}
+      aria-current={current(getPath('/get-started'))}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Get Started
@@ -140,6 +156,7 @@ const navLinks = [
         {featureSubLinks.map((sub) => (
           <a
             href={sub.href}
+            aria-current={exactly(sub.href)}
             class="block rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
           >
             {sub.name}
@@ -149,29 +166,33 @@ const navLinks = [
     </div>
     <a
       href={getPath('/versions')}
+      aria-current={current(getPath('/versions'))}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Versions
     </a>
     <a
       href={getPath('/verification')}
+      aria-current={current(getPath('/verification'))}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Verification
     </a>
     <a
       href={getPath('/docs')}
+      aria-current={current(getPath('/docs'))}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       Docs
     </a>
     <a
       href={getPath('/api')}
+      aria-current={current(getPath('/api'))}
       class="block rounded-lg px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white"
     >
       API
     </a>
-  </div>
+  </nav>
 </header>
 
 <script>
@@ -190,14 +211,17 @@ const navLinks = [
       setOpen(false);
       btn?.focus();
     }
-    if (group?.contains(document.activeElement)) {
+    // The dropdown is open for a hovering pointer as well as for focus (WCAG 1.4.13).
+    if (group?.matches(':hover, :focus-within')) {
       group.dataset.dismissed = '';
-      group.querySelector('a')?.focus();
+      if (group.contains(document.activeElement)) group.querySelector('a')?.focus();
     }
   });
 
+  // Leaving with the pointer re-arms it too, so a later keyboard visit still opens it.
   const reopen = () => group && delete group.dataset.dismissed;
   group?.addEventListener('mouseenter', reopen);
+  group?.addEventListener('mouseleave', reopen);
   group?.addEventListener('focusout', (e) => {
     if (!group.contains(e.relatedTarget as Node | null)) reopen();
   });

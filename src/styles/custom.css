@@ -80,8 +80,10 @@ p, li, dd, blockquote {
 /* A table that scrolls sideways shows a glow on each edge that has more to
  * reveal, so a phone user can tell a column is hidden. The glows are scroll-
  * attached backgrounds; the `local` covers, the colour of the card behind, hide
- * a glow once the table is scrolled flush to that edge. Only the images are set,
- * so each scroller keeps its own background colour. */
+ * a glow once the table is scrolled flush to that edge. The glows are linear, not
+ * radial: a radial one fades with distance from the table's middle, so the top
+ * screen of a tall table showed nothing. Only the images are set, so each scroller
+ * keeps its own background colour. */
 :is(.frosted-card, .overflow-hidden, .overflow-x-auto):has(> table),
 .markdown-body .table-wrap {
   --edge-cover: #0e1527;
@@ -89,8 +91,8 @@ p, li, dd, blockquote {
   background-image:
     linear-gradient(to right, var(--edge-cover) 30%, transparent),
     linear-gradient(to left, var(--edge-cover) 30%, transparent),
-    radial-gradient(farthest-side at 0 50%, var(--edge-glow), transparent),
-    radial-gradient(farthest-side at 100% 50%, var(--edge-glow), transparent);
+    linear-gradient(to right, var(--edge-glow), transparent),
+    linear-gradient(to left, var(--edge-glow), transparent);
   background-position: left center, right center, left center, right center;
   background-size: 2.5rem 100%, 2.5rem 100%, 1.1rem 100%, 1.1rem 100%;
   background-repeat: no-repeat;
@@ -132,6 +134,17 @@ p, li, dd, blockquote {
   font-family: inherit;
 }
 
+/* Shiki makes each <pre> a tab stop. Its ring would sit outside the pre, where the
+ * wrapper's overflow clips it, so the wrapper draws the ring inside its own edge. */
+.code-block pre.astro-code:focus-visible {
+  outline: none;
+}
+
+.code-block:has(> pre.astro-code:focus-visible) {
+  outline: 2px solid #ff4d2e;
+  outline-offset: -2px;
+}
+
 /* A block inside a panel that already draws the box (the tabbed snippets). */
 .code-block-bare {
   padding: 0;
@@ -146,6 +159,16 @@ p, li, dd, blockquote {
   white-space: pre-wrap;
   /* Wrap at spaces; only a token longer than the box (the compose URL) splits mid-word. */
   overflow-wrap: break-word;
+}
+
+/* Each word is an inline-block, so the line breaks between words and never at a
+ * hyphen inside one (`--bootstrap-server` stays together, `--` glued to its name).
+ * The space before a word sits outside its span (see Hero.astro). */
+.code-block-wrap pre.astro-code .line > span {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* Custom scrollbars */
@@ -173,6 +196,16 @@ summary::-webkit-details-marker {
 }
 summary {
   list-style: none;
+}
+
+/* From lg up the docs menu is always open and its <details> is display:contents
+ * (DocsLayout). Chromium still draws the content in a ::details-content box, and
+ * that box becomes the containing block of the sticky menu inside it, so the menu
+ * would scroll away with the page. Dissolving the box lets it stick to the aside. */
+@media (min-width: 64rem) {
+  #docs-nav::details-content {
+    display: contents;
+  }
 }
 
 /* Markdown prose and table styling */
@@ -208,16 +241,19 @@ summary {
   margin-bottom: 0.75rem;
   padding-bottom: 0.35rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  scroll-margin-top: 6rem;
+  scroll-margin-top: 1.5rem;
 }
 
+/* The html element already reserves the sticky header (scroll-padding-top), and
+ * the browser adds a target's scroll-margin to it: 1.5rem here, not 6rem, keeps a
+ * deep-linked heading about 92px down instead of 176px. */
 .markdown-body h3 {
   font-size: 1rem;
   font-weight: 600;
   color: #f3f4f6;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
-  scroll-margin-top: 6rem;
+  scroll-margin-top: 1.5rem;
 }
 
 .markdown-body h4 {
@@ -226,6 +262,12 @@ summary {
   color: #e5e7eb;
   margin-top: 1.25rem;
   margin-bottom: 0.4rem;
+}
+
+/* A long identifier in a heading (a class name, a config section) wraps inside the
+ * card rather than run past it on a 320px phone. */
+.markdown-body :is(h1, h2, h3, h4) {
+  overflow-wrap: anywhere;
 }
 
 .markdown-body p {
@@ -277,45 +319,52 @@ summary {
 
 /* Plain words in a cell stay whole: a column is never narrower than its
  * longest word, and the table scrolls sideways rather than split "Implemented"
- * in two. Inline code breaks at a hyphen or at a <wbr> the wrap-tables plugin
- * puts after a slash or underscore, so a long path gives up width to the columns
- * beside it. The floor keeps a column wide enough for a short phrase ("broker
- * default") and a short file name whole. */
+ * in two. A long name in a cell, in code or not, breaks at a hyphen or at a <wbr>
+ * the wrap-tables plugin puts at a slash, dot, underscore or camelCase seam, so it
+ * gives up width to the columns beside it. The floor keeps a column wide enough
+ * for a short phrase ("broker default") and a short file name whole, and is low
+ * enough that a five-column table still fits a tablet with its prose column on
+ * screen. A KIP id never splits at its hyphen. */
 .markdown-body th,
 .markdown-body td {
-  min-width: 8rem;
+  min-width: 6rem;
+}
+
+.markdown-body .kip-id {
+  white-space: nowrap;
 }
 
 .markdown-body .table-wrap[data-cols="3"] table {
   min-width: 30rem;
 }
 
-/* The KIP matrix is a run of three-column KIP / Title / Grounding tables. A
- * shared first-column width makes the Title column start at the same place in
- * each, and holds a "KIP-1206 / KIP-1222" pair to two clean lines. */
-.markdown-body .table-wrap[data-cols="3"] :is(th, td):first-child {
-  width: 9rem;
-}
-
-.markdown-body .table-wrap[data-cols="4"] table {
+.markdown-body .table-wrap:is([data-cols="4"], [data-cols="5"], [data-cols="6"]) table {
   min-width: 38rem;
 }
 
-.markdown-body .table-wrap[data-cols="5"] table,
-.markdown-body .table-wrap[data-cols="6"] table {
-  min-width: 44rem;
-}
-
-.markdown-body .table-wrap[data-cols="7"] table,
-.markdown-body .table-wrap[data-cols="8"] table,
-.markdown-body .table-wrap[data-cols="9"] table {
+.markdown-body .table-wrap:is([data-cols="7"], [data-cols="8"], [data-cols="9"]) table {
   min-width: 56rem;
 }
 
-/* The wide tables are the KIP matrix, whose Owner, Tests and image columns hold
- * file paths: keep each about 30 characters wide rather than a few. */
-.markdown-body .table-wrap:is([data-cols="7"], [data-cols="8"], [data-cols="9"]) td:has(code) {
-  min-width: 13rem;
+/* Below md these tables stack into cards (see the end of this block), so the
+ * column rules apply from md up. */
+@media (min-width: 48rem) {
+  /* The KIP matrix is a run of three-column KIP / Title / Grounding tables. A
+   * shared first-column width makes the Title column start at the same place in
+   * each, and holds a "KIP-1206 / KIP-1222" pair to two clean lines. */
+  .markdown-body .table-wrap[data-cols="3"] :is(th, td):first-child {
+    width: 9rem;
+  }
+
+  /* Past six columns (the KIP matrix) the table scrolls on a tablet. Its first
+   * column, the KIP, stays put so a scrolled row still says which KIP it is. The
+   * cell needs an opaque background or the columns scrolling under it show through. */
+  .markdown-body .table-wrap:is([data-cols="7"], [data-cols="8"], [data-cols="9"]) :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #0e1527;
+  }
 }
 
 /* Translucent, so the edge glow of a scrolling table shows through the header. */
@@ -351,24 +400,20 @@ summary {
   color: #f3f4f6;
 }
 
-/* The key column of a reference table holds one identifier per cell. It stays
- * whole, and the wide description column absorbs the wrapping. A first column of
- * prose with code chips inside it wraps like any other text. */
-.markdown-body td:first-child > code:only-child {
-  white-space: nowrap;
-  overflow-wrap: normal;
-}
-
-/* nowrap does not stop a <wbr> from breaking the line. */
-.markdown-body td:first-child > code:only-child wbr {
-  display: none;
-}
-
-/* On a phone a long signature may wrap at its spaces, so the description beside
- * it is not pushed a screen away. */
-@media (max-width: 639px) {
+/* The key column of a reference table holds one identifier per cell. Where the
+ * page is wide enough it stays whole and the description column absorbs the
+ * wrapping. On a tablet the page is too narrow to spare that width, so the key
+ * breaks at a <wbr> instead. A first column of prose with code chips inside it
+ * wraps like any other text. */
+@media (min-width: 80rem) {
   .markdown-body td:first-child > code:only-child {
-    white-space: normal;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  /* nowrap does not stop a <wbr> from breaking the line. */
+  .markdown-body td:first-child > code:only-child wbr {
+    display: none;
   }
 }
 
@@ -376,7 +421,7 @@ summary {
  * to read, and let the table scroll to get it, rather than squeeze it into a
  * strip a few words wide and a screen tall. */
 .markdown-body td:last-child {
-  min-width: 16rem;
+  min-width: 11rem;
 }
 
 .markdown-body tbody tr:last-child td {
@@ -402,6 +447,79 @@ summary {
 
 .markdown-body tr:hover td {
   background: rgba(255, 255, 255, 0.03);
+}
+
+/* On a phone a table of three or more columns (the wrap-tables plugin marks it
+ * data-stack and copies each header onto its cells as data-label) becomes one
+ * card per row: the first cell heads the card and every other cell sits under its
+ * label. Scrolling sideways hid the prose column behind a screen of blank rows. */
+@media (max-width: 47.99rem) {
+  .markdown-body .table-wrap[data-stack] {
+    overflow: visible;
+    margin: 1.25rem 0;
+    border: 0;
+    background: none;
+  }
+
+  .markdown-body .table-wrap[data-stack] :is(table, tbody, tr, td) {
+    display: block;
+    min-width: 0;
+  }
+
+  .markdown-body .table-wrap[data-stack] thead {
+    display: none;
+  }
+
+  .markdown-body .table-wrap[data-stack] tr {
+    margin-bottom: 0.75rem;
+    padding: 0.25rem 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.4);
+  }
+
+  .markdown-body .table-wrap[data-stack] td {
+    padding: 0.35rem 0.875rem;
+    border-bottom: 0;
+  }
+
+  .markdown-body .table-wrap[data-stack] td:empty {
+    display: none;
+  }
+
+  /* A card is wide enough to hold a short chip on one line, which keeps the
+   * punctuation beside it from stranding (see .code-atom below). */
+  .markdown-body .table-wrap[data-stack] td code.code-atom {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  /* nowrap does not stop a <wbr> from breaking the line. */
+  .markdown-body .table-wrap[data-stack] td code.code-atom wbr {
+    display: none;
+  }
+
+  .markdown-body .table-wrap[data-stack] td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.1rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #9ca3af;
+  }
+
+  /* A cell between the first and the last is usually a short value (Type,
+   * Default), so its label sits beside it and the card stays short. */
+  .markdown-body .table-wrap[data-stack] td:not(:first-child, :last-child)::before {
+    display: inline;
+    margin-right: 0.5rem;
+  }
+
+  .markdown-body .table-wrap[data-stack] td:is(:first-child, :not([data-label]))::before {
+    display: none;
+  }
 }
 
 .markdown-body ul {
@@ -439,12 +557,13 @@ summary {
 
 /* Inline code is a chip. The hand-written docs pages (.docs-page, set in
  * DocsLayout) get the same chip as the synced guides; code in a heading, in a
- * block and in an embedded widget (#krabka-playground, #krabka-kernels) keep
- * their own look. A chip is an atom: it moves to the next line whole rather than
- * split at a hyphen (`--` from `--flag`, `package-` from `lock.json`), and breaks
- * inside only when it is wider than its line or cell. */
+ * block, in an embedded widget (#krabka-playground, #krabka-kernels) and in the
+ * evidence ledger (.el) keep their own look. A chip is an atom: it moves to the
+ * next line whole rather than split at a hyphen (`--` from `--flag`, `package-`
+ * from `lock.json`), and breaks inside only when it is wider than its line or
+ * cell. The size never falls under 11px, which 0.85em of a 12px table cell would. */
 .markdown-body :is(p, li, td) code:not(pre code),
-.docs-page code:not(pre code, :is(h1, h2, h3, h4) code, [id^="krabka-"] code) {
+.docs-page code:not(pre code, :is(h1, h2, h3, h4) code, [id^="krabka-"] code, .el code) {
   display: inline-block;
   max-width: 100%;
   background: rgba(255, 255, 255, 0.08);
@@ -452,11 +571,23 @@ summary {
   font-family: 'JetBrains Mono', monospace;
   padding: 0.15rem 0.4rem;
   border-radius: 0.35rem;
-  font-size: 0.85em;
+  font-size: max(0.85em, 11px);
   line-height: 1.35;
   vertical-align: baseline;
   border: 1px solid rgba(255, 255, 255, 0.06);
   overflow-wrap: break-word;
+}
+
+/* A short chip is set as plain inline text on one line. As an inline-block it
+ * would be a line break opportunity on both sides, so a line could end on the "("
+ * before it or start on the "." after it. The wrap-tables plugin adds the class.
+ * Only the last cell of a row (the prose column, already 11rem at least) takes it
+ * in a table, and every cell of a stacked card above; a one-line chip in a narrow
+ * column would hold that column open. */
+.markdown-body :is(p, li) code.code-atom:not(pre code),
+.markdown-body td:last-child code.code-atom {
+  display: inline;
+  white-space: nowrap;
 }
 
 /* Code reads exactly as typed: JetBrains Mono's ligatures would draw `<>` as a
@@ -514,4 +645,73 @@ samp,
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   margin: 2rem 0;
+}
+
+/* Touch: the small text controls (Copy, the docs menu, On this page, the
+ * breadcrumb, the footer links) reach a 40px target by padding, which leaves the
+ * line-clamp on long TOC entries working. */
+@media (pointer: coarse) {
+  .copy-btn,
+  #docs-nav summary {
+    min-height: 2.5rem;
+  }
+
+  #docs-nav a {
+    padding-block: 0.8rem;
+  }
+
+  .docs-page nav[aria-label="Breadcrumb"] a {
+    margin-block: 0;
+    padding-block: 0.8rem;
+  }
+
+  footer li a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+  }
+}
+
+/* Paper: no site chrome, dark-theme colours swapped for ink on white, code wraps
+ * instead of scrolling, and an external link shows where it points. */
+@media print {
+  body > header,
+  body > footer,
+  aside[aria-label="Documentation menu"],
+  .copy-btn,
+  #copy-status {
+    display: none !important;
+  }
+
+  html,
+  body,
+  body * {
+    background: #fff !important;
+    color: #000 !important;
+    border-color: #999 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* The code theme sets its own !important background and border with more specificity. */
+  .markdown-body pre,
+  .code-block,
+  pre.astro-code {
+    background: #fff !important;
+    border-color: #999 !important;
+  }
+
+  pre,
+  pre code,
+  .code-block {
+    white-space: pre-wrap !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere;
+    width: auto !important;
+  }
+
+  .markdown-body a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    overflow-wrap: anywhere;
+  }
 }

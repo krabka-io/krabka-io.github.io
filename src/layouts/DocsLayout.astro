@@ -185,7 +185,9 @@ const breadcrumbData = {
     <div class:list={['grid grid-cols-1 gap-8', Astro.props.wide ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : 'lg:grid-cols-12']}>
       
       <!-- Sticky Left Sidebar -->
-      <aside class:list={[!Astro.props.wide && 'lg:col-span-3']}>
+      <aside aria-label="Documentation menu" class:list={[!Astro.props.wide && 'lg:col-span-3']}>
+        <!-- The page-wide skip link lands here, at the top of the menu; this one jumps past it. -->
+        <a href="#docs-article" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-krab-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">Skip to article</a>
         <!-- Below lg the whole menu folds behind one summary, so the page starts
              at its content. From lg up the script below keeps it open. -->
         <details id="docs-nav" open class="lg:contents">
@@ -241,6 +243,7 @@ const breadcrumbData = {
                         <li>
                           <a
                             href={itemUrl}
+                            aria-current={activeItem ? 'page' : undefined}
                             class={`block px-2.5 py-1.5 lg:py-1 rounded-md text-xs transition-colors ${
                               activeItem
                                 ? 'bg-krab-500/15 text-krab-400 font-semibold'
@@ -303,7 +306,7 @@ const breadcrumbData = {
         <script is:inline>
           (function () {
             var nav = document.getElementById('docs-nav');
-            var wide = window.matchMedia('(min-width: 1024px)');
+            var wide = window.matchMedia('(min-width: 64rem)');
             if (!wide.matches) nav.open = false;
             wide.addEventListener('change', function (e) { nav.open = e.matches; });
           })();
@@ -311,7 +314,7 @@ const breadcrumbData = {
       </aside>
 
       <!-- Main Docs Content (Takes full remaining 9 columns) -->
-      <div class:list={['docs-page min-w-0 space-y-4', !Astro.props.wide && 'lg:col-span-9']}>
+      <div id="docs-article" tabindex="-1" class:list={['docs-page min-w-0 space-y-4 focus:outline-none', !Astro.props.wide && 'lg:col-span-9']}>
         <!-- Breadcrumbs UI. The links pad out to a 28px hit area without growing the row. -->
         <nav aria-label="Breadcrumb" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400 pb-2">
           <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Home</a>
