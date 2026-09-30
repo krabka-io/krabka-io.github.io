@@ -192,7 +192,8 @@
 }
 
 #krabka-kernels .kx-input::placeholder {
-  color: rgba(156, 163, 175, 0.55);
+  color: var(--kx-muted);
+  opacity: 1; /* Firefox dims placeholders; the muted colour is already 7:1 */
 }
 
 #krabka-kernels .kx-input:focus,
@@ -761,6 +762,15 @@
   font-size: 0.74rem;
   font-weight: 500;
   color: var(--kx-muted);
+}
+
+/* On the narrowest phones 38% is under nine characters wide, so `survivors`
+ * and `available` split mid-word. */
+@media (max-width: 350px) {
+  #krabka-kernels .kx-kv th {
+    width: 46%;
+    max-width: 50%;
+  }
 }
 
 #krabka-kernels .kx-rows th {

@@ -108,17 +108,24 @@ class PlaygroundUI {
 
     const diagramWrap = el("div", "cp-diagram-wrap");
     this.svg = document.createElementNS(SVG_NS, "svg");
-    this.svg.setAttribute("viewBox", "0 0 420 360");
     this.svg.setAttribute("class", "cp-diagram");
-    this.svg.setAttribute("role", "img");
+    // A group, not an img: the nodes inside are focusable buttons, and an img
+    // role makes its children presentational.
+    this.svg.setAttribute("role", "group");
     this.svg.setAttribute("aria-label", "KRaft cluster diagram");
+    // Three layers so message labels always paint over the nodes.
+    this.arcLayer = svgEl("g");
+    this.nodeLayer = svgEl("g");
+    this.labelLayer = svgEl("g", "cp-labels");
+    this.svg.append(arrowMarker(), this.arcLayer, this.nodeLayer, this.labelLayer);
     diagramWrap.appendChild(this.svg);
-    // The viewBox scales with its column, so SVG text shrinks with it. Publish
-    // the user-units-per-pixel ratio so the stylesheet can size text in
-    // screen pixels (`--cp-u`).
+    this.nodeEls = new Map();
+    this.width = 0;
+    // The viewBox is sized in screen pixels (see drawCluster), so text keeps
+    // its size at every width; redraw when the column changes width.
     new ResizeObserver(() => {
-      const w = this.svg.clientWidth;
-      if (w > 0) this.svg.style.setProperty("--cp-u", String(420 / w));
+      const w = this.svg.getBoundingClientRect().width;
+      if (w > 0 && w !== this.width && this.lastSnap) this.drawCluster(this.lastSnap);
     }).observe(this.svg);
 
     this.status = el("div", "cp-status");
@@ -147,7 +154,50 @@ class PlaygroundUI {
       "<strong>Play</strong> auto-steps. Everything runs the real deterministic " +
       "engine, compiled to WebAssembly.";
 
-    this.root.append(controls, faults, stage, legend, hint);
+    // Screen-reader announcements for elections, partitions and drops. The
+    // per-tick status line and the timeline stay silent: they change too often.
+    this.live = el("div", "cp-sr");
+    this.live.setAttribute("role", "status");
+    this.live.setAttribute("aria-live", "polite");
+    this.pending = [];
+    this.announceTimer = null;
+    this.prev = null;
+
+    this.root.append(controls, faults, stage, legend, hint, this.live);
+  }
+
+  // Queue a short sentence; sentences that arrive within the same 1.5 s window
+  // are spoken together, so Play cannot flood the speech queue.
+  announce(text) {
+    this.pending.push(text);
+    if (this.announceTimer) return;
+    const flush = () => {
+      this.live.textContent = this.pending.join(" ");
+      this.pending = [];
+      this.announceTimer = setTimeout(() => {
+        this.announceTimer = null;
+        if (this.pending.length > 0) flush();
+      }, 1500);
+    };
+    flush();
+  }
+
+  // Announce what changed since the last render. The first render after a
+  // reset only records the baseline.
+  announceChanges(snap, fresh) {
+    const prev = this.prev;
+    const cut = new Set(snap.nodes.filter((n) => n.partitioned).map((n) => n.id));
+    const leader = snap.leaders.length > 0 ? snap.leaders[0] : null;
+    if (prev) {
+      for (const id of cut) if (!prev.cut.has(id)) this.announce(`N${id} partitioned.`);
+      for (const id of prev.cut) if (!cut.has(id)) this.announce(`N${id} healed.`);
+      if (leader !== prev.leader) {
+        const epoch = Math.max(0, ...snap.nodes.map((n) => n.epoch));
+        this.announce(leader == null ? "No leader." : `N${leader} is leader, epoch ${epoch}.`);
+      }
+      if (fresh.some((s) => s.action.kind === "Drop")) this.announce("Message dropped.");
+    }
+    this.prev = { cut, leader };
   }
 
   // ---- lifecycle ------------------------------------------------------------
@@ -161,6 +211,7 @@ class PlaygroundUI {
     }
     this.seenSteps = 0;
     this.timeline.innerHTML = "";
+    this.prev = null;
     this.render();
   }
 
@@ -227,9 +278,6 @@ class PlaygroundUI {
       if (node.partitioned) this.pg.heal(id);
       else this.pg.partition(id);
     });
-    // The diagram was redrawn, so hand keyboard focus to the new node.
-    const again = this.svg.querySelector(`[data-node="${id}"]`);
-    if (again) again.focus();
   }
 
   healAll() {
@@ -247,26 +295,44 @@ class PlaygroundUI {
     const snap = this.snapshot();
     this.drawCluster(snap);
     this.drawStatus(snap);
-    this.appendTimeline(snap.step_count);
+    this.announceChanges(snap, this.appendTimeline(snap.step_count));
   }
 
+  // The viewBox is the column's pixel size, so text is never scaled: the ring
+  // shrinks on a phone instead, and message labels that would not fit clear of
+  // the nodes and of each other are left off (the arrow stays, its hover title
+  // names the event).
   drawCluster(snap) {
-    const svg = this.svg;
-    svg.innerHTML = "";
-    svg.appendChild(arrowMarker());
+    this.lastSnap = snap;
+    const W = this.svg.getBoundingClientRect().width || 420;
+    this.width = W;
+    const { pos, height } = layoutRing(snap.nodes, W);
+    this.svg.setAttribute("viewBox", `0 0 ${W} ${height}`);
 
-    const cx = 210;
-    const cy = 180;
-    const r = 120;
-    const n = snap.nodes.length;
-    const pos = new Map();
-    snap.nodes.forEach((node, i) => {
-      // Start at top, go clockwise.
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-      pos.set(node.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-    });
+    // Nodes persist across redraws so keyboard focus survives Play.
+    if (snap.nodes.some((node) => !this.nodeEls.has(node.id)) || this.nodeEls.size !== snap.nodes.length) {
+      this.nodeLayer.replaceChildren();
+      this.nodeEls.clear();
+      for (const node of snap.nodes) {
+        const parts = createNode(node.id, (id) => this.toggleNode(id));
+        this.nodeEls.set(node.id, parts);
+        this.nodeLayer.appendChild(parts.g);
+      }
+    }
+    for (const node of snap.nodes) updateNode(this.nodeEls.get(node.id), node, pos.get(node.id));
 
-    // In-flight messages first (under the nodes).
+    // Decorative: the nodes carry the state, the timeline lists the events.
+    this.arcLayer.replaceChildren();
+    this.labelLayer.replaceChildren();
+    this.arcLayer.setAttribute("aria-hidden", "true");
+    this.labelLayer.setAttribute("aria-hidden", "true");
+    const taken = [];
+    for (const node of snap.nodes) {
+      const { x, y } = pos.get(node.id);
+      taken.push({ x: x - NODE_R - 2, y: y - NODE_R - 2, w: 2 * NODE_R + 4, h: 2 * NODE_R + 4 });
+      taken.push({ x: x - 26, y: y + NODE_R, w: 52, h: 32 }); // log / hwm caption
+      if (node.partitioned) taken.push({ x: x - 8, y: y - NODE_R - 20, w: 16, h: 18 });
+    }
     const pairCount = new Map();
     for (const m of snap.in_flight) {
       const from = pos.get(m.src);
@@ -275,13 +341,7 @@ class PlaygroundUI {
       const key = `${m.src}-${m.dst}`;
       const k = pairCount.get(key) || 0;
       pairCount.set(key, k + 1);
-      svg.appendChild(messageArc(from, to, m.event, k));
-    }
-
-    // Nodes on top.
-    for (const node of snap.nodes) {
-      const p = pos.get(node.id);
-      svg.appendChild(nodeBadge(node, p, (id) => this.toggleNode(id)));
+      messageArc(this.arcLayer, this.labelLayer, from, to, m.event, k, taken, W, height);
     }
   }
 
@@ -306,7 +366,7 @@ class PlaygroundUI {
         this.timeline.innerHTML = "";
         this.seenSteps = 0;
       } else {
-        return;
+        return [];
       }
     }
     const fresh = JSON.parse(this.pg.timeline_since(this.seenSteps));
@@ -322,77 +382,113 @@ class PlaygroundUI {
     this.seenSteps = stepCount;
     // Keep the latest event in view.
     this.timeline.scrollTop = this.timeline.scrollHeight;
+    return fresh;
   }
 }
 
 // ---- SVG helpers ------------------------------------------------------------
 
-function nodeBadge(node, p, onClick) {
-  const g = document.createElementNS(SVG_NS, "g");
-  const style = ROLE_STYLE[node.role] || ROLE_STYLE.Unattached;
-  g.setAttribute("class", `cp-node cp-${style.cls}${node.partitioned ? " cp-partitioned" : ""}`);
-  g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
+const NODE_R = 28;
+
+// Node centres on a ring sized to the column, in screen pixels, plus the
+// height that fits the ring with the partition marker above and the two-line
+// caption below.
+function layoutRing(nodes, W) {
+  const n = nodes.length;
+  const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n;
+  const reach = Math.max(...nodes.map((_, i) => Math.abs(Math.cos(angle(i)))));
+  const drop = Math.max(...nodes.map((_, i) => Math.sin(angle(i))));
+  const r = Math.min(150, Math.max(56, (W / 2 - NODE_R - 6) / reach));
+  const cy = NODE_R + 22 + r;
+  const pos = new Map();
+  nodes.forEach((node, i) => {
+    pos.set(node.id, { x: W / 2 + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) });
+  });
+  return { pos, height: Math.ceil(cy + r * drop + NODE_R + 34) };
+}
+
+function svgEl(tag, cls) {
+  const e = document.createElementNS(SVG_NS, tag);
+  if (cls) e.setAttribute("class", cls);
+  return e;
+}
+
+// The parts of a node badge that never change. `updateNode` fills in the rest,
+// so the same elements (and keyboard focus) survive every redraw.
+function createNode(id, onClick) {
+  const g = svgEl("g");
   g.style.cursor = "pointer";
-  g.dataset.node = String(node.id);
+  g.dataset.node = String(id);
   // A node is a toggle: the same action for a click, Enter or Space.
   g.setAttribute("role", "button");
   g.setAttribute("tabindex", "0");
+  g.addEventListener("click", () => onClick(id));
+  g.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    onClick(id);
+  });
+
+  const circle = svgEl("circle", "cp-node-bg");
+  circle.setAttribute("r", String(NODE_R));
+  g.appendChild(circle);
+
+  const idText = svgEl("text", "cp-node-id");
+  idText.setAttribute("text-anchor", "middle");
+  idText.setAttribute("y", "-3");
+  idText.textContent = `N${id}`;
+
+  const role = svgEl("text", "cp-node-role");
+  role.setAttribute("text-anchor", "middle");
+  role.setAttribute("y", "11");
+
+  // Log and high-watermark caption under the node, on two lines so it stays
+  // narrower than the gap between neighbours on a phone.
+  const log = svgEl("text", "cp-node-log");
+  log.setAttribute("text-anchor", "middle");
+  const logLine = svgEl("tspan");
+  logLine.setAttribute("x", "0");
+  logLine.setAttribute("y", String(NODE_R + 13));
+  const hwmLine = svgEl("tspan");
+  hwmLine.setAttribute("x", "0");
+  hwmLine.setAttribute("y", String(NODE_R + 26));
+  log.append(logLine, hwmLine);
+
+  const cut = svgEl("text", "cp-node-cut");
+  cut.setAttribute("text-anchor", "middle");
+  cut.setAttribute("y", String(-(NODE_R + 6)));
+  cut.textContent = "✂";
+
+  g.append(idText, role, log, cut);
+  return { g, role, logLine, hwmLine };
+}
+
+function updateNode({ g, role, logLine, hwmLine }, node, p) {
+  const style = ROLE_STYLE[node.role] || ROLE_STYLE.Unattached;
+  g.setAttribute("class", `cp-node cp-${style.cls}${node.partitioned ? " cp-partitioned" : ""}`);
+  g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
   g.setAttribute(
     "aria-label",
     `N${node.id}, ${node.role}, epoch ${node.epoch}. ` +
       (node.partitioned ? "Partitioned; activate to heal." : "Activate to partition."),
   );
-  g.addEventListener("click", () => onClick(node.id));
-  g.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter" && ev.key !== " ") return;
-    ev.preventDefault();
-    onClick(node.id);
-  });
-
-  const circle = document.createElementNS(SVG_NS, "circle");
-  circle.setAttribute("r", "30");
-  circle.setAttribute("class", "cp-node-bg");
-  g.appendChild(circle);
-
-  const idText = document.createElementNS(SVG_NS, "text");
-  idText.setAttribute("class", "cp-node-id");
-  idText.setAttribute("text-anchor", "middle");
-  idText.setAttribute("dy", "-2");
-  idText.textContent = `N${node.id}`;
-  g.appendChild(idText);
-
-  const roleText = document.createElementNS(SVG_NS, "text");
-  roleText.setAttribute("class", "cp-node-role");
-  roleText.setAttribute("text-anchor", "middle");
-  roleText.setAttribute("dy", "13");
-  roleText.textContent = `${style.glyph} e${node.epoch}`;
-  g.appendChild(roleText);
-
-  // Log/high-watermark caption under the node.
-  const logText = document.createElementNS(SVG_NS, "text");
-  logText.setAttribute("class", "cp-node-log");
-  logText.setAttribute("text-anchor", "middle");
-  logText.setAttribute("dy", "48");
-  logText.textContent = `log ${node.log_len} · hwm ${node.hwm}`;
-  g.appendChild(logText);
-
-  if (node.partitioned) {
-    const scissors = document.createElementNS(SVG_NS, "text");
-    scissors.setAttribute("class", "cp-node-cut");
-    scissors.setAttribute("text-anchor", "middle");
-    scissors.setAttribute("dy", "-34");
-    scissors.textContent = "✂";
-    g.appendChild(scissors);
-  }
-
-  return g;
+  role.textContent = `${style.glyph} e${node.epoch}`;
+  logLine.textContent = `log ${node.log_len}`;
+  hwmLine.textContent = `hwm ${node.hwm}`;
 }
 
-// A curved arrow from `from` to `bus` `to`, nudged outward by `k` so multiple
-// messages between the same pair don't perfectly overlap.
-function messageArc(from, to, eventLabel, k) {
-  const g = document.createElementNS(SVG_NS, "g");
-  g.setAttribute("class", "cp-msg");
+// Where along the arc a label may sit, best first.
+const LABEL_SPOTS = [0.5, 0.32, 0.68, 0.2, 0.8];
+
+const overlaps = (a, b) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+// A curved arrow from `from` to `to`, nudged outward by `k` so multiple
+// messages between the same pair don't perfectly overlap. Its label goes at the
+// first spot along the arc that clears `taken` (nodes and earlier labels) and
+// the diagram edges; if none does, the arrow goes unlabelled.
+function messageArc(arcLayer, labelLayer, from, to, eventLabel, k, taken, W, H) {
+  const g = svgEl("g", "cp-msg");
 
   // Trim endpoints to the node radius so arrows touch the rim, not the centre.
   const dx = to.x - from.x;
@@ -400,7 +496,7 @@ function messageArc(from, to, eventLabel, k) {
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len;
   const uy = dy / len;
-  const rad = 32;
+  const rad = NODE_R + 2;
   const sx = from.x + ux * rad;
   const sy = from.y + uy * rad;
   const ex = to.x - ux * rad;
@@ -409,25 +505,44 @@ function messageArc(from, to, eventLabel, k) {
   // Control point perpendicular to the chord for a gentle curve.
   const mx = (sx + ex) / 2;
   const my = (sy + ey) / 2;
-  const off = 18 + k * 14;
+  const off = 16 + k * 14;
   const px = mx + (-uy) * off;
   const py = my + ux * off;
 
-  const path = document.createElementNS(SVG_NS, "path");
+  const path = svgEl("path", "cp-msg-path");
   path.setAttribute("d", `M ${sx} ${sy} Q ${px} ${py} ${ex} ${ey}`);
-  path.setAttribute("class", "cp-msg-path");
   path.setAttribute("marker-end", "url(#cp-arrow)");
-  g.appendChild(path);
+  const title = svgEl("title");
+  title.textContent = eventLabel;
+  g.append(title, path);
+  arcLayer.appendChild(g);
 
-  const text = document.createElementNS(SVG_NS, "text");
-  text.setAttribute("class", "cp-msg-label");
-  text.setAttribute("x", String(px));
-  text.setAttribute("y", String(py));
+  const text = svgEl("text", "cp-msg-label");
   text.setAttribute("text-anchor", "middle");
+  text.setAttribute("dy", "0.35em");
   text.textContent = eventLabel;
-  g.appendChild(text);
-
-  return g;
+  labelLayer.appendChild(text);
+  let w = eventLabel.length * 6.4;
+  try {
+    w = text.getBBox().width || w;
+  } catch {
+    // Not rendered (hidden): the estimate above will do.
+  }
+  for (const t of LABEL_SPOTS) {
+    const a = (1 - t) * (1 - t);
+    const b = 2 * (1 - t) * t;
+    const c = t * t;
+    const x = a * sx + b * px + c * ex;
+    const y = a * sy + b * py + c * ey;
+    const box = { x: x - w / 2 - 2, y: y - 8, w: w + 4, h: 16 };
+    if (box.x < 0 || box.y < 0 || box.x + box.w > W || box.y + box.h > H) continue;
+    if (taken.some((o) => overlaps(box, o))) continue;
+    text.setAttribute("x", String(x));
+    text.setAttribute("y", String(y));
+    taken.push(box);
+    return;
+  }
+  text.remove();
 }
 
 function arrowMarker() {

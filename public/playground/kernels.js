@@ -233,6 +233,8 @@ class KernelExplorer {
 
     // Sidebar: filter + grouped kernel list.
     const sidebar = el("aside", "kx-sidebar");
+    // The docs menu is the page's other aside; distinct names keep landmarks unique.
+    sidebar.setAttribute("aria-label", "Kernel list");
     this.filterInput = el("input", "kx-input kx-filter");
     this.filterInput.type = "search";
     this.filterInput.placeholder = "Filter kernels";
@@ -316,7 +318,11 @@ class KernelExplorer {
         const fn = el("span", "kx-item-fn");
         fn.textContent = spec.function || spec.id;
         item.append(name, fn);
-        item.addEventListener("click", () => this.select(spec.id));
+        item.addEventListener("click", () => {
+          this.select(spec.id);
+          // select() rebuilds the list, so put focus back on the new button.
+          this.list.querySelector(`[data-id="${CSS.escape(spec.id)}"]`)?.focus();
+        });
         group.appendChild(item);
       }
       this.list.appendChild(group);
@@ -845,7 +851,9 @@ function clauseList(title, clauses, cls) {
   for (const clause of items) {
     const li = el("li", "kx-clause");
     const code = el("code");
-    code.innerHTML = highlightRust(String(clause));
+    // Offer wrap points after `::`, `.` and `_` so a long path breaks between
+    // names, not inside one (markup never contains those before a word char).
+    code.innerHTML = highlightRust(String(clause)).replace(/(::|[_.])(?=\w)/g, "$1<wbr>");
     li.appendChild(code);
     list.appendChild(li);
   }
@@ -893,10 +901,16 @@ function renderValue(value, prominent) {
   return pre;
 }
 
-// A zero-width space after each underscore gives a narrow key column a place to
-// break, so `min_insync_safe` wraps between words instead of inside `safe`.
+// A <wbr> after each underscore gives a narrow key column a place to break, so
+// `min_insync_safe` wraps between words instead of inside `safe`. Unlike a
+// zero-width space it adds no character, so a copied key stays exact.
 function breakAfterUnderscores(key) {
-  return key.replace(/_/g, "_​");
+  const frag = document.createDocumentFragment();
+  key.split(/(?<=_)/).forEach((part, i) => {
+    if (i > 0) frag.append(document.createElement("wbr"));
+    frag.append(part);
+  });
+  return frag;
 }
 
 function keyValueTable(obj) {
@@ -906,7 +920,7 @@ function keyValueTable(obj) {
     const tr = document.createElement("tr");
     const th = document.createElement("th");
     th.scope = "row";
-    th.textContent = breakAfterUnderscores(key);
+    th.append(breakAfterUnderscores(key));
     const td = document.createElement("td");
     td.appendChild(renderValue(val, false));
     tr.append(th, td);
@@ -931,7 +945,7 @@ function objectTable(rows) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.scope = "col";
-    th.textContent = breakAfterUnderscores(col);
+    th.append(breakAfterUnderscores(col));
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
