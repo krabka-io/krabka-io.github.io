@@ -26,6 +26,8 @@ export interface CatalogLink {
 export interface KernelRef extends CatalogLink {
   /** Module file stem under `crates/verified/src/`, e.g. `authz`. */
   module: string;
+  /** Source file path under `crates/verified/src/`, e.g. `authz/acl_decision.rs`. */
+  file: string;
 }
 
 export interface LedgerRow {
@@ -35,6 +37,8 @@ export interface LedgerRow {
   module: string;
   /** Every `krabka-verified` module the row's kernels live in. */
   modules: string[];
+  /** Source files of the row's kernels, relative to `crates/verified/src/`, without repeats. */
+  files: string[];
   /** Every kernel function the row names, in catalog order. */
   kernels: KernelRef[];
   /** Site grouping derived from the module; see `MODULE_AREAS`. */
@@ -434,14 +438,16 @@ function sectionProse(lines: string[], section: RawSection): string[] {
 
 // ---- the ledger ---------------------------------------------------------------------
 
-const VERIFIED_SRC_RE = /\/crates\/verified\/src\/([a-z0-9_]+)\.rs(?:#.*)?$/;
+// A kernel's module is the first path segment under `src/`: `opa.rs` and
+// `authz/acl_decision.rs` belong to `opa` and `authz`.
+const VERIFIED_SRC_RE = /\/crates\/verified\/src\/(([a-z0-9_]+)(?:\/[a-z0-9_]+)*\.rs)(?:#.*)?$/;
 
 function kernelRefs(cell: string): KernelRef[] {
   const refs: KernelRef[] = [];
   for (const link of extractLinks(cell)) {
     const match = VERIFIED_SRC_RE.exec(link.url);
     if (!match) continue;
-    refs.push({ label: link.label, url: link.url, module: match[1] });
+    refs.push({ label: link.label, url: link.url, module: match[2], file: match[1] });
   }
   return refs;
 }
@@ -450,6 +456,11 @@ function parseLedger(lines: string[], section: RawSection | undefined): { rows: 
   if (!section) return { rows: [], notes: [] };
   const table = readTable(lines, section.start, section.end, 'Kernel and contract');
   const notes = sectionProse(lines, section);
+  // Since the broker split the ledger, the table sits under "### Production
+  // kernels" and its lead-in and trailing paragraphs say how to read it. The
+  // "### Cross-module theorems" prose is long and stays in the catalog page.
+  const kernelsAt = lines.findIndex((line, i) => i >= section.start && i < section.end && /^### Production kernels\s*$/.test(line));
+  if (kernelsAt !== -1) notes.push(...renderBlocks(lines.slice(kernelsAt + 1, section.end)));
   if (!table) return { rows: [], notes };
 
   const seen = new Map<string, number>();
@@ -472,6 +483,7 @@ function parseLedger(lines: string[], section: RawSection | undefined): { rows: 
       id,
       module,
       modules,
+      files: [...new Set(kernels.map((k) => k.file))],
       kernels,
       area: areaForModule(module),
       claim,
