@@ -2,7 +2,7 @@
 //! (`public/playground/wasi/`).
 //!
 //! `scripts/check-wasi.mjs` builds this crate for `wasm32-wasip1` and runs it in
-//! a Web Worker behind the runtime's WASI shim, the way the lab will run the
+//! a Web Worker behind the runtime's WASI shim, the way the lab runs the
 //! real broker. It exercises every preview-1 call the broker makes:
 //!
 //! - Two echo servers on the first two preopened listeners. The first returns
@@ -33,6 +33,7 @@ mod control;
 mod echo;
 mod fsuite;
 mod lab;
+mod log;
 mod net;
 
 use std::os::fd::RawFd;

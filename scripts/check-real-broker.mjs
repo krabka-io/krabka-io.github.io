@@ -320,15 +320,16 @@ async function node(page, id, pred = '() => true', label = `node ${id}`, timeout
   }
 }
 
-// The first line of a real broker's stderr (the runtime keeps its last 200)
-// that contains `text`, once there is one.
+// The first JSON record of a real broker's stderr (the runtime keeps its last
+// 200 lines) whose line contains `text`, once there is one.
 async function stderrLine(page, id, text, label, timeout = STEP_TIMEOUT) {
-  return waitFor(
+  const line = await waitFor(
     page,
     `(() => { const p = window.krabkaLab.external.process(${id}); return p ? p.tail('stderr').find((l) => l.includes(${JSON.stringify(text)})) || null : null; })()`,
     label,
     timeout,
   );
+  return JSON.parse(line);
 }
 
 async function openLab(page, base) {
@@ -372,9 +373,9 @@ async function oneBroker(context, base, errors) {
     JSON.stringify(running.state.env),
   );
   const boot = await stderrLine(page, 1, 'starting the broker on /data/log', 'the broker to start');
-  check('it formats its volume and boots a fresh cluster', /bootstrap_mode=Bootstrap/.test(boot) && /voter=true/.test(boot), boot);
+  check('it formats its volume and boots a fresh cluster', boot.bootstrap_mode === 'Bootstrap' && boot.voter === true, JSON.stringify(boot));
   const serving = await stderrLine(page, 1, 'krabka-broker serving on', 'the broker to serve', BOOT_TIMEOUT);
-  check(`it advertises its local bridge address (${elapsed(since)})`, serving.endsWith('krabka-broker serving on 127.0.0.1:9092'), serving);
+  check(`it advertises its local bridge address (${elapsed(since)})`, serving.message.endsWith('krabka-broker serving on 127.0.0.1:9092'), JSON.stringify(serving));
   await page.close();
 }
 
@@ -484,7 +485,7 @@ async function threeBrokers(context, base, errors) {
   check('three voters, each with the same static quorum', envs.every((v) => v === '1@10.0.0.1:9093,2@10.0.0.2:9093,3@10.0.0.3:9093'), JSON.stringify(envs));
   const servingLines = [];
   for (const id of [1, 2, 3]) servingLines.push(await stderrLine(page, id, 'krabka-broker serving on', `broker ${id} to serve`, BOOT_TIMEOUT));
-  check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.endsWith(`serving on 127.0.0.1:${9092 + i}`)), servingLines.join(' | '));
+  check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.message.endsWith(`serving on 127.0.0.1:${9092 + i}`)), servingLines.map((l) => JSON.stringify(l)).join(' | '));
   const topic = await createTopic(page);
   check(`the lab's admin node creates "${TOPIC}" with three replicas on the real brokers (${elapsed(since)})`, topic.status === 'created', JSON.stringify(topic));
   if (args.has('--kafkactl') || args.has('--kafkactl-only')) {
@@ -597,7 +598,7 @@ async function threeBrokers(context, base, errors) {
   await page.evaluate((id) => window.krabkaLab.fault({ kind: 'restart', node: id }), leader);
   const back = await node(page, leader, `(n) => n.alive && n.state.process.state === 'running' && n.state.process.incarnation === 2`, 'the restarted broker', BOOT_TIMEOUT);
   const rejoin = await stderrLine(page, leader, 'starting the broker on /data/log', 'the restarted broker to start');
-  check(`restart brings broker ${leader} back on its volume (${elapsed(restartedAt)})`, back.state.process.volume === `${scenarioId}/${leader}` && /bootstrap_mode=Rejoin/.test(rejoin), rejoin);
+  check(`restart brings broker ${leader} back on its volume (${elapsed(restartedAt)})`, back.state.process.volume === `${scenarioId}/${leader}` && rejoin.bootstrap_mode === 'Rejoin', JSON.stringify(rejoin));
   // A client that starts again fetches fresh metadata, as a restarted Kafka
   // client does; the lab's clients otherwise refresh it only on an error or
   // after metadata.max.age.ms (5 min).
@@ -654,7 +655,7 @@ async function threeBrokers(context, base, errors) {
     await node(page, id, isRunning, `broker ${id} to run after the reload`, BOOT_TIMEOUT);
     rejoins.push(await stderrLine(page, id, 'starting the broker on /data/log', `broker ${id} to start after the reload`));
   }
-  check(`the real brokers restart from their IndexedDB volumes (${elapsed(reloadedAt)})`, rejoins.every((l) => /bootstrap_mode=Rejoin/.test(l)), rejoins.join(' | '));
+  check(`the real brokers restart from their IndexedDB volumes (${elapsed(reloadedAt)})`, rejoins.every((l) => l.bootstrap_mode === 'Rejoin'), rejoins.map((l) => JSON.stringify(l)).join(' | '));
   const replayId = await page.evaluate(
     (topic) =>
       window.krabkaLab.world.addNode({
