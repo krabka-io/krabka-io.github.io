@@ -159,6 +159,8 @@ const FIELD_TYPES = {
     },
     write: (input, value) => {
       input.value = value === undefined ? "" : toJson(value, true);
+      // Show the whole preset instead of a 6-row window onto it.
+      input.rows = Math.min(14, Math.max(6, input.value.split("\n").length));
     },
     parse: (raw) => {
       const text = raw.trim();
@@ -628,7 +630,7 @@ class KernelExplorer {
       const sig = el("div", "kx-signature-box");
       sig.appendChild(label("Signature"));
       const pre = el("pre", "kx-signature");
-      pre.textContent = spec.signature;
+      pre.innerHTML = highlightRust(spec.signature);
       sig.appendChild(pre);
       this.contract.appendChild(sig);
     }
@@ -778,6 +780,58 @@ function mutedNote(text) {
   return note;
 }
 
+// ---- syntax colour ------------------------------------------------------------
+//
+// A deliberately small tokenizer for the Rust signature, the Pearlite clauses
+// and the JSON values, coloured with the krabka-dark Shiki palette the rest of
+// the site uses (see the `.kx-hl-*` rules in kernels.css). Only words, numbers
+// and strings are picked out; operators and punctuation stay the base colour,
+// as they do in the theme. Built from escaped text only, so the result is safe
+// to assign to innerHTML.
+
+const RUST_TOKEN = /"(?:[^"\\]|\\.)*"|\b\d[\d_]*(?:[iu](?:8|16|32|64|128|size))?\b|\b[A-Za-z_]\w*/g;
+const RUST_KEYWORDS = new Set([
+  "pub", "const", "fn", "let", "if", "else", "match", "forall", "exists", "as",
+  "in", "mut", "ref", "self", "impl", "for", "where", "return",
+]);
+const RUST_PRIMITIVE = /^(?:[iu](?:8|16|32|64|128|size)|bool|str|char)$/;
+
+const JSON_TOKEN = /"(?:[^"\\]|\\.)*"|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b(?:true|false|null)\b/g;
+const JSON_KEY_END = /\s*:/y;
+
+function rustClass(word, text, end) {
+  if (word[0] === '"') return "string";
+  if (/^\d/.test(word)) return "number";
+  if (RUST_KEYWORDS.has(word)) return "keyword";
+  if (word === "true" || word === "false") return "const";
+  if (RUST_PRIMITIVE.test(word) || /^[A-Z]/.test(word)) return "type";
+  return text[end] === "(" ? "call" : "";
+}
+
+function jsonClass(word, text, end) {
+  if (word[0] === '"') {
+    JSON_KEY_END.lastIndex = end;
+    return JSON_KEY_END.test(text) ? "call" : "string";
+  }
+  return /^-?\d/.test(word) ? "number" : "const";
+}
+
+function highlight(text, token, classify) {
+  let html = "";
+  let last = 0;
+  for (const m of text.matchAll(token)) {
+    const end = m.index + m[0].length;
+    const cls = classify(m[0], text, end);
+    html += escapeHtml(text.slice(last, m.index));
+    html += cls ? `<span class="kx-hl-${cls}">${escapeHtml(m[0])}</span>` : escapeHtml(m[0]);
+    last = end;
+  }
+  return html + escapeHtml(text.slice(last));
+}
+
+const highlightRust = (text) => highlight(text, RUST_TOKEN, rustClass);
+const highlightJson = (text) => highlight(text, JSON_TOKEN, jsonClass);
+
 function clauseList(title, clauses, cls) {
   const box = el("div", `kx-clauses ${cls}`);
   box.appendChild(label(title));
@@ -791,7 +845,7 @@ function clauseList(title, clauses, cls) {
   for (const clause of items) {
     const li = el("li", "kx-clause");
     const code = el("code");
-    code.textContent = String(clause);
+    code.innerHTML = highlightRust(String(clause));
     li.appendChild(code);
     list.appendChild(li);
   }
@@ -828,15 +882,21 @@ function renderValue(value, prominent) {
       return objectTable(value);
     }
     const pre = el("pre", "kx-json");
-    pre.textContent = toJson(value, true);
+    pre.innerHTML = highlightJson(toJson(value, true));
     return pre;
   }
   if (isPlainObject(value)) {
     return keyValueTable(value);
   }
   const pre = el("pre", "kx-json");
-  pre.textContent = toJson(value, true);
+  pre.innerHTML = highlightJson(toJson(value, true));
   return pre;
+}
+
+// A zero-width space after each underscore gives a narrow key column a place to
+// break, so `min_insync_safe` wraps between words instead of inside `safe`.
+function breakAfterUnderscores(key) {
+  return key.replace(/_/g, "_​");
 }
 
 function keyValueTable(obj) {
@@ -846,7 +906,7 @@ function keyValueTable(obj) {
     const tr = document.createElement("tr");
     const th = document.createElement("th");
     th.scope = "row";
-    th.textContent = key;
+    th.textContent = breakAfterUnderscores(key);
     const td = document.createElement("td");
     td.appendChild(renderValue(val, false));
     tr.append(th, td);
@@ -871,7 +931,7 @@ function objectTable(rows) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.scope = "col";
-    th.textContent = col;
+    th.textContent = breakAfterUnderscores(col);
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);

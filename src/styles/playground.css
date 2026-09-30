@@ -70,7 +70,7 @@
 
 #krabka-playground .cp-btn:hover {
   border-color: var(--cp-accent);
-  color: var(--cp-accent-deep);
+  color: var(--cp-accent);
 }
 
 #krabka-playground .cp-btn:active {
@@ -147,6 +147,13 @@
   font-size: 0.8rem;
 }
 
+#krabka-playground .cp-timeline:empty::before {
+  content: "No events yet. Press Play or Step.";
+  display: block;
+  padding: 0.3rem 0.1rem;
+  color: var(--cp-muted);
+}
+
 #krabka-playground .cp-event {
   display: grid;
   grid-template-columns: 1.1rem 3.2rem 1fr;
@@ -179,20 +186,33 @@
   transition: stroke 0.15s ease, fill 0.15s ease;
 }
 
+/* The diagram scales with its column, so SVG text shrinks with it. app.js sets
+ * --cp-u (user units per screen pixel) on the svg; each size below is its
+ * design size in user units or a floor in screen pixels, whichever is larger. */
 #krabka-playground .cp-node-id {
-  font-size: 15px;
+  font-size: max(15px, calc(12px * var(--cp-u, 1)));
   font-weight: 700;
   fill: var(--cp-text);
 }
 
 #krabka-playground .cp-node-role {
-  font-size: 11px;
+  font-size: max(11px, calc(9.5px * var(--cp-u, 1)));
   fill: var(--cp-muted);
 }
 
 #krabka-playground .cp-node-log {
-  font-size: 9.5px;
+  font-size: max(9.5px, calc(10px * var(--cp-u, 1)));
   fill: var(--cp-muted);
+  /* Message arrows end at the rim, over this caption; keep it readable. */
+  paint-order: stroke;
+  stroke: var(--cp-panel);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+}
+
+#krabka-playground .cp-node:focus-visible {
+  outline: 2px solid var(--cp-text);
+  outline-offset: 2px;
 }
 
 #krabka-playground .cp-node-cut {
@@ -238,21 +258,12 @@
 }
 
 #krabka-playground .cp-msg-label {
-  font-size: 8.5px;
+  font-size: max(8.5px, calc(10px * var(--cp-u, 1)));
   fill: var(--cp-text);
   paint-order: stroke;
   stroke: var(--cp-panel);
   stroke-width: 2.4px;
   stroke-linejoin: round;
-}
-
-/* The diagram scales with its column, so on a phone SVG text renders at half
- * size. These sizes counter that; the circles keep their geometry. */
-@media (max-width: 560px) {
-  #krabka-playground .cp-node-id { font-size: 17px; }
-  #krabka-playground .cp-node-role,
-  #krabka-playground .cp-node-log { font-size: 12.5px; }
-  #krabka-playground .cp-msg-label { font-size: 12px; }
 }
 
 /* Legend. */
@@ -294,7 +305,7 @@
 }
 
 #krabka-playground .cp-error {
-  color: var(--cp-accent-deep);
+  color: #ff8466;
   font-size: 0.88rem;
 }
 

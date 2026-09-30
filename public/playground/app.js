@@ -29,7 +29,7 @@ const ACTION_ICON = {
   Deliver: "→", // →
   Partition: "✂", // ✂
   Heal: "⛓", // ⛓
-  Timeout: "⏰", // ⏰
+  Timeout: "⏰︎", // ⏰, forced to the flat text glyph like the others
   Elected: "♔", // ♔
   Append: "✎", // ✎
   Drop: "✕", // ✕
@@ -56,6 +56,7 @@ class PlaygroundUI {
     const controls = el("div", "cp-controls");
 
     this.sizeSel = el("select", "cp-select");
+    this.sizeSel.setAttribute("aria-label", "Number of voters");
     for (const n of [3, 5]) {
       const o = document.createElement("option");
       o.value = String(n);
@@ -93,6 +94,7 @@ class PlaygroundUI {
     faults.append(
       label("Faults"),
       button("Partition leader", "", () => this.partitionLeader()),
+      button("Heal", "", () => this.healAll()),
       button("Produce ✎", "", () => this.act(() => this.pg.append(1))),
       button("Drop next ✕", "", () => this.act(() => this.pg.drop_next())),
       button("Reorder bus", "", () => this.act(() => this.pg.reorder())),
@@ -111,6 +113,13 @@ class PlaygroundUI {
     this.svg.setAttribute("role", "img");
     this.svg.setAttribute("aria-label", "KRaft cluster diagram");
     diagramWrap.appendChild(this.svg);
+    // The viewBox scales with its column, so SVG text shrinks with it. Publish
+    // the user-units-per-pixel ratio so the stylesheet can size text in
+    // screen pixels (`--cp-u`).
+    new ResizeObserver(() => {
+      const w = this.svg.clientWidth;
+      if (w > 0) this.svg.style.setProperty("--cp-u", String(420 / w));
+    }).observe(this.svg);
 
     this.status = el("div", "cp-status");
     diagramWrap.appendChild(this.status);
@@ -133,7 +142,7 @@ class PlaygroundUI {
 
     const hint = el("p", "cp-hint");
     hint.innerHTML =
-      "Click a node to partition it (click again to heal). " +
+      "Click a node, or Tab to it and press Enter, to partition it (again to heal). " +
       "<strong>Step</strong> delivers one bus message or fires the next timer; " +
       "<strong>Play</strong> auto-steps. Everything runs the real deterministic " +
       "engine, compiled to WebAssembly.";
@@ -166,7 +175,7 @@ class PlaygroundUI {
   play() {
     if (this.playing) return;
     this.playing = true;
-    this.playBtn.textContent = "⎉ Pause";
+    this.playBtn.textContent = "❚❚ Pause";
     this.playBtn.classList.add("cp-active");
     const tick = () => {
       if (!this.playing) return;
@@ -218,6 +227,14 @@ class PlaygroundUI {
       if (node.partitioned) this.pg.heal(id);
       else this.pg.partition(id);
     });
+    // The diagram was redrawn, so hand keyboard focus to the new node.
+    const again = this.svg.querySelector(`[data-node="${id}"]`);
+    if (again) again.focus();
+  }
+
+  healAll() {
+    const cut = this.snapshot().nodes.filter((n) => n.partitioned);
+    if (cut.length > 0) this.act(() => cut.forEach((n) => this.pg.heal(n.id)));
   }
 
   // ---- rendering ------------------------------------------------------------
@@ -316,7 +333,21 @@ function nodeBadge(node, p, onClick) {
   g.setAttribute("class", `cp-node cp-${style.cls}${node.partitioned ? " cp-partitioned" : ""}`);
   g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
   g.style.cursor = "pointer";
+  g.dataset.node = String(node.id);
+  // A node is a toggle: the same action for a click, Enter or Space.
+  g.setAttribute("role", "button");
+  g.setAttribute("tabindex", "0");
+  g.setAttribute(
+    "aria-label",
+    `N${node.id}, ${node.role}, epoch ${node.epoch}. ` +
+      (node.partitioned ? "Partitioned; activate to heal." : "Activate to partition."),
+  );
   g.addEventListener("click", () => onClick(node.id));
+  g.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    onClick(node.id);
+  });
 
   const circle = document.createElementNS(SVG_NS, "circle");
   circle.setAttribute("r", "30");
