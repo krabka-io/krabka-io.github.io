@@ -19,8 +19,8 @@ kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m`
 
 const clientSnippets = {
   rust: `// Cargo.toml:
-//   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs" }
-//   plus the [patch.crates-io] block from that repository's Cargo.toml (see /docs/streams-rs)
+//   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
+//   plus the [patch.crates-io] block from that revision's Cargo.toml (see /docs/streams-rs)
 //   bytes = "1"
 //   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 use bytes::Bytes;
@@ -41,8 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             value: Some(Bytes::from("Hello Krabka from Rust!")),
             ..Default::default()
         })
-        .await
-        .await??;
+        .await?;
 
     producer.flush().await?;
     producer.close().await?;
