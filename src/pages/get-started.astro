@@ -69,7 +69,8 @@ func main() {
     if err := cl.ProduceSync(context.Background(), rec).FirstErr(); err != nil { panic(err) }
     fmt.Println("Produced message to Krabka!")
 }`,
-  java: `// Works unmodified with the standard Apache Kafka Java Producer!
+  java: `// Maven dependency: org.apache.kafka:kafka-clients:4.3.1
+// Works unmodified with the standard Apache Kafka Java Producer!
 import org.apache.kafka.clients.producer.*;
 import java.util.Properties;
 
@@ -85,6 +86,47 @@ public class App {
         producer.close();
     }
 }`,
+  python: `# python -m pip install confluent-kafka==2.15.1
+# Save as app.py and run: python app.py
+from confluent_kafka import Producer
+
+producer = Producer({"bootstrap.servers": "localhost:9092"})
+
+def delivered(error, message):
+    if error is not None:
+        raise RuntimeError(str(error))
+    print(f"Delivered to partition {message.partition()} at offset {message.offset()}.")
+
+producer.produce(
+    "quickstart-events",
+    key="user-1",
+    value="Hello Krabka from Python!",
+    on_delivery=delivered,
+)
+if producer.flush(30) != 0:
+    raise TimeoutError("Message delivery timed out")`,
+  javascript: `// npm install kafkajs@2.2.4
+// Save as app.cjs and run: node app.cjs
+const { Kafka } = require('kafkajs');
+
+async function main() {
+    const kafka = new Kafka({ clientId: 'quickstart', brokers: ['localhost:9092'] });
+    const producer = kafka.producer();
+    await producer.connect();
+    try {
+        await producer.send({
+            topic: 'quickstart-events',
+            messages: [{ key: 'user-1', value: 'Hello Krabka from KafkaJS!' }],
+        });
+    } finally {
+        await producer.disconnect();
+    }
+}
+
+main().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});`,
   cli: `kafka-topics.sh --bootstrap-server localhost:9092 --create --topic quickstart-events --partitions 1 --replication-factor 1
 kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning`
@@ -99,7 +141,7 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
 
 <BaseLayout
   title="Get Started | Krabka"
-  description="Run a single-node KRaft Krabka cluster locally with Docker Compose, deploy to Kubernetes via Helm, or produce and consume records with Rust, Go, and Java."
+  description="Run a single-node KRaft Krabka cluster locally with Docker Compose, deploy to Kubernetes via Helm, or produce and consume records with Rust, Go, Java, Python, and Node.js."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="text-left border-b border-white/10 pb-8 mb-12">
@@ -176,6 +218,12 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
           <button type="button" role="tab" id="client-tab-c-java" aria-controls="client-c-java" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Java
           </button>
+          <button type="button" role="tab" id="client-tab-c-python" aria-controls="client-c-python" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Python
+          </button>
+          <button type="button" role="tab" id="client-tab-c-javascript" aria-controls="client-c-javascript" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Node.js
+          </button>
           <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Kafka CLI
           </button>
@@ -184,7 +232,7 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
         <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
           <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust">
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Async FutureProducer snippet</span>
+              <span>Native async Rust producer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
@@ -213,6 +261,26 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
               </button>
             </div>
             <CodeBlock size="sm" code={clientSnippets.java} lang="java" />
+          </div>
+
+          <div id="client-c-python" role="tabpanel" aria-labelledby="client-tab-c-python" hidden>
+            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
+              <span>confluent-kafka Python producer</span>
+              <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.python}>
+                <span>Copy</span>
+              </button>
+            </div>
+            <CodeBlock size="sm" code={clientSnippets.python} lang="python" />
+          </div>
+
+          <div id="client-c-javascript" role="tabpanel" aria-labelledby="client-tab-c-javascript" hidden>
+            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
+              <span>KafkaJS producer</span>
+              <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.javascript}>
+                <span>Copy</span>
+              </button>
+            </div>
+            <CodeBlock size="sm" code={clientSnippets.javascript} lang="javascript" />
           </div>
 
           <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli" hidden>
