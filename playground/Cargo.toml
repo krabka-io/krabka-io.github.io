@@ -2,7 +2,7 @@
 name = "krabka-playground"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.98.1"
 license = "Apache-2.0"
 authors = ["The Krabka Authors"]
 publish = false
@@ -42,9 +42,9 @@ strip = true
 [dependencies]
 # ---- Krabka crates. The broker pins are `main`; the protocol pins are one
 # revision of the protocol repository.
-krabka-kraft-core = { git = "https://github.com/krabka-io/krabka-broker", rev = "e526934f24d84c52216ffa8efdb94f6a4e5b9042", features = ["sim"] }
+krabka-kraft-core = { git = "https://github.com/krabka-io/krabka-broker", rev = "505d7c890d46d3937f35e92753c65733f3bf4b88", features = ["sim"] }
 # The Creusot-verified decision kernels the `/docs/verified` page evaluates
-# interactively. Same revision as the consensus core, so the two never disagree.
+# interactively. This revision matches the verified-kernels catalog and proofs.
 krabka-verified = { git = "https://github.com/krabka-io/krabka-broker", rev = "53e0ad76cf9afa15b557454bd882b627e7e16bc6" }
 krabka-ids = "0.4.0"
 krabka-units = "0.4.0"
@@ -56,7 +56,7 @@ krabka-protocol = { version = "0.4.0", default-features = false, features = ["gz
 # its topology with the crate's `Topology`, and joins its group with the
 # byte-exact KIP-1071 wire topology the crate derives. `main` with the
 # embedder API.
-krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "a86d61bcaa92ae62f05b5f092dd94c1767c4e47d" }
+krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "10dea5cc9d68823353540347f7010d20bdc7351f" }
 
 # ---- Schema engines. The schema registry node parses and checks schemas with
 # the same crates `krabka-schema-registry` uses.
@@ -95,16 +95,16 @@ getrandom3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 # resolves them the same way: a git pin on the krabka-protocol repository. Keep
 # every entry on one revision.
 [patch.crates-io]
-krabka-compression = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
-krabka-ids = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
-krabka-protocol = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
-krabka-security = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
-krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
-krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "6133ca4d24a477bd9fce7a25853125eb5dcfcb30" }
+krabka-compression = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-ids = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-protocol = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-security = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
 # `krabka-client-streams` links the Kafka network clients and the schema serdes
 # in a native build (the host tests), never on wasm. They come from their
 # repositories too, at revisions built against the protocol revision above.
-krabka-client-consumer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
-krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
-krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "275d08f7b1f502193019f5ffa8d3452a34047396" }
-krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "ee9c3933fb1d71735846e7e5e33ea6ab3a694dc5" }
+krabka-client-consumer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "92a5f3df874fb9b89f4b0b51124c3ce1bfd6f9aa" }
+krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "92a5f3df874fb9b89f4b0b51124c3ce1bfd6f9aa" }
+krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "92a5f3df874fb9b89f4b0b51124c3ce1bfd6f9aa" }
+krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "a7b5964f7536b07a36a1f440d4af65c0bf6609dd" }

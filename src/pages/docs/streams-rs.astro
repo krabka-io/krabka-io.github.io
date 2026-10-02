@@ -6,7 +6,12 @@ import apiReference from '../../data/api-reference.json';
 
 const apiHref = (id: string) => new URL(apiReference.find((entry) => entry.id === id)!.apiPath, 'https://krabka.io').href;
 
-const producerCode = `use std::time::Duration;
+const producerCode = `// Cargo.toml:
+//   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "92a5f3df874fb9b89f4b0b51124c3ce1bfd6f9aa" }
+//   plus the [patch.crates-io] block from that revision's Cargo.toml
+//   bytes = "1"
+//   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+use std::time::Duration;
 use bytes::Bytes;
 use krabka_client_producer::{Acks, Compression, Producer, ProducerRecord};
 
@@ -28,8 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             value: Some(Bytes::from("hello krabka")),
             ..Default::default()
         })
-        .await
-        .await??;
+        .await?;
 
     producer.flush().await?;
     producer.close().await?;
@@ -195,12 +199,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
       <h2 class="text-xl font-bold text-white pt-2">Adding the Crates</h2>
       <p>
-        These repositories do not publish to crates.io, and the <code class="font-mono text-xs">krabka-*</code> names there still belong to an older repository. Depend on them by git revision, and copy the <code class="font-mono text-xs">[patch.crates-io]</code> block from the <code class="font-mono text-xs">Cargo.toml</code> at the root of the repository you depend on, so that <code class="font-mono text-xs">krabka-protocol</code> and <code class="font-mono text-xs">krabka-units</code> resolve to one copy. The examples below need Rust 1.97.1 or newer, <code class="font-mono text-xs">tokio</code> with the <code class="font-mono text-xs">macros</code> and <code class="font-mono text-xs">rt-multi-thread</code> features, <code class="font-mono text-xs">bytes</code> for the producer, and <code class="font-mono text-xs">krabka-units</code> for the consumers.
+        These repositories do not publish to crates.io, and the <code class="font-mono text-xs">krabka-*</code> names there still belong to an older repository. Depend on them by git revision, and copy the <code class="font-mono text-xs">[patch.crates-io]</code> block from the <code class="font-mono text-xs">Cargo.toml</code> at the pinned revision of the repository you depend on, so that <code class="font-mono text-xs">krabka-protocol</code> and <code class="font-mono text-xs">krabka-units</code> resolve to one copy. The examples below need Rust 1.98.1 or newer, <code class="font-mono text-xs">tokio</code> with the <code class="font-mono text-xs">macros</code> and <code class="font-mono text-xs">rt-multi-thread</code> features, <code class="font-mono text-xs">bytes</code> for the producer, and <code class="font-mono text-xs">krabka-units</code> for the consumers.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Async Producer Example</h2>
       <p>
-        The idempotent producer automatically initializes producer epochs and base sequences to guarantee deduplication on the broker:
+        The idempotent producer automatically initializes producer epochs and base sequences to guarantee deduplication on the broker.
+        <code class="font-mono text-xs">send(record).await?</code> waits for delivery and returns metadata.
+        For pipelining, <code class="font-mono text-xs">enqueue(record).await?</code> queues a record and returns a delivery handle;
+        await each handle with <code class="font-mono text-xs">delivery.await?</code> to check its result.
       </p>
 
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
