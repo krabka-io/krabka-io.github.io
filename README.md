@@ -51,6 +51,21 @@ npm run check-links
 # Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
 npm run check-seo
 
+# Check getting started snippet coverage and shell syntax (fetches the synced guides)
+npm run check-snippets
+npm run test:snippets
+
+# Execute an integration suite; run these sequentially, with port 9092 free.
+# Docker is required. Rust, Go, Java, Python, and Node.js use their native tools;
+# the Java suite needs JDK 21, Gradle 9.6.1 and Maven; Helm needs kind/kubectl/helm.
+npm run check-snippets -- compose
+npm run check-snippets -- helm
+npm run check-snippets -- rust
+npm run check-snippets -- go
+npm run check-snippets -- java
+npm run check-snippets -- python
+npm run check-snippets -- javascript
+
 # Verify that every API reference linked from /api resolves (needs the network)
 npm run check-api-links
 
@@ -157,7 +172,10 @@ The chart signing public key lives in [krabka-io/tooling](https://github.com/kra
 ### 10. Automated Verification Suites
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
-- **Code Stub Verifier (`scripts/verify-code-stubs.mjs`):** Parses and validates all code snippets across ingested markdown guides and Astro documentation pages.
+- **Website Snippets (`scripts/check-snippets.mjs`, `snippets.yml`):** Extracts every displayed snippet from `/get-started`, `/docs/quickstart`, and the Rust, Go, and Java client pages, plus the synced Java/Go getting started guides. New or missing snippets fail coverage. Separate CI jobs run on pull requests, main, and daily to catch drift in the imported guides. Sources, dependency locks, and diagnostics are saved as workflow artifacts.
+  - Docker Compose and Helm examples execute against the checked-out `public/quickstart` manifests; Helm uses its own kind cluster and kubeconfig. Readiness polling, interactive stdin, and consumer time limits come from the test harness. CLI and client producers must write the expected value, read back with the standard Kafka consumer.
+  - All Rust examples compile against the same git revisions and dependency lock as the playground. The streams test driver runs its existing output assertion; the two infinite consumer loops are compile checks. Both Rust producers, franz-go, Apache Kafka Java, confluent-kafka Python, and KafkaJS run against the actual quickstart broker image.
+  - Go/Java guide fragments get missing program structure and fixture inputs. Serdes use the libraries' registry stubs; columnar and streams examples run locally, with output assertions where the guide feeds records. Gradle BOM blocks and the Maven XML resolve their published dependencies. Repository build commands (`go test`, `bazel test`, `./gradlew build`) receive shell syntax checks; their execution belongs to the source repositories' CI.
 - **Cluster Lab End-to-End (`scripts/check-lab.mjs`):** Drives `/docs/lab` in headless Chromium without a broker, persistence and WebRTC hosting included. `check-lab-clusters.mjs` runs the cluster presets on real brokers; `check-lab-presets.mjs`, `check-lab-external.mjs`, `check-real-broker.mjs` and `check-wasi.mjs` cover the presets, the external-node contract, the real broker and the WASI runtime.
 - **Catalog Parse Check (`scripts/check-catalog.mjs`):** Runs the verification-catalog parser against the synced `docs/verification.md` and fails when the ledger table or the model paragraphs no longer parse, so a layout change in the broker's catalog cannot silently empty the site's ledger. The deploy workflow runs it after every build.
 
@@ -171,6 +189,7 @@ krabka-io.github.io/
 │   ├── deploy.yml            # Builds the site and deploys to GitHub Pages
 │   ├── helm-index.yml        # Rebuilds the aggregated chart index and opens a pull request
 │   ├── kafkactl-lab.yml      # Releases the kafkactl lab bridge binaries
+│   ├── snippets.yml          # Getting started deployments and client-library examples
 │   └── playground.yml        # Playground and WASI crates: tests, clippy, wasm builds
 ├── kafkactl-lab/             # krabka build of fgrosse/kafkactl with the lab bridge command (Go)
 ├── playground/               # krabka-playground: WASM consensus simulator, verified kernels, Cluster Lab (Rust)
@@ -206,7 +225,9 @@ krabka-io.github.io/
 │   ├── check-wasi.mjs        # Browser WASI runtime and cross-origin isolation
 │   ├── check-proof-readability.mjs # Obligation summaries in the proof explorer
 │   ├── check-proof-highlight.mjs # Why3 highlighter keywords, line count and escaping
-│   ├── verify-code-stubs.mjs # Markdown and Astro code snippet syntax checker
+│   ├── check-snippets.mjs    # Compile and run the website quickstarts and client samples
+│   ├── snippets/             # Source extraction, coverage checks, and extractor tests
+│   ├── verify-code-stubs.mjs # Legacy JSON/XML Markdown inspection
 │   └── build-helm-index.sh   # Rebuilds public/charts from component repositories
 ├── src/
 │   ├── components/           # Reusable UI components (Navbar, Footer, CodeBlock, EvidenceLedger, VerificationBar, etc.)
