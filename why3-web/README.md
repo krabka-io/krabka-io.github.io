@@ -33,6 +33,7 @@ Bazel drives it, the way krabka-broker builds its Creusot proof image:
 ```sh
 bazel build //why3-web:bundle        # bazel-bin/why3-web/why3-web.tar
 bash why3-web/install.sh             # npm run build:why3-web: unpack into public/why3-web/
+npm run check-proof-workers          # replay the barrier placement regression in browser globals
 ```
 
 `image.apko.yaml` and its lock are the Wolfi base with opam, a C toolchain and
@@ -85,6 +86,10 @@ time limit by terminating a worker.
 - The worker is linked with `js_of_ocaml --effects=cps`: Why3's reduction
   engine (`compute_specified`) recurses deeply on a large verification
   condition and overflows the JavaScript stack otherwise.
+- Alt-Ergo disables js_of_ocaml 6.2 inlining, which otherwise moves part of
+  `Satml_types.mk_and` outside its `Exit` handler and fails valid goals with
+  `Function 'exit' not implemented`. The worker check exercises both bundles,
+  solver errors, the step budget and reuse after failures.
 - The Why3 side prints tasks with Why3's Try Why3 driver for Alt-Ergo's
   Dolmen front end (`try_alt_ergo.drv`, SMT-LIB with polymorphic
   declarations); the Alt-Ergo worker reads them as the `psmt2` dialect. CI

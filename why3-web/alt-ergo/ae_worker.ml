@@ -74,6 +74,7 @@ let run id content steps =
   close_out ch;
   let regular = Buffer.create 1024 and diagnostic = Buffer.create 1024 in
   let fmt_r = Format.formatter_of_buffer regular and fmt_d = Format.formatter_of_buffer diagnostic in
+  Sys_js.set_channel_flusher stderr (Buffer.add_string diagnostic);
   Options.Output.set_regular (Options.Output.of_formatter fmt_r);
   Options.Output.set_diagnostic (Options.Output.of_formatter fmt_d);
   Options.set_file_for_js filename;
@@ -81,6 +82,8 @@ let run id content steps =
      dialect Alt-Ergo reads from .psmt2 files. *)
   Options.set_input_format (Some (Options.Smtlib2 `Poly));
   Options.set_steps_bound steps;
+  Steps.reset_steps ();
+  Steps.set_steps_bound steps;
   Options.set_timelimit_per_goal false;
   Options.set_answers_with_loc false;
   let t0 = Sys.time () in
@@ -91,10 +94,15 @@ let run id content steps =
   in
   Format.pp_print_flush fmt_r ();
   Format.pp_print_flush fmt_d ();
+  Format.pp_print_flush Format.err_formatter ();
+  flush stderr;
   let out = Buffer.contents regular and diag = Buffer.contents diagnostic in
-  let has s = Str.string_match (Str.regexp_string s) out 0 || (try ignore (Str.search_forward (Str.regexp_string s) out 0); true with Not_found -> false) in
+  let answers = List.map String.trim (String.split_on_char '\n' out) in
+  let has s = List.mem s answers in
   let verdict =
-    if has "unsat" then "unsat"
+    if steps >= 0 && Steps.get_steps () > steps then "timeout"
+    else if Option.is_some status then "error"
+    else if has "unsat" then "unsat"
     else if has "timeout" || has "Timeout" then "timeout"
     else if has "sat" then "sat"
     else if has "unknown" then "unknown"

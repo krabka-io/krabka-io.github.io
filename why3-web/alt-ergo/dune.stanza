@@ -12,5 +12,6 @@
  )
  (modules ae_worker)
  (modes byte js)
- (js_of_ocaml (flags +toplevel.js +dynlink.js) (javascript_files ae_worker_stubs.js))
+ ; js_of_ocaml 6.2 inlining drops part of Satml_types.mk_and's Exit handler.
+ (js_of_ocaml (flags --disable inline +toplevel.js +dynlink.js) (javascript_files ae_worker_stubs.js))
 )
