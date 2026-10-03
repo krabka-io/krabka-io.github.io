@@ -1,80 +1,71 @@
 ---
+import { getPath } from '../utils/paths';
+
 const repos = [
   {
     name: 'krabka-broker',
-    category: 'Core',
     language: 'Rust',
-    desc: 'Apache Kafka-compatible broker with KRaft consensus, S3/GCS tiered storage, and the krabka-verified proof kernels.',
+    desc: 'Kafka-compatible broker with KRaft and tiered storage.',
     github: 'https://github.com/krabka-io/krabka-broker',
   },
   {
     name: 'krabka-protocol',
-    category: 'Core',
     language: 'Rust',
-    desc: 'Byte-for-byte Apache Kafka wire protocol codecs, KRaft metadata records, and SASL/TLS.',
+    desc: 'Kafka wire codecs, KRaft records, and SASL/TLS.',
     github: 'https://github.com/krabka-io/krabka-protocol',
   },
   {
     name: 'krabka-client-rs',
-    category: 'Clients',
     language: 'Rust',
-    desc: 'Native Rust Kafka client: FutureProducer, StreamConsumer, and Admin API, with Stateright-checked failover and lock-order models.',
+    desc: 'Kafka producer, consumer, and admin APIs.',
     github: 'https://github.com/krabka-io/krabka-client-rs',
   },
   {
     name: 'krabka-streams-rs',
-    category: 'Streaming',
     language: 'Rust',
-    desc: 'Native Kafka Streams for Rust with state stores, windowing, and schema registry serdes.',
+    desc: 'Stream processing, windowing, and state stores.',
     github: 'https://github.com/krabka-io/krabka-streams-rs',
   },
   {
     name: 'krabka-streams-go',
-    category: 'Streaming',
     language: 'Go',
-    desc: 'Go stream processing library with Apache Arrow record batching and barrier cuts.',
+    desc: 'Arrow batch processing and barrier cuts.',
     github: 'https://github.com/krabka-io/krabka-streams-go',
   },
   {
     name: 'krabka-streams-java',
-    category: 'Streaming',
     language: 'Java',
-    desc: 'Java stream processing library with Kafka Streams, schema registry serdes, and Apache Arrow.',
+    desc: 'Kafka Streams APIs, Arrow batches, and schema serdes.',
     github: 'https://github.com/krabka-io/krabka-streams-java',
   },
   {
     name: 'krabka-schema-registry',
-    category: 'Core',
     language: 'Rust',
-    desc: 'Confluent-compatible schema registry backed by the compacted _schemas topic.',
+    desc: 'Confluent-compatible schemas stored in Kafka.',
     github: 'https://github.com/krabka-io/krabka-schema-registry',
   },
   {
     name: 'krabka-operator',
-    category: 'Operations',
     language: 'Rust',
-    desc: 'Kubernetes operator reconciling Kafka clusters, node pools, topics, users, connectors, rebalances, schema registries, and gRPC gateways.',
+    desc: 'Kubernetes cluster and resource management.',
     github: 'https://github.com/krabka-io/krabka-operator',
   },
   {
     name: 'krabka-connect',
-    category: 'Integration',
     language: 'Rust',
-    desc: 'Connector framework, PostgreSQL CDC source, single-connector worker runtime, and MirrorMaker 2-compatible replicator.',
+    desc: 'PostgreSQL CDC and cross-cluster replication.',
     github: 'https://github.com/krabka-io/krabka-connect',
   },
   {
     name: 'krabka-rebalancer',
-    category: 'Operations',
     language: 'Rust',
-    desc: 'Partition assignment and cluster balancing daemon in the style of Cruise Control.',
+    desc: 'Partition assignment and cluster balancing.',
     github: 'https://github.com/krabka-io/krabka-rebalancer',
   },
   {
     name: 'krabka-cli',
-    category: 'Tools',
     language: 'Rust',
-    desc: 'Operator & admin CLI: log formatting, topic, config, ACL, and consumer-group administration, and git-style plugin subcommands.',
+    desc: 'Cluster, topic, ACL, and consumer-group administration.',
     github: 'https://github.com/krabka-io/krabka-cli',
   },
 ];
@@ -82,17 +73,17 @@ const repos = [
 const broader = [
   {
     name: 'krabka-o11y',
-    desc: 'Observability stack for metrics, traces, profiles, and logs, served through PromQL, TraceQL, pprof, and LogQL.',
+    desc: 'Metrics, traces, profiles, and logs.',
     github: 'https://github.com/krabka-io/krabka-o11y',
   },
   {
     name: 'krabka-o11y-demo',
-    desc: 'Runnable Grafana stack with dashboards for a Krabka cluster and an instrumented orders pipeline.',
+    desc: 'Grafana dashboards and an example orders pipeline.',
     github: 'https://github.com/krabka-io/krabka-o11y-demo',
   },
   {
     name: 'gres',
-    desc: 'Postgres-compatible compute tier that stores all durable state on Krabka topics and object storage.',
+    desc: 'Postgres-compatible compute backed by krabka and object storage.',
     github: 'https://github.com/krabka-io/gres',
   },
 ];
@@ -100,13 +91,13 @@ const broader = [
 
 <section class="py-16">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-    <div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
+    <div class="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
       <div>
         <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-          The Broker and the Kafka Ecosystem
+          Repositories
         </h2>
         <p class="mt-2 text-lg text-gray-400">
-          Purpose-built repositories that speak the Kafka wire protocol or operate a Kafka cluster.
+          Broker, clients, streams, and operations.
         </p>
       </div>
 
@@ -116,77 +107,66 @@ const broader = [
         rel="noopener noreferrer"
         class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors"
       >
-        View Organization on GitHub
+        GitHub organization
         <svg class="ml-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
         </svg>
       </a>
     </div>
 
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {repos.map((repo) => (
-        <a
-          href={repo.github}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="frosted-card group rounded-2xl p-6 transition-all hover:border-krab-500/50 hover:bg-slate-900/90 flex flex-col justify-between"
-        >
-          <div>
-            <div class="flex items-center justify-between gap-2">
-              <span class="rounded bg-white/5 px-2 py-0.5 text-xs font-medium text-gray-400 border border-white/10">
-                {repo.category}
-              </span>
-              <span class="text-xs font-semibold text-krab-400">
-                {repo.language}
-              </span>
-            </div>
-
-            <h3 class="mt-3 text-base font-bold text-white group-hover:text-krab-400 transition-colors">
-              {repo.name}
-            </h3>
-
-            <p class="mt-2 text-sm text-gray-400 leading-relaxed">
-              {repo.desc}
-            </p>
-          </div>
-
-          <div class="mt-5 flex items-center text-xs font-semibold text-gray-300 group-hover:text-white pt-2 border-t border-white/5">
-            <span>github.com/krabka-io/{repo.name}</span>
-            <svg class="ml-auto h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-          </div>
-        </a>
-      ))}
+    <div class="frosted-card overflow-hidden rounded-xl border border-white/10">
+      <table class="w-full table-fixed text-left text-sm sm:table-auto" aria-label="krabka repositories">
+        <thead class="border-b border-white/10 bg-black/20 text-gray-300">
+          <tr>
+            <th scope="col" class="w-[46%] px-2 py-3 sm:w-auto sm:px-4">Repository</th>
+            <th scope="col" class="px-2 py-3 sm:px-4">Description</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {repos.map((repo) => (
+            <tr class="align-top hover:bg-white/5">
+              <th scope="row" class="px-2 py-2.5 font-semibold sm:px-4 [overflow-wrap:anywhere]">
+                <a href={repo.github} target="_blank" rel="noopener noreferrer" class="flex items-start gap-2 text-krab-400 underline underline-offset-2 hover:text-krab-300">
+                  <img
+                    src={getPath(`/icons/languages/${repo.language.toLowerCase()}.svg`)}
+                    alt={repo.language}
+                    title={repo.language}
+                    width="20"
+                    height="20"
+                    class:list={['h-5 w-5 shrink-0', { invert: repo.language !== 'Go', 'brightness-0': repo.language === 'Java' }]}
+                  />
+                  <span class="min-w-0">{repo.name}</span>
+                </a>
+              </th>
+              <td class="px-2 py-2.5 text-gray-400 sm:px-4 [overflow-wrap:anywhere]">{repo.desc}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
 
-    <!-- Broader Krabka ecosystem: projects built on the broker, documented on their own sites -->
-    <div class="mt-14 rounded-2xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
-      <div class="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
-        <div>
-          <h3 class="text-xl font-bold text-white">The Broader Krabka Ecosystem</h3>
-          <p class="mt-1 text-sm text-gray-400 max-w-2xl">
-            These projects build on the broker but are not part of the Kafka ecosystem. Each has its own repository and documentation.
-          </p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {broader.map((repo) => (
-          <a
-            href={repo.github}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="group rounded-xl border border-white/10 bg-slate-900/50 p-5 transition-colors hover:border-krab-500/40"
-          >
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-bold text-white group-hover:text-krab-400 transition-colors">{repo.name}</span>
-              <svg class="h-3.5 w-3.5 text-gray-500 group-hover:text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </div>
-            <p class="mt-2 text-xs text-gray-400 leading-relaxed">{repo.desc}</p>
-          </a>
-        ))}
+    <!-- Broader krabka ecosystem: projects built on the broker, documented on their own sites -->
+    <div class="mt-8">
+      <h3 class="mb-4 text-xl font-bold text-white">Built on krabka</h3>
+      <div class="frosted-card overflow-hidden rounded-xl border border-white/10">
+        <table class="w-full table-fixed text-left text-sm sm:table-auto" aria-label="Projects built on krabka">
+          <thead class="border-b border-white/10 bg-black/20 text-gray-300">
+            <tr>
+              <th scope="col" class="w-[42%] px-2 py-3 sm:w-auto sm:px-4">Repository</th>
+              <th scope="col" class="px-2 py-3 sm:px-4">Description</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            {broader.map((repo) => (
+              <tr class="align-top hover:bg-white/5">
+                <th scope="row" class="px-2 py-2.5 font-semibold sm:px-4 [overflow-wrap:anywhere]">
+                  <a href={repo.github} target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">{repo.name}</a>
+                </th>
+                <td class="px-2 py-2.5 text-gray-400 sm:px-4 [overflow-wrap:anywhere]">{repo.desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

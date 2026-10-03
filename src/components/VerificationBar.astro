@@ -12,9 +12,9 @@ const compact = (value: number) =>
 
 const creusotPoints = [
   {
-    text: 'Small, total, allocation-light kernels in the ',
+    text: 'Pure decision functions in the ',
     code: 'krabka-verified',
-    tail: ' crate. Creusot proves each one’s pre- and postconditions with automated provers.',
+    tail: ' crate. Creusot uses automated provers to establish postconditions for inputs that satisfy the preconditions.',
   },
   {
     text: 'KRaft vote admission and quorum size, ISR and leader failover, KIP-534 compaction retention, ACL precedence, quota token buckets, and idempotent-producer sequencing are proved kernels.',
@@ -25,7 +25,7 @@ const creusotPoints = [
 ];
 
 const staterightPoints = [
-  { text: 'Models enumerate crashes, retries, failover, replay, and concurrent operations that example-based tests cannot cover.' },
+  { text: 'Models enumerate crashes, retries, failover, replay, and concurrent operations within stated bounds.' },
   { text: 'KRaft consensus, the quorum WAL, leader failover, transactions and exactly-once, group coordination, log compaction, and client failover each have a checked model.' },
   { text: 'Each runner pins its unique-state count. A search that shrinks without an explained model change fails the build.' },
 ];
@@ -35,10 +35,10 @@ const staterightPoints = [
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
     <div class="max-w-3xl mx-auto text-center mb-10">
       <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-        Engineered for Correctness
+        Proofs and model checks
       </h2>
       <p class="mt-3 text-base text-gray-400">
-        Safe Rust rules out memory corruption. Two formal tiers then check the decisions that a broker gets wrong most expensively, and pull request CI reruns every proof and every model.
+        The broker forbids unsafe Rust. <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a> proves decision-kernel contracts, and <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> checks event sequences within each model’s bounds. CI reruns the proofs and models on pull requests.
       </p>
     </div>
 
@@ -127,7 +127,7 @@ const staterightPoints = [
         </ul>
 
         <div class="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
-          <span>Many models drive production decision functions directly, so the property checked is the property shipped.</span>
+          <span>Many models call production decision functions directly. Their results apply within the model’s stated bounds.</span>
           <a href={getPath('/verification#stateright')} class="font-semibold text-krab-400 hover:text-krab-300 whitespace-nowrap">
             {stats.catalogAvailable ? `Browse all ${n(stats.models)} models →` : 'Browse the model inventory →'}
           </a>
@@ -140,7 +140,7 @@ const staterightPoints = [
         href={getPath('/verification')}
         class="inline-block text-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors"
       >
-        Read how Krabka is verified, and where the formal boundary ends
+        Read how krabka is verified, and where the formal boundary ends
         <svg class="ml-1.5 inline h-4 w-4 align-text-bottom" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
         </svg>

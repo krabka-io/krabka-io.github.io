@@ -24,8 +24,8 @@ replication = 3`;
 ---
 
 <BaseLayout
-  title="Tiered Storage Engine | Krabka"
-  description="Decouple compute from storage with KIP-405 tiered offloading to S3-compatible object stores (including MinIO) and Google Cloud Storage in Krabka."
+  title="Tiered Storage Engine | krabka"
+  description="KIP-405 tiered storage uploads sealed log segments to S3-compatible object stores, including MinIO, or Google Cloud Storage."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
@@ -36,7 +36,7 @@ replication = 3`;
         Tiered Storage
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Decouple broker compute from storage capacity (<code class="text-krab-300 font-mono text-sm">krabka-remote-storage</code> and <code class="text-krab-300 font-mono text-sm">krabka-object-store</code>). Keep historical streaming data cost-effectively in S3-compatible object storage (including MinIO) or Google Cloud Storage while serving real-time consumer fetches from local disk.
+        <code class="text-krab-300 font-mono text-sm">krabka-remote-storage</code> and <code class="text-krab-300 font-mono text-sm">krabka-object-store</code> upload sealed log segments to S3-compatible object storage (including MinIO) or Google Cloud Storage. Active segments stay on local disk, and consumers can fetch older offsets from object storage.
       </p>
     </div>
 
@@ -46,7 +46,7 @@ replication = 3`;
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Two-Tier Storage Architecture</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Krabka splits partition lifecycle management across two high-performance storage tiers:
+          Partition segments use two storage tiers:
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-5 rounded-xl border border-white/5 space-y-2">
@@ -64,14 +64,14 @@ replication = 3`;
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Topic-Backed Remote Log Metadata Manager</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Segment catalog state is tracked durably in the internal topic <code class="font-mono text-krab-300 text-xs">__remote_log_metadata</code> (<code class="font-mono text-xs text-gray-200">krabka-remote-storage-topic</code>). This design guarantees that metadata lifecycle, replication, and failovers are managed natively by the KRaft quorum without requiring external relational databases or DynamoDB tables.
+          <code class="font-mono text-xs text-gray-200">krabka-remote-storage-topic</code> stores the segment catalog in the internal Kafka topic <code class="font-mono text-krab-300 text-xs">__remote_log_metadata</code>. Kafka replicates that topic; the catalog does not require a separate database.
         </p>
       </div>
 
       <!-- Section C: Configuration -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-bold text-white font-sans">Tiered Storage Configuration</h2>
+          <h2 class="text-xl font-bold text-white font-sans"><a href={getPath('/docs/broker/config-reference#remote_storage')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Tiered Storage Configuration</a></h2>
           <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={tieredConfig}>
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
             <span>Copy Config</span>
@@ -84,7 +84,7 @@ replication = 3`;
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Remote Fetch Routing</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Consumers fetching offsets that have aged out of local storage are served from object storage through a bounded pool of remote reader threads, using an on-disk cache of remote segment indexes. Tokio async tasks handle socket transfer with no JVM heap.
+          Consumers fetching offsets that have aged out of local storage are served from object storage through a bounded pool of remote reader threads, using an on-disk cache of remote segment indexes. Tokio async tasks handle socket transfer.
         </p>
       </div>
 
