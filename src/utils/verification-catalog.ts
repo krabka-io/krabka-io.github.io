@@ -112,6 +112,8 @@ export const CATALOG_PAGE = '/docs/broker/verification';
  * be extended when the broker adds a module.
  */
 export const MODULE_AREAS: Record<string, string> = {
+  composition: 'Cross-module theorems',
+
   consensus: 'KRaft consensus',
   vote: 'KRaft consensus',
   voter_set: 'KRaft consensus',
@@ -185,6 +187,7 @@ export const OTHER_AREA = 'Other kernels';
 
 /** Display order of the areas; anything unlisted sorts after these. */
 export const AREA_ORDER: string[] = [
+  'Cross-module theorems',
   'KRaft consensus',
   'Replication and failover',
   'Storage and log',
