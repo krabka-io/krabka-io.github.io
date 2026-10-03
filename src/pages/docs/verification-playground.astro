@@ -36,7 +36,7 @@ if (stats.catalogAvailable) {
 
 <DocsLayout
   title="Verification Playground"
-  description="Evaluate Krabka's Creusot-verified decision kernels in WebAssembly, read each kernel's proof ledger row, and browse every Stateright model with its bounds, properties, and pinned state counts."
+  description="Evaluate krabka's Creusot-verified decision kernels in WebAssembly, read each kernel's proof ledger row, and browse every Stateright model with its bounds, properties, and pinned state counts."
   currentSlug="/docs/verification-playground"
 >
   <div class="space-y-6 font-sans">
@@ -54,10 +54,9 @@ if (stats.catalogAvailable) {
 
     <div class="space-y-3 text-sm text-gray-300 leading-relaxed">
       <p>
-        Krabka keeps its safety-critical decisions in <code class="font-mono text-krab-300">krabka-verified</code>,
-        a crate of small pure functions whose contracts Creusot proves. The kernels do no I/O, so the crate
-        compiles to WebAssembly unchanged, and the explorer below calls the same compiled bodies the broker
-        calls: the answer on screen is the broker's answer, shown beside
+        krabka keeps its safety-critical decisions in <code class="font-mono text-krab-300">krabka-verified</code>,
+        a crate of small pure functions whose contracts <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a> proves. The kernels do no I/O, so the crate
+        compiles to WebAssembly. The explorer calls the kernel functions from the pinned broker release and shows each result beside
         the <code class="font-mono text-krab-300">requires</code> and <code class="font-mono text-krab-300">ensures</code> contract
         quoted from the source.
       </p>
@@ -93,7 +92,7 @@ if (stats.catalogAvailable) {
     <div class="space-y-3 text-sm text-gray-300 leading-relaxed">
       <p>
         Where correctness depends on a sequence of crashes, retries and interleavings rather than on one
-        decision, Krabka writes a Stateright model. The checker enumerates every reachable state within the
+        decision, krabka writes a <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> model. The checker enumerates every reachable state within the
         model's bounds and prints a counterexample trace if a property fails, and each runner asserts its
         unique-state count against a pinned constant, so a search that silently shrinks fails the build.
       </p>
@@ -132,9 +131,8 @@ if (stats.catalogAvailable) {
         </ol>
         <p>
           The bindings live in <code class="font-mono text-krab-300">playground/src/kernels.rs</code> in this
-          repository. They add no logic of their own: each arm parses a request, checks the preconditions the
-          catalog lists for the caller, and calls the kernel. The proof ledger text under each kernel is read
-          from the catalog at build time, so the page and the catalog cannot disagree.
+          repository. Each arm parses a request, checks the preconditions the catalog lists for the caller,
+          and calls the kernel. The proof ledger text under each kernel is read from the catalog at build time.
         </p>
       </div>
     </details>

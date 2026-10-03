@@ -29,14 +29,14 @@ const spaceOutsideToken = {
       <!-- Left Column: Content & CTAs -->
       <div class="lg:col-span-7 space-y-6 text-left">
         <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl leading-[1.1]">
-          Krabka is Kafka without the JVM. <br />
+          Kafka-compatible broker. <br />
           <span class="text-transparent bg-clip-text bg-gradient-to-r from-krab-500 via-krab-400 to-amber-400">
-            Built to be correct.
+            Written in safe Rust.
           </span>
         </h1>
 
         <p class="text-lg text-gray-300 sm:text-xl max-w-2xl font-normal leading-relaxed">
-          Krabka is an open-source, byte-exact Apache Kafka wire-protocol broker with a native KRaft consensus quorum, written in safe Rust. Its safety-critical decisions are proved with Creusot and its failure orderings are model-checked with Stateright.
+          krabka is an open-source broker that implements the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Apache Kafka wire protocol</a> and a <a href={getPath('/features/kraft')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">KRaft metadata quorum</a> in <a href={getPath('/verification#memory-safety')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">safe Rust</a>. <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a> proves selected <a href={getPath('/verification#proof-contracts')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">decision-kernel contracts</a>, and <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> checks failure sequences within each <a href={getPath('/verification#model-bounds')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">model’s bounds</a>.
         </p>
 
         <div class="flex flex-wrap items-center gap-4 pt-2">
@@ -63,20 +63,6 @@ const spaceOutsideToken = {
           </a>
         </div>
 
-        <div class="flex flex-col gap-2 pt-4 text-sm text-gray-400 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6">
-          <div class="flex items-start gap-2">
-            <svg class="mt-0.5 h-4 w-4 shrink-0 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Safe Rust (zero <code class="text-xs bg-white/10 px-1 py-0.5 rounded font-mono">unsafe</code>)</span>
-          </div>
-          <div class="flex items-start gap-2">
-            <svg class="mt-0.5 h-4 w-4 shrink-0 text-krab-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Creusot proofs and Stateright models rerun on every pull request</span>
-          </div>
-        </div>
       </div>
 
       <!-- Right Column: Two Clean Split Terminal Boxes with Copy Buttons -->
@@ -98,8 +84,8 @@ const spaceOutsideToken = {
             </button>
           </div>
 
-          <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-center gap-2">
-            <span class="text-gray-500 select-none">$</span>
+          <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-start gap-2">
+            <span class="text-gray-500 select-none leading-[1.65]">$</span>
             <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={startCommand} lang="bash" theme={krabTheme} wrap={null} transformers={[spaceOutsideToken]} /></div>
           </div>
         </div>
@@ -120,21 +106,15 @@ const spaceOutsideToken = {
             </button>
           </div>
 
-          <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-center gap-2">
-            <span class="text-gray-500 select-none">$</span>
+          <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-start gap-2">
+            <span class="text-gray-500 select-none leading-[1.65]">$</span>
             <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={produceCommand} lang="bash" theme={krabTheme} wrap={null} transformers={[spaceOutsideToken]} /></div>
           </div>
         </div>
 
-        <!-- Status Bar -->
-        <div class="rounded-xl bg-black/40 p-3 text-xs text-gray-400 border border-white/5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 font-sans">
-          <div class="flex items-center gap-2 text-emerald-400 font-medium">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 motion-safe:animate-pulse"></span>
-            <span>KRaft Quorum Active (0.0.0.0:9092)</span>
-          </div>
-          <div class="text-gray-300">
-            <code class="text-white font-mono">unsafe_code</code>: <strong class="text-white font-mono">forbid</strong>
-          </div>
+        <!-- Example listener -->
+        <div class="rounded-xl bg-black/40 p-3 text-xs text-gray-300 font-medium border border-white/5 font-sans">
+          Example listener: localhost:9092
         </div>
 
       </div>

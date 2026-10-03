@@ -19,8 +19,8 @@ const section = (slug: string) => catalog.sections.find((s) => s.slug === slug);
 const brokerRepo = 'https://github.com/krabka-io/krabka-broker';
 const verifiedCrateUrl = `${brokerRepo}/tree/main/crates/verified`;
 const protocolRepo = 'https://github.com/krabka-io/krabka-protocol';
-const creusotUrl = 'https://github.com/creusot-rs/creusot';
-const staterightUrl = 'https://github.com/stateright/stateright';
+const creusotUrl = 'https://creusot.rs/';
+const staterightUrl = 'https://www.stateright.rs/';
 const catalogPath = getPath('/docs/broker/verification');
 const playgroundPath = getPath('/docs/verification-playground');
 const modelGalleryPath = getPath('/docs/verification-playground#models');
@@ -61,8 +61,8 @@ const localEvidence: EvidenceItem[] = [
     area: 'Independent failure signals',
     claim: 'cargo-mutants inserts faults into production code and the suite must detect each one; sweeps run weekly per crate, and a skip is accepted only with a stated reason that a lint enforces.',
     body_html: [
-      `<p>A proof can have a bad adapter and a test can repeat the implementation's mistake, so Krabka layers checks whose failure modes are independent of each other. A surviving mutant is a fault the test suite did not detect, whatever the proofs and the models say about the same code.</p>`,
-      `<p>Mutation testing stands in for authorship only while it is actually running. The <a href="${mutantsBaselinePath}">mutation sweep baseline</a> records the last run in which each swept crate came back with no survivor.</p>`,
+      `<p>Mutation testing inserts faults into production code and checks whether the test suite detects them. A surviving mutant is a change the suite did not detect.</p>`,
+      `<p>The <a href="${mutantsBaselinePath}">mutation sweep baseline</a> records the last run in which each swept crate had no surviving mutants.</p>`,
     ].join(''),
     links: [
       { label: 'Mutation sweep baseline', url: mutantsBaselinePath },
@@ -75,9 +75,9 @@ const localEvidence: EvidenceItem[] = [
     title: 'Differential and JVM acceptance suites',
     kind: 'Differential testing',
     area: 'Independent failure signals',
-    claim: 'Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka, real kafka-clients drive both, and responses are compared byte for byte.',
+    claim: 'Digest-pinned Apache Kafka and Confluent Platform brokers run beside krabka, real kafka-clients drive both, and responses are compared byte for byte.',
     body_html: [
-      `<p>Digest-pinned Apache Kafka and Confluent Platform brokers run beside Krabka. Real <code>kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.</p>`,
+      `<p>Digest-pinned Apache Kafka and Confluent Platform brokers run beside krabka. Real <code>kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.</p>`,
       `<p>The wire layer in <a href="${protocolRepo}" target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Protocol encoding and decoding sit largely outside both formal tiers, so these suites are the evidence that the generated codecs are byte exact against a live Kafka.</p>`,
     ].join(''),
     links: [
@@ -173,22 +173,22 @@ const evidence: EvidenceItem[] = [...localEvidence, ...catalogEvidence];
 const articleSchema = {
   '@context': 'https://schema.org',
   '@type': 'TechArticle',
-  headline: 'How Krabka Is Verified: Safe Rust, Creusot Proofs, and Stateright Model Checking',
+  headline: 'How krabka Is Verified: Safe Rust, Creusot Proofs, and Stateright Model Checking',
   description:
-    'How the Krabka Kafka-compatible broker establishes correctness: forbidden unsafe Rust, Creusot-proved decision kernels, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka.',
+    'How the krabka Kafka-compatible broker establishes correctness: forbidden unsafe Rust, Creusot-proved decision kernels, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka.',
   author: {
     '@type': 'Organization',
-    name: 'Krabka Authors',
+    name: 'krabka Authors',
     url: 'https://krabka.io',
   },
   keywords:
-    'Krabka verification, Creusot, Stateright, formal verification Kafka, model checking Kafka, memory safe Kafka broker, Rust Kafka correctness',
+    'krabka verification, Creusot, Stateright, formal verification Kafka, model checking Kafka, memory safe Kafka broker, Rust Kafka correctness',
 };
 ---
 
 <BaseLayout
-  title="Correctness & Verification: Safe Rust, Creusot, Stateright | Krabka"
-  description="How Krabka establishes correctness: forbidden unsafe Rust, Creusot-proved decision kernels, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka."
+  title="Correctness & Verification: Safe Rust, Creusot, Stateright | krabka"
+  description="How krabka establishes correctness: forbidden unsafe Rust, Creusot-proved decision kernels, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka."
 >
   <script type="application/ld+json" set:html={JSON.stringify(articleSchema)} slot="head" />
 
@@ -198,7 +198,7 @@ const articleSchema = {
         Correctness &amp; Verification
       </h1>
       <p class="mt-3 max-w-[60ch] text-sm leading-relaxed text-gray-300 sm:text-base">
-        A Kafka broker is trusted with other people's data, so Krabka treats correctness as an engineering requirement with evidence behind it. Safe Rust rules out memory corruption, Creusot proves the decisions that admit, fence, retain and elect, Stateright enumerates the event orderings around them, and every pull request reruns all of it.
+        The broker forbids unsafe Rust, uses <a href={creusotUrl} target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a>-proved decision kernels, and has <a href={staterightUrl} target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> models for event sequences within stated bounds. Pull request CI reruns the proofs and models. The ledger below lists what each check covers and the assumptions it requires.
       </p>
     </header>
 
@@ -223,7 +223,7 @@ const articleSchema = {
           <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Memory safety</div>
           <h2 class="mt-1 text-base font-bold text-white">Zero <code class="font-mono">unsafe</code></h2>
           <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
-            Every Krabka workspace forbids <code class="pill-code">unsafe_code</code> as a compiler-enforced lint, under Cargo and under Bazel alike, so buffer overruns, use-after-free and data races are excluded by the type system, not by review.
+            krabka workspace code forbids <code class="pill-code">unsafe_code</code> as a compiler-enforced lint under Cargo and Bazel. Safe Rust checks memory access and data races at compile time; dependencies remain outside this workspace lint.
           </p>
           <details class="drill mt-3">
             <summary>
@@ -234,20 +234,20 @@ const articleSchema = {
             </summary>
             <div class="drill-body">
               <p>
-                Krabka is written in safe Rust. The workspace lint <code>unsafe_code = "forbid"</code> cannot be overridden by an inner attribute, and the Bazel build passes the same <code>-Funsafe_code</code> flag so the guarantee does not lapse under a second build system. Clippy runs at the <code>pedantic</code> level with warnings promoted to errors, and no suppression attributes are accepted.
+                krabka is written in safe Rust. The workspace lint <code>unsafe_code = "forbid"</code> cannot be overridden by an inner attribute, and the Bazel build passes the same <code>-Funsafe_code</code> flag. Clippy runs at the <code>pedantic</code> level with warnings promoted to errors, and no suppression attributes are accepted.
               </p>
               <p>
-                The wire layer in <a href={protocolRepo} target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Byte exactness against Kafka is checked by differential suites that run digest-pinned Apache Kafka and Confluent Platform brokers beside Krabka and compare live responses.
+                The wire layer in <a href={protocolRepo} target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Byte exactness against Kafka is checked by differential suites that run digest-pinned Apache Kafka and Confluent Platform brokers beside krabka and compare live responses.
               </p>
             </div>
           </details>
         </article>
 
-        <article data-pillar class="frosted-card min-w-0 rounded-2xl p-5">
+        <article id="proof-contracts" data-pillar class="frosted-card min-w-0 scroll-mt-24 rounded-2xl p-5">
           <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Formal verification</div>
           <h2 class="mt-1 text-base font-bold text-white">Creusot proof kernels</h2>
           <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
-            Safety-critical decisions live in <code class="pill-code">krabka-verified</code> as pure kernels with pre- and postconditions; <a href={creusotUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 hover:text-krab-300">Creusot</a>, a deductive verifier for Rust, translates them to Why3 and automated provers discharge the contracts.
+            Safety-critical decisions live in <a href={verifiedCrateUrl} target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300"><code class="pill-code">krabka-verified</code></a> as pure kernels with pre- and postconditions; <a href={creusotUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a>, a deductive verifier for Rust, translates them to <a href="https://why3.org/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Why3</a> and automated provers discharge the contracts.
           </p>
           <details class="drill mt-3">
             <summary>
@@ -258,10 +258,10 @@ const articleSchema = {
             </summary>
             <div class="drill-body">
               <p>
-                A function carries <code>#[requires]</code> and <code>#[ensures]</code> contracts beside its body, and the proof obligations go to SMT solvers through Why3. When a proof session is green, the contract holds for every input the Rust types admit, not only for the inputs a test happened to pick.
+                A function carries <code>#[requires]</code> and <code>#[ensures]</code> contracts beside its body, and the proof obligations go to SMT solvers through Why3. A discharged proof establishes the postconditions for inputs that satisfy the preconditions.
               </p>
               <p>
-                Krabka extracts each safety-critical decision into a small, total, synchronous kernel in the <code>krabka-verified</code> crate. A host crate maps its state into the kernel's inputs, calls it, and applies the result. There is no second copy of any decision, so the proved body is the body that runs in production.
+                krabka extracts each safety-critical decision into a small, total, synchronous kernel in the <code>krabka-verified</code> crate. A host crate maps its state into the kernel's inputs, calls it, and applies the result. There is no second copy of any decision, so the proved body is the body that runs in production.
               </p>
               <ul>
                 <li><strong>Proof sessions are source.</strong> Why3 sessions live under <code>verif/</code> in the repository. A contract change without a matching proof update fails the build.</li>
@@ -275,11 +275,11 @@ const articleSchema = {
           </details>
         </article>
 
-        <article data-pillar class="frosted-card min-w-0 rounded-2xl p-5">
+        <article id="model-bounds" data-pillar class="frosted-card min-w-0 scroll-mt-24 rounded-2xl p-5">
           <div class="text-xs font-semibold uppercase tracking-wider text-krab-400">Model checking</div>
           <h2 class="mt-1 text-base font-bold text-white">Stateright models</h2>
           <p class="mt-2 text-sm leading-relaxed text-gray-300 [overflow-wrap:anywhere]">
-            Where correctness depends on a sequence of crashes, retries and interleavings, a <a href={staterightUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 hover:text-krab-300">Stateright</a> model explores every reachable state within stated bounds and reports a counterexample trace if a property fails.
+            Where correctness depends on a sequence of crashes, retries and interleavings, a <a href={staterightUrl} target="_blank" rel="noopener noreferrer" class="font-semibold text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> model explores every reachable state within stated bounds and reports a counterexample trace if a property fails.
           </p>
           <details class="drill mt-3">
             <summary>
@@ -293,7 +293,7 @@ const articleSchema = {
                 Stateright is a model checker for Rust. A model declares its actors, the actions each may take, and the properties that must hold. The checker performs a breadth-first search over every reachable state within the model's bounds, and when a property fails it prints the exact sequence of actions that broke it.
               </p>
               <p>
-                Some Krabka models drive a production decision function directly. Others compose real decision functions with a small environment of crashes, retries, and message reordering. Each model's module comment states its bounds, its properties, and its <code>DRIVEN</code> and <code>MODELED</code> notes, so a reader can tell what the property says about production before relying on it.
+                Some krabka models drive a production decision function directly. Others compose real decision functions with a small environment of crashes, retries, and message reordering. Each model's module comment states its bounds, its properties, and its <code>DRIVEN</code> and <code>MODELED</code> notes, so a reader can tell what the property says about production before relying on it.
               </p>
               <ul>
                 <li><strong>Pinned state counts.</strong> An exhaustive search over a fixed model visits a deterministic set of states. Each runner asserts its unique-state count against a pinned constant, so an action generator that silently drops a branch fails the build instead of passing a smaller search.</li>

@@ -29,7 +29,7 @@ const crds = [
 
 <DocsLayout
   title="Runtime Architecture"
-  description="How a running Krabka cluster fits together: one broker core that speaks the Kafka wire protocol, and the operator, registry, rebalancer and clients that connect to it as ordinary cluster components."
+  description="How a running krabka cluster fits together: one broker core that speaks the Kafka wire protocol, and the operator, registry, rebalancer and clients that connect to it as ordinary cluster components."
   currentSlug="/docs/runtime-architecture"
 >
   <div class="space-y-6 font-sans">
@@ -42,7 +42,7 @@ const crds = [
 
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
       <p>
-        Krabka is one broker core with a set of operational services around it. The broker speaks the
+        krabka is one broker core with a set of operational services around it. The broker speaks the
         Kafka wire protocol, stores records in Kafka-compatible log segments, and keeps metadata in a
         native KRaft quorum. Every other component connects to that core the way any Kafka client
         does. None of them reaches into broker internals.
@@ -110,7 +110,7 @@ const crds = [
       <h2 class="text-xl font-bold text-white pt-2">The Kubernetes control plane</h2>
       <p>
         On Kubernetes the operator is the only component that talks to the Kubernetes API. It watches
-        the namespaces you grant it and reconciles every Krabka resource it finds. A
+        the namespaces you grant it and reconciles every krabka resource it finds. A
         <code class="font-mono text-krab-300">Kafka</code> resource owns the cluster. One or more
         <code class="font-mono text-krab-300">KafkaNodePool</code> resources supply the brokers, and
         the broker count is the sum of the pool replica counts.
