@@ -1,0 +1,4093 @@
+{
+  "vendor": "redpanda",
+  "rf": 1,
+  "repetition": 3,
+  "case": {
+    "bytes": 1024,
+    "payload": "random",
+    "compression": "lz4",
+    "warmup_seconds": 5,
+    "seconds": 30,
+    "id": "memory-8g",
+    "kind": "memory",
+    "rf": 1,
+    "memory_gib": 8,
+    "rate": -1
+  },
+  "budget": {
+    "broker_memory_bytes": 8589934592,
+    "broker_cpus": 4,
+    "kafka_heap_bytes": null,
+    "redpanda_memory_bytes": 6442450944,
+    "redpanda_reserve_bytes": 1073741824
+  },
+  "topic": {
+    "topic": "bench-memory-8g",
+    "full_isr": true,
+    "description": "(name=bench-memory-8g, internal=false, partitions=(partition=0, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=1, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=2, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=3, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=4, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=5, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=6, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=7, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=8, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=9, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=10, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A),(partition=11, leader=broker-0:9092 (id: 0 rack: null isFenced: false), replicas=broker-0:9092 (id: 0 rack: null isFenced: false), isr=broker-0:9092 (id: 0 rack: null isFenced: false), elr=N/A, lastKnownElr=N/A), authorizedOperations=null)",
+    "configs": "[ConfigEntry(name=compression.type, value=producer, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=initial.retention.local.target.ms, value=-1, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=initial.retention.local.target.bytes, value=-1, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=redpanda.remote.write, value=false, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=BOOLEAN, documentation=null), ConfigEntry(name=redpanda.iceberg.mode, value=disabled, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[ConfigSynonym(name=redpanda.iceberg.mode, value=disabled, source=DEFAULT_CONFIG)], type=STRING, documentation=null), ConfigEntry(name=cleanup.policy, value=delete, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=flush.ms, value=100, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=retention.local.target.bytes, value=-1, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=retention.local.target.ms, value=86400000, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=segment.bytes, value=134217728, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=retention.ms, value=-1, source=DYNAMIC_TOPIC_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=redpanda.schema.registry.context, value=., source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=redpanda.remote.read, value=false, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=BOOLEAN, documentation=null), ConfigEntry(name=max.compaction.lag.ms, value=9223372036854, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=redpanda.remote.allowgaps, value=false, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=BOOLEAN, documentation=null), ConfigEntry(name=redpanda.remote.delete, value=true, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[ConfigSynonym(name=redpanda.remote.delete, value=true, source=DEFAULT_CONFIG)], type=BOOLEAN, documentation=null), ConfigEntry(name=max.message.bytes, value=1048576, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=INT, documentation=null), ConfigEntry(name=min.compaction.lag.ms, value=0, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=message.timestamp.type, value=CreateTime, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=flush.bytes, value=262144, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=min.cleanable.dirty.ratio, value=0.5, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=DOUBLE, documentation=null), ConfigEntry(name=retention.bytes, value=-1, source=DYNAMIC_TOPIC_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=delete.retention.ms, value=-1, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=redpanda.storage.mode, value=unset, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=message.timestamp.after.max.ms, value=3600000, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=write.caching, value=true, source=DYNAMIC_TOPIC_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=message.timestamp.before.max.ms, value=9223372036854, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=segment.ms, value=1209600000, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=LONG, documentation=null), ConfigEntry(name=redpanda.storage.mode.impl, value=unset, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=true, synonyms=[], type=STRING, documentation=null), ConfigEntry(name=redpanda.leaders.preference, value=none, source=DEFAULT_CONFIG, isSensitive=false, isReadOnly=false, synonyms=[], type=STRING, documentation=null)]"
+  },
+  "workload": {
+    "sent": 22961648,
+    "consumed": 22961648,
+    "duplicates": 0,
+    "errors": 0,
+    "seconds": 35.050416,
+    "latency_ms_p50": 47.487,
+    "latency_ms_p95": 60.479,
+    "latency_ms_p99": 67.327,
+    "ack_latency_ms_p99": 58.399,
+    "measured_latency_samples": 20716384
+  },
+  "workload_time_series": {
+    "schema_version": 1,
+    "started_at": "2026-10-03T22:44:38.611538786Z",
+    "sampling_interval_ms": 1000,
+    "samples": [
+      {
+        "elapsed_ms": 1003.502747,
+        "interval_ms": 1003.502747,
+        "phase": "warmup",
+        "offered_records_per_second": -1,
+        "offered_records": 275537,
+        "submitted": 275950,
+        "acknowledged": 245824,
+        "consumed": 179194,
+        "errors": 0,
+        "ack_records_per_second": 244965.946267,
+        "consume_records_per_second": 178568.519653,
+        "consumer_lag_records": 66630,
+        "offered_backlog_records": 96343,
+        "ack_latency_ms_p99": 290.303,
+        "latency_ms_p99": 391.935,
+        "latency_samples": 179194,
+        "client_cpu_seconds": 3.53,
+        "client_cpu_cores": 3.517678,
+        "client_heap_used_bytes": 152895576
+      },
+      {
+        "elapsed_ms": 2013.687165,
+        "interval_ms": 1010.184418,
+        "phase": "warmup",
+        "offered_records_per_second": -1,
+        "offered_records": 710879,
+        "submitted": 711094,
+        "acknowledged": 688765,
+        "consumed": 662143,
+        "errors": 0,
+        "ack_records_per_second": 438475.383413,
+        "consume_records_per_second": 478080.033105,
+        "consumer_lag_records": 26622,
+        "offered_backlog_records": 48736,
+        "ack_latency_ms_p99": 78.655,
+        "latency_ms_p99": 217.087,
+        "latency_samples": 483949,
+        "client_cpu_seconds": 7.1,
+        "client_cpu_cores": 3.534008,
+        "client_heap_used_bytes": 172259344
+      },
+      {
+        "elapsed_ms": 3017.047456,
+        "interval_ms": 1003.360291,
+        "phase": "warmup",
+        "offered_records_per_second": -1,
+        "offered_records": 1165168,
+        "submitted": 1165404,
+        "acknowledged": 1136116,
+        "consumed": 1134204,
+        "errors": 0,
+        "ack_records_per_second": 445852.804833,
+        "consume_records_per_second": 470480.050122,
+        "consumer_lag_records": 1912,
+        "offered_backlog_records": 30964,
+        "ack_latency_ms_p99": 87.487,
+        "latency_ms_p99": 122.623,
+        "latency_samples": 471061,
+        "client_cpu_seconds": 9.82,
+        "client_cpu_cores": 2.710891,
+        "client_heap_used_bytes": 129144432
+      },
+      {
+        "elapsed_ms": 4018.353713,
+        "interval_ms": 1001.306257,
+        "phase": "warmup",
+        "offered_records_per_second": -1,
+        "offered_records": 1729467,
+        "submitted": 1730136,
+        "acknowledged": 1699103,
+        "consumed": 1697694,
+        "errors": 0,
+        "ack_records_per_second": 562252.553666,
+        "consume_records_per_second": 562754.897476,
+        "consumer_lag_records": 1409,
+        "offered_backlog_records": 31773,
+        "ack_latency_ms_p99": 67.711,
+        "latency_ms_p99": 85.375,
+        "latency_samples": 563490,
+        "client_cpu_seconds": 11.76,
+        "client_cpu_cores": 1.937469,
+        "client_heap_used_bytes": 482765864
+      },
+      {
+        "elapsed_ms": 5023.044597,
+        "interval_ms": 1004.690884,
+        "phase": "warmup",
+        "offered_records_per_second": -1,
+        "offered_records": 2255828,
+        "submitted": 2256665,
+        "acknowledged": 2225739,
+        "consumed": 2223887,
+        "errors": 0,
+        "ack_records_per_second": 524177.145814,
+        "consume_records_per_second": 523736.214173,
+        "consumer_lag_records": 1852,
+        "offered_backlog_records": 31941,
+        "ack_latency_ms_p99": 64.543,
+        "latency_ms_p99": 70.463,
+        "latency_samples": 526621,
+        "client_cpu_seconds": 13.68,
+        "client_cpu_cores": 1.911036,
+        "client_heap_used_bytes": 82173936
+      },
+      {
+        "elapsed_ms": 6024.573841,
+        "interval_ms": 1001.529244,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 2838085,
+        "submitted": 2838325,
+        "acknowledged": 2808627,
+        "consumed": 2805840,
+        "errors": 0,
+        "ack_records_per_second": 581997.983076,
+        "consume_records_per_second": 581064.410736,
+        "consumer_lag_records": 2787,
+        "offered_backlog_records": 32245,
+        "ack_latency_ms_p99": 62.591,
+        "latency_ms_p99": 69.567,
+        "latency_samples": 581525,
+        "client_cpu_seconds": 15.8,
+        "client_cpu_cores": 2.116763,
+        "client_heap_used_bytes": 152872248
+      },
+      {
+        "elapsed_ms": 7025.6239,
+        "interval_ms": 1001.050059,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 3465193,
+        "submitted": 3465193,
+        "acknowledged": 3435176,
+        "consumed": 3433033,
+        "errors": 0,
+        "ack_records_per_second": 625891.776707,
+        "consume_records_per_second": 626535.101178,
+        "consumer_lag_records": 2143,
+        "offered_backlog_records": 32160,
+        "ack_latency_ms_p99": 54.239,
+        "latency_ms_p99": 82.239,
+        "latency_samples": 627193,
+        "client_cpu_seconds": 18.09,
+        "client_cpu_cores": 2.287598,
+        "client_heap_used_bytes": 126206472
+      },
+      {
+        "elapsed_ms": 8026.548064,
+        "interval_ms": 1000.924164,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 4070566,
+        "submitted": 4070816,
+        "acknowledged": 4040562,
+        "consumed": 4036387,
+        "errors": 0,
+        "ack_records_per_second": 604827.040623,
+        "consume_records_per_second": 602796.91679,
+        "consumer_lag_records": 4175,
+        "offered_backlog_records": 34179,
+        "ack_latency_ms_p99": 56.671,
+        "latency_ms_p99": 61.567,
+        "latency_samples": 603354,
+        "client_cpu_seconds": 20.13,
+        "client_cpu_cores": 2.038116,
+        "client_heap_used_bytes": 365459360
+      },
+      {
+        "elapsed_ms": 9027.667673,
+        "interval_ms": 1001.119609,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 4663645,
+        "submitted": 4663881,
+        "acknowledged": 4633960,
+        "consumed": 4632544,
+        "errors": 0,
+        "ack_records_per_second": 592734.369266,
+        "consume_records_per_second": 595490.283719,
+        "consumer_lag_records": 1416,
+        "offered_backlog_records": 31101,
+        "ack_latency_ms_p99": 56.767,
+        "latency_ms_p99": 74.111,
+        "latency_samples": 596157,
+        "client_cpu_seconds": 22.36,
+        "client_cpu_cores": 2.227506,
+        "client_heap_used_bytes": 89426496
+      },
+      {
+        "elapsed_ms": 10028.64695,
+        "interval_ms": 1000.979277,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 5285595,
+        "submitted": 5285961,
+        "acknowledged": 5256622,
+        "consumed": 5254768,
+        "errors": 0,
+        "ack_records_per_second": 622052.837963,
+        "consume_records_per_second": 621615.266467,
+        "consumer_lag_records": 1854,
+        "offered_backlog_records": 30827,
+        "ack_latency_ms_p99": 58.655,
+        "latency_ms_p99": 74.943,
+        "latency_samples": 622224,
+        "client_cpu_seconds": 24.22,
+        "client_cpu_cores": 1.85818,
+        "client_heap_used_bytes": 465907968
+      },
+      {
+        "elapsed_ms": 11029.503888,
+        "interval_ms": 1000.856938,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 5955349,
+        "submitted": 5955671,
+        "acknowledged": 5927050,
+        "consumed": 5923439,
+        "errors": 0,
+        "ack_records_per_second": 669853.976673,
+        "consume_records_per_second": 668098.481024,
+        "consumer_lag_records": 3611,
+        "offered_backlog_records": 31910,
+        "ack_latency_ms_p99": 52.031,
+        "latency_ms_p99": 57.343,
+        "latency_samples": 668671,
+        "client_cpu_seconds": 26.35,
+        "client_cpu_cores": 2.128176,
+        "client_heap_used_bytes": 305616880
+      },
+      {
+        "elapsed_ms": 12030.626973,
+        "interval_ms": 1001.123085,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 6539545,
+        "submitted": 6539545,
+        "acknowledged": 6509332,
+        "consumed": 6509137,
+        "errors": 0,
+        "ack_records_per_second": 581628.78144,
+        "consume_records_per_second": 585040.949285,
+        "consumer_lag_records": 195,
+        "offered_backlog_records": 30408,
+        "ack_latency_ms_p99": 60.767,
+        "latency_ms_p99": 65.791,
+        "latency_samples": 585893,
+        "client_cpu_seconds": 28.26,
+        "client_cpu_cores": 1.907857,
+        "client_heap_used_bytes": 388620832
+      },
+      {
+        "elapsed_ms": 13031.953008,
+        "interval_ms": 1001.326035,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 7122119,
+        "submitted": 7122395,
+        "acknowledged": 7092059,
+        "consumed": 7087721,
+        "errors": 0,
+        "ack_records_per_second": 581955.306895,
+        "consume_records_per_second": 577817.793382,
+        "consumer_lag_records": 4338,
+        "offered_backlog_records": 34398,
+        "ack_latency_ms_p99": 61.407,
+        "latency_ms_p99": 66.687,
+        "latency_samples": 578389,
+        "client_cpu_seconds": 30.08,
+        "client_cpu_cores": 1.81759,
+        "client_heap_used_bytes": 438275704
+      },
+      {
+        "elapsed_ms": 14032.897309,
+        "interval_ms": 1000.944301,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 7819690,
+        "submitted": 7819882,
+        "acknowledged": 7790173,
+        "consumed": 7784598,
+        "errors": 0,
+        "ack_records_per_second": 697455.392176,
+        "consume_records_per_second": 696219.559174,
+        "consumer_lag_records": 5575,
+        "offered_backlog_records": 35092,
+        "ack_latency_ms_p99": 48.607,
+        "latency_ms_p99": 54.687,
+        "latency_samples": 696877,
+        "client_cpu_seconds": 32.19,
+        "client_cpu_cores": 2.108009,
+        "client_heap_used_bytes": 513795192
+      },
+      {
+        "elapsed_ms": 15033.809321,
+        "interval_ms": 1000.912012,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 8536950,
+        "submitted": 8536950,
+        "acknowledged": 8506749,
+        "consumed": 8505489,
+        "errors": 0,
+        "ack_records_per_second": 715923.069569,
+        "consume_records_per_second": 720234.137823,
+        "consumer_lag_records": 1260,
+        "offered_backlog_records": 31461,
+        "ack_latency_ms_p99": 48.319,
+        "latency_ms_p99": 54.303,
+        "latency_samples": 720891,
+        "client_cpu_seconds": 34.34,
+        "client_cpu_cores": 2.148041,
+        "client_heap_used_bytes": 287965792
+      },
+      {
+        "elapsed_ms": 16034.682219,
+        "interval_ms": 1000.872898,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 9294210,
+        "submitted": 9295107,
+        "acknowledged": 9264331,
+        "consumed": 9263093,
+        "errors": 0,
+        "ack_records_per_second": 756921.284924,
+        "consume_records_per_second": 756943.265737,
+        "consumer_lag_records": 1238,
+        "offered_backlog_records": 31117,
+        "ack_latency_ms_p99": 46.335,
+        "latency_ms_p99": 59.231,
+        "latency_samples": 758842,
+        "client_cpu_seconds": 36.63,
+        "client_cpu_cores": 2.288003,
+        "client_heap_used_bytes": 376048240
+      },
+      {
+        "elapsed_ms": 17036.217023,
+        "interval_ms": 1001.534804,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 10056297,
+        "submitted": 10056887,
+        "acknowledged": 10027099,
+        "consumed": 10024881,
+        "errors": 0,
+        "ack_records_per_second": 761599.094663,
+        "consume_records_per_second": 760620.596466,
+        "consumer_lag_records": 2218,
+        "offered_backlog_records": 31416,
+        "ack_latency_ms_p99": 44.351,
+        "latency_ms_p99": 54.623,
+        "latency_samples": 760951,
+        "client_cpu_seconds": 38.9,
+        "client_cpu_cores": 2.266521,
+        "client_heap_used_bytes": 495361200
+      },
+      {
+        "elapsed_ms": 18037.790829,
+        "interval_ms": 1001.573806,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 10797513,
+        "submitted": 10797586,
+        "acknowledged": 10767190,
+        "consumed": 10763699,
+        "errors": 0,
+        "ack_records_per_second": 738928.070569,
+        "consume_records_per_second": 737657.070876,
+        "consumer_lag_records": 3491,
+        "offered_backlog_records": 33814,
+        "ack_latency_ms_p99": 45.919,
+        "latency_ms_p99": 62.399,
+        "latency_samples": 738417,
+        "client_cpu_seconds": 41.15,
+        "client_cpu_cores": 2.246465,
+        "client_heap_used_bytes": 427383856
+      },
+      {
+        "elapsed_ms": 19038.550466,
+        "interval_ms": 1000.759637,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 11600606,
+        "submitted": 11601193,
+        "acknowledged": 11573807,
+        "consumed": 11568210,
+        "errors": 0,
+        "ack_records_per_second": 806004.728986,
+        "consume_records_per_second": 803900.327567,
+        "consumer_lag_records": 5597,
+        "offered_backlog_records": 32396,
+        "ack_latency_ms_p99": 43.135,
+        "latency_ms_p99": 60.735,
+        "latency_samples": 804569,
+        "client_cpu_seconds": 43.53,
+        "client_cpu_cores": 2.378193,
+        "client_heap_used_bytes": 406128272
+      },
+      {
+        "elapsed_ms": 20039.834332,
+        "interval_ms": 1001.283866,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 12405460,
+        "submitted": 12405634,
+        "acknowledged": 12375741,
+        "consumed": 12371345,
+        "errors": 0,
+        "ack_records_per_second": 800905.744346,
+        "consume_records_per_second": 802105.2044,
+        "consumer_lag_records": 4396,
+        "offered_backlog_records": 34115,
+        "ack_latency_ms_p99": 44.639,
+        "latency_ms_p99": 57.087,
+        "latency_samples": 803077,
+        "client_cpu_seconds": 45.95,
+        "client_cpu_cores": 2.416897,
+        "client_heap_used_bytes": 364482128
+      },
+      {
+        "elapsed_ms": 21041.683262,
+        "interval_ms": 1001.84893,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 13142800,
+        "submitted": 13142908,
+        "acknowledged": 13113593,
+        "consumed": 13111097,
+        "errors": 0,
+        "ack_records_per_second": 736490.281025,
+        "consume_records_per_second": 738386.774541,
+        "consumer_lag_records": 2496,
+        "offered_backlog_records": 31703,
+        "ack_latency_ms_p99": 45.887,
+        "latency_ms_p99": 55.231,
+        "latency_samples": 739752,
+        "client_cpu_seconds": 48.32,
+        "client_cpu_cores": 2.365626,
+        "client_heap_used_bytes": 290799824
+      },
+      {
+        "elapsed_ms": 22042.771091,
+        "interval_ms": 1001.087829,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 13841903,
+        "submitted": 13842611,
+        "acknowledged": 13812371,
+        "consumed": 13810763,
+        "errors": 0,
+        "ack_records_per_second": 698018.675043,
+        "consume_records_per_second": 698905.7101,
+        "consumer_lag_records": 1608,
+        "offered_backlog_records": 31140,
+        "ack_latency_ms_p99": 49.823,
+        "latency_ms_p99": 55.007,
+        "latency_samples": 699814,
+        "client_cpu_seconds": 50.42,
+        "client_cpu_cores": 2.097718,
+        "client_heap_used_bytes": 369462208
+      },
+      {
+        "elapsed_ms": 23043.990416,
+        "interval_ms": 1001.219325,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 14574443,
+        "submitted": 14574524,
+        "acknowledged": 14547853,
+        "consumed": 14544911,
+        "errors": 0,
+        "ack_records_per_second": 734586.300559,
+        "consume_records_per_second": 733253.925158,
+        "consumer_lag_records": 2942,
+        "offered_backlog_records": 29532,
+        "ack_latency_ms_p99": 47.807,
+        "latency_ms_p99": 69.951,
+        "latency_samples": 734000,
+        "client_cpu_seconds": 52.57,
+        "client_cpu_cores": 2.147382,
+        "client_heap_used_bytes": 251282336
+      },
+      {
+        "elapsed_ms": 24044.585065,
+        "interval_ms": 1000.594649,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 15241782,
+        "submitted": 15242382,
+        "acknowledged": 15212074,
+        "consumed": 15207436,
+        "errors": 0,
+        "ack_records_per_second": 663826.25638,
+        "consume_records_per_second": 662131.264306,
+        "consumer_lag_records": 4638,
+        "offered_backlog_records": 34346,
+        "ack_latency_ms_p99": 53.151,
+        "latency_ms_p99": 59.711,
+        "latency_samples": 663974,
+        "client_cpu_seconds": 54.58,
+        "client_cpu_cores": 2.008805,
+        "client_heap_used_bytes": 517620640
+      },
+      {
+        "elapsed_ms": 25045.838764,
+        "interval_ms": 1001.253699,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 15794323,
+        "submitted": 15794323,
+        "acknowledged": 15764398,
+        "consumed": 15767536,
+        "errors": 0,
+        "ack_records_per_second": 551632.418988,
+        "consume_records_per_second": 559398.682431,
+        "consumer_lag_records": 0,
+        "offered_backlog_records": 26787,
+        "ack_latency_ms_p99": 62.143,
+        "latency_ms_p99": 67.007,
+        "latency_samples": 558651,
+        "client_cpu_seconds": 56.33,
+        "client_cpu_cores": 1.747809,
+        "client_heap_used_bytes": 381038464
+      },
+      {
+        "elapsed_ms": 26046.381977,
+        "interval_ms": 1000.543213,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 16365408,
+        "submitted": 16365408,
+        "acknowledged": 16334924,
+        "consumed": 16334924,
+        "errors": 0,
+        "ack_records_per_second": 570216.25112,
+        "consume_records_per_second": 567079.954797,
+        "consumer_lag_records": 0,
+        "offered_backlog_records": 30484,
+        "ack_latency_ms_p99": 63.903,
+        "latency_ms_p99": 67.199,
+        "latency_samples": 567388,
+        "client_cpu_seconds": 58.07,
+        "client_cpu_cores": 1.739055,
+        "client_heap_used_bytes": 367743952
+      },
+      {
+        "elapsed_ms": 27047.024475,
+        "interval_ms": 1000.642498,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 17135698,
+        "submitted": 17135881,
+        "acknowledged": 17105803,
+        "consumed": 17100527,
+        "errors": 0,
+        "ack_records_per_second": 770384.029802,
+        "consume_records_per_second": 765111.417445,
+        "consumer_lag_records": 5276,
+        "offered_backlog_records": 35171,
+        "ack_latency_ms_p99": 53.343,
+        "latency_ms_p99": 63.103,
+        "latency_samples": 766103,
+        "client_cpu_seconds": 60.34,
+        "client_cpu_cores": 2.268542,
+        "client_heap_used_bytes": 526014320
+      },
+      {
+        "elapsed_ms": 28047.693694,
+        "interval_ms": 1000.669219,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 17893459,
+        "submitted": 17893521,
+        "acknowledged": 17866711,
+        "consumed": 17861792,
+        "errors": 0,
+        "ack_records_per_second": 760399.126457,
+        "consume_records_per_second": 760755.887706,
+        "consumer_lag_records": 4919,
+        "offered_backlog_records": 31667,
+        "ack_latency_ms_p99": 46.527,
+        "latency_ms_p99": 76.671,
+        "latency_samples": 760765,
+        "client_cpu_seconds": 62.59,
+        "client_cpu_cores": 2.248495,
+        "client_heap_used_bytes": 133182184
+      },
+      {
+        "elapsed_ms": 29048.291388,
+        "interval_ms": 1000.597694,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 18627468,
+        "submitted": 18627528,
+        "acknowledged": 18599282,
+        "consumed": 18595701,
+        "errors": 0,
+        "ack_records_per_second": 732133.408255,
+        "consume_records_per_second": 733470.609018,
+        "consumer_lag_records": 3581,
+        "offered_backlog_records": 31767,
+        "ack_latency_ms_p99": 47.327,
+        "latency_ms_p99": 51.807,
+        "latency_samples": 733909,
+        "client_cpu_seconds": 64.75,
+        "client_cpu_cores": 2.15871,
+        "client_heap_used_bytes": 483390968
+      },
+      {
+        "elapsed_ms": 30048.979652,
+        "interval_ms": 1000.688264,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 19367552,
+        "submitted": 19367623,
+        "acknowledged": 19339911,
+        "consumed": 19334762,
+        "errors": 0,
+        "ack_records_per_second": 740119.602322,
+        "consume_records_per_second": 738552.680778,
+        "consumer_lag_records": 5149,
+        "offered_backlog_records": 32790,
+        "ack_latency_ms_p99": 47.167,
+        "latency_ms_p99": 68.799,
+        "latency_samples": 739292,
+        "client_cpu_seconds": 67.05,
+        "client_cpu_cores": 2.298418,
+        "client_heap_used_bytes": 436886480
+      },
+      {
+        "elapsed_ms": 31049.755389,
+        "interval_ms": 1000.775737,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 20135922,
+        "submitted": 20135991,
+        "acknowledged": 20106451,
+        "consumed": 20102161,
+        "errors": 0,
+        "ack_records_per_second": 765945.827482,
+        "consume_records_per_second": 766804.16164,
+        "consumer_lag_records": 4290,
+        "offered_backlog_records": 33761,
+        "ack_latency_ms_p99": 44.287,
+        "latency_ms_p99": 60.127,
+        "latency_samples": 767168,
+        "client_cpu_seconds": 69.31,
+        "client_cpu_cores": 2.258248,
+        "client_heap_used_bytes": 143009568
+      },
+      {
+        "elapsed_ms": 32051.595112,
+        "interval_ms": 1001.839723,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 20938686,
+        "submitted": 20938772,
+        "acknowledged": 20917084,
+        "consumed": 20903329,
+        "errors": 0,
+        "ack_records_per_second": 809144.39844,
+        "consume_records_per_second": 799696.779442,
+        "consumer_lag_records": 13755,
+        "offered_backlog_records": 35357,
+        "ack_latency_ms_p99": 45.663,
+        "latency_ms_p99": 57.439,
+        "latency_samples": 801168,
+        "client_cpu_seconds": 71.66,
+        "client_cpu_cores": 2.345685,
+        "client_heap_used_bytes": 94016576
+      },
+      {
+        "elapsed_ms": 33052.337106,
+        "interval_ms": 1000.741994,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 21772003,
+        "submitted": 21772122,
+        "acknowledged": 21745317,
+        "consumed": 21732073,
+        "errors": 0,
+        "ack_records_per_second": 827618.911733,
+        "consume_records_per_second": 828129.532855,
+        "consumer_lag_records": 13244,
+        "offered_backlog_records": 39930,
+        "ack_latency_ms_p99": 51.999,
+        "latency_ms_p99": 61.247,
+        "latency_samples": 828744,
+        "client_cpu_seconds": 74.7,
+        "client_cpu_cores": 3.037746,
+        "client_heap_used_bytes": 468358208
+      },
+      {
+        "elapsed_ms": 34053.104838,
+        "interval_ms": 1000.767732,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 22413622,
+        "submitted": 22413742,
+        "acknowledged": 22383522,
+        "consumed": 22380484,
+        "errors": 0,
+        "ack_records_per_second": 637715.405476,
+        "consume_records_per_second": 647913.576014,
+        "consumer_lag_records": 3038,
+        "offered_backlog_records": 33138,
+        "ack_latency_ms_p99": 56.095,
+        "latency_ms_p99": 58.879,
+        "latency_samples": 648411,
+        "client_cpu_seconds": 76.6,
+        "client_cpu_cores": 1.898542,
+        "client_heap_used_bytes": 588948576
+      },
+      {
+        "elapsed_ms": 35049.946172,
+        "interval_ms": 996.841334,
+        "phase": "measure",
+        "offered_records_per_second": -1,
+        "offered_records": 22961648,
+        "submitted": 22961648,
+        "acknowledged": 22961648,
+        "consumed": 22961648,
+        "errors": 0,
+        "ack_records_per_second": 579957.893279,
+        "consume_records_per_second": 583005.519713,
+        "consumer_lag_records": 0,
+        "offered_backlog_records": 0,
+        "ack_latency_ms_p99": 61.567,
+        "latency_ms_p99": 65.151,
+        "latency_samples": 581164,
+        "client_cpu_seconds": 78.21,
+        "client_cpu_cores": 1.615102,
+        "client_heap_used_bytes": 540049096
+      }
+    ]
+  },
+  "events": [],
+  "time_series": {
+    "schema_version": 1,
+    "started_at": "2026-10-03T22:44:37.908Z",
+    "sampling_interval_ms": 250,
+    "samples": [
+      {
+        "elapsed_ms": 0.38815500028431416,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 278597,
+            "rss_bytes": 440655872,
+            "anon_bytes": 377622528,
+            "memory_current_bytes": 381173760,
+            "inactive_file_bytes": 708608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 278597,
+          "rss_bytes": 440655872,
+          "anon_bytes": 377622528,
+          "working_set_bytes": 380465152,
+          "cpu_seconds": 0,
+          "cpu_cores": null
+        }
+      },
+      {
+        "elapsed_ms": 251.77344699995592,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 279794,
+            "rss_bytes": 440655872,
+            "anon_bytes": 377622528,
+            "memory_current_bytes": 381173760,
+            "inactive_file_bytes": 708608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 279794,
+          "rss_bytes": 440655872,
+          "anon_bytes": 377622528,
+          "working_set_bytes": 380465152,
+          "cpu_seconds": 0.001197,
+          "cpu_cores": 0.004761615090836594
+        }
+      },
+      {
+        "elapsed_ms": 502.6258860002272,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 281032,
+            "rss_bytes": 440655872,
+            "anon_bytes": 377622528,
+            "memory_current_bytes": 381173760,
+            "inactive_file_bytes": 708608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 281032,
+          "rss_bytes": 440655872,
+          "anon_bytes": 377622528,
+          "working_set_bytes": 380465152,
+          "cpu_seconds": 0.002435,
+          "cpu_cores": 0.0049351722667470704
+        }
+      },
+      {
+        "elapsed_ms": 753.4708899999969,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 285493,
+            "rss_bytes": 440754176,
+            "anon_bytes": 377622528,
+            "memory_current_bytes": 382484480,
+            "inactive_file_bytes": 708608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 285493,
+          "rss_bytes": 440754176,
+          "anon_bytes": 377622528,
+          "working_set_bytes": 381775872,
+          "cpu_seconds": 0.006896,
+          "cpu_cores": 0.01778389016671066
+        }
+      },
+      {
+        "elapsed_ms": 1004.7310999999754,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 287985,
+            "rss_bytes": 440881152,
+            "anon_bytes": 377622528,
+            "memory_current_bytes": 382746624,
+            "inactive_file_bytes": 708608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 287985,
+          "rss_bytes": 440881152,
+          "anon_bytes": 377622528,
+          "working_set_bytes": 382038016,
+          "cpu_seconds": 0.009388,
+          "cpu_cores": 0.009918004924059455
+        }
+      },
+      {
+        "elapsed_ms": 1255.609477000311,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 449567,
+            "rss_bytes": 525881344,
+            "anon_bytes": 461955072,
+            "memory_current_bytes": 466964480,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 449567,
+          "rss_bytes": 525881344,
+          "anon_bytes": 461955072,
+          "working_set_bytes": 466251776,
+          "cpu_seconds": 0.17097,
+          "cpu_cores": 0.6440650722153861
+        }
+      },
+      {
+        "elapsed_ms": 1506.4836160000414,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 689080,
+            "rss_bytes": 634302464,
+            "anon_bytes": 570347520,
+            "memory_current_bytes": 576503808,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 689080,
+          "rss_bytes": 634302464,
+          "anon_bytes": 570347520,
+          "working_set_bytes": 575791104,
+          "cpu_seconds": 0.410483,
+          "cpu_cores": 0.9547137897711228
+        }
+      },
+      {
+        "elapsed_ms": 1757.316026000306,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 954421,
+            "rss_bytes": 747888640,
+            "anon_bytes": 683773952,
+            "memory_current_bytes": 688893952,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 954421,
+          "rss_bytes": 747888640,
+          "anon_bytes": 683773952,
+          "working_set_bytes": 688181248,
+          "cpu_seconds": 0.675824,
+          "cpu_cores": 1.0578417677353578
+        }
+      },
+      {
+        "elapsed_ms": 2008.194153000135,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 1232676,
+            "rss_bytes": 861499392,
+            "anon_bytes": 797163520,
+            "memory_current_bytes": 802770944,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 1232676,
+          "rss_bytes": 861499392,
+          "anon_bytes": 797163520,
+          "working_set_bytes": 802058240,
+          "cpu_seconds": 0.954079,
+          "cpu_cores": 1.1091241924019535
+        }
+      },
+      {
+        "elapsed_ms": 2259.1284940000623,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 1506053,
+            "rss_bytes": 979120128,
+            "anon_bytes": 914440192,
+            "memory_current_bytes": 919642112,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 1506053,
+          "rss_bytes": 979120128,
+          "anon_bytes": 914440192,
+          "working_set_bytes": 918929408,
+          "cpu_seconds": 1.227456,
+          "cpu_cores": 1.0894363796945556
+        }
+      },
+      {
+        "elapsed_ms": 2510.059950000141,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 1793590,
+            "rss_bytes": 1100017664,
+            "anon_bytes": 1035440128,
+            "memory_current_bytes": 1041022976,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 1793590,
+          "rss_bytes": 1100017664,
+          "anon_bytes": 1035440128,
+          "working_set_bytes": 1040310272,
+          "cpu_seconds": 1.514993,
+          "cpu_cores": 1.1458786577953386
+        }
+      },
+      {
+        "elapsed_ms": 2760.941471999977,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 2065809,
+            "rss_bytes": 1218035712,
+            "anon_bytes": 1153445888,
+            "memory_current_bytes": 1159749632,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 2065809,
+          "rss_bytes": 1218035712,
+          "anon_bytes": 1153445888,
+          "working_set_bytes": 1159036928,
+          "cpu_seconds": 1.787212,
+          "cpu_cores": 1.0850500181523053
+        }
+      },
+      {
+        "elapsed_ms": 3011.818777000066,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 2345436,
+            "rss_bytes": 1328984064,
+            "anon_bytes": 1264328704,
+            "memory_current_bytes": 1270427648,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 2345436,
+          "rss_bytes": 1328984064,
+          "anon_bytes": 1264328704,
+          "working_set_bytes": 1269714944,
+          "cpu_seconds": 2.066839,
+          "cpu_cores": 1.1145966351954422
+        }
+      },
+      {
+        "elapsed_ms": 3263.0201770002022,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 2616844,
+            "rss_bytes": 1449799680,
+            "anon_bytes": 1385156608,
+            "memory_current_bytes": 1392865280,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 2616844,
+          "rss_bytes": 1449799680,
+          "anon_bytes": 1385156608,
+          "working_set_bytes": 1392152576,
+          "cpu_seconds": 2.338247,
+          "cpu_cores": 1.0804398383124165
+        }
+      },
+      {
+        "elapsed_ms": 3513.945531000383,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 2899095,
+            "rss_bytes": 1564893184,
+            "anon_bytes": 1499906048,
+            "memory_current_bytes": 1507135488,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 2899095,
+          "rss_bytes": 1564893184,
+          "anon_bytes": 1499906048,
+          "working_set_bytes": 1506422784,
+          "cpu_seconds": 2.620498,
+          "cpu_cores": 1.1248404973847181
+        }
+      },
+      {
+        "elapsed_ms": 3764.7611210001633,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 3191975,
+            "rss_bytes": 1698578432,
+            "anon_bytes": 1632976896,
+            "memory_current_bytes": 1640407040,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 3191975,
+          "rss_bytes": 1698578432,
+          "anon_bytes": 1632976896,
+          "working_set_bytes": 1639694336,
+          "cpu_seconds": 2.913378,
+          "cpu_cores": 1.167710507948317
+        }
+      },
+      {
+        "elapsed_ms": 4015.728874000255,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 3514076,
+            "rss_bytes": 1848631296,
+            "anon_bytes": 1783603200,
+            "memory_current_bytes": 1790910464,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 3514076,
+          "rss_bytes": 1848631296,
+          "anon_bytes": 1783603200,
+          "working_set_bytes": 1790197760,
+          "cpu_seconds": 3.235479,
+          "cpu_cores": 1.2834358045986978
+        }
+      },
+      {
+        "elapsed_ms": 4266.609736000188,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 3857002,
+            "rss_bytes": 2003415040,
+            "anon_bytes": 1938771968,
+            "memory_current_bytes": 1946959872,
+            "inactive_file_bytes": 712704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 3857002,
+          "rss_bytes": 2003415040,
+          "anon_bytes": 1938771968,
+          "working_set_bytes": 1946247168,
+          "cpu_seconds": 3.578405,
+          "cpu_cores": 1.366887841768066
+        }
+      },
+      {
+        "elapsed_ms": 4517.5005250000395,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 4184338,
+            "rss_bytes": 2162524160,
+            "anon_bytes": 2097713152,
+            "memory_current_bytes": 2105982976,
+            "inactive_file_bytes": 765952,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 4184338,
+          "rss_bytes": 2162524160,
+          "anon_bytes": 2097713152,
+          "working_set_bytes": 2105217024,
+          "cpu_seconds": 3.905741,
+          "cpu_cores": 1.3046951675862177
+        }
+      },
+      {
+        "elapsed_ms": 4768.267094000243,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 4497729,
+            "rss_bytes": 2303868928,
+            "anon_bytes": 2239094784,
+            "memory_current_bytes": 2247409664,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 4497729,
+          "rss_bytes": 2303868928,
+          "anon_bytes": 2239094784,
+          "working_set_bytes": 2246598656,
+          "cpu_seconds": 4.219132,
+          "cpu_cores": 1.2497319768319919
+        }
+      },
+      {
+        "elapsed_ms": 5019.14009000035,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 4811748,
+            "rss_bytes": 2448560128,
+            "anon_bytes": 2383785984,
+            "memory_current_bytes": 2392952832,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 4811748,
+          "rss_bytes": 2448560128,
+          "anon_bytes": 2383785984,
+          "working_set_bytes": 2392141824,
+          "cpu_seconds": 4.533151,
+          "cpu_cores": 1.2517050659364932
+        }
+      },
+      {
+        "elapsed_ms": 5270.0187570001,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 5126976,
+            "rss_bytes": 2595020800,
+            "anon_bytes": 2529841152,
+            "memory_current_bytes": 2538999808,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 5126976,
+          "rss_bytes": 2595020800,
+          "anon_bytes": 2529841152,
+          "working_set_bytes": 2538188800,
+          "cpu_seconds": 4.848379,
+          "cpu_cores": 1.2564958343003088
+        }
+      },
+      {
+        "elapsed_ms": 5520.59909800021,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 5420443,
+            "rss_bytes": 2728607744,
+            "anon_bytes": 2663768064,
+            "memory_current_bytes": 2673033216,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 5420443,
+          "rss_bytes": 2728607744,
+          "anon_bytes": 2663768064,
+          "working_set_bytes": 2672222208,
+          "cpu_seconds": 5.141846,
+          "cpu_cores": 1.171149336092057
+        }
+      },
+      {
+        "elapsed_ms": 5771.963030999992,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 5715534,
+            "rss_bytes": 2870362112,
+            "anon_bytes": 2805268480,
+            "memory_current_bytes": 2815737856,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 5715534,
+          "rss_bytes": 2870362112,
+          "anon_bytes": 2805268480,
+          "working_set_bytes": 2814926848,
+          "cpu_seconds": 5.436937,
+          "cpu_cores": 1.1739591932636397
+        }
+      },
+      {
+        "elapsed_ms": 6022.869369999971,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 6042602,
+            "rss_bytes": 3019055104,
+            "anon_bytes": 2954092544,
+            "memory_current_bytes": 2964295680,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 6042602,
+          "rss_bytes": 3019055104,
+          "anon_bytes": 2954092544,
+          "working_set_bytes": 2963484672,
+          "cpu_seconds": 5.764005,
+          "cpu_cores": 1.303546181031429
+        }
+      },
+      {
+        "elapsed_ms": 6273.778915000148,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 6371179,
+            "rss_bytes": 3176337408,
+            "anon_bytes": 3111374848,
+            "memory_current_bytes": 3121827840,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 6371179,
+          "rss_bytes": 3176337408,
+          "anon_bytes": 3111374848,
+          "working_set_bytes": 3121016832,
+          "cpu_seconds": 6.092582,
+          "cpu_cores": 1.3095436445025173
+        }
+      },
+      {
+        "elapsed_ms": 6524.809997000266,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 6701630,
+            "rss_bytes": 3337224192,
+            "anon_bytes": 3272065024,
+            "memory_current_bytes": 3283365888,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 6701630,
+          "rss_bytes": 3337224192,
+          "anon_bytes": 3272065024,
+          "working_set_bytes": 3282554880,
+          "cpu_seconds": 6.423033,
+          "cpu_cores": 1.3163748383948926
+        }
+      },
+      {
+        "elapsed_ms": 6775.717147000134,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 7043864,
+            "rss_bytes": 3502059520,
+            "anon_bytes": 3436986368,
+            "memory_current_bytes": 3447836672,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 7043864,
+          "rss_bytes": 3502059520,
+          "anon_bytes": 3436986368,
+          "working_set_bytes": 3447025664,
+          "cpu_seconds": 6.765267,
+          "cpu_cores": 1.3639866380857615
+        }
+      },
+      {
+        "elapsed_ms": 7026.6804820001125,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 7403935,
+            "rss_bytes": 3674017792,
+            "anon_bytes": 3609055232,
+            "memory_current_bytes": 3620093952,
+            "inactive_file_bytes": 811008,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 7403935,
+          "rss_bytes": 3674017792,
+          "anon_bytes": 3609055232,
+          "working_set_bytes": 3619282944,
+          "cpu_seconds": 7.125338,
+          "cpu_cores": 1.4347553996285185
+        }
+      },
+      {
+        "elapsed_ms": 7277.557657000143,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 7771587,
+            "rss_bytes": 3843829760,
+            "anon_bytes": 3778826240,
+            "memory_current_bytes": 3790446592,
+            "inactive_file_bytes": 851968,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 7771587,
+          "rss_bytes": 3843829760,
+          "anon_bytes": 3778826240,
+          "working_set_bytes": 3789594624,
+          "cpu_seconds": 7.49299,
+          "cpu_cores": 1.4654661190279874
+        }
+      },
+      {
+        "elapsed_ms": 7528.4094140003435,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 8137408,
+            "rss_bytes": 4016889856,
+            "anon_bytes": 3951919104,
+            "memory_current_bytes": 3964653568,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 8137408,
+          "rss_bytes": 4016889856,
+          "anon_bytes": 3951919104,
+          "working_set_bytes": 3963744256,
+          "cpu_seconds": 7.858811,
+          "cpu_cores": 1.4583154783313226
+        }
+      },
+      {
+        "elapsed_ms": 7779.287831000052,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 8488157,
+            "rss_bytes": 4180877312,
+            "anon_bytes": 4115881984,
+            "memory_current_bytes": 4127649792,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 8488157,
+          "rss_bytes": 4180877312,
+          "anon_bytes": 4115881984,
+          "working_set_bytes": 4126740480,
+          "cpu_seconds": 8.20956,
+          "cpu_cores": 1.398083598400603
+        }
+      },
+      {
+        "elapsed_ms": 8030.2406660001725,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 8828937,
+            "rss_bytes": 4342960128,
+            "anon_bytes": 4277936128,
+            "memory_current_bytes": 4290510848,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 8828937,
+          "rss_bytes": 4342960128,
+          "anon_bytes": 4277936128,
+          "working_set_bytes": 4289601536,
+          "cpu_seconds": 8.55034,
+          "cpu_cores": 1.3579444121435684
+        }
+      },
+      {
+        "elapsed_ms": 8281.467604000121,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 9167921,
+            "rss_bytes": 4507279360,
+            "anon_bytes": 4442132480,
+            "memory_current_bytes": 4455419904,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 9167921,
+          "rss_bytes": 4507279360,
+          "anon_bytes": 4442132480,
+          "working_set_bytes": 4454510592,
+          "cpu_seconds": 8.889324,
+          "cpu_cores": 1.349313901999112
+        }
+      },
+      {
+        "elapsed_ms": 8532.397987999953,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 9517857,
+            "rss_bytes": 4669321216,
+            "anon_bytes": 4604182528,
+            "memory_current_bytes": 4617809920,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 9517857,
+          "rss_bytes": 4669321216,
+          "anon_bytes": 4604182528,
+          "working_set_bytes": 4616900608,
+          "cpu_seconds": 9.23926,
+          "cpu_cores": 1.3945541166518691
+        }
+      },
+      {
+        "elapsed_ms": 8783.31905400008,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 9861822,
+            "rss_bytes": 4831506432,
+            "anon_bytes": 4766412800,
+            "memory_current_bytes": 4779966464,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 9861822,
+          "rss_bytes": 4831506432,
+          "anon_bytes": 4766412800,
+          "working_set_bytes": 4779057152,
+          "cpu_seconds": 9.583225,
+          "cpu_cores": 1.3708095756289624
+        }
+      },
+      {
+        "elapsed_ms": 9034.184435999952,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 10217226,
+            "rss_bytes": 4991614976,
+            "anon_bytes": 4926521344,
+            "memory_current_bytes": 4940574720,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 10217226,
+          "rss_bytes": 4991614976,
+          "anon_bytes": 4926521344,
+          "working_set_bytes": 4939665408,
+          "cpu_seconds": 9.938629,
+          "cpu_cores": 1.416712011704271
+        }
+      },
+      {
+        "elapsed_ms": 9285.007440000307,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 10557273,
+            "rss_bytes": 5149868032,
+            "anon_bytes": 5084749824,
+            "memory_current_bytes": 5099388928,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 10557273,
+          "rss_bytes": 5149868032,
+          "anon_bytes": 5084749824,
+          "working_set_bytes": 5098479616,
+          "cpu_seconds": 10.278676,
+          "cpu_cores": 1.355724931830891
+        }
+      },
+      {
+        "elapsed_ms": 9534.98543599993,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 10889894,
+            "rss_bytes": 5312983040,
+            "anon_bytes": 5247377408,
+            "memory_current_bytes": 5262127104,
+            "inactive_file_bytes": 909312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 10889894,
+          "rss_bytes": 5312983040,
+          "anon_bytes": 5247377408,
+          "working_set_bytes": 5261217792,
+          "cpu_seconds": 10.611297,
+          "cpu_cores": 1.3306011141896725
+        }
+      },
+      {
+        "elapsed_ms": 9785.741204000078,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 11229194,
+            "rss_bytes": 5472100352,
+            "anon_bytes": 5406760960,
+            "memory_current_bytes": 5422198784,
+            "inactive_file_bytes": 942080,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 11229194,
+          "rss_bytes": 5472100352,
+          "anon_bytes": 5406760960,
+          "working_set_bytes": 5421256704,
+          "cpu_seconds": 10.950597,
+          "cpu_cores": 1.3531094526998055
+        }
+      },
+      {
+        "elapsed_ms": 10036.623208000325,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 11592609,
+            "rss_bytes": 5683777536,
+            "anon_bytes": 5618282496,
+            "memory_current_bytes": 5634363392,
+            "inactive_file_bytes": 983040,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 11592609,
+          "rss_bytes": 5683777536,
+          "anon_bytes": 5618282496,
+          "working_set_bytes": 5633380352,
+          "cpu_seconds": 11.314012,
+          "cpu_cores": 1.44854949420622
+        }
+      },
+      {
+        "elapsed_ms": 10287.611620000098,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 11930299,
+            "rss_bytes": 5835841536,
+            "anon_bytes": 5770387456,
+            "memory_current_bytes": 5786312704,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 11930299,
+          "rss_bytes": 5835841536,
+          "anon_bytes": 5770387456,
+          "working_set_bytes": 5785305088,
+          "cpu_seconds": 11.651702,
+          "cpu_cores": 1.3454406014581466
+        }
+      },
+      {
+        "elapsed_ms": 10538.490778000094,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 12245434,
+            "rss_bytes": 5889495040,
+            "anon_bytes": 5824049152,
+            "memory_current_bytes": 5840510976,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 12245434,
+          "rss_bytes": 5889495040,
+          "anon_bytes": 5824049152,
+          "working_set_bytes": 5839503360,
+          "cpu_seconds": 11.966837,
+          "cpu_cores": 1.2561226787918545
+        }
+      },
+      {
+        "elapsed_ms": 10789.750787000172,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 12583820,
+            "rss_bytes": 5891981312,
+            "anon_bytes": 5826469888,
+            "memory_current_bytes": 5842087936,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 12583820,
+          "rss_bytes": 5891981312,
+          "anon_bytes": 5826469888,
+          "working_set_bytes": 5841080320,
+          "cpu_seconds": 12.305223,
+          "cpu_cores": 1.3467562997655356
+        }
+      },
+      {
+        "elapsed_ms": 11040.637269000057,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 12903545,
+            "rss_bytes": 5892337664,
+            "anon_bytes": 5826826240,
+            "memory_current_bytes": 5843030016,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 12903545,
+          "rss_bytes": 5892337664,
+          "anon_bytes": 5826826240,
+          "working_set_bytes": 5842022400,
+          "cpu_seconds": 12.624948,
+          "cpu_cores": 1.274381136246895
+        }
+      },
+      {
+        "elapsed_ms": 11291.494045000058,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 13238950,
+            "rss_bytes": 5892734976,
+            "anon_bytes": 5827223552,
+            "memory_current_bytes": 5843746816,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 13238950,
+          "rss_bytes": 5892734976,
+          "anon_bytes": 5827223552,
+          "working_set_bytes": 5842739200,
+          "cpu_seconds": 12.960353,
+          "cpu_cores": 1.3370378322967815
+        }
+      },
+      {
+        "elapsed_ms": 11542.42626200011,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 13571374,
+            "rss_bytes": 5892829184,
+            "anon_bytes": 5827317760,
+            "memory_current_bytes": 5843329024,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 13571374,
+          "rss_bytes": 5892829184,
+          "anon_bytes": 5827317760,
+          "working_set_bytes": 5842321408,
+          "cpu_seconds": 13.292777,
+          "cpu_cores": 1.3247561591500652
+        }
+      },
+      {
+        "elapsed_ms": 11793.355815000366,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 13893096,
+            "rss_bytes": 5892997120,
+            "anon_bytes": 5827387392,
+            "memory_current_bytes": 5843271680,
+            "inactive_file_bytes": 1007616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 13893096,
+          "rss_bytes": 5892997120,
+          "anon_bytes": 5827387392,
+          "working_set_bytes": 5842264064,
+          "cpu_seconds": 13.614499,
+          "cpu_cores": 1.2821208030433595
+        }
+      },
+      {
+        "elapsed_ms": 12044.210367000196,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 14254844,
+            "rss_bytes": 5893128192,
+            "anon_bytes": 5827547136,
+            "memory_current_bytes": 5843574784,
+            "inactive_file_bytes": 1015808,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 14254844,
+          "rss_bytes": 5893128192,
+          "anon_bytes": 5827547136,
+          "working_set_bytes": 5842558976,
+          "cpu_seconds": 13.976247,
+          "cpu_cores": 1.442062729642018
+        }
+      },
+      {
+        "elapsed_ms": 12295.18203800032,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 14623787,
+            "rss_bytes": 5912223744,
+            "anon_bytes": 5846409216,
+            "memory_current_bytes": 5862600704,
+            "inactive_file_bytes": 1040384,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 14623787,
+          "rss_bytes": 5912223744,
+          "anon_bytes": 5846409216,
+          "working_set_bytes": 5861560320,
+          "cpu_seconds": 14.34519,
+          "cpu_cores": 1.4700583477400488
+        }
+      },
+      {
+        "elapsed_ms": 12546.179597000126,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 14993638,
+            "rss_bytes": 5926178816,
+            "anon_bytes": 5860425728,
+            "memory_current_bytes": 5876994048,
+            "inactive_file_bytes": 1069056,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 14993638,
+          "rss_bytes": 5926178816,
+          "anon_bytes": 5860425728,
+          "working_set_bytes": 5875924992,
+          "cpu_seconds": 14.715041,
+          "cpu_cores": 1.4735242903309864
+        }
+      },
+      {
+        "elapsed_ms": 12797.186043000314,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 15323433,
+            "rss_bytes": 5926363136,
+            "anon_bytes": 5860294656,
+            "memory_current_bytes": 5877587968,
+            "inactive_file_bytes": 1101824,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 15323433,
+          "rss_bytes": 5926363136,
+          "anon_bytes": 5860294656,
+          "working_set_bytes": 5876486144,
+          "cpu_seconds": 15.044836,
+          "cpu_cores": 1.3138905604031867
+        }
+      },
+      {
+        "elapsed_ms": 13048.189704000019,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 15642085,
+            "rss_bytes": 5926539264,
+            "anon_bytes": 5860974592,
+            "memory_current_bytes": 5877747712,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 15642085,
+          "rss_bytes": 5926539264,
+          "anon_bytes": 5860974592,
+          "working_set_bytes": 5876641792,
+          "cpu_seconds": 15.363488,
+          "cpu_cores": 1.2695113638218034
+        }
+      },
+      {
+        "elapsed_ms": 13299.319329000078,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 15961652,
+            "rss_bytes": 5926768640,
+            "anon_bytes": 5861195776,
+            "memory_current_bytes": 5877501952,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 15961652,
+          "rss_bytes": 5926768640,
+          "anon_bytes": 5861195776,
+          "working_set_bytes": 5876396032,
+          "cpu_seconds": 15.683055,
+          "cpu_cores": 1.272518126843554
+        }
+      },
+      {
+        "elapsed_ms": 13550.230336999986,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 16291124,
+            "rss_bytes": 5926928384,
+            "anon_bytes": 5861363712,
+            "memory_current_bytes": 5877534720,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 16291124,
+          "rss_bytes": 5926928384,
+          "anon_bytes": 5861363712,
+          "working_set_bytes": 5876428800,
+          "cpu_seconds": 16.012527,
+          "cpu_cores": 1.3131030106105213
+        }
+      },
+      {
+        "elapsed_ms": 13801.607414000202,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 16614859,
+            "rss_bytes": 5926977536,
+            "anon_bytes": 5861412864,
+            "memory_current_bytes": 5878681600,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 16614859,
+          "rss_bytes": 5926977536,
+          "anon_bytes": 5861412864,
+          "working_set_bytes": 5877575680,
+          "cpu_seconds": 16.336262,
+          "cpu_cores": 1.2878461467658895
+        }
+      },
+      {
+        "elapsed_ms": 14052.521827999968,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 16968414,
+            "rss_bytes": 5927067648,
+            "anon_bytes": 5861502976,
+            "memory_current_bytes": 5877772288,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 16968414,
+          "rss_bytes": 5927067648,
+          "anon_bytes": 5861502976,
+          "working_set_bytes": 5876666368,
+          "cpu_seconds": 16.689817,
+          "cpu_cores": 1.4090661208499946
+        }
+      },
+      {
+        "elapsed_ms": 14303.45317400014,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 17310721,
+            "rss_bytes": 5927264256,
+            "anon_bytes": 5861699584,
+            "memory_current_bytes": 5877997568,
+            "inactive_file_bytes": 1105920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 17310721,
+          "rss_bytes": 5927264256,
+          "anon_bytes": 5861699584,
+          "working_set_bytes": 5876891648,
+          "cpu_seconds": 17.032124,
+          "cpu_cores": 1.36414603219705
+        }
+      },
+      {
+        "elapsed_ms": 14554.329646999948,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 17654908,
+            "rss_bytes": 5927391232,
+            "anon_bytes": 5861826560,
+            "memory_current_bytes": 5878177792,
+            "inactive_file_bytes": 1118208,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 17654908,
+          "rss_bytes": 5927391232,
+          "anon_bytes": 5861826560,
+          "working_set_bytes": 5877059584,
+          "cpu_seconds": 17.376311,
+          "cpu_cores": 1.3719381330758114
+        }
+      },
+      {
+        "elapsed_ms": 14805.174221000168,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 17993088,
+            "rss_bytes": 5927559168,
+            "anon_bytes": 5861994496,
+            "memory_current_bytes": 5878640640,
+            "inactive_file_bytes": 1130496,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 17993088,
+          "rss_bytes": 5927559168,
+          "anon_bytes": 5861994496,
+          "working_set_bytes": 5877510144,
+          "cpu_seconds": 17.714491,
+          "cpu_cores": 1.34816549788995
+        }
+      },
+      {
+        "elapsed_ms": 15056.013304000255,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 18332752,
+            "rss_bytes": 5927845888,
+            "anon_bytes": 5862281216,
+            "memory_current_bytes": 5878673408,
+            "inactive_file_bytes": 1163264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 18332752,
+          "rss_bytes": 5927845888,
+          "anon_bytes": 5862281216,
+          "working_set_bytes": 5877510144,
+          "cpu_seconds": 18.054155,
+          "cpu_cores": 1.3541111534038068
+        }
+      },
+      {
+        "elapsed_ms": 15306.91266000038,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 18683457,
+            "rss_bytes": 5928030208,
+            "anon_bytes": 5862465536,
+            "memory_current_bytes": 5879205888,
+            "inactive_file_bytes": 1196032,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 18683457,
+          "rss_bytes": 5928030208,
+          "anon_bytes": 5862465536,
+          "working_set_bytes": 5878009856,
+          "cpu_seconds": 18.40486,
+          "cpu_cores": 1.39779155112628
+        }
+      },
+      {
+        "elapsed_ms": 15557.964680999983,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 19058853,
+            "rss_bytes": 5928226816,
+            "anon_bytes": 5862662144,
+            "memory_current_bytes": 5879738368,
+            "inactive_file_bytes": 1196032,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 19058853,
+          "rss_bytes": 5928226816,
+          "anon_bytes": 5862662144,
+          "working_set_bytes": 5878542336,
+          "cpu_seconds": 18.780256,
+          "cpu_cores": 1.4952916869790651
+        }
+      },
+      {
+        "elapsed_ms": 15809.113292000256,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 19426435,
+            "rss_bytes": 5928435712,
+            "anon_bytes": 5862871040,
+            "memory_current_bytes": 5880487936,
+            "inactive_file_bytes": 1196032,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 19426435,
+          "rss_bytes": 5928435712,
+          "anon_bytes": 5862871040,
+          "working_set_bytes": 5879291904,
+          "cpu_seconds": 19.147838,
+          "cpu_cores": 1.4636035554247995
+        }
+      },
+      {
+        "elapsed_ms": 16060.027075000107,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 19789605,
+            "rss_bytes": 5928775680,
+            "anon_bytes": 5863211008,
+            "memory_current_bytes": 5879566336,
+            "inactive_file_bytes": 1204224,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 19789605,
+          "rss_bytes": 5928775680,
+          "anon_bytes": 5863211008,
+          "working_set_bytes": 5878362112,
+          "cpu_seconds": 19.511008,
+          "cpu_cores": 1.4473895999575916
+        }
+      },
+      {
+        "elapsed_ms": 16310.631009000354,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 20163070,
+            "rss_bytes": 5928996864,
+            "anon_bytes": 5863432192,
+            "memory_current_bytes": 5879894016,
+            "inactive_file_bytes": 1204224,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 20163070,
+          "rss_bytes": 5928996864,
+          "anon_bytes": 5863432192,
+          "working_set_bytes": 5878689792,
+          "cpu_seconds": 19.884473,
+          "cpu_cores": 1.490259925447272
+        }
+      },
+      {
+        "elapsed_ms": 16561.49907700019,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 20536593,
+            "rss_bytes": 5929115648,
+            "anon_bytes": 5863550976,
+            "memory_current_bytes": 5879951360,
+            "inactive_file_bytes": 1208320,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 20536593,
+          "rss_bytes": 5929115648,
+          "anon_bytes": 5863550976,
+          "working_set_bytes": 5878743040,
+          "cpu_seconds": 20.257996,
+          "cpu_cores": 1.488922057630085
+        }
+      },
+      {
+        "elapsed_ms": 16812.50539200008,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 20931290,
+            "rss_bytes": 5929205760,
+            "anon_bytes": 5863641088,
+            "memory_current_bytes": 5881524224,
+            "inactive_file_bytes": 1232896,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 20931290,
+          "rss_bytes": 5929205760,
+          "anon_bytes": 5863641088,
+          "working_set_bytes": 5880291328,
+          "cpu_seconds": 20.652693,
+          "cpu_cores": 1.572458445916684
+        }
+      },
+      {
+        "elapsed_ms": 17063.354514000006,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 21318528,
+            "rss_bytes": 5929283584,
+            "anon_bytes": 5863718912,
+            "memory_current_bytes": 5880160256,
+            "inactive_file_bytes": 1245184,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 21318528,
+          "rss_bytes": 5929283584,
+          "anon_bytes": 5863718912,
+          "working_set_bytes": 5878915072,
+          "cpu_seconds": 21.039931,
+          "cpu_cores": 1.5437088115465396
+        }
+      },
+      {
+        "elapsed_ms": 17314.24788899999,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 21692858,
+            "rss_bytes": 5929340928,
+            "anon_bytes": 5863776256,
+            "memory_current_bytes": 5880741888,
+            "inactive_file_bytes": 1273856,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 21692858,
+          "rss_bytes": 5929340928,
+          "anon_bytes": 5863776256,
+          "working_set_bytes": 5879468032,
+          "cpu_seconds": 21.414261,
+          "cpu_cores": 1.4919883795258533
+        }
+      },
+      {
+        "elapsed_ms": 17565.1368160001,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 22062086,
+            "rss_bytes": 5929377792,
+            "anon_bytes": 5863813120,
+            "memory_current_bytes": 5880524800,
+            "inactive_file_bytes": 1294336,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 22062086,
+          "rss_bytes": 5929377792,
+          "anon_bytes": 5863813120,
+          "working_set_bytes": 5879230464,
+          "cpu_seconds": 21.783489,
+          "cpu_cores": 1.4716791387124049
+        }
+      },
+      {
+        "elapsed_ms": 17815.997560000047,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 22436594,
+            "rss_bytes": 5929439232,
+            "anon_bytes": 5863874560,
+            "memory_current_bytes": 5880213504,
+            "inactive_file_bytes": 1294336,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 22436594,
+          "rss_bytes": 5929439232,
+          "anon_bytes": 5863874560,
+          "working_set_bytes": 5878919168,
+          "cpu_seconds": 22.157997,
+          "cpu_cores": 1.4928920086439643
+        }
+      },
+      {
+        "elapsed_ms": 18066.686954000033,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 22804051,
+            "rss_bytes": 5929533440,
+            "anon_bytes": 5863968768,
+            "memory_current_bytes": 5880483840,
+            "inactive_file_bytes": 1302528,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 22804051,
+          "rss_bytes": 5929533440,
+          "anon_bytes": 5863968768,
+          "working_set_bytes": 5879181312,
+          "cpu_seconds": 22.525454,
+          "cpu_cores": 1.4657859837501541
+        }
+      },
+      {
+        "elapsed_ms": 18317.885317000095,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 23178666,
+            "rss_bytes": 5929578496,
+            "anon_bytes": 5864013824,
+            "memory_current_bytes": 5880565760,
+            "inactive_file_bytes": 1302528,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 23178666,
+          "rss_bytes": 5929578496,
+          "anon_bytes": 5864013824,
+          "working_set_bytes": 5879263232,
+          "cpu_seconds": 22.900069,
+          "cpu_cores": 1.4913114700508956
+        }
+      },
+      {
+        "elapsed_ms": 18568.78728800034,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 23542024,
+            "rss_bytes": 5929730048,
+            "anon_bytes": 5864095744,
+            "memory_current_bytes": 5880397824,
+            "inactive_file_bytes": 1306624,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 23542024,
+          "rss_bytes": 5929730048,
+          "anon_bytes": 5864095744,
+          "working_set_bytes": 5879091200,
+          "cpu_seconds": 23.263427,
+          "cpu_cores": 1.4482070370010873
+        }
+      },
+      {
+        "elapsed_ms": 18819.66308999993,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 23914697,
+            "rss_bytes": 5929791488,
+            "anon_bytes": 5864157184,
+            "memory_current_bytes": 5881098240,
+            "inactive_file_bytes": 1318912,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 23914697,
+          "rss_bytes": 5929791488,
+          "anon_bytes": 5864157184,
+          "working_set_bytes": 5879779328,
+          "cpu_seconds": 23.6361,
+          "cpu_cores": 1.485488026464237
+        }
+      },
+      {
+        "elapsed_ms": 19070.61980300024,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 24300693,
+            "rss_bytes": 5929869312,
+            "anon_bytes": 5864235008,
+            "memory_current_bytes": 5881946112,
+            "inactive_file_bytes": 1335296,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 24300693,
+          "rss_bytes": 5929869312,
+          "anon_bytes": 5864235008,
+          "working_set_bytes": 5880610816,
+          "cpu_seconds": 24.022096,
+          "cpu_cores": 1.5380979268704378
+        }
+      },
+      {
+        "elapsed_ms": 19321.55688900035,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 24693460,
+            "rss_bytes": 5929902080,
+            "anon_bytes": 5864267776,
+            "memory_current_bytes": 5880602624,
+            "inactive_file_bytes": 1355776,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 24693460,
+          "rss_bytes": 5929902080,
+          "anon_bytes": 5864267776,
+          "working_set_bytes": 5879246848,
+          "cpu_seconds": 24.414863,
+          "cpu_cores": 1.5652010878927325
+        }
+      },
+      {
+        "elapsed_ms": 19572.55535000004,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 25106956,
+            "rss_bytes": 5929963520,
+            "anon_bytes": 5864329216,
+            "memory_current_bytes": 5881044992,
+            "inactive_file_bytes": 1388544,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 25106956,
+          "rss_bytes": 5929963520,
+          "anon_bytes": 5864329216,
+          "working_set_bytes": 5879656448,
+          "cpu_seconds": 24.828359,
+          "cpu_cores": 1.6474045233309647
+        }
+      },
+      {
+        "elapsed_ms": 19823.264651000034,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 25522130,
+            "rss_bytes": 5930147840,
+            "anon_bytes": 5864513536,
+            "memory_current_bytes": 5882380288,
+            "inactive_file_bytes": 1388544,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 25522130,
+          "rss_bytes": 5930147840,
+          "anon_bytes": 5864513536,
+          "working_set_bytes": 5880991744,
+          "cpu_seconds": 25.243533,
+          "cpu_cores": 1.6559975969938496
+        }
+      },
+      {
+        "elapsed_ms": 20074.175469000358,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 25944992,
+            "rss_bytes": 5930180608,
+            "anon_bytes": 5864546304,
+            "memory_current_bytes": 5881638912,
+            "inactive_file_bytes": 1392640,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 25944992,
+          "rss_bytes": 5930180608,
+          "anon_bytes": 5864546304,
+          "working_set_bytes": 5880246272,
+          "cpu_seconds": 25.666395,
+          "cpu_cores": 1.6853079646787243
+        }
+      },
+      {
+        "elapsed_ms": 20325.013180000242,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 26365706,
+            "rss_bytes": 5930266624,
+            "anon_bytes": 5864632320,
+            "memory_current_bytes": 5881479168,
+            "inactive_file_bytes": 1392640,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 26365706,
+          "rss_bytes": 5930266624,
+          "anon_bytes": 5864632320,
+          "working_set_bytes": 5880086528,
+          "cpu_seconds": 26.087109,
+          "cpu_cores": 1.6772358443352047
+        }
+      },
+      {
+        "elapsed_ms": 20575.85702200001,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 26736692,
+            "rss_bytes": 5930373120,
+            "anon_bytes": 5864738816,
+            "memory_current_bytes": 5881450496,
+            "inactive_file_bytes": 1417216,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 26736692,
+          "rss_bytes": 5930373120,
+          "anon_bytes": 5864738816,
+          "working_set_bytes": 5880033280,
+          "cpu_seconds": 26.458095,
+          "cpu_cores": 1.4789519927714283
+        }
+      },
+      {
+        "elapsed_ms": 20827.05592700001,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 27112650,
+            "rss_bytes": 5930483712,
+            "anon_bytes": 5864783872,
+            "memory_current_bytes": 5881409536,
+            "inactive_file_bytes": 1421312,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 27112650,
+          "rss_bytes": 5930483712,
+          "anon_bytes": 5864783872,
+          "working_set_bytes": 5879988224,
+          "cpu_seconds": 26.834053,
+          "cpu_cores": 1.4966546132038425
+        }
+      },
+      {
+        "elapsed_ms": 21078.027517000213,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 27481329,
+            "rss_bytes": 5930528768,
+            "anon_bytes": 5864828928,
+            "memory_current_bytes": 5881716736,
+            "inactive_file_bytes": 1433600,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 27481329,
+          "rss_bytes": 5930528768,
+          "anon_bytes": 5864828928,
+          "working_set_bytes": 5880283136,
+          "cpu_seconds": 27.202732,
+          "cpu_cores": 1.4690069103028722
+        }
+      },
+      {
+        "elapsed_ms": 21327.915546000004,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 27839773,
+            "rss_bytes": 5930602496,
+            "anon_bytes": 5864902656,
+            "memory_current_bytes": 5882167296,
+            "inactive_file_bytes": 1470464,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 27839773,
+          "rss_bytes": 5930602496,
+          "anon_bytes": 5864902656,
+          "working_set_bytes": 5880696832,
+          "cpu_seconds": 27.561176,
+          "cpu_cores": 1.4344184530756392
+        }
+      },
+      {
+        "elapsed_ms": 21578.696421000175,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 28198862,
+            "rss_bytes": 5930700800,
+            "anon_bytes": 5865000960,
+            "memory_current_bytes": 5881606144,
+            "inactive_file_bytes": 1486848,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 28198862,
+          "rss_bytes": 5930700800,
+          "anon_bytes": 5865000960,
+          "working_set_bytes": 5880119296,
+          "cpu_seconds": 27.920265,
+          "cpu_cores": 1.4318835118497557
+        }
+      },
+      {
+        "elapsed_ms": 21829.56829500012,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 28558617,
+            "rss_bytes": 5930819584,
+            "anon_bytes": 5865054208,
+            "memory_current_bytes": 5882294272,
+            "inactive_file_bytes": 1486848,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 28558617,
+          "rss_bytes": 5930819584,
+          "anon_bytes": 5865054208,
+          "working_set_bytes": 5880807424,
+          "cpu_seconds": 28.28002,
+          "cpu_cores": 1.4340188649448908
+        }
+      },
+      {
+        "elapsed_ms": 22080.464225000236,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 28927202,
+            "rss_bytes": 5930848256,
+            "anon_bytes": 5865082880,
+            "memory_current_bytes": 5881925632,
+            "inactive_file_bytes": 1486848,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 28927202,
+          "rss_bytes": 5930848256,
+          "anon_bytes": 5865082880,
+          "working_set_bytes": 5880438784,
+          "cpu_seconds": 28.648605,
+          "cpu_cores": 1.4690752456599467
+        }
+      },
+      {
+        "elapsed_ms": 22331.469188000076,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 29277984,
+            "rss_bytes": 5930860544,
+            "anon_bytes": 5865095168,
+            "memory_current_bytes": 5882048512,
+            "inactive_file_bytes": 1486848,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 29277984,
+          "rss_bytes": 5930860544,
+          "anon_bytes": 5865095168,
+          "working_set_bytes": 5880561664,
+          "cpu_seconds": 28.999387,
+          "cpu_cores": 1.3975102157650345
+        }
+      },
+      {
+        "elapsed_ms": 22582.29118900001,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 29618212,
+            "rss_bytes": 5930909696,
+            "anon_bytes": 5865144320,
+            "memory_current_bytes": 5882363904,
+            "inactive_file_bytes": 1499136,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 29618212,
+          "rss_bytes": 5930909696,
+          "anon_bytes": 5865144320,
+          "working_set_bytes": 5880864768,
+          "cpu_seconds": 29.339615,
+          "cpu_cores": 1.3564519804627833
+        }
+      },
+      {
+        "elapsed_ms": 22833.121767000295,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 29969057,
+            "rss_bytes": 5930938368,
+            "anon_bytes": 5865172992,
+            "memory_current_bytes": 5882122240,
+            "inactive_file_bytes": 1519616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 29969057,
+          "rss_bytes": 5930938368,
+          "anon_bytes": 5865172992,
+          "working_set_bytes": 5880602624,
+          "cpu_seconds": 29.69046,
+          "cpu_cores": 1.3987329726585478
+        }
+      },
+      {
+        "elapsed_ms": 23083.992930000182,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 30337083,
+            "rss_bytes": 5930946560,
+            "anon_bytes": 5865181184,
+            "memory_current_bytes": 5882245120,
+            "inactive_file_bytes": 1536000,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 30337083,
+          "rss_bytes": 5930946560,
+          "anon_bytes": 5865181184,
+          "working_set_bytes": 5880709120,
+          "cpu_seconds": 30.058486,
+          "cpu_cores": 1.4669920432431915
+        }
+      },
+      {
+        "elapsed_ms": 23334.84360500006,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 30708119,
+            "rss_bytes": 5930975232,
+            "anon_bytes": 5865209856,
+            "memory_current_bytes": 5882306560,
+            "inactive_file_bytes": 1548288,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 30708119,
+          "rss_bytes": 5930975232,
+          "anon_bytes": 5865209856,
+          "working_set_bytes": 5880758272,
+          "cpu_seconds": 30.429522,
+          "cpu_cores": 1.4791110289026759
+        }
+      },
+      {
+        "elapsed_ms": 23585.780150000006,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 31070250,
+            "rss_bytes": 5931003904,
+            "anon_bytes": 5865238528,
+            "memory_current_bytes": 5883179008,
+            "inactive_file_bytes": 1564672,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 31070250,
+          "rss_bytes": 5931003904,
+          "anon_bytes": 5865238528,
+          "working_set_bytes": 5881614336,
+          "cpu_seconds": 30.791653,
+          "cpu_cores": 1.4431178208820803
+        }
+      },
+      {
+        "elapsed_ms": 23836.669207000174,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 31430878,
+            "rss_bytes": 5931048960,
+            "anon_bytes": 5865283584,
+            "memory_current_bytes": 5882478592,
+            "inactive_file_bytes": 1581056,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 31430878,
+          "rss_bytes": 5931048960,
+          "anon_bytes": 5865283584,
+          "working_set_bytes": 5880897536,
+          "cpu_seconds": 31.152281,
+          "cpu_cores": 1.437400276887162
+        }
+      },
+      {
+        "elapsed_ms": 24087.498993000016,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 31779674,
+            "rss_bytes": 5931069440,
+            "anon_bytes": 5865304064,
+            "memory_current_bytes": 5882720256,
+            "inactive_file_bytes": 1593344,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 31779674,
+          "rss_bytes": 5931069440,
+          "anon_bytes": 5865304064,
+          "working_set_bytes": 5881126912,
+          "cpu_seconds": 31.501077,
+          "cpu_cores": 1.3905685028978965
+        }
+      },
+      {
+        "elapsed_ms": 24338.26904800022,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 32133845,
+            "rss_bytes": 5931098112,
+            "anon_bytes": 5865332736,
+            "memory_current_bytes": 5882171392,
+            "inactive_file_bytes": 1593344,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 32133845,
+          "rss_bytes": 5931098112,
+          "anon_bytes": 5865332736,
+          "working_set_bytes": 5880578048,
+          "cpu_seconds": 31.855248,
+          "cpu_cores": 1.4123337014848565
+        }
+      },
+      {
+        "elapsed_ms": 24589.168043000158,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 32454709,
+            "rss_bytes": 5931159552,
+            "anon_bytes": 5865394176,
+            "memory_current_bytes": 5882834944,
+            "inactive_file_bytes": 1593344,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 32454709,
+          "rss_bytes": 5931159552,
+          "anon_bytes": 5865394176,
+          "working_set_bytes": 5881241600,
+          "cpu_seconds": 32.176112,
+          "cpu_cores": 1.2788572548888832
+        }
+      },
+      {
+        "elapsed_ms": 24840.042172000278,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 32768114,
+            "rss_bytes": 5931175936,
+            "anon_bytes": 5865410560,
+            "memory_current_bytes": 5883043840,
+            "inactive_file_bytes": 1593344,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 32768114,
+          "rss_bytes": 5931175936,
+          "anon_bytes": 5865410560,
+          "working_set_bytes": 5881450496,
+          "cpu_seconds": 32.489517,
+          "cpu_cores": 1.2492519704965284
+        }
+      },
+      {
+        "elapsed_ms": 25089.9314720002,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 33077195,
+            "rss_bytes": 5931360256,
+            "anon_bytes": 5865463808,
+            "memory_current_bytes": 5884301312,
+            "inactive_file_bytes": 1617920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 33077195,
+          "rss_bytes": 5931360256,
+          "anon_bytes": 5865463808,
+          "working_set_bytes": 5882683392,
+          "cpu_seconds": 32.798598,
+          "cpu_cores": 1.236871686783291
+        }
+      },
+      {
+        "elapsed_ms": 25340.758604000323,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 33357912,
+            "rss_bytes": 5931384832,
+            "anon_bytes": 5865488384,
+            "memory_current_bytes": 5882613760,
+            "inactive_file_bytes": 1617920,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 33357912,
+          "rss_bytes": 5931384832,
+          "anon_bytes": 5865488384,
+          "working_set_bytes": 5880995840,
+          "cpu_seconds": 33.079315,
+          "cpu_cores": 1.1191652105636771
+        }
+      },
+      {
+        "elapsed_ms": 25591.553503999952,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 33638792,
+            "rss_bytes": 5931433984,
+            "anon_bytes": 5865537536,
+            "memory_current_bytes": 5883293696,
+            "inactive_file_bytes": 1626112,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 33638792,
+          "rss_bytes": 5931433984,
+          "anon_bytes": 5865537536,
+          "working_set_bytes": 5881667584,
+          "cpu_seconds": 33.360195,
+          "cpu_cores": 1.1199589784338306
+        }
+      },
+      {
+        "elapsed_ms": 25842.707886000164,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 33920487,
+            "rss_bytes": 5931450368,
+            "anon_bytes": 5865553920,
+            "memory_current_bytes": 5882802176,
+            "inactive_file_bytes": 1642496,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 33920487,
+          "rss_bytes": 5931450368,
+          "anon_bytes": 5865553920,
+          "working_set_bytes": 5881159680,
+          "cpu_seconds": 33.64189,
+          "cpu_cores": 1.1216009760871408
+        }
+      },
+      {
+        "elapsed_ms": 26093.55807000026,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 34207054,
+            "rss_bytes": 5931474944,
+            "anon_bytes": 5865578496,
+            "memory_current_bytes": 5882454016,
+            "inactive_file_bytes": 1642496,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 34207054,
+          "rss_bytes": 5931474944,
+          "anon_bytes": 5865578496,
+          "working_set_bytes": 5880811520,
+          "cpu_seconds": 33.928457,
+          "cpu_cores": 1.1423830568124635
+        }
+      },
+      {
+        "elapsed_ms": 26344.510225000326,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 34492268,
+            "rss_bytes": 5931524096,
+            "anon_bytes": 5865627648,
+            "memory_current_bytes": 5882679296,
+            "inactive_file_bytes": 1667072,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 34492268,
+          "rss_bytes": 5931524096,
+          "anon_bytes": 5865627648,
+          "working_set_bytes": 5881012224,
+          "cpu_seconds": 34.213671,
+          "cpu_cores": 1.1365273990172615
+        }
+      },
+      {
+        "elapsed_ms": 26595.429388000164,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 34780438,
+            "rss_bytes": 5931556864,
+            "anon_bytes": 5865660416,
+            "memory_current_bytes": 5882368000,
+            "inactive_file_bytes": 1691648,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 34780438,
+          "rss_bytes": 5931556864,
+          "anon_bytes": 5865660416,
+          "working_set_bytes": 5880676352,
+          "cpu_seconds": 34.501841,
+          "cpu_cores": 1.1484575213579258
+        }
+      },
+      {
+        "elapsed_ms": 26846.38586000027,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 35094630,
+            "rss_bytes": 5931565056,
+            "anon_bytes": 5865668608,
+            "memory_current_bytes": 5882740736,
+            "inactive_file_bytes": 1691648,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 35094630,
+          "rss_bytes": 5931565056,
+          "anon_bytes": 5865668608,
+          "working_set_bytes": 5881049088,
+          "cpu_seconds": 34.816033,
+          "cpu_cores": 1.2519780721170874
+        }
+      },
+      {
+        "elapsed_ms": 27097.360827000346,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 35467922,
+            "rss_bytes": 5931659264,
+            "anon_bytes": 5865762816,
+            "memory_current_bytes": 5883998208,
+            "inactive_file_bytes": 1691648,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 35467922,
+          "rss_bytes": 5931659264,
+          "anon_bytes": 5865762816,
+          "working_set_bytes": 5882306560,
+          "cpu_seconds": 35.189325,
+          "cpu_cores": 1.4873674632254814
+        }
+      },
+      {
+        "elapsed_ms": 27348.311970000155,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 35848890,
+            "rss_bytes": 5931667456,
+            "anon_bytes": 5865771008,
+            "memory_current_bytes": 5883686912,
+            "inactive_file_bytes": 1703936,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 35848890,
+          "rss_bytes": 5931667456,
+          "anon_bytes": 5865771008,
+          "working_set_bytes": 5881982976,
+          "cpu_seconds": 35.570293,
+          "cpu_cores": 1.5180962933501745
+        }
+      },
+      {
+        "elapsed_ms": 27599.19761000015,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 36236425,
+            "rss_bytes": 5931749376,
+            "anon_bytes": 5865852928,
+            "memory_current_bytes": 5883351040,
+            "inactive_file_bytes": 1708032,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 36236425,
+          "rss_bytes": 5931749376,
+          "anon_bytes": 5865852928,
+          "working_set_bytes": 5881643008,
+          "cpu_seconds": 35.957828,
+          "cpu_cores": 1.544667921209084
+        }
+      },
+      {
+        "elapsed_ms": 27850.075927000027,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 36615215,
+            "rss_bytes": 5931761664,
+            "anon_bytes": 5865865216,
+            "memory_current_bytes": 5882949632,
+            "inactive_file_bytes": 1728512,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 36615215,
+          "rss_bytes": 5931761664,
+          "anon_bytes": 5865865216,
+          "working_set_bytes": 5881221120,
+          "cpu_seconds": 36.336618,
+          "cpu_cores": 1.5098554730825267
+        }
+      },
+      {
+        "elapsed_ms": 28101.00099100033,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 37012230,
+            "rss_bytes": 5931843584,
+            "anon_bytes": 5865947136,
+            "memory_current_bytes": 5883432960,
+            "inactive_file_bytes": 1736704,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 37012230,
+          "rss_bytes": 5931843584,
+          "anon_bytes": 5865947136,
+          "working_set_bytes": 5881696256,
+          "cpu_seconds": 36.733633,
+          "cpu_cores": 1.5822054348445784
+        }
+      },
+      {
+        "elapsed_ms": 28352.003508999944,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 37394108,
+            "rss_bytes": 5931921408,
+            "anon_bytes": 5866024960,
+            "memory_current_bytes": 5883793408,
+            "inactive_file_bytes": 1761280,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 37394108,
+          "rss_bytes": 5931921408,
+          "anon_bytes": 5866024960,
+          "working_set_bytes": 5882032128,
+          "cpu_seconds": 37.115511,
+          "cpu_cores": 1.521411032221537
+        }
+      },
+      {
+        "elapsed_ms": 28602.916741000023,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 37783650,
+            "rss_bytes": 5931966464,
+            "anon_bytes": 5866070016,
+            "memory_current_bytes": 5883510784,
+            "inactive_file_bytes": 1761280,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 37783650,
+          "rss_bytes": 5931966464,
+          "anon_bytes": 5866070016,
+          "working_set_bytes": 5881749504,
+          "cpu_seconds": 37.505053,
+          "cpu_cores": 1.5524968408197672
+        }
+      },
+      {
+        "elapsed_ms": 28853.90104500018,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 38140834,
+            "rss_bytes": 5932138496,
+            "anon_bytes": 5866094592,
+            "memory_current_bytes": 5884067840,
+            "inactive_file_bytes": 1785856,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 38140834,
+          "rss_bytes": 5932138496,
+          "anon_bytes": 5866094592,
+          "working_set_bytes": 5882281984,
+          "cpu_seconds": 37.862237,
+          "cpu_cores": 1.4231328186952095
+        }
+      },
+      {
+        "elapsed_ms": 29104.734358000103,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 38490003,
+            "rss_bytes": 5932179456,
+            "anon_bytes": 5866135552,
+            "memory_current_bytes": 5883252736,
+            "inactive_file_bytes": 1794048,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 38490003,
+          "rss_bytes": 5932179456,
+          "anon_bytes": 5866135552,
+          "working_set_bytes": 5881458688,
+          "cpu_seconds": 38.211406,
+          "cpu_cores": 1.3920359932418844
+        }
+      },
+      {
+        "elapsed_ms": 29355.68300600024,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 38854622,
+            "rss_bytes": 5932179456,
+            "anon_bytes": 5866135552,
+            "memory_current_bytes": 5884858368,
+            "inactive_file_bytes": 1806336,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 38854622,
+          "rss_bytes": 5932179456,
+          "anon_bytes": 5866135552,
+          "working_set_bytes": 5883052032,
+          "cpu_seconds": 38.576025,
+          "cpu_cores": 1.4529625997419295
+        }
+      },
+      {
+        "elapsed_ms": 29606.612678000238,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 39229871,
+            "rss_bytes": 5932183552,
+            "anon_bytes": 5866139648,
+            "memory_current_bytes": 5883826176,
+            "inactive_file_bytes": 1822720,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 39229871,
+          "rss_bytes": 5932183552,
+          "anon_bytes": 5866139648,
+          "working_set_bytes": 5882003456,
+          "cpu_seconds": 38.951274,
+          "cpu_cores": 1.4954349440189059
+        }
+      },
+      {
+        "elapsed_ms": 29857.614965999965,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 39603781,
+            "rss_bytes": 5932195840,
+            "anon_bytes": 5866151936,
+            "memory_current_bytes": 5884854272,
+            "inactive_file_bytes": 1830912,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 39603781,
+          "rss_bytes": 5932195840,
+          "anon_bytes": 5866151936,
+          "working_set_bytes": 5883023360,
+          "cpu_seconds": 39.325184,
+          "cpu_cores": 1.489667695779757
+        }
+      },
+      {
+        "elapsed_ms": 30108.462755999994,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 39975047,
+            "rss_bytes": 5932220416,
+            "anon_bytes": 5866176512,
+            "memory_current_bytes": 5884952576,
+            "inactive_file_bytes": 1830912,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 39975047,
+          "rss_bytes": 5932220416,
+          "anon_bytes": 5866176512,
+          "working_set_bytes": 5883121664,
+          "cpu_seconds": 39.69645,
+          "cpu_cores": 1.480044930832188
+        }
+      },
+      {
+        "elapsed_ms": 30359.322568000294,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 40330545,
+            "rss_bytes": 5932232704,
+            "anon_bytes": 5866188800,
+            "memory_current_bytes": 5883576320,
+            "inactive_file_bytes": 1851392,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 40330545,
+          "rss_bytes": 5932232704,
+          "anon_bytes": 5866188800,
+          "working_set_bytes": 5881724928,
+          "cpu_seconds": 40.051948,
+          "cpu_cores": 1.4171181791349419
+        }
+      },
+      {
+        "elapsed_ms": 30610.29947900027,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 40691080,
+            "rss_bytes": 5932277760,
+            "anon_bytes": 5866233856,
+            "memory_current_bytes": 5883170816,
+            "inactive_file_bytes": 1843200,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 40691080,
+          "rss_bytes": 5932277760,
+          "anon_bytes": 5866233856,
+          "working_set_bytes": 5881327616,
+          "cpu_seconds": 40.412483,
+          "cpu_cores": 1.4365265655852875
+        }
+      },
+      {
+        "elapsed_ms": 30861.60444200039,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 41064601,
+            "rss_bytes": 5932302336,
+            "anon_bytes": 5866258432,
+            "memory_current_bytes": 5884039168,
+            "inactive_file_bytes": 1847296,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 41064601,
+          "rss_bytes": 5932302336,
+          "anon_bytes": 5866258432,
+          "working_set_bytes": 5882191872,
+          "cpu_seconds": 40.786004,
+          "cpu_cores": 1.4863256003416994
+        }
+      },
+      {
+        "elapsed_ms": 31112.556556000374,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 41455566,
+            "rss_bytes": 5932306432,
+            "anon_bytes": 5866262528,
+            "memory_current_bytes": 5883961344,
+            "inactive_file_bytes": 1880064,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 41455566,
+          "rss_bytes": 5932306432,
+          "anon_bytes": 5866262528,
+          "working_set_bytes": 5882081280,
+          "cpu_seconds": 41.176969,
+          "cpu_cores": 1.5579267046940402
+        }
+      },
+      {
+        "elapsed_ms": 31363.53823600011,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 41850156,
+            "rss_bytes": 5932318720,
+            "anon_bytes": 5866274816,
+            "memory_current_bytes": 5883662336,
+            "inactive_file_bytes": 1892352,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 41850156,
+          "rss_bytes": 5932318720,
+          "anon_bytes": 5866274816,
+          "working_set_bytes": 5881769984,
+          "cpu_seconds": 41.571559,
+          "cpu_cores": 1.5721864639698655
+        }
+      },
+      {
+        "elapsed_ms": 31614.47512200009,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 42219283,
+            "rss_bytes": 5932335104,
+            "anon_bytes": 5866291200,
+            "memory_current_bytes": 5884035072,
+            "inactive_file_bytes": 1908736,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 42219283,
+          "rss_bytes": 5932335104,
+          "anon_bytes": 5866291200,
+          "working_set_bytes": 5882126336,
+          "cpu_seconds": 41.940686,
+          "cpu_cores": 1.470995380089428
+        }
+      },
+      {
+        "elapsed_ms": 31865.35792700015,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 42589061,
+            "rss_bytes": 5932351488,
+            "anon_bytes": 5866307584,
+            "memory_current_bytes": 5883867136,
+            "inactive_file_bytes": 1908736,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 42589061,
+          "rss_bytes": 5932351488,
+          "anon_bytes": 5866307584,
+          "working_set_bytes": 5881958400,
+          "cpu_seconds": 42.310464,
+          "cpu_cores": 1.4739073090318509
+        }
+      },
+      {
+        "elapsed_ms": 32116.164509000257,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 42946406,
+            "rss_bytes": 5932380160,
+            "anon_bytes": 5866336256,
+            "memory_current_bytes": 5883797504,
+            "inactive_file_bytes": 1921024,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 42946406,
+          "rss_bytes": 5932380160,
+          "anon_bytes": 5866336256,
+          "working_set_bytes": 5881876480,
+          "cpu_seconds": 42.667809,
+          "cpu_cores": 1.4247831821249737
+        }
+      },
+      {
+        "elapsed_ms": 32367.043196999934,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 43349744,
+            "rss_bytes": 5932380160,
+            "anon_bytes": 5866336256,
+            "memory_current_bytes": 5883908096,
+            "inactive_file_bytes": 1921024,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 43349744,
+          "rss_bytes": 5932380160,
+          "anon_bytes": 5866336256,
+          "working_set_bytes": 5881987072,
+          "cpu_seconds": 43.071147,
+          "cpu_cores": 1.6077013285421815
+        }
+      },
+      {
+        "elapsed_ms": 32617.8748560003,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 43804153,
+            "rss_bytes": 5932396544,
+            "anon_bytes": 5866352640,
+            "memory_current_bytes": 5885112320,
+            "inactive_file_bytes": 1953792,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 43804153,
+          "rss_bytes": 5932396544,
+          "anon_bytes": 5866352640,
+          "working_set_bytes": 5883158528,
+          "cpu_seconds": 43.525556,
+          "cpu_cores": 1.8116094348334844
+        }
+      },
+      {
+        "elapsed_ms": 32868.76745000016,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 44237007,
+            "rss_bytes": 5932404736,
+            "anon_bytes": 5866360832,
+            "memory_current_bytes": 5884452864,
+            "inactive_file_bytes": 1953792,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 44237007,
+          "rss_bytes": 5932404736,
+          "anon_bytes": 5866360832,
+          "working_set_bytes": 5882499072,
+          "cpu_seconds": 43.95841,
+          "cpu_cores": 1.7252561867180638
+        }
+      },
+      {
+        "elapsed_ms": 33119.65519400034,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 44676052,
+            "rss_bytes": 5932421120,
+            "anon_bytes": 5866377216,
+            "memory_current_bytes": 5883854848,
+            "inactive_file_bytes": 1986560,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 44676052,
+          "rss_bytes": 5932421120,
+          "anon_bytes": 5866377216,
+          "working_set_bytes": 5881868288,
+          "cpu_seconds": 44.397455,
+          "cpu_cores": 1.7499659130407035
+        }
+      },
+      {
+        "elapsed_ms": 33370.77432000032,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 45088993,
+            "rss_bytes": 5932429312,
+            "anon_bytes": 5866385408,
+            "memory_current_bytes": 5884645376,
+            "inactive_file_bytes": 2002944,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 45088993,
+          "rss_bytes": 5932429312,
+          "anon_bytes": 5866385408,
+          "working_set_bytes": 5882642432,
+          "cpu_seconds": 44.810396,
+          "cpu_cores": 1.6444028241801047
+        }
+      },
+      {
+        "elapsed_ms": 33621.68771200022,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 45512007,
+            "rss_bytes": 5932429312,
+            "anon_bytes": 5866385408,
+            "memory_current_bytes": 5884063744,
+            "inactive_file_bytes": 2019328,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 45512007,
+          "rss_bytes": 5932429312,
+          "anon_bytes": 5866385408,
+          "working_set_bytes": 5882044416,
+          "cpu_seconds": 45.23341,
+          "cpu_cores": 1.6858964626334811
+        }
+      },
+      {
+        "elapsed_ms": 33872.53434900008,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 45922466,
+            "rss_bytes": 5932437504,
+            "anon_bytes": 5866393600,
+            "memory_current_bytes": 5884436480,
+            "inactive_file_bytes": 2023424,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 45922466,
+          "rss_bytes": 5932437504,
+          "anon_bytes": 5866393600,
+          "working_set_bytes": 5882413056,
+          "cpu_seconds": 45.643869,
+          "cpu_cores": 1.6362946097627864
+        }
+      },
+      {
+        "elapsed_ms": 34123.40783700021,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 46254530,
+            "rss_bytes": 5932441600,
+            "anon_bytes": 5866397696,
+            "memory_current_bytes": 5884354560,
+            "inactive_file_bytes": 2023424,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 46254530,
+          "rss_bytes": 5932441600,
+          "anon_bytes": 5866397696,
+          "working_set_bytes": 5882331136,
+          "cpu_seconds": 45.975933,
+          "cpu_cores": 1.3236312957861456
+        }
+      },
+      {
+        "elapsed_ms": 34374.311631000135,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 46580047,
+            "rss_bytes": 5932544000,
+            "anon_bytes": 5866442752,
+            "memory_current_bytes": 5884645376,
+            "inactive_file_bytes": 2031616,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 46580047,
+          "rss_bytes": 5932544000,
+          "anon_bytes": 5866442752,
+          "working_set_bytes": 5882613760,
+          "cpu_seconds": 46.30145,
+          "cpu_cores": 1.2973777510917073
+        }
+      },
+      {
+        "elapsed_ms": 34625.212821000256,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 46897738,
+            "rss_bytes": 5932560384,
+            "anon_bytes": 5866459136,
+            "memory_current_bytes": 5884641280,
+            "inactive_file_bytes": 2043904,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 46897738,
+          "rss_bytes": 5932560384,
+          "anon_bytes": 5866459136,
+          "working_set_bytes": 5882597376,
+          "cpu_seconds": 46.619141,
+          "cpu_cores": 1.266199654134153
+        }
+      },
+      {
+        "elapsed_ms": 34876.13696200028,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 47192372,
+            "rss_bytes": 5932568576,
+            "anon_bytes": 5866467328,
+            "memory_current_bytes": 5884821504,
+            "inactive_file_bytes": 2052096,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 47192372,
+          "rss_bytes": 5932568576,
+          "anon_bytes": 5866467328,
+          "working_set_bytes": 5882769408,
+          "cpu_seconds": 46.913775,
+          "cpu_cores": 1.1741955111444247
+        }
+      },
+      {
+        "elapsed_ms": 35127.042098999955,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 47486945,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884243968,
+            "inactive_file_bytes": 2052096,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 47486945,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882191872,
+          "cpu_seconds": 47.208348,
+          "cpu_cores": 1.1740413270230596
+        }
+      },
+      {
+        "elapsed_ms": 35376.98999899998,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 47779473,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884727296,
+            "inactive_file_bytes": 2101248,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 47779473,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882626048,
+          "cpu_seconds": 47.500876,
+          "cpu_cores": 1.1703559021698797
+        }
+      },
+      {
+        "elapsed_ms": 35627.652253000066,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48081793,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884932096,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48081793,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882744832,
+          "cpu_seconds": 47.803196,
+          "cpu_cores": 1.206085061374659
+        }
+      },
+      {
+        "elapsed_ms": 35877.95742999995,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48236994,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884317696,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48236994,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882130432,
+          "cpu_seconds": 47.958397,
+          "cpu_cores": 0.6200471035406149
+        }
+      },
+      {
+        "elapsed_ms": 36129.15182600031,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48238991,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884317696,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48238991,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882130432,
+          "cpu_seconds": 47.960394,
+          "cpu_cores": 0.00795001812061593
+        }
+      },
+      {
+        "elapsed_ms": 36380.000807000324,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48241083,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884317696,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48241083,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882130432,
+          "cpu_seconds": 47.962486,
+          "cpu_cores": 0.008339679083646965
+        }
+      },
+      {
+        "elapsed_ms": 36630.950287000276,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48243806,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5884317696,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48243806,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5882130432,
+          "cpu_seconds": 47.965209,
+          "cpu_cores": 0.010850789569281118
+        }
+      },
+      {
+        "elapsed_ms": 36881.577666,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48246125,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5883383808,
+            "inactive_file_bytes": 2187264,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48246125,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5881196544,
+          "cpu_seconds": 47.967528,
+          "cpu_cores": 0.009252780000554446
+        }
+      },
+      {
+        "elapsed_ms": 36951.02640000032,
+        "brokers": [
+          {
+            "id": "60bf0c411352dba024fe047ac27a4c7d2272f93792c493985647621692450b5f",
+            "cpu_usage_us": 48246492,
+            "rss_bytes": 5932589056,
+            "anon_bytes": 5866487808,
+            "memory_current_bytes": 5883383808,
+            "inactive_file_bytes": 2244608,
+            "oom_kill": 0
+          }
+        ],
+        "cluster": {
+          "cpu_usage_us": 48246492,
+          "rss_bytes": 5932589056,
+          "anon_bytes": 5866487808,
+          "working_set_bytes": 5881139200,
+          "cpu_seconds": 47.967895,
+          "cpu_cores": 0.005284473580155997
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "cpu_seconds": 47.967895,
+    "cpu_us_per_record": 2.089044087776278,
+    "rss_peak_bytes": 5932589056,
+    "anon_peak_bytes": 5866487808,
+    "working_set_peak_bytes": 5883158528,
+    "resource_samples": 149,
+    "sampling_interval_ms": 250,
+    "max_sample_gap_ms": 251.3852919996716,
+    "measurement_wall_seconds": 36.950638245000036
+  },
+  "curve": {
+    "records_per_second": 690577.7123959621,
+    "consume_records_per_second": 690639.3904213521,
+    "client_cpu_cores": 2.149072809025364,
+    "measurement_seconds": 30.026901575,
+    "latency_ms_p99": 67.327,
+    "ack_latency_ms_p99": 58.399,
+    "consumer_lag_peak_records": 13755,
+    "consumer_lag_at_measurement_end": 0,
+    "offered_backlog_at_measurement_end": 0,
+    "recovery_seconds": null
+  }
+}

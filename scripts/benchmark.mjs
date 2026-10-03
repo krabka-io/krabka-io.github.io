@@ -21,7 +21,7 @@ const WORKLOAD = {
   license: 'Apache-2.0',
 };
 const DEFAULT_IMAGES = {
-  krabka: 'ghcr.io/krabka-io/krabka-broker:v0.6.1',
+  krabka: 'ghcr.io/krabka-io/krabka-broker:v0.7.0',
   kafka: 'apache/kafka:4.3.1',
   redpanda: 'docker.redpanda.com/redpandadata/redpanda:v26.2.2',
 };
