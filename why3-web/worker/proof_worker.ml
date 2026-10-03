@@ -4,7 +4,7 @@
  * a Coma file that Creusot generated for one krabka-verified function, splits
  * it into the same verification conditions why3find proved, applies the same
  * transformations the recorded session applied, and prints each leaf task in
- * Alt-Ergo's native input language for the Alt-Ergo worker to discharge.
+ * the selected prover's SMT-LIB input language.
  *
  * Modelled on Why3's own src/trywhy3/why3_worker.ml (LGPL 2.1, Inria), with a
  * JSON protocol instead of OCaml marshalling so the page side stays plain
@@ -32,11 +32,6 @@ let input_file = "/session/input.coma"
 let config : Whyconf.config = Whyconf.read_config (Some conf_file)
 let main : Whyconf.main = Whyconf.get_main config
 
-let prover : Whyconf.config_prover =
-  let provers = Whyconf.get_provers config in
-  if Whyconf.Mprover.is_empty provers then failwith "why3.conf names no prover";
-  snd (Whyconf.Mprover.choose provers)
-
 let env : Env.env = Env.create_env (Whyconf.loadpath main)
 
 (* The Coma files carry the Rust source spans Creusot recorded on the proof
@@ -44,7 +39,17 @@ let env : Env.env = Env.create_env (Whyconf.loadpath main)
  * warning per span; the page links spans to GitHub itself. *)
 let () = Loc.set_warning_hook (fun ?loc:_ _ -> ())
 
-let driver : Driver.driver = Driver.load_driver_for_prover main env prover
+let drivers =
+  Whyconf.Mprover.fold
+    (fun _ prover acc ->
+      (String.lowercase_ascii prover.Whyconf.prover.Whyconf.prover_name, (prover, Driver.load_driver_for_prover main env prover)) :: acc)
+    (Whyconf.get_provers config) []
+
+let driver_for name =
+  let name = if name = "" then "alt-ergo" else name in
+  match List.assoc_opt name drivers with
+  | Some pair -> pair
+  | None -> failwith (Printf.sprintf "unsupported prover %S" name)
 
 (* ---- task registry ------------------------------------------------------------- *)
 
@@ -133,8 +138,9 @@ let transform id name =
   in
   send (`Assoc [ ("kind", `String "children"); ("id", `Int id); ("name", `String name); ("children", `List children) ])
 
-let task id =
+let task id prover_name =
   let e = lookup id in
+  let _, driver = driver_for prover_name in
   let text = Format.asprintf "%a" (Driver.print_task driver) e.task in
   let pretty = Pp.string_of Pretty.print_sequent e.task in
   send
@@ -142,6 +148,7 @@ let task id =
       [ ("kind", `String "task"); ("id", `Int id); ("name", `String e.name); ("expl", `String e.expl); ("text", `String text); ("pretty", `String pretty) ])
 
 let ping () =
+  let prover, _ = driver_for "alt-ergo" in
   let p = prover.Whyconf.prover in
   send
     (`Assoc
@@ -175,7 +182,7 @@ let handle (json : Yojson.Safe.t) =
     | "ping" -> ping ()
     | "load" -> load (string_member "name" json) (string_member "content" json)
     | "transform" -> transform id (string_member "name" json)
-    | "task" -> task id
+    | "task" -> task id (string_member "prover" json)
     | other -> failwith (Printf.sprintf "unknown command %S" other)
   with e ->
     send

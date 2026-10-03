@@ -69,8 +69,8 @@ function recallMode() {
   }
 }
 
-function isOurs(worker) {
-  return Boolean(worker) && new URL(worker.scriptURL).pathname === SW_URL.pathname;
+function isOurs(worker, workerUrl = SW_URL) {
+  return Boolean(worker) && new URL(worker.scriptURL).pathname === workerUrl.pathname;
 }
 
 function coepOf(worker) {
@@ -96,10 +96,10 @@ function activated(registration, timeoutMs) {
   });
 }
 
-async function register(coep, timeoutMs) {
-  const url = new URL(SW_URL);
+async function register(coep, timeoutMs, workerUrl, scope) {
+  const url = new URL(workerUrl);
   url.searchParams.set("coep", coep);
-  const registration = await navigator.serviceWorker.register(url.href, { scope: SCOPE.pathname });
+  const registration = await navigator.serviceWorker.register(url.href, { scope: scope.pathname });
   if (!registration) throw new Error("the browser declined the registration");
   await activated(registration, timeoutMs);
 }
@@ -116,13 +116,16 @@ function reloadWith(state, reload) {
  * @param {object} [options]
  * @param {boolean} [options.reload] Reload by itself (default true); false leaves it to the caller.
  * @param {number} [options.timeoutMs] How long the service worker may take to activate.
+ * @param {URL} [options.workerUrl] Worker URL; its directory is the isolated page scope.
  */
-export async function ensureCrossOriginIsolation({ reload = true, timeoutMs = 10_000 } = {}) {
+export async function ensureCrossOriginIsolation({ reload = true, timeoutMs = 10_000, workerUrl = SW_URL } = {}) {
+  workerUrl = new URL(workerUrl);
+  const scope = new URL("./", workerUrl);
   const state = takeState();
   const container = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
   const controller = container?.controller ?? null;
   if (globalThis.crossOriginIsolated) {
-    if (isOurs(controller)) {
+    if (isOurs(controller, workerUrl)) {
       rememberMode(coepOf(controller));
       return { isolated: true, via: "service-worker", coep: coepOf(controller), reason: null, reloading: false };
     }
@@ -130,21 +133,21 @@ export async function ensureCrossOriginIsolation({ reload = true, timeoutMs = 10
   }
   if (!globalThis.isSecureContext) return unavailable("the page is not a secure context (https or localhost), so it cannot use a service worker");
   if (!container) return unavailable("service workers are unavailable in this browser (private browsing can disable them)");
-  if (!location.pathname.startsWith(SCOPE.pathname)) {
-    if (`${location.pathname}/` === SCOPE.pathname && reload && state?.step !== "slash") {
+  if (!location.pathname.startsWith(scope.pathname)) {
+    if (`${location.pathname}/` === scope.pathname && reload && state?.step !== "slash") {
       saveState({ step: "slash" });
-      location.replace(`${SCOPE.pathname}${location.search}${location.hash}`);
+      location.replace(`${scope.pathname}${location.search}${location.hash}`);
       return { ...unavailable("moving to the page's canonical URL"), reloading: true };
     }
-    return unavailable(`this page (${location.pathname}) is outside the service worker's scope ${SCOPE.pathname}`);
+    return unavailable(`this page (${location.pathname}) is outside the service worker's scope ${scope.pathname}`);
   }
-  if (isOurs(controller)) {
+  if (isOurs(controller, workerUrl)) {
     // The service worker served this page, and the browser still did not isolate it.
     const coep = coepOf(controller);
     if (coep === "credentialless" && state?.step !== "degraded") {
       rememberMode("require-corp");
       try {
-        await register("require-corp", timeoutMs);
+        await register("require-corp", timeoutMs, workerUrl, scope);
       } catch (err) {
         return unavailable(`the service worker could not switch to COEP require-corp: ${err.message}`);
       }
@@ -156,7 +159,7 @@ export async function ensureCrossOriginIsolation({ reload = true, timeoutMs = 10
     return unavailable("the service worker did not take control of the page after a reload (a hard reload bypasses service workers: reload normally)");
   }
   try {
-    await register(recallMode(), timeoutMs);
+    await register(recallMode(), timeoutMs, workerUrl, scope);
   } catch (err) {
     return unavailable(`the service worker could not be registered: ${err.message}`);
   }
