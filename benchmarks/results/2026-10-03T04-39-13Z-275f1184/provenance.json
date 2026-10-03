@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-10-03T04-39-13Z-275f1184",
+  "started_at": "2026-10-03T04:39:13.251Z",
+  "mode": "full",
+  "status": "complete",
+  "repetitions": 3,
+  "images": {
+    "krabka": {
+      "requested": "ghcr.io/krabka-io/krabka-broker:v0.6.1",
+      "reference": "ghcr.io/krabka-io/krabka-broker@sha256:46dcee888be701e0b4c7a53d758d633e051d5c49ccc4a6554049482e0b441b9d",
+      "image_id": "sha256:46dcee888be701e0b4c7a53d758d633e051d5c49ccc4a6554049482e0b441b9d",
+      "labels": {
+        "org.opencontainers.image.created": "2026-08-31T20:16:40Z"
+      }
+    },
+    "kafka": {
+      "requested": "apache/kafka:4.3.1",
+      "reference": "apache/kafka@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837",
+      "image_id": "sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837",
+      "labels": {
+        "org.label-schema.build-date": "2026-06-17",
+        "org.label-schema.description": "Apache Kafka",
+        "org.label-schema.name": "kafka",
+        "org.label-schema.vcs-url": "https://github.com/apache/kafka",
+        "org.opencontainers.image.authors": "Apache Kafka"
+      }
+    },
+    "redpanda": {
+      "requested": "docker.redpanda.com/redpandadata/redpanda:v26.2.2",
+      "reference": "docker.redpanda.com/redpandadata/redpanda@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96",
+      "image_id": "sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96",
+      "labels": {
+        "org.opencontainers.image.authors": "Redpanda Data <hi@redpanda.com>"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "1k-random-lz4",
+      "bytes": 1024,
+      "payload": "random",
+      "compression": "lz4",
+      "rate": -1,
+      "records": 10000000
+    },
+    {
+      "id": "100b-random-lz4",
+      "bytes": 100,
+      "payload": "random",
+      "compression": "lz4",
+      "rate": -1,
+      "records": 10000000
+    },
+    {
+      "id": "1k-zeros-lz4",
+      "bytes": 1024,
+      "payload": "zeros",
+      "compression": "lz4",
+      "rate": -1,
+      "records": 10000000
+    },
+    {
+      "id": "1k-random-none",
+      "bytes": 1024,
+      "payload": "random",
+      "compression": "none",
+      "rate": -1,
+      "records": 5000000
+    },
+    {
+      "id": "100k-random-lz4",
+      "bytes": 102400,
+      "payload": "random",
+      "compression": "lz4",
+      "rate": -1,
+      "records": 60000
+    },
+    {
+      "id": "1k-random-20k",
+      "bytes": 1024,
+      "payload": "random",
+      "compression": "lz4",
+      "rate": 20000,
+      "records": 600000
+    }
+  ],
+  "workload_source": {
+    "url": "https://raw.githubusercontent.com/krabka-io/krabka-broker/c27ed4f7e2c9ba4bf48376ed674bc26b166353f4/packaging/performance/BrokerPerformanceWorkload.java",
+    "sha256": "159c33cc5be5dcceb233a71250437469a23c82e408f5077f2c5452cc86ea8e89",
+    "license": "Apache-2.0"
+  },
+  "contract": {
+    "partitions": 12,
+    "acks": "all",
+    "idempotence": true,
+    "batch_bytes": 65536,
+    "linger_ms": 5,
+    "broker_cpus": 4,
+    "broker_memory_bytes": 10737418240,
+    "swap_bytes": 0,
+    "nofile": 131072,
+    "kafka_heap_bytes": 1073741824,
+    "redpanda_shards": 4,
+    "redpanda_memory_bytes": 8589934592,
+    "redpanda_reserve_bytes": 1073741824,
+    "redpanda_write_caching": true,
+    "redpanda_network_iocbs_per_shard": 1024,
+    "client_memory_bytes": 4294967296,
+    "client_heap_bytes": 2147483648,
+    "warmup_records": {
+      "1": 3000000,
+      "3": 1000000
+    },
+    "resource_sampling_ms": 250,
+    "workload_timeout_seconds": 900,
+    "durability": "buffered writes; no identical crash-durability claim"
+  },
+  "cpu_sets": {
+    "brokers": [
+      [
+        0,
+        8,
+        1,
+        9
+      ],
+      [
+        2,
+        10,
+        3,
+        11
+      ],
+      [
+        4,
+        12,
+        5,
+        13
+      ]
+    ],
+    "client": [
+      6,
+      14,
+      7,
+      15
+    ]
+  },
+  "host": {
+    "cpu_model": "AMD EPYC 4344P 8-Core Processor",
+    "logical_cpus": 16,
+    "kernel": "7.0.0-31-generic",
+    "memory_total_bytes": 65933004800,
+    "available_memory_bytes": 40285626368,
+    "free_disk_bytes": 338844696576,
+    "docker_free_disk_bytes": 338844696576,
+    "topology": [
+      {
+        "cpu": 0,
+        "core": 0,
+        "socket": 0
+      },
+      {
+        "cpu": 8,
+        "core": 0,
+        "socket": 0
+      },
+      {
+        "cpu": 1,
+        "core": 1,
+        "socket": 0
+      },
+      {
+        "cpu": 9,
+        "core": 1,
+        "socket": 0
+      },
+      {
+        "cpu": 2,
+        "core": 2,
+        "socket": 0
+      },
+      {
+        "cpu": 10,
+        "core": 2,
+        "socket": 0
+      },
+      {
+        "cpu": 3,
+        "core": 3,
+        "socket": 0
+      },
+      {
+        "cpu": 11,
+        "core": 3,
+        "socket": 0
+      },
+      {
+        "cpu": 4,
+        "core": 4,
+        "socket": 0
+      },
+      {
+        "cpu": 12,
+        "core": 4,
+        "socket": 0
+      },
+      {
+        "cpu": 5,
+        "core": 5,
+        "socket": 0
+      },
+      {
+        "cpu": 13,
+        "core": 5,
+        "socket": 0
+      },
+      {
+        "cpu": 6,
+        "core": 6,
+        "socket": 0
+      },
+      {
+        "cpu": 14,
+        "core": 6,
+        "socket": 0
+      },
+      {
+        "cpu": 7,
+        "core": 7,
+        "socket": 0
+      },
+      {
+        "cpu": 15,
+        "core": 7,
+        "socket": 0
+      }
+    ],
+    "load_average": [
+      0.4,
+      1.87,
+      3.46
+    ],
+    "docker_version": "29.8.1",
+    "aio_max_nr": 65536,
+    "aio_nr": 0,
+    "javac": "javac 25.0.4.1",
+    "java": "openjdk 25.0.4.1 2026-08-18\nOpenJDK Runtime Environment (build 25.0.4.1+1-1-26.04.4-Ubuntu)\nOpenJDK 64-Bit Server VM (build 25.0.4.1+1-1-26.04.4-Ubuntu, mixed mode, sharing)",
+    "filesystem": "Filesystem     Type 1K-blocks      Used Available Use% Mounted on\n/dev/md3       ext4 887398508 511344460 330903024  61% /",
+    "load_average_at_end": [
+      8.55,
+      56.35,
+      112.61
+    ]
+  },
+  "runner": {
+    "repository_commit": "ad44e762a47c51544361b2e044c4f94c458b985d",
+    "source_hashes": {
+      "scripts/benchmark.mjs": "53e4ea8a193abe8eeed72d7ffb077961098486257d247d15b165d20520ca30f6",
+      "scripts/benchmark-results.mjs": "13838375fed72bfef377c47c7910bf54f30933a0f4aa749852496add7f464277",
+      "benchmarks/BenchmarkAdmin.java": "f669b2747fa0f58f1720839784ff0b83c6ffa84a84e473a17b7700cb775fc3a1"
+    }
+  },
+  "client_jars": {
+    "HdrHistogram-2.2.2.jar": "22d1d4316c4ec13a68b559e98c8256d69071593731da96136640f864fa14fad8",
+    "activation-1.1.1.jar": "ae475120e9fcd99b4b00b38329bd61cdc5eb754eee03fe66c01f50e137724f99",
+    "aopalliance-repackaged-3.0.6.jar": "a82b6d1a348324ef88dc807c7cd7aaf633985cbff7b30036fb61a1b86981d840",
+    "argparse4j-0.7.0.jar": "65ceb669d88f63306c680f8088bbf765bbca72d288a61a03703000076c3d3f56",
+    "caffeine-3.2.0.jar": "ec411dfdf0c03f25218648ce89861630b71680e5858a9a7278ebac8e55cab3d7",
+    "classgraph-4.8.179.jar": "16558357f234052370109127a45d69a9bd6d8646925594792634486dc48b159d",
+    "commons-beanutils-1.11.0.jar": "9e44ba68ec9a3f21286fa2a8bbb003b735c0f69101bb43144b79f4f8aaa74709",
+    "commons-collections-3.2.2.jar": "eeeae917917144a68a741d4c0dff66aa5c5c5fd85593ff217bced3fc8ca783b8",
+    "commons-digester-2.1.jar": "e0b2b980a84fc6533c5ce291f1917b32c507f62bcad64198fff44368c2196a3d",
+    "commons-logging-1.3.5.jar": "6d7a744e4027649fbb50895df9497d109f98c766a637062fe8d2eabbb3140ba4",
+    "commons-validator-1.10.1.jar": "ed74711a78d793ca37f6075e4a1e93d107233dfd20d0bb17e32bad88d38e56aa",
+    "connect-api-4.3.1.jar": "1bcaea58317cadb37648cd2214221c8c77664f5363691f26addae42cd44aef55",
+    "connect-basic-auth-extension-4.3.1.jar": "b68cb6865392055b47a9ee5275587cab4523aeb215716bcfda0fc6eff62b75a6",
+    "connect-file-4.3.1.jar": "6159a279a5bcc62b9ad0940c8c5033c6d485d9bff7b9dfe1e92e65320d88ea04",
+    "connect-json-4.3.1.jar": "cf79e07615bfc317e4e2da7b6848e030f2853a89af69d69dfef1e70e02d4bd11",
+    "connect-mirror-4.3.1.jar": "87e4233f391954b3282d124303bc5726e73dbcb914a68045650dcd167900b56b",
+    "connect-mirror-client-4.3.1.jar": "634745ea129e6b3566bde6ccdb0b7a3de173607ce316b3638c96e0d5bec45cb8",
+    "connect-runtime-4.3.1.jar": "76612e36e4cdb46a46572b5620b7aa47ad53d40a1f7c463bd6964875dad0b68a",
+    "connect-transforms-4.3.1.jar": "b23c7c74f64c0eef93b9927af1cf544fd193460da8ae66a98d6c2bd6598ef6a4",
+    "hash4j-0.22.0.jar": "23028a3fd006e530bf495f551083208187cafd8f80624d048eba56442f16a50e",
+    "hk2-api-3.0.6.jar": "c049a21a9fd9316c7e291a2bc28835f70d25affb623dc1599a83b6b84ec83a4f",
+    "hk2-locator-3.0.6.jar": "e2664d21b017c3aa1518b913264602bea604edc54d356103c10afba99abd04fc",
+    "hk2-utils-3.0.6.jar": "fc84d85a0744b576d9ec7db5845eeb998ed532a9450dd19c8c922c3ee6926206",
+    "jackson-annotations-2.21.jar": "53ca085f4a150f703f49e1aabd935bd03b43e1ea3d55d135438292af22cef56b",
+    "jackson-core-2.21.2.jar": "12e8655b100267b44d0f14d01b1f5082a5105e616174dc4307be1a761e92407b",
+    "jackson-databind-2.21.2.jar": "8c982f01f148d805f0aaac2339011244757e0df7c6ff8951f2fa3f433b8ed849",
+    "jackson-dataformat-csv-2.21.2.jar": "682f8c7977e02a42748426bf54946e32e52e2f80b84b6642801ab12bd541368a",
+    "jackson-dataformat-yaml-2.21.2.jar": "d25551812fa0c14f37cabaa9401e63eadcea42ce36311183af5622d5bc8a1bc7",
+    "jackson-datatype-jdk8-2.21.2.jar": "e581bbf3fc5622d16b57366dd41e10fc56921fb202879de2ef487f87dd9b30e7",
+    "jackson-jakarta-rs-base-2.21.2.jar": "40f4c57a2e6f34505338da188724e7ace7b343dde3964b76a12c993cdedad1af",
+    "jackson-jakarta-rs-json-provider-2.21.2.jar": "ca969ea798efedc4b56589505fab51eb69c11a361b2e7583855593fc8690a666",
+    "jackson-module-blackbird-2.21.2.jar": "5ed62cdcd357a24b73de9280e167aa014d7b4c17d04823844d482274cf07097e",
+    "jackson-module-jakarta-xmlbind-annotations-2.21.2.jar": "f507551c823b137c8487275fc171652a78a4f083732e349e1d3cb42e568dd7e4",
+    "jakarta.activation-2.0.1.jar": "b9e24b7dd6e07495562ea96531be3130c96dba4d78e1dfd88adbbdebf4332871",
+    "jakarta.activation-api-2.1.0.jar": "56e8d994095fe49c28138c60291482f66f18d12ac2b720e938697dce6a3135c7",
+    "jakarta.annotation-api-2.1.1.jar": "5f65fdaf424eee2b55e1d882ba9bb376be93fb09b37b808be6e22e8851c909fe",
+    "jakarta.inject-api-2.0.1.jar": "f7dc98062fccf14126abb751b64fab12c312566e8cbdc8483598bffcea93af7c",
+    "jakarta.servlet-api-6.0.0.jar": "c034eb1afb158987dbb53a5fea0cadf611c8dae8daadd59c44d9d5ab70129cef",
+    "jakarta.validation-api-3.0.2.jar": "291c25e6910cc6a7ebd96d4c6baebf6d7c37676c5482c2d96146e901b62c1fc9",
+    "jakarta.ws.rs-api-3.1.0.jar": "6b3b3628b8b4aedda0d24c3354335e985497d8ef3c510b8f3028e920d5b8663d",
+    "jakarta.xml.bind-api-3.0.1.jar": "b8fb4bee3ff5b5c1ef77144d8411316018d7bbd41fcf1ede0646f7978546b867",
+    "javassist-3.30.2-GA.jar": "eba37290994b5e4868f3af98ff113f6244a6b099385d9ad46881307d3cb01aaf",
+    "javax.activation-api-1.2.0.jar": "43fdef0b5b6ceb31b0424b208b930c74ab58fac2ceeb7b3f6fd3aeb8b5ca4393",
+    "javax.annotation-api-1.3.2.jar": "e04ba5195bcd555dc95650f7cc614d151e4bcd52d29a10b8aa2197f3ab89ab9b",
+    "jaxb-api-2.3.1.jar": "88b955a0df57880a26a74708bc34f74dcaf8ebf4e78843a28b50eae945732b06",
+    "jersey-client-3.1.10.jar": "96cf86c23b515da20a30a39633a920f12a420d1e5f02c55ef5577ca2694d11c6",
+    "jersey-common-3.1.10.jar": "b8df5de87d48d6abf555f340755a056c8cb29a660af958e959db8a4cb3552b54",
+    "jersey-container-servlet-3.1.10.jar": "4aadc66d2d36afb273b3898581d6aa51e0f992308d56fd51b8e3201efa461f67",
+    "jersey-container-servlet-core-3.1.10.jar": "fd15e7e37215d772ccdae8d4076c41a11ad3fec9ca88a1f8a8f6dacf4663bb69",
+    "jersey-hk2-3.1.10.jar": "00ed71c496a856ac1f73272482a7abe27b5a96b823c29cc08f4b708c8d3e647e",
+    "jersey-server-3.1.10.jar": "1b33a9be417b72f7ceef3afe9780781b66122b0f1db78f2f82502988072cfab0",
+    "jetty-alpn-client-12.0.34.jar": "dde78ab533961bb853a8ce5a23a90d4dd54cd6522e9e7f90566ca7f44e035ef9",
+    "jetty-client-12.0.34.jar": "b77b7535a809c78af71126b90aed0836cc9f9ac80d32e5cbf7a07025ace14401",
+    "jetty-ee10-servlet-12.0.34.jar": "08030501c5868ba348e0e349121cb3493586c29d438c725bf76b0559e8d5f5ed",
+    "jetty-ee10-servlets-12.0.34.jar": "bf9fe841e09f39d498838965b57e52b79f12e7bd5e259e645cc9e0a6cbe96426",
+    "jetty-http-12.0.34.jar": "63890ecc5bb8bf26c4dd0952ef2d0d3dd3f7434b37b21e51f7ea8dfbe96b9dc0",
+    "jetty-io-12.0.34.jar": "3704daeb82b39041ee5e6f810636c2fcb9a10476cdbf0fd067e584ed3110d66a",
+    "jetty-security-12.0.34.jar": "e9a595eff775859a5461c0ce05e27ace5182ee1fdc1b17016453fa41ca0e1560",
+    "jetty-server-12.0.34.jar": "fb7a1401b7b2358e9cb975764c54fac72fcecd7ae5199369041118603cd3fd7d",
+    "jetty-session-12.0.34.jar": "a161ae531c5d6a695f17a547fdf90746dcd929f1abac5c60c7061a6fb20d346f",
+    "jetty-util-12.0.34.jar": "3f8906cd72428d87dbbc0bd915192ce0f426e9db7805d3b0337588c1b6d7206e",
+    "jline-3.30.4.jar": "a177738b52cf41ff4865c4a441c4fc7fdf2262648159e0de6ced2f842acf52e9",
+    "jopt-simple-5.0.4.jar": "df26cc58f235f477db07f753ba5a3ab243ebe5789d9f89ecf68dd62ea9a66c28",
+    "jose4j-0.9.6.jar": "7314af50cde9c99e8eaf43eee617a23edcc6bb43036221064355094999d837ef",
+    "jspecify-1.0.0.jar": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab",
+    "kafka-clients-4.3.1.jar": "dc3d65e3ac811a446184ea1dca0fe9cf957c2d8984dcb4668d01f4b77fc8f50e",
+    "kafka-coordinator-common-4.3.1.jar": "08ca85027d8dbd81edf925743b5b29ad62be04b511255de1650df39e16c426b6",
+    "kafka-group-coordinator-4.3.1.jar": "a9e89a36c909f3e115164eb0198c420a4e905c01c0f989478d1664a2b7cb24cc",
+    "kafka-group-coordinator-api-4.3.1.jar": "7f83b525733349e746a9650f8daa76b8ba546ba911a9a69ec6aaefcf756e57f2",
+    "kafka-metadata-4.3.1.jar": "6c69c72e609dd0cfaeb2211e4d85c2d40dba4d278aa6e799b9c12f8e7e320cd0",
+    "kafka-raft-4.3.1.jar": "6561ca329cdde1b835c9dc44dba4e473ab51b7d516c426fbdacd709c11a4b9cf",
+    "kafka-server-4.3.1.jar": "9feccdde22eee9d0848ba8399269ef532a8fcaf7cddc1bfc97bf69375e162e3c",
+    "kafka-server-common-4.3.1.jar": "a6091f8dff9cd45720e5686ac1658f35e02d5826e4fc14eb19c2bc51ac0ad654",
+    "kafka-share-coordinator-4.3.1.jar": "096666b3c7b52909c148d8255d896e91684a8cb11352012960b56e37426cc8f8",
+    "kafka-shell-4.3.1.jar": "f38b35e9b72f57c3fa305cdef6639d2ae2c289630cf4f6eeccf3252677726201",
+    "kafka-storage-4.3.1.jar": "9c64393854251b11633382472d6df8ea5985bd423a41397d93bdbc64a128f3a7",
+    "kafka-storage-api-4.3.1.jar": "74fb0434cc9d9e6ed61d7351431bea36fbc8af5f9323f65f4c5da0ac5cb0e5b9",
+    "kafka-streams-4.3.1.jar": "d8603bb0066ff1761d65138242182a91b8bf33cf011bb345fad4e12dcd3e5517",
+    "kafka-streams-examples-4.3.1.jar": "72f0581e2142b401485840896a244782f21092caf2c659b83193407c960bbd02",
+    "kafka-streams-scala_2.13-4.3.1.jar": "d6d3bc918815a191e587329cdbe28db4a3309ebc2ed71b495ab1be998e2c0bbe",
+    "kafka-streams-test-utils-4.3.1.jar": "c371f5cdc60b845eedb1604b316351908d79cd9f95f7d0567a3d34dc0ac98809",
+    "kafka-tools-4.3.1.jar": "463e92a3ae2a3daec073c4e43f628d83fe0228087f0b8a6e93b29b29df8287c1",
+    "kafka-tools-api-4.3.1.jar": "809471933daf794080bebebdc43e47728de0b3fffb8d52c00149e2f7e1774c43",
+    "kafka-transaction-coordinator-4.3.1.jar": "8a82895130d54bd01350509e02f7d9d7d4b9b9069eb7435c8d6f588a87ddca30",
+    "kafka_2.13-4.3.1.jar": "ccf2100586b2d2af972015afd83322aa355f41b2852f1b1e1e992b0b392d8a7b",
+    "log4j-1.2-api-2.25.4.jar": "7b1a61507950ea67b3d6b11437ee37fad9db06f855c92c25c08aee074c757395",
+    "log4j-api-2.25.4.jar": "c4b642a7f047275215de117e0e3847eb2c7711d84a0aa7433e7b3c096daf341d",
+    "log4j-core-2.25.4.jar": "10fee2c0485d54fa44ee75d314f6295508f7b932281873db61a91b88073200e6",
+    "log4j-slf4j-impl-2.25.4.jar": "7ac68a0afcc83d54f48d116d79370a43f0a2a6b71b5c1d6dda943bb6a95ddbaa",
+    "lz4-java-1.10.2.jar": "252dabd586d22149a31661a8afc1a50747714eb1a298bd4a6e780c8c91a13866",
+    "maven-artifact-3.9.15.jar": "f154c31f15ac97c37b9cdf9f8d63cde5053c470d2daf54df7dfd3bb3c9e501c6",
+    "metrics-core-2.2.0.jar": "6b7a14a6f34c10f8683f7b5e2f39df0f07b58c7dff0e468ebbc713905c46979c",
+    "opentelemetry-proto-1.3.2-alpha.jar": "5e5d61a86cbdbc1db8c806894b6e4e253ea151671903ed51c021c705f7c37440",
+    "osgi-resource-locator-1.0.3.jar": "aab5d7849f7cfcda2cc7c541ba1bd365151d42276f151c825387245dfde3dd74",
+    "pcollections-4.0.2.jar": "2bbeef5797a241300c4f7513cd546239629ed7deda4fc0c31df90bb95f5f13ef",
+    "plexus-utils-3.6.1.jar": "05a63effd67e2d6b9d610cc82e2bd7473289d34802e57a529b28110f28af5679",
+    "protobuf-java-3.25.5.jar": "8540247fad9e06baefa8fb45eb313802d019f485f14300e0f9d6b556ed88e753",
+    "re2j-1.8.jar": "7b52c72156dd7f98b3237a5b35c1d34fba381b21048c89208913ad80a45dfbd7",
+    "rocksdbjni-10.1.3.jar": "e7f925287d9fe2574fb7c7a86f7facaa9b8ab602a2eed0e598bf633528121498",
+    "scala-library-2.13.18.jar": "4e85d96ff7bc7dc627985523c3541b9917aaa08e956391380c42db21a2c4e5a0",
+    "scala-logging_2.13-3.9.6.jar": "0ad0c3f4d89d538b3b6c300158555e266aa69cf1b5f6522aba8b5bad238eb994",
+    "scala-reflect-2.13.18.jar": "6935ff1982b2ac93d695f15aa66921be2f602921277afe002f018fd8c7d6e29b",
+    "slf4j-api-1.7.36.jar": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0",
+    "snakeyaml-2.5.jar": "e6682acf1ace77508ef13649cbf4f8d09d2cf5457bdb61d25ffb6ac0233d78dd",
+    "snappy-java-1.1.10.7.jar": "4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36",
+    "swagger-annotations-2.2.39.jar": "ea3017076809f8104ff8a130dc4c12db8c67595aa1d978104a9beca8277a7d29",
+    "trogdor-4.3.1.jar": "33d3701e338f8a410dcf411b019d802dd471515db0a95bbd7f6a899d092a412f",
+    "zstd-jni-1.5.6-10.jar": "b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df"
+  },
+  "client_java": "openjdk 21.0.11 2026-04-21 LTS\nOpenJDK Runtime Environment Temurin-21.0.11+10 (build 21.0.11+10-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.11+10 (build 21.0.11+10-LTS, mixed mode, sharing)",
+  "completed_trials": 108,
+  "completed_at": "2026-10-03T05:30:09.213Z"
+}
