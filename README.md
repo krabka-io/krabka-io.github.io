@@ -84,7 +84,7 @@ npm run check-wasi
 # Sync the broker's proof sessions and Coma files for the proof explorer
 npm run sync-proofs
 
-# Build Why3 and Alt-Ergo to JavaScript with Bazel (needs Docker) for the browser re-check
+# Build Why3 and browser provers with Bazel (needs Docker) for the browser re-check
 npm run build:why3-web
 
 # Check that the synced broker verification catalog still parses into the ledger rows
@@ -122,7 +122,7 @@ npm run preview
 
 ### 4b. Proof Explorer (`/docs/proof-explorer`)
 - `scripts/sync-proofs.mjs` copies the broker's Why3find proof sessions (`verif/**/proof.json`) and the Coma files Creusot generated into `src/data/proof-sessions.json` and `public/proofs/coma/`. The page is a full-window app: the sessions by module on the left (arrow keys walk them, `/` filters), and for the open session tabs for its proof tree (tactics, provers, times), the `[@expl]` obligations parsed from the Coma with their source spans, and the generated Coma itself, syntax-highlighted by `public/proofs/highlight.js`.
-- With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo compiled to JavaScript discharges each leaf through Why3's SMT-LIB driver.
+- With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo (JavaScript), Z3 or cvc5 (WebAssembly) re-check each supported leaf through its Why3 SMT-LIB driver. Z3 enables shared memory with a scoped service worker, reloads once and resumes the check; CVC4 leaves stay recorded-only.
 
 ### 5. Cluster Lab (`/docs/lab`)
 - A distributed-systems playground: real `krabka-broker` processes, a schema registry, producers, consumers and `krabka-client-streams` apps placed on a canvas. The brokers are the real broker compiled for `wasm32-wasip1` (`playground/broker-wasi`, staged by `npm run build:broker`, contract in `playground/docs/lab-real-broker.md`) and run in Web Workers on the browser WASI runtime in `public/playground/wasi/`. Clients and apps run as one sans-IO simulation inside the `playground/` crate (`playground/src/lab/`, contract in `playground/docs/lab-design.md`). The page owns the clock and the virtual network; faults (kill, restart, wipe, isolate, partition, latency, loss) are deliberate. The network, the clients and the apps replay under the seed; the broker processes draw real randomness and do not.
@@ -200,7 +200,7 @@ krabka-io.github.io/
 │   ├── wasi-guest/           # Test guest for the browser WASI runtime
 │   ├── docs/                 # lab-design.md and lab-real-broker.md
 │   └── build.sh              # Compiles to WebAssembly in public/playground/
-├── why3-web/                 # Why3 and Alt-Ergo compiled to JavaScript with Bazel, for the proof explorer
+├── why3-web/                 # Why3 and browser provers, built with Bazel for the proof explorer
 ├── public/
 │   ├── brand/                # Stable brand marks and lockups
 │   ├── charts/               # Aggregated Helm repository: index.yaml and tarballs
