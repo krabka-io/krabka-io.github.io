@@ -32,7 +32,11 @@ function shell(code, name, options = {}) {
   return run('bash', ['-euo', 'pipefail', write(`${name}.sh`, code)], work, options);
 }
 function localAssets(code) {
-  return code.replaceAll('https://krabka.io/quickstart/', `${mode === 'helm' ? '' : 'file://'}${root}/public/quickstart/`);
+  const assets = code.replaceAll('https://krabka.io/quickstart/', `${mode === 'helm' ? '' : 'file://'}${root}/public/quickstart/`);
+  // Test the packaged charts this branch will publish, including their versions.
+  return mode === 'helm'
+    ? assets.replace(/krabka\/(krabka-[\w-]+) --version ([\d.]+)/g, (_, chart, version) => `${root}/public/charts/${chart}-${version}.tgz --version ${version}`)
+    : assets;
 }
 async function guide(language) {
   const page = `docs/streams-${language}/getting-started`;
