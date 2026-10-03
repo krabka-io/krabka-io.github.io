@@ -8,7 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { CASES, VENDORS, aggregateSample, resourceSummary, validateDelivery, publishResults } from './benchmark-results.mjs';
+import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
+import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
@@ -27,23 +28,29 @@ const DEFAULT_IMAGES = {
 const { values: options } = parseArgs({ options: {
   'krabka-image': { type: 'string', default: DEFAULT_IMAGES.krabka },
   'redpanda-image': { type: 'string', default: DEFAULT_IMAGES.redpanda },
+  'suite': { type: 'string', default: 'throughput' },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
 } });
 if (options.help) {
-  console.log(`Usage: npm run benchmark -- [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
+  console.log(`Usage: npm run benchmark -- [--suite throughput|curves] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
 Full: 108 measured trials, three repetitions, RF1/RF3, all three vendors.
-Smoke: same cases and resource limits, one repetition, small record counts; never publishes.
+Curves: 72 trials; RF1 load/memory sweeps and RF3 leader pause/resume; max 16 GiB RAM including client.
+Smoke: all cases once, short durations/counts; never publishes.
 Dry run: validates the host and resolves images; starts no containers and publishes nothing.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
-14 available logical CPUs, 34 GiB available RAM, and 150 GiB free disk (4 GiB for smoke).
+14 available logical CPUs and 150 GiB free disk for full runs.
+Throughput: 34 GiB available RAM, 4 GiB free disk for smoke.
+Curves: 20 GiB available RAM, 24 GiB free disk for smoke.
 See benchmarks/README.md for methodology and retained artifacts.`);
 } else {
   await main().catch(error => { console.error(`benchmark: ${error.message}`); process.exitCode = 1; });
 }
 
 async function main() {
+  assert.ok(['throughput', 'curves'].includes(options.suite), 'suite must be throughput or curves');
+  const curves = options.suite === 'curves';
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')}-${randomUUID().slice(0, 8)}`;
   const artifacts = path.join(ROOT, '.benchmarks', runId);
   await fs.mkdir(artifacts, { recursive: true });
@@ -60,10 +67,12 @@ async function main() {
   let lock;
   let resourceCreationStarted = false;
   const trials = [];
+  const failures = [];
   const repetitions = options.smoke ? 1 : 3;
-  const cases = CASES.map(c => options.smoke ? { ...c, records: c.bytes > 1024 ? 200 : 2000 } : { ...c });
+  const cases = curves ? curveCases(options.smoke)
+    : CASES.map(c => options.smoke ? { ...c, records: c.bytes > 1024 ? 200 : 2000 } : { ...c });
   const provenance = {
-    schema_version: 1, run_id: runId, started_at: new Date().toISOString(),
+    schema_version: 1, suite: options.suite, run_id: runId, started_at: new Date().toISOString(),
     mode: options.smoke ? 'smoke' : 'full', status: 'running', repetitions,
     images: {}, cases, workload_source: WORKLOAD,
     contract: { partitions: 12, acks: 'all', idempotence: true, batch_bytes: 65536, linger_ms: 5,
@@ -77,6 +86,23 @@ async function main() {
       durability: 'buffered writes; no identical crash-durability claim',
     },
   };
+  if (curves) {
+    provenance.workload_source = { path: 'benchmarks/BenchmarkTimeline.java', license: 'Apache-2.0',
+      sha256: createHash('sha256').update(await fs.readFile(path.join(ROOT, 'benchmarks/BenchmarkTimeline.java'))).digest('hex') };
+    delete provenance.contract.warmup_records;
+    delete provenance.contract.workload_timeout_seconds;
+    Object.assign(provenance.contract, { broker_memory_bytes: 4 * GIB,
+      redpanda_memory_bytes: 3 * GIB, redpanda_reserve_bytes: GIB / 2,
+      required_available_memory_bytes: 20 * GIB, maximum_cluster_and_client_memory_bytes: 16 * GIB,
+      workload_sampling_ms: 1000, workload_max_records: options.smoke ? 16_000_000 : 64_000_000,
+      warmup_seconds: options.smoke ? 2 : 5, drain_timeout_seconds: 60, workload_deadline_extra_seconds: 120,
+      producer_max_block_ms: 30000, producer_request_timeout_ms: 10000, producer_delivery_timeout_ms: 45000,
+      budget_source: 'per-trial budget overrides base broker allocations',
+      lag_definition: 'max(0, acknowledged - consumed); offered backlog includes unsent scheduled records',
+      fault: 'pause/resume broker leading partition 0; same containers and volumes',
+      latency: 'HDR 3 significant digits, microseconds; scheduled send to ack/consume; measured cohort includes drain',
+    });
+  }
   const save = () => fs.writeFile(path.join(artifacts, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
 
   async function command(executable, args, { timeout = 120_000, output, ignoreAbort = false } = {}) {
@@ -181,13 +207,15 @@ async function main() {
     assert.ok(aioMax - aioUsed >= 3 * 4 * 2050 + 128, 'insufficient available Linux AIO slots for Redpanda RF3');
     const meminfo = await fs.readFile('/proc/meminfo', 'utf8');
     const memoryAvailable = Number(meminfo.match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-    assert.ok(memoryAvailable >= 34 * GIB, `need 34 GiB available RAM (three 10 GiB brokers + 4 GiB client); found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
+    const requiredMemory = (curves ? 20 : 34) * GIB;
+    assert.ok(memoryAvailable >= requiredMemory, `need ${requiredMemory / GIB} GiB available RAM; found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
     const disk = await fs.statfs(ROOT);
     const freeDisk = disk.bavail * disk.bsize;
-    assert.ok(freeDisk >= (options.smoke ? 4 : 150) * GIB, `insufficient disk: ${(freeDisk / GIB).toFixed(1)} GiB free`);
+    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : 150) * GIB;
+    assert.ok(freeDisk >= requiredDisk, `insufficient disk: ${(freeDisk / GIB).toFixed(1)} GiB free`);
     const dockerDisk = await fs.statfs(info.DockerRootDir);
     const dockerFreeDisk = dockerDisk.bavail * dockerDisk.bsize;
-    assert.ok(dockerFreeDisk >= (options.smoke ? 4 : 150) * GIB,
+    assert.ok(dockerFreeDisk >= requiredDisk,
       `insufficient Docker storage: ${(dockerFreeDisk / GIB).toFixed(1)} GiB free`);
     const ownCgroup = (await fs.readFile('/proc/self/cgroup', 'utf8')).match(/^0::(.+)$/m)?.[1];
     assert.ok(ownCgroup, 'host cgroup v2 is required');
@@ -220,7 +248,8 @@ async function main() {
     };
     provenance.runner = {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
-      source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs', 'benchmarks/BenchmarkAdmin.java'].map(async name =>
+      source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
+        'scripts/benchmark-curves.mjs', 'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
     console.log(`benchmark ${runId}: ${provenance.mode}; artifacts ${artifacts}`);
@@ -253,6 +282,7 @@ async function main() {
     assert.equal(createHash('sha256').update(source).digest('hex'), WORKLOAD.sha256, 'upstream workload hash differs');
     await fs.writeFile(path.join(artifacts, 'BrokerPerformanceWorkload.java'), source);
     await fs.copyFile(path.join(ROOT, 'benchmarks', 'BenchmarkAdmin.java'), path.join(artifacts, 'BenchmarkAdmin.java'));
+    await fs.copyFile(path.join(ROOT, 'benchmarks', 'BenchmarkTimeline.java'), path.join(artifacts, 'BenchmarkTimeline.java'));
     const kafkaImage = provenance.images.kafka.reference;
     const jarContainer = await createContainer([kafkaImage], 'client-jars');
     await docker(['cp', `${jarContainer}:/opt/kafka/libs`, path.join(artifacts, 'libs')]);
@@ -260,7 +290,7 @@ async function main() {
     const classes = path.join(artifacts, 'classes');
     await fs.mkdir(classes);
     await command('javac', ['--release', '17', '-cp', `${artifacts}/libs/*`, '-d', classes,
-      `${artifacts}/BrokerPerformanceWorkload.java`, `${artifacts}/BenchmarkAdmin.java`],
+      `${artifacts}/BrokerPerformanceWorkload.java`, `${artifacts}/BenchmarkAdmin.java`, `${artifacts}/BenchmarkTimeline.java`],
     { output: path.join(artifacts, 'compile') });
     const jars = (await fs.readdir(path.join(artifacts, 'libs'))).filter(f => f.endsWith('.jar')).sort();
     provenance.client_jars = Object.fromEntries(await Promise.all(jars.map(async name =>
@@ -268,17 +298,22 @@ async function main() {
     provenance.client_java = await oneShot(['--entrypoint', 'java', kafkaImage, '--version'], 'client-version');
     await save();
 
-    const clientArgs = () => [
+    const clientArgs = (extra = []) => [
       '--network', network, '--cpuset-cpus', provenance.cpu_sets.client.join(','),
       '--cpus', String(provenance.cpu_sets.client.length), '--memory', '4g', '--memory-swap', '4g',
       '--ulimit', 'nofile=131072:131072', '--volume', `${classes}:/bench/classes:ro`,
+      ...extra,
       '--entrypoint', 'java', kafkaImage, '-Xms256m', '-Xmx2g', '-cp', '/bench/classes:/opt/kafka/libs/*',
     ];
     const runClient = (args, label, output, timeout = 120_000) => oneShot([...clientArgs(), ...args], label, { output, timeout });
 
-    async function launchCluster(vendor, rf, repetition, directory) {
+    async function launchCluster(vendor, rf, repetition, directory, budget = {
+      broker_memory_bytes: 10 * GIB, kafka_heap_bytes: GIB, redpanda_memory_bytes: 8 * GIB,
+      redpanda_reserve_bytes: GIB,
+    }) {
       const available = Number((await fs.readFile('/proc/meminfo', 'utf8')).match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-      assert.ok(available >= (rf * 10 + 4) * GIB, `RF${rf} needs ${rf * 10 + 4} GiB available RAM before cluster startup`);
+      const needed = rf * budget.broker_memory_bytes + 4 * GIB + (curves ? 4 * GIB : 0);
+      assert.ok(available >= needed, `RF${rf} needs ${needed / GIB} GiB available RAM before cluster startup`);
       resourceCreationStarted = true;
       network = await docker(['network', 'create', '--label', `krabka.benchmark=${runId}`, `krabka-bench-${runId}-${vendor}-rf${rf}-${repetition}`]);
       const names = Array.from({ length: rf }, (_, i) => `broker-${i}`);
@@ -298,7 +333,7 @@ async function main() {
         const dataPath = { krabka: '/data', kafka: '/var/lib/kafka/data', redpanda: '/var/lib/redpanda/data' }[vendor];
         const common = ['--hostname', names[i], '--network', network, '--network-alias', names[i],
           '--cpuset-cpus', provenance.cpu_sets.brokers[i].join(','), '--cpus', '4',
-          '--memory', '10g', '--memory-swap', '10g', '--ulimit', 'nofile=131072:131072',
+          '--memory', String(budget.broker_memory_bytes), '--memory-swap', String(budget.broker_memory_bytes), '--ulimit', 'nofile=131072:131072',
           '--volume', `${volume}:${dataPath}`];
         let args;
         if (vendor === 'krabka') {
@@ -318,7 +353,7 @@ async function main() {
             KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER', KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT',
             KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: rf, KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: rf,
             KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: rf === 1 ? 1 : 2, KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0,
-            KAFKA_HEAP_OPTS: '-Xms1g -Xmx1g', KAFKA_LOG_DIRS: '/var/lib/kafka/data',
+            KAFKA_HEAP_OPTS: `-Xms${budget.kafka_heap_bytes / 1024 ** 2}m -Xmx${budget.kafka_heap_bytes / 1024 ** 2}m`, KAFKA_LOG_DIRS: '/var/lib/kafka/data',
             CLUSTER_ID: Buffer.from(clusterId.replaceAll('-', ''), 'hex').toString('base64url'),
           };
           args = [...common, ...Object.entries(env).flatMap(([key, value]) => ['--env', `${key}=${value}`]), image];
@@ -345,7 +380,8 @@ rpk:
             '--entrypoint', '/bin/bash', kafkaImage, '-c',
             'cp /input.yaml /data/redpanda.yaml && chown 101:101 /data/redpanda.yaml'], 'redpanda-config');
           args = [...common, image, 'redpanda', 'start', '--config=/var/lib/redpanda/data/redpanda.yaml',
-            '--smp=4', '--memory=8G', '--reserve-memory=1G', '--overprovisioned', '--check=false',
+            '--smp=4', `--memory=${budget.redpanda_memory_bytes / 1024 ** 2}M`,
+            `--reserve-memory=${budget.redpanda_reserve_bytes / 1024 ** 2}M`, '--overprovisioned', '--check=false',
             '--max-networking-io-control-blocks=1024', '--default-log-level=warn'];
         }
         const id = await createContainer(args, `rf${rf}-${vendor}-${repetition}-broker-${i}`);
@@ -396,16 +432,11 @@ rpk:
         inactive_file_bytes: counter(stats, 'inactive_file'), oom_kill: counter(events, 'oom_kill') };
     }
 
-    async function trial(vendor, rf, repetition, workload, brokers, directory, warmup = false) {
-      controller.signal.throwIfAborted();
-      const prefix = warmup ? 'warmup' : workload.id;
-      const topic = `bench-${prefix}`;
-      const topicSettings = await runClient(['BenchmarkAdmin', 'topic', 'broker-0:9092', topic, String(rf),
-        String(rf === 1 ? 1 : 2), vendor], 'topic', path.join(directory, `${prefix}.topic`));
-      await fs.writeFile(path.join(directory, `${prefix}.topic.json`), `${topicSettings}\n`);
+    async function measureResources(brokers, filename, action, poll = async () => {}) {
       const samples = [];
+      const startedAt = new Date().toISOString();
       const start = performance.now();
-      const sampleFile = await fs.open(path.join(directory, `${prefix}.resources.jsonl`), 'w');
+      const sampleFile = await fs.open(filename, 'w');
       const samplingController = new AbortController();
       let sampleError;
       async function sample() {
@@ -422,14 +453,15 @@ rpk:
           await delay(250, undefined, { signal: samplingController.signal }).catch(error => {
             if (error.name !== 'AbortError') throw error;
           });
-          if (!samplingController.signal.aborted) await sample();
+          if (!samplingController.signal.aborted) {
+            await sample();
+            await poll();
+          }
         }
       })().catch(error => { sampleError = error; controller.abort(error); });
       let output;
       try {
-        output = await runClient(['BrokerPerformanceWorkload', 'broker-0:9092', topic, `${topic}-group`,
-          String(workload.records), String(workload.bytes), String(workload.rate), '900',
-          workload.compression, workload.payload], 'workload', path.join(directory, `${prefix}.workload`), 960_000);
+        output = await action();
       } finally {
         samplingController.abort();
         await sampling;
@@ -437,18 +469,130 @@ rpk:
         finally { await sampleFile.close(); }
       }
       if (sampleError) throw sampleError;
+      return { output, samples, startedAt };
+    }
+
+    async function trial(vendor, rf, repetition, workload, brokers, directory, warmup = false) {
+      controller.signal.throwIfAborted();
+      const prefix = warmup ? 'warmup' : workload.id;
+      const topic = `bench-${prefix}`;
+      const topicSettings = await runClient(['BenchmarkAdmin', 'topic', 'broker-0:9092', topic, String(rf),
+        String(rf === 1 ? 1 : 2), vendor], 'topic', path.join(directory, `${prefix}.topic`));
+      await fs.writeFile(path.join(directory, `${prefix}.topic.json`), `${topicSettings}\n`);
+      const { output, samples, startedAt } = await measureResources(brokers,
+        path.join(directory, `${prefix}.resources.jsonl`), () => runClient([
+          'BrokerPerformanceWorkload', 'broker-0:9092', topic, `${topic}-group`,
+          String(workload.records), String(workload.bytes), String(workload.rate), '900',
+          workload.compression, workload.payload], 'workload', path.join(directory, `${prefix}.workload`), 960_000));
       const measured = JSON.parse(output);
       validateDelivery(measured, workload.records);
       const metrics = { ...measured, ...resourceSummary(samples, measured.sent) };
       const result = { vendor, rf, min_isr: vendor === 'redpanda' ? null : (rf === 1 ? 1 : 2),
         acknowledgment: vendor === 'redpanda' ? `Raft majority (${rf === 1 ? 1 : 2})` : 'all in-sync replicas', repetition, case: workload,
-        workload: measured, metrics, topic: JSON.parse(topicSettings) };
+        workload: measured, metrics, topic: JSON.parse(topicSettings),
+        time_series: resourceTimeSeries(samples, startedAt) };
       await fs.writeFile(path.join(directory, `${prefix}.json`), `${JSON.stringify(result, null, 2)}\n`);
       if (!warmup) trials.push(result);
       console.log(`${warmup ? 'Warm-up' : `Trial ${trials.length}`}: RF${rf} ${vendor} round ${repetition} ${prefix}: ${measured.records_per_second.toFixed(0)} records/s, ${metrics.cpu_us_per_record.toFixed(2)} CPU µs/record`);
     }
 
-    for (const rf of [1, 3]) {
+    async function curveTrial(vendor, repetition, workload, brokers, directory, budget) {
+      const rf = workload.rf;
+      const topic = `bench-${workload.id}`;
+      const bootstrap = brokers.map(b => `${b.name}:9092`).join(',');
+      const topicSettings = JSON.parse(await runClient(['BenchmarkAdmin', 'topic', bootstrap, topic,
+        String(rf), String(rf === 1 ? 1 : 2), vendor], 'topic', path.join(directory, 'topic')));
+      let leader;
+      if (workload.kind === 'recovery') {
+        leader = JSON.parse(await runClient(['BenchmarkAdmin', 'leader', bootstrap, topic], 'leader', path.join(directory, 'leader')));
+        assert.ok(brokers[leader.broker_id], 'leader is outside this run');
+      }
+      const events = [];
+      let workloadStart;
+      let paused = false;
+      const event = async action => {
+        const broker = brokers[leader.broker_id];
+        await docker([action, broker.id]);
+        paused = action === 'pause';
+        events.push({ action, broker_id: leader.broker_id, container_id: broker.id,
+          led_partitions: leader.led_partitions, at: new Date().toISOString(),
+          elapsed_ms: performance.now() - workloadStart });
+        await fs.writeFile(path.join(directory, 'events.json'), `${JSON.stringify(events, null, 2)}\n`);
+      };
+      const poll = async () => {
+        if (!leader) return;
+        if (workloadStart === undefined) {
+          const header = await fs.readFile(path.join(directory, 'started.json'), 'utf8').catch(error => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          if (!header) return;
+          workloadStart = performance.now() - (Date.now() - Date.parse(JSON.parse(header).started_at));
+        }
+        const elapsed = performance.now() - workloadStart;
+        if (events.length === 0 && elapsed >= (workload.warmup_seconds + workload.pause_after_seconds) * 1000) {
+          await event('pause');
+        } else if (paused && elapsed >= events[0].elapsed_ms + workload.pause_seconds * 1000) {
+          await event('unpause');
+        }
+      };
+      let measurement;
+      try {
+        measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
+          () => oneShot([...clientArgs(['--user', String(process.getuid()), '--volume', `${directory}:/bench/output`]),
+            'BenchmarkTimeline', bootstrap, topic, String(workload.rate), String(workload.warmup_seconds),
+            String(workload.seconds), '/bench/output', String(provenance.contract.workload_max_records)], 'timeline',
+          { output: path.join(directory, 'workload'), timeout: (workload.warmup_seconds + workload.seconds + 120) * 1000 }), poll);
+      } finally {
+        if (paused) await docker(['unpause', brokers[leader.broker_id].id], { ignoreAbort: true, timeout: 30_000 });
+      }
+      const measured = JSON.parse(measurement.output);
+      const workloadTimeline = { schema_version: 1,
+        ...JSON.parse(await fs.readFile(path.join(directory, 'started.json'), 'utf8')),
+        sampling_interval_ms: 1000,
+        samples: (await fs.readFile(path.join(directory, 'workload.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse) };
+      const result = { vendor, rf, repetition, case: workload, budget, topic: topicSettings,
+        workload: measured, workload_time_series: workloadTimeline, events,
+        time_series: resourceTimeSeries(measurement.samples, measurement.startedAt),
+        metrics: resourceSummary(measurement.samples, measured.sent),
+        curve: curveSummary(workload, measured, workloadTimeline, events) };
+      if (leader) {
+        result.recovered_topic = JSON.parse(await runClient(['BenchmarkAdmin', 'isr', bootstrap, topic,
+          String(rf), '2', vendor], 'recovered-isr', path.join(directory, 'recovered-isr')));
+      }
+      await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(result, null, 2)}\n`);
+      trials.push(result);
+      console.log(`Curve ${trials.length}: ${vendor} ${workload.id}, ${workload.memory_gib} GiB/broker: ${result.curve.records_per_second.toFixed(0)} ack records/s, ${result.curve.latency_ms_p99.toFixed(2)} ms p99`);
+    }
+
+    if (curves) {
+      for (let repetition = 1; repetition <= repetitions; repetition++) {
+        const offset = (repetition - 1) % VENDORS.length;
+        const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
+        for (const workload of cases) for (const vendor of order) {
+          const directory = path.join(artifacts, `rf${workload.rf}-${vendor}-${repetition}-${workload.id}`);
+          await fs.mkdir(directory);
+          const budget = curveBudget(workload, vendor);
+          console.log(`Starting ${vendor} ${workload.id} round ${repetition}/${repetitions}`);
+          try {
+            const brokers = await launchCluster(vendor, workload.rf, repetition, directory, budget);
+            await curveTrial(vendor, repetition, workload, brokers, directory, budget);
+          } catch (error) {
+            controller.signal.throwIfAborted();
+            const failure = { vendor, rf: workload.rf, repetition, case: workload, budget,
+              status: 'failed', error: error.message, artifacts: path.basename(directory) };
+            await fs.writeFile(path.join(directory, 'failure.json'), `${JSON.stringify(failure, null, 2)}\n`);
+            failures.push(failure);
+            console.error(`Failed curve ${vendor} ${workload.id} round ${repetition}: ${error.message}`);
+          }
+          await cleanup();
+          provenance.completed_trials = trials.length;
+          provenance.attempted_trials = trials.length + failures.length;
+          provenance.failed_trials = failures.length;
+          await save();
+        }
+      }
+    } else for (const rf of [1, 3]) {
       for (let repetition = 1; repetition <= repetitions; repetition++) {
         const offset = (repetition - 1) % VENDORS.length;
         const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
@@ -466,6 +610,12 @@ rpk:
       }
     }
     controller.signal.throwIfAborted();
+    if (failures.length) {
+      await fs.writeFile(path.join(artifacts, 'collection.json'), `${JSON.stringify({
+        run_id: runId, status: 'failed', attempted_trials: trials.length + failures.length,
+        successful_trials: trials.length, failures, trials }, null, 2)}\n`);
+      throw new Error(`Completed ${trials.length + failures.length} curve attempts: ${trials.length} passed, ${failures.length} failed. Diagnostics and valid captures retained in ${artifacts}; results not published.`);
+    }
     provenance.status = 'complete';
     provenance.completed_at = new Date().toISOString();
     provenance.host.load_average_at_end = os.loadavg();
@@ -473,7 +623,7 @@ rpk:
     if (options.smoke) console.log(`Smoke passed: ${trials.length} trials. Results retained only in ${artifacts}`);
     else {
       await publishResults(ROOT, provenance, trials, controller.signal);
-      console.log(`Published ${trials.length} trials to benchmarks/results/${runId}/ and benchmarks/latest.md`);
+      console.log(`Published ${trials.length} trials to benchmarks/results/${runId}/ and benchmarks/latest${curves ? '-curves' : ''}.md`);
     }
   } catch (error) {
     provenance.status = interrupted ? 'interrupted' : 'failed';

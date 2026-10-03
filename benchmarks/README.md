@@ -13,6 +13,11 @@ npm run benchmark -- --smoke
 # Run the full 108-trial matrix and update repository results
 npm run benchmark
 
+# Capture latency/load, throughput/memory, and recovery curves
+npm run benchmark -- --suite curves --dry-run
+npm run benchmark -- --suite curves --smoke
+npm run benchmark -- --suite curves
+
 # Compare a different published Krabka or Redpanda image (tag or registry digest)
 npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v0.6.1 \
   --redpanda-image docker.redpanda.com/redpandadata/redpanda:v26.2.2
@@ -26,6 +31,7 @@ npm run test:benchmark
 - Node >=22.12 and JDK >=17 (`java` and `javac`). No Bazel build, sibling checkout, npm dependencies, or Docker Compose is needed.
 - Native Linux/amd64 with a local Docker daemon, cgroup v2, readable `/proc` and cgroup resource counters, CPU affinity/quota and memory/swap limits enabled. Remote Docker, Docker Desktop, and emulated images are rejected.
 - At least **14 available logical CPUs** and **34 GiB available RAM** (three 10 GiB brokers plus a 4 GiB client). Each broker receives 4 logical CPUs, a 4 CPU quota, 10 GiB RAM, zero swap, and a 131,072 open-file limit. RF3 runs three brokers; the client receives the remaining CPUs and a separate 4 GiB memory limit. SMT siblings are grouped where possible and the topology is recorded.
+- The **curves suite** requires the same CPUs but only **20 GiB available RAM**: at most 12 GiB of brokers plus the 4 GiB client and 4 GiB host headroom. It requires 150 GiB free disk for full runs or 24 GiB for smoke. This fits the current 16-logical-CPU host with about 61 GiB total RAM. Only one vendor/cluster runs at a time; each case gets fresh storage, which is removed before the next case. Other containers are left running.
 - At least **150 GiB free disk** for a full run, or **4 GiB** for smoke, both at the checkout and Docker storage. Data uses Docker volumes and is deleted after each cluster repetition; measurements and logs remain.
 - At least **24,728 available Linux AIO slots** (`fs.aio-max-nr - fs.aio-nr`). Redpanda networking AIO is explicitly limited to 1,024 control blocks per shard so three nodes fit the usual 65,536-slot host limit consistently. This setting and the host limit are recorded; no sysctl is changed.
 - Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to `raw.githubusercontent.com` for the pinned Java workload. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v0.6.1, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
@@ -51,10 +57,45 @@ Kafka uses `-Xms1g -Xmx1g`. Redpanda uses four shards, 8 GiB application memory,
 
 The producer/consumer source is downloaded unmodified from [krabka-broker commit c27ed4f7](https://github.com/krabka-io/krabka-broker/blob/c27ed4f7e2c9ba4bf48376ed674bc26b166353f4/packaging/performance/BrokerPerformanceWorkload.java) (Apache-2.0) and verified against its SHA-256 before compilation. Both Java classes compile against the exact Kafka 4.3.1 image jars, which are used for every vendor. Source, runner, and jar hashes are retained in provenance.
 
+## Curves suite
+
+`--suite curves` runs 72 trials (eight cases × three vendors × three repetitions) with rotating vendor order. Full cases use five seconds of warm-up and 30 seconds of measurement, except recovery, which measures 60 seconds. Expect roughly an hour or more including cluster startup and drain; readiness, client execution, drain, and replica recovery all have deadlines. Smoke runs all 24 vendor/case combinations once with two seconds of warm-up and three seconds of measurement (16 seconds for recovery), and never publishes.
+
+Curve failures retain a `failure.json` beside raw telemetry and logs, then the runner cleans up and attempts the remaining cases. Any failed case makes the overall run fail and prevents publication; `collection.json` retains successful trials and the failure list under `.benchmarks/`. Interruptions and cleanup failures still stop immediately. Producer errors include the first ten exception traces and final counters.
+
+| Chart | Cases | RF | Memory per broker |
+|---|---|---|---|
+| p99 latency versus offered throughput | 20k, 100k, 250k, 500k scheduled records/s | 1 | 4 GiB |
+| Throughput versus memory budget | Unlimited offered load at 2, 4, 8 GiB | 1 | 2/4/8 GiB |
+| Throughput/lag during recovery | 20k records/s; pause the broker leading partition 0, then resume it | 3 | 4 GiB |
+
+All cases use 1 KiB seeded random payloads, LZ4, 12 partitions, `acks=all`, idempotence, 64 KiB batches, and 5 ms linger. Brokers have four logical CPUs each; SMT placement and client affinity are recorded. The client has a 4 GiB cgroup limit and 2 GiB heap. Kafka's heap is one quarter of its cgroup budget, capped at 1 GiB. Redpanda's application allocation is three quarters of its budget, with one eighth reserved and one eighth left as headroom, at four shards. Exact allocations and Docker inspections are retained. These settings define this comparison, not minimum vendor requirements or an exhaustive tuning search.
+
+The local `BenchmarkTimeline.java` uses the same Kafka 4.3.1 jars as the original driver, including the bundled HDR Histogram jar. It uses bounded histograms (three significant digits, microseconds), a bounded sequence bitmap, a 32 MiB producer buffer, and a record ceiling of 64 million (16 million in smoke). Producer `max.block.ms=30000` allows backpressure during the ten-second recovery pause without requiring a larger buffer; request and delivery timeouts are 10 and 45 seconds. Reaching the ceiling fails the run rather than publishing a shortened case. The disk check allows for the maximum RF1 dataset and overhead; RF3 recovery is rate limited. No unbounded per-record latency array is used.
+
+Rate-limited records carry their **scheduled send timestamp**, so acknowledgment and end-to-end latency include producer pacing/backpressure delay. The driver stops scheduling after the configured duration and allows up to 60 seconds to drain submitted records. It reports intended offered rate separately from actual submitted, acknowledged, and consumed counts. Offered backlog includes scheduled records that never reached the producer before the duration expired; it can remain nonzero after submitted records drain. Latency describes submitted records, so inspect that backlog before treating a point as sustainable throughput. Unlimited memory cases timestamp actual generation and make no fixed-rate claim.
+
+`workload_time_series` retains a UTC start and one-second intervals with actual elapsed times, interval duration, warm-up/measurement/drain phase, achieved acknowledgment and consumption rates, cumulative counters, p99 acknowledgment and end-to-end latency, latency sample count, client CPU cores, cumulative client CPU seconds, and heap bytes. Empty latency intervals are `null`. `consumer_lag_records` is `max(0, acknowledged - consumed)`, a workload backlog count, not committed consumer-group offset lag. Summary throughput averages actual measurement intervals; intervals are classified by their start time, so boundary intervals can include part of a neighboring phase. Summary p99 uses all records scheduled after warm-up, including their drain latency; interval p99 values are never averaged. Broker resource samples have their own start timestamp and include startup, warm-up, measurement, and drain.
+
+Recovery pauses the actual leader of partition 0 after 15 measured seconds for at least ten seconds, then resumes the same container and storage. Smoke pauses after four measured seconds for at least five seconds. `events` records actual pause/unpause completion times, UTC timestamps, container/broker identity, and affected leader partitions on the workload clock. Resource sampling continues while the process is paused; counters remain comparable across resume. The run requires exact final acknowledged/consumed counts, no duplicates/errors, and all replicas back in ISR afterward. Recovery time is the first three consecutive post-resume intervals with at least 90% of offered acknowledgment throughput and at most 100 ms worth of acknowledged backlog; it is `null` when recovery under that definition is not observed. This tests a process stall on a shared host, not a machine failure, restart, or disk durability.
+
+Complete full runs retain all trial JSON and a `charts.json` containing `latency_vs_offered_throughput`, `throughput_vs_memory_budget`, and recovery timelines/events, ready for later website rendering. The new summary is `latest-curves.md`; the existing `latest.md` remains the original throughput suite. Publication rejects incomplete matrices, altered budgets, missing telemetry/fault events, counter inconsistencies, delivery errors, and missing replica recovery. Diagnostics from failed/smoke runs stay under `.benchmarks/`.
+
+The [archived 72-trial collection](diagnostics/2026-10-03T07-52-36Z-230b0a75/summary.md) contains 71 passing trials and one failed Krabka recovery trial with 59 duplicate sequences. Its compressed JSON captures and failed-trial logs are retained under `diagnostics/`, with checksums, separately from published results. Use `gzip -dc FILE` to read the JSON/JSONL files. The failed trial remains explicitly marked in the chart data; this collection does not update a latest report.
+
 ## Measurements and publication
 
 Per-trial results contain records/s, logical MiB/s, p50/p95/p99 latency, aggregate broker CPU seconds and CPU µs/acknowledged record, and observed peak RSS, anonymous memory, and working set. CPU and memory cover client startup through shutdown, while workload throughput and latency exclude client initialization. The client and admin processes run outside broker cgroups. Working set is `memory.current - inactive_file`. Sampling targets 250 ms; actual gaps are reported. RF3 memory peaks use simultaneous cluster sums, not the sum of each broker's individual maximum.
 
 Successful reports show medians and min–max ranges across three repetitions. They identify image references and IDs, host resources and SMT topology, CPU sets, source/client hashes, topic configurations, resource budgets, case order, warm-up, and measurement windows. TLS, authentication, tiered storage, compaction, forced per-append fsync, restarts, and failure injection are outside the workload. Shared-host noise and client bottlenecks can affect results.
 
-Raw configurations, container inspections, commands, logs, workload JSON, and resource time series live in gitignored `.benchmarks/<UTC-run-id>/`. Checked-in history is compact: provenance, one JSON per measured trial, and a summary. Only a complete full matrix can publish. Smoke, failed, interrupted, missing-counter, OOM, or delivery-invalid runs retain diagnostics and preserve the previous latest report. Ctrl-C triggers cleanup; the workload subprocess has a 16-minute outer deadline, with shorter deadlines for setup and readiness.
+Each per-trial JSON also retains a versioned `time_series` for future website charts:
+
+- `started_at`: UTC start of the resource measurement window. Add each sample's `elapsed_ms` to this timestamp for its wall-clock time; elapsed times use a monotonic clock.
+- `sampling_interval_ms`: the 250 ms target. Every actual sample time is retained, including longer gaps and the final partial interval; samples are not resampled or interpolated.
+- `samples[].brokers`: broker IDs and raw CPU usage in microseconds, RSS, anonymous memory, cgroup current memory, inactive file cache (all in bytes), and OOM kill counters.
+- `samples[].cluster`: simultaneous sums of CPU usage, RSS, anonymous memory, and working set, plus CPU seconds since the first sample and average CPU cores used during the preceding actual interval. The first sample's `cpu_cores` is `null` because it has no preceding interval. Four cores fully used read as `4`, not `100` percent.
+
+The summary and timeline use the same samples, and publication rejects missing timelines or inconsistent summaries. Trial vendor, RF, repetition, case, and topic configuration remain alongside the series; run-level host, image, and workload provenance remain in `provenance.json`. Warm-up series are retained locally and excluded from published measured trials. Throughput and latency are whole-workload summaries, not interval measurements. Older checked-in runs without `time_series` remain summary-only; their samples cannot be reconstructed from peaks.
+
+Raw configurations, container inspections, commands, logs, workload JSON, and streaming resource samples live in gitignored `.benchmarks/<UTC-run-id>/`. Checked-in history contains provenance, one JSON per measured trial (including its resource timeline), and a summary. Only a complete full matrix can publish. Smoke, failed, interrupted, missing-counter, OOM, or delivery-invalid runs retain diagnostics and preserve the previous latest report. Ctrl-C triggers cleanup; the workload subprocess has a 16-minute outer deadline, with shorter deadlines for setup and readiness.

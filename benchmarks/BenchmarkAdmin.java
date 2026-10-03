@@ -39,6 +39,15 @@ public final class BenchmarkAdmin {
                 throw new IllegalStateException("cluster readiness deadline exceeded", last);
             }
             String topic = args[2];
+            if (args[0].equals("leader")) {
+                TopicDescription description = admin.describeTopics(List.of(topic)).allTopicNames()
+                        .get(10, TimeUnit.SECONDS).get(topic);
+                int leader = description.partitions().get(0).leader().id();
+                System.out.println("{\"broker_id\":" + leader + ",\"led_partitions\":"
+                        + description.partitions().stream().filter(p -> p.leader().id() == leader)
+                                .map(p -> p.partition()).toList() + "}");
+                return;
+            }
             int replicas = Integer.parseInt(args[3]);
             int minIsr = Integer.parseInt(args[4]);
             Map<String, String> configs = new TreeMap<>();
@@ -52,8 +61,10 @@ public final class BenchmarkAdmin {
             if (args[5].equals("redpanda")) {
                 configs.put("write.caching", "true");
             }
-            admin.createTopics(List.of(new NewTopic(topic, 12, (short) replicas).configs(configs)))
-                    .all().get(15, TimeUnit.SECONDS);
+            if (args[0].equals("topic")) {
+                admin.createTopics(List.of(new NewTopic(topic, 12, (short) replicas).configs(configs)))
+                        .all().get(15, TimeUnit.SECONDS);
+            }
             TopicDescription description = null;
             while (System.nanoTime() < deadline) {
                 try {
@@ -89,7 +100,7 @@ public final class BenchmarkAdmin {
                 }
             }
             // Topic names and broker config strings contain no user-provided secrets.
-            System.out.println("{\"topic\":\"" + topic + "\",\"description\":\""
+            System.out.println("{\"topic\":\"" + topic + "\",\"full_isr\":true,\"description\":\""
                     + escape(description.toString()) + "\",\"configs\":\""
                     + escape(actual.toString()) + "\"}");
         }

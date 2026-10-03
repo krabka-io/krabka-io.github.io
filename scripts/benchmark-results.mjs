@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { curveCases, curveBudget, curveSummary, curveReport } from './benchmark-curves.mjs';
 
 export const VENDORS = ['krabka', 'kafka', 'redpanda'];
 export const CASES = [
@@ -57,18 +58,46 @@ export function aggregateSample(brokers) {
   return total;
 }
 
-export function resourceSummary(samples, acknowledged) {
+function resourceTotals(samples) {
   assert.ok(samples.length >= 2, 'at least two resource samples required');
   const count = samples[0].brokers.length;
   assert.ok(samples.every(s => s.brokers.length === count), 'incomplete cluster samples');
+  assert.ok(samples.every(s => Number.isFinite(s.elapsed_ms) && s.elapsed_ms >= 0), 'invalid sample time');
   const totals = samples.map(s => aggregateSample(s.brokers));
   for (let i = 1; i < samples.length; i++) {
+    assert.ok(samples[i].elapsed_ms > samples[i - 1].elapsed_ms, 'sample times must increase');
     for (let broker = 0; broker < count; broker++) {
       assert.equal(samples[i].brokers[broker].id, samples[0].brokers[broker].id, 'broker identity changed');
       assert.ok(samples[i].brokers[broker].cpu_usage_us >= samples[i - 1].brokers[broker].cpu_usage_us,
         'CPU counter reset');
     }
   }
+  return totals;
+}
+
+export function resourceTimeSeries(samples, startedAt) {
+  assert.ok(Number.isFinite(Date.parse(startedAt)), 'invalid measurement start');
+  const totals = resourceTotals(samples);
+  return {
+    schema_version: 1,
+    started_at: startedAt,
+    sampling_interval_ms: 250,
+    samples: samples.map((sample, i) => ({
+      ...sample,
+      cluster: {
+        ...totals[i],
+        cpu_seconds: (totals[i].cpu_usage_us - totals[0].cpu_usage_us) / 1e6,
+        // Average CPU cores used over the actual preceding interval. The first
+        // sample is a baseline, not a measured zero-CPU interval.
+        cpu_cores: i === 0 ? null : (totals[i].cpu_usage_us - totals[i - 1].cpu_usage_us)
+          / ((sample.elapsed_ms - samples[i - 1].elapsed_ms) * 1000),
+      },
+    })),
+  };
+}
+
+export function resourceSummary(samples, acknowledged) {
+  const totals = resourceTotals(samples);
   const cpuUs = totals.at(-1).cpu_usage_us - totals[0].cpu_usage_us;
   assert.ok(cpuUs > 0 && acknowledged > 0, 'invalid CPU or record count');
   return {
@@ -92,6 +121,23 @@ export function validateComplete(provenance, trials) {
   for (const vendor of VENDORS) {
     assert.match(provenance.images[vendor].reference, /@sha256:[a-f0-9]{64}$/, 'image must be immutable');
   }
+  if (provenance.suite === 'curves') {
+    const cases = curveCases();
+    assert.deepEqual(provenance.cases, cases, 'curve plan differs');
+    assert.equal(trials.length, cases.length * VENDORS.length * 3, 'curve matrix is incomplete');
+    for (const workload of cases) for (const vendor of VENDORS) for (let repetition = 1; repetition <= 3; repetition++) {
+      const selected = trials.filter(t => t.case.id === workload.id && t.vendor === vendor && t.repetition === repetition);
+      assert.equal(selected.length, 1, 'missing or duplicate curve trial');
+      const trial = selected[0];
+      assert.deepEqual(trial.case, workload);
+      assert.equal(trial.rf, workload.rf);
+      assert.deepEqual(trial.budget, curveBudget(workload, vendor), 'curve resource budget differs');
+      validateResourceEvidence(trial);
+      assert.deepEqual(trial.curve, curveSummary(workload, trial.workload, trial.workload_time_series, trial.events));
+      if (workload.kind === 'recovery') assert.equal(trial.recovered_topic?.full_isr, true, 'replicas did not recover');
+    }
+    return;
+  }
   assert.equal(trials.length, 2 * 3 * VENDORS.length * CASES.length, 'matrix is incomplete');
   for (const rf of [1, 3]) {
     for (const vendor of VENDORS) {
@@ -106,14 +152,26 @@ export function validateComplete(provenance, trials) {
           for (const key of METRICS) {
             assert.ok(Number.isFinite(trial.metrics[key]) && trial.metrics[key] >= 0, `invalid ${key}`);
           }
-          assert.ok(trial.metrics.resource_samples >= 2, 'resource evidence missing');
+          validateResourceEvidence(trial);
         }
       }
     }
   }
 }
 
+function validateResourceEvidence(trial) {
+  assert.ok(trial.metrics.resource_samples >= 2, 'resource evidence missing');
+  assert.ok(trial.time_series, 'resource time series missing');
+  assert.ok(trial.time_series.samples.every(s => s.brokers.length === trial.rf), 'time series topology differs');
+  assert.deepEqual(trial.time_series,
+    resourceTimeSeries(trial.time_series.samples, trial.time_series.started_at), 'invalid resource time series');
+  for (const [key, value] of Object.entries(resourceSummary(trial.time_series.samples, trial.workload.sent))) {
+    assert.equal(trial.metrics[key], value, `time series and summary differ: ${key}`);
+  }
+}
+
 export function report(provenance, trials) {
+  if (provenance.suite === 'curves') return curveReport(provenance, trials);
   const lines = [
     '# Krabka, Kafka 4.3.1, and Redpanda — local benchmark', '',
     `Run: ${provenance.run_id}. Completed: ${provenance.completed_at}.`, '',
@@ -129,6 +187,7 @@ export function report(provenance, trials) {
     '- Kafka/Krabka acknowledge their in-sync replication contract; Redpanda uses Raft majority acknowledgment with write.caching=true. This does not establish identical failure or crash-durability guarantees.', '',
     '## Measurement boundaries', '',
     'Throughput and latency come from the Java producer/consumer workload. Broker CPU is the cgroup cpu.stat usage delta; its window includes client startup, initialization, and shutdown. CPU per record divides aggregate broker CPU by acknowledged records, not replicas. Memory is sampled every 250 ms, and RF3 peaks use the simultaneous sum across brokers. Working set is memory.current minus inactive_file; RSS excludes most disk page cache. Sampling gaps are retained per trial. Warm-up is excluded; brokers retain warm-up and earlier-case data until the repetition ends.', '',
+    'Each per-trial JSON retains the CPU and memory time series with its UTC start, actual elapsed sample times, raw per-broker counters, simultaneous cluster totals, and interval CPU cores used. Throughput and latency remain whole-workload summaries.', '',
     'No TLS, authentication, tiered storage, compaction, restart, failure injection, or forced per-append fsync is tested. Redpanda write caching is explicitly enabled, without dev-container mode or unsafe-bypass-fsync. Results include shared-host and client bottlenecks; they are not universal performance rankings or production qualification.', '',
   ];
   function range(selected, key, scale = 1, digits = 2) {
@@ -163,9 +222,10 @@ export async function publishResults(root, provenance, trials, signal) {
   validateComplete(provenance, trials);
   signal?.throwIfAborted();
   const base = path.join(root, 'benchmarks');
+  const latestName = provenance.suite === 'curves' ? 'latest-curves.md' : 'latest.md';
   const destination = path.join(base, 'results', provenance.run_id);
   const temporary = `${destination}.tmp`;
-  const latestTemporary = path.join(base, `latest.${provenance.run_id}.tmp`);
+  const latestTemporary = path.join(base, `${latestName}.${provenance.run_id}.tmp`);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   assert.equal(await fs.stat(destination).then(() => true, () => false), false, 'run already published');
   await fs.mkdir(temporary);
@@ -178,6 +238,21 @@ export async function publishResults(root, provenance, trials, signal) {
       await fs.writeFile(path.join(temporary, 'trials', name), `${JSON.stringify(trial, null, 2)}\n`);
     }
     await fs.writeFile(path.join(temporary, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
+    if (provenance.suite === 'curves') {
+      const charts = { schema_version: 1, run_id: provenance.run_id,
+        latency_vs_offered_throughput: [], throughput_vs_memory_budget: [], recovery: [] };
+      for (const trial of trials) {
+        const point = { vendor: trial.vendor, repetition: trial.repetition, rf: trial.rf,
+          case_id: trial.case.id, ...trial.curve };
+        if (trial.case.kind === 'latency') charts.latency_vs_offered_throughput.push({ ...point,
+          offered_records_per_second: trial.case.rate });
+        if (trial.case.kind === 'memory') charts.throughput_vs_memory_budget.push({ ...point,
+          memory_budget_bytes: trial.budget.broker_memory_bytes });
+        if (trial.case.kind === 'recovery') charts.recovery.push({ ...point,
+          timeline: trial.workload_time_series, events: trial.events });
+      }
+      await fs.writeFile(path.join(temporary, 'charts.json'), `${JSON.stringify(charts, null, 2)}\n`);
+    }
     const markdown = report(provenance, trials);
     await fs.writeFile(path.join(temporary, 'summary.md'), markdown);
     await fs.writeFile(latestTemporary,
@@ -186,7 +261,7 @@ export async function publishResults(root, provenance, trials, signal) {
     await fs.rename(temporary, destination);
     historyPublished = true;
     signal?.throwIfAborted();
-    await fs.rename(latestTemporary, path.join(base, 'latest.md'));
+    await fs.rename(latestTemporary, path.join(base, latestName));
     latestPublished = true;
   } finally {
     if (historyPublished && !latestPublished) await fs.rm(destination, { recursive: true, force: true });
