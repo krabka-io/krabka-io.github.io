@@ -545,6 +545,8 @@ fn producer_decision_kernel(input: &Input<'_>) -> KernelResult {
             producer_epoch,
             base_sequence,
             last_offset_delta,
+            false, // Empty-log checks apply only under Kafka trunk rules.
+            false, // Preserve the playground's Kafka 4.3.1 behavior.
         ) {
             ProducerDecision::Append => Outcome::of("Append"),
             ProducerDecision::Duplicate { retained } => {

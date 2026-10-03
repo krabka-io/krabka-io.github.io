@@ -1,3 +1,4 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -194,6 +195,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -621,6 +623,14 @@ spec:
                     The gateway does one produce call against `targetTopic` for every
                     verified POST to `/<name>`.
                   properties:
+                    forwardHeaders:
+                      description: |-
+                        Request headers to preserve as Kafka record headers. Authentication
+                        credentials and webhook signatures cannot be forwarded.
+                      items:
+                        type: string
+                      nullable: true
+                      type: array
                     idempotencySource:
                       description: |-
                         How to derive the idempotency key for deduplication, for example
@@ -656,7 +666,8 @@ spec:
                       type: string
                     secretRef:
                       description: |-
-                        Kubernetes Secret key reference for the HMAC signing secret. The
+                        Kubernetes Secret key reference for the HMAC signing secret or the
+                        Standard Webhooks signing token required by `signatureMode`. The
                         controller resolves it at render time and puts the raw secret value
                         into the config Secret. The CRD never stores that value.
                       nullable: true
@@ -679,6 +690,12 @@ spec:
                       description: |-
                         HTTP header that carries the HMAC signature, for example
                         `X-Hub-Signature-256`.
+                      nullable: true
+                      type: string
+                    signatureMode:
+                      description: |-
+                        Signature protocol. Set `standard_webhooks` to verify the signed
+                        message ID, timestamp, and body; omit for body-only HMAC verification.
                       nullable: true
                       type: string
                     signaturePrefix:
@@ -761,6 +778,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1505,6 +1523,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1689,6 +1708,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3436,6 +3456,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3562,6 +3583,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3886,6 +3908,7 @@ spec:
     storage: true
     subresources:
       status: {}
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
