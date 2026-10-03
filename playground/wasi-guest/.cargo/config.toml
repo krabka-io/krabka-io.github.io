@@ -1,9 +1,0 @@
-# The guest only makes sense on wasm32-wasip1, so a plain `cargo build` in this
-# directory targets it. tokio 1.53 refuses its `net` feature on
-# wasm32-wasip1 without `--cfg tokio_unstable` (a `compile_error!`); the flag
-# is scoped to this target so nothing native ever sees it.
-[build]
-target = "wasm32-wasip1"
-
-[target.wasm32-wasip1]
-rustflags = ["--cfg", "tokio_unstable"]

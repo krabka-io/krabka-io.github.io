@@ -1,7 +1,0 @@
-# tokio refuses its `net` feature on wasm32-wasip1 without `--cfg
-# tokio_unstable` (a `compile_error!`), and the broker needs `net` for the
-# listeners it adopts from the runtime's preopened sockets. The flag is scoped
-# to that target, so the native unit tests never see it. A `RUSTFLAGS`
-# variable replaces this table, so the builds set none.
-[target.wasm32-wasip1]
-rustflags = ["--cfg", "tokio_unstable"]
