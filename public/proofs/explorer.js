@@ -7,7 +7,7 @@
 // prover discharged each leaf and how long it took), the `[@expl]` obligations
 // with their source spans, the generated Coma on demand, and, when the
 // why3-web bundle is part of the build, a browser re-check that replays the
-// recorded tree through Why3 and Alt-Ergo compiled to JavaScript.
+// recorded tree through Why3 and the recorded prover in JavaScript or WebAssembly.
 //
 // No bundler: this is a plain ES module loaded by
 // src/pages/docs/proof-explorer.astro. Styles are in src/styles/proofs.css.
@@ -19,12 +19,19 @@
 
 import { obligationSummary, formulaTokens, operators, tokenText, readableTokens } from "./readability.js";
 import { highlightWhy } from "./highlight.js";
+import { ensureCrossOriginIsolation } from "../docs/lab/coi.js";
 
 const COMA_DIR = "/proofs/coma/";
 const WHY3_WEB_DIR = "/why3-web/";
 const MANIFEST_PATH = WHY3_WEB_DIR + "manifest.json";
 const WHY3_WORKER_PATH = WHY3_WEB_DIR + "proof_worker.js";
-const ALT_ERGO_WORKER_PATH = WHY3_WEB_DIR + "alt-ergo-worker.js";
+const PROVER_WORKER_PATHS = {
+  "alt-ergo": WHY3_WEB_DIR + "alt-ergo-worker.js",
+  z3: WHY3_WEB_DIR + "smt-worker.js?prover=z3",
+  cvc5: WHY3_WEB_DIR + "smt-worker.js?prover=cvc5",
+};
+const PROVER_WORKERS = Math.max(1, Math.min(2, navigator.hardwareConcurrency || 2));
+const RESUME_CHECK_KEY = "krabka-proof-recheck";
 const VERIFICATION_PAGE = "/verification";
 
 const SESSIONS_ID = "proof-sessions";
@@ -34,9 +41,9 @@ const GITHUB = "https://github.com";
 // Where the list stacks above the detail (proofs.css uses the same width).
 const STACKED = "(max-width: 60rem)";
 
-// Alt-Ergo in the browser.
+// Browser prover budgets.
 const ALT_ERGO_STEPS_BOUND = 5_000_000;
-const ALT_ERGO_TIMEOUT_MS = 60_000;
+const PROVER_TIMEOUT_MS = 60_000;
 
 const KINDS = [
   { key: "kernel", label: "kernels", on: true },
@@ -953,33 +960,17 @@ function main() {
 // Browser re-check
 // =============================================================================
 //
-// Two web workers from the why3-web bundle, both optional in a build:
-//
-//   WHY3_WORKER_PATH      Why3 as a worker. Requests and replies are JSON
-//                         strings; strictly one reply per request, in order.
-//     {"cmd":"ping"}                        -> {"kind":"pong","why3":..,"prover":..}
-//     {"cmd":"load","name":..,"content":..} -> {"kind":"loaded","name":..,"theories":[{"name":..,"goals":[{"id","name","expl"}]}]}
-//     {"cmd":"transform","id":..,"name":..} -> {"kind":"children","id":..,"name":..,"children":[{"id","expl"}]}
-//     {"cmd":"task","id":..}                -> {"kind":"task","id":..,"name":..,"expl":..,"text":..,"pretty":..}
-//     any failure                           -> {"kind":"error","cmd":..,"id":..,"message":..}
-//
-//   ALT_ERGO_WORKER_PATH  Alt-Ergo 2.6.2 over its Dolmen solving loop, in a
-//                         worker of our own. JSON strings both ways, one task
-//                         at a time per worker:
-//     {"id":n,"filename":"task.smt2","content":<task.text>,"steps":5000000}
-//       -> {"id":n,"status":"unsat"|"sat"|"unknown"|"timeout"|"error","output":..,"diagnostic":..,"exception":..,"ms":n}
-//                         where "unsat" means proved.
-//
-// Replay: for each recorded goal, find the loaded goal by name and walk the
-// recorded tree. A tactic node sends `transform` on the current Why3 task and
-// pairs the returned children with the recorded children in order; a count
-// mismatch marks the subtree diverged. A leaf recorded with alt-ergo fetches
-// its `task` text (SMT-LIB, from Why3's driver for Alt-Ergo's Dolmen front
-// end) and hands it to the Alt-Ergo pool; a leaf recorded with another prover
-// is shown as recorded only.
+// Why3 loads Coma, replays the recorded tactics, and prints each leaf through
+// the recorded prover's driver. Solver workers return one JSON reply per task:
+// {id, status: "unsat"|"sat"|"unknown"|"timeout"|"error", output, diagnostic, ms}.
+// Only unsat counts as proved; unsupported provers stay recorded-only.
 
 let why3 = null;
-let altErgoPool = null;
+const proverPools = new Map();
+
+function canRecheck(prover) {
+  return Boolean(bundle && PROVER_WORKER_PATHS[prover] && bundle[prover.replace("-", "_")]);
+}
 // The re-check in flight, {cancel()}, or null. It belongs to the pane on
 // screen, so selecting a session cancels it: there is never a running check
 // whose panel is out of sight.
@@ -1011,12 +1002,12 @@ function renderCheckPanel(session) {
     return panel;
   }
   if (bundle === false) {
-    panel.appendChild(el("p", "px-note", "The browser re-check is not part of this build: the why3-web bundle (Why3 and Alt-Ergo compiled to JavaScript) was not published with the site."));
+    panel.appendChild(el("p", "px-note", "The browser re-check is not part of this build: the why3-web bundle (Why3 and browser provers) was not published with the site."));
     panel.appendChild(
       el(
         "p",
         "px-note",
-        "With the bundle present, this panel loads the session's Coma file into Why3 running in a web worker, applies the recorded split_vc and compute_specified tactics to reproduce the same leaves, and hands each leaf as SMT-LIB to Alt-Ergo in a second worker. Each leaf then shows whether the browser reproduced the recorded proof and how long it took beside the recorded time.",
+        "With the bundle present, this panel loads the session's Coma file into Why3 running in a web worker, applies the recorded split_vc and compute_specified tactics to reproduce the same leaves, and hands each supported leaf as SMT-LIB to its recorded prover in another worker. Each leaf then shows whether the browser reproduced the recorded proof and how long it took beside the recorded time.",
       ),
     );
     return panel;
@@ -1025,30 +1016,32 @@ function renderCheckPanel(session) {
   const versions = [];
   if (bundle.why3) versions.push(`Why3 ${bundle.why3}`);
   if (bundle.alt_ergo) versions.push(`Alt-Ergo ${bundle.alt_ergo}`);
+  if (bundle.z3) versions.push(`Z3 ${bundle.z3}`);
+  if (bundle.cvc5) versions.push(`cvc5 ${bundle.cvc5}`);
   if (bundle.creusot) versions.push(`Creusot prelude ${bundle.creusot}`);
   shead.appendChild(el("span", "px-section-hint", versions.join(", ") + (bundle.built ? `, built ${String(bundle.built).slice(0, 10)}` : "")));
 
-  const altLeaves = [];
+  const supportedLeaves = [];
   const otherLeaves = [];
   session.goals.forEach((goal, gi) => {
     walkTree(goal.tree, String(gi), 0, (node) => {
       if (node.tactic) return;
-      if (node.prover === "alt-ergo") altLeaves.push(node);
+      if (canRecheck(node.prover)) supportedLeaves.push(node);
       else otherLeaves.push(node);
     });
   });
 
-  if (altLeaves.length === 0) {
+  if (supportedLeaves.length === 0) {
     const others = [...new Set(otherLeaves.map((l) => l.prover))].join(", ");
-    panel.appendChild(el("p", "px-note", `Nothing to re-check in the browser: no leaf of this session was recorded with alt-ergo, the only prover that runs here${others ? `; its leaves were recorded with ${others}` : ""}.`));
+    panel.appendChild(el("p", "px-note", `Nothing to re-check in the browser: no leaf of this session has a browser prover in this bundle${others ? `; its leaves were recorded with ${others}` : ""}.`));
     return panel;
   }
 
   const note = el("p", "px-note");
   note.textContent =
-    `Replays the recorded tree: Why3 loads the Coma file and splits it with the recorded tactics, then Alt-Ergo compiled to JavaScript tries each of the ${plural(altLeaves.length, "leaf", "leaves")} recorded with alt-ergo` +
+    `Replays the recorded tree: Why3 loads the Coma file and splits it with the recorded tactics, then the recorded prover (${[...new Set(supportedLeaves.map((l) => l.prover))].join(", ")}) tries each of the ${plural(supportedLeaves.length, "leaf", "leaves")} supported here` +
     (otherLeaves.length > 0 ? `; the ${plural(otherLeaves.length, "leaf", "leaves")} recorded with ${[...new Set(otherLeaves.map((l) => l.prover))].join(", ")} stay as recorded.` : ".") +
-    ` Up to ${Math.max(1, navigator.hardwareConcurrency || 2)} Alt-Ergo workers run in parallel with a ${ALT_ERGO_TIMEOUT_MS / 1000} s limit per leaf. Choosing another session stops a run in progress.`;
+    ` Up to ${PROVER_WORKERS} workers per prover run in parallel with a ${PROVER_TIMEOUT_MS / 1000} s limit per leaf. Choosing another session stops a run in progress.`;
   panel.appendChild(note);
 
   // While a run is going the button becomes its Cancel, so it never goes
@@ -1075,6 +1068,25 @@ function renderCheckPanel(session) {
       activeCheck.cancel();
       return;
     }
+    if (supportedLeaves.some((leaf) => leaf.prover === "z3") && !self.crossOriginIsolated) {
+      status.textContent = "Enabling shared memory for Z3...";
+      try {
+        sessionStorage.setItem(RESUME_CHECK_KEY, session.id);
+        const isolation = await ensureCrossOriginIsolation({ workerUrl: new URL(sitePath("/docs/proof-explorer/coi-sw.js"), location.href) });
+        if (isolation.reloading) return;
+        sessionStorage.removeItem(RESUME_CHECK_KEY);
+        if (!isolation.isolated) {
+          status.textContent = `Z3 could not start: ${isolation.reason}`;
+          announce.textContent = status.textContent;
+          return;
+        }
+      } catch (err) {
+        status.textContent = `Z3 could not start: ${err.message}`;
+        announce.textContent = status.textContent;
+        return;
+      }
+      if (selectedId !== session.id || activeCheck) return;
+    }
     let cancelled = false;
     const mine = {
       cancel: () => {
@@ -1083,8 +1095,8 @@ function renderCheckPanel(session) {
         button.setAttribute("aria-disabled", "true");
         setRunning(true, "Cancelling...");
         // Abandons the leaves in flight; the replay stops at its next checkpoint.
-        if (altErgoPool) altErgoPool.terminate();
-        altErgoPool = null;
+        for (const pool of proverPools.values()) pool.terminate();
+        proverPools.clear();
       },
     };
     activeCheck = mine;
@@ -1107,7 +1119,7 @@ function renderCheckPanel(session) {
       });
       status.textContent = summary.text;
       announce.textContent = summary.text;
-      // Green only when every leaf the session recorded with alt-ergo was re-proved here.
+      // Green only when every supported leaf was re-proved here.
       panel.classList.add(summary.proved === summary.total ? "px-check-ok" : summary.proved > 0 ? "px-check-partial" : "px-check-failed");
     } catch (err) {
       const message = err === CANCELLED ? "Re-check cancelled." : `The re-check stopped: ${err && err.message ? err.message : String(err)}`;
@@ -1121,14 +1133,39 @@ function renderCheckPanel(session) {
       setRunning(false, "Re-check again");
     }
   });
+  try {
+    if (sessionStorage.getItem(RESUME_CHECK_KEY) === session.id && self.crossOriginIsolated) {
+      sessionStorage.removeItem(RESUME_CHECK_KEY);
+      queueMicrotask(() => {
+        detailEl.querySelector('[data-tab="check"]')?.click();
+        button.click();
+      });
+    }
+  } catch { /* Re-check still works without session storage. */ }
   return panel;
 }
 
 // ---- Why3 worker: one request in flight at a time -----------------------------
 
+function proofWorker(path) {
+  // Like the lab's WASI workers, a blob worker inherits the page's isolation
+  // policy when /why3-web/ is outside the page service worker's scope.
+  const source = new URL(path, location.href).href;
+  const url = URL.createObjectURL(new Blob([
+    `self.proofWorkerUrl = ${JSON.stringify(source)}; importScripts(${JSON.stringify(source)});`,
+  ], { type: "text/javascript" }));
+  const worker = new Worker(url);
+  const revoke = () => URL.revokeObjectURL(url);
+  worker.addEventListener("message", revoke, { once: true });
+  worker.addEventListener("error", revoke, { once: true });
+  const terminate = worker.terminate.bind(worker);
+  worker.terminate = () => { revoke(); terminate(); };
+  return worker;
+}
+
 class Why3Worker {
   constructor(url) {
-    this.worker = new Worker(url);
+    this.worker = proofWorker(url);
     this.pending = [];
     this.worker.onmessage = (event) => {
       const next = this.pending.shift();
@@ -1187,11 +1224,12 @@ async function getWhy3() {
   return w;
 }
 
-// ---- Alt-Ergo pool ----------------------------------------------------------------
+// ---- prover pools ----------------------------------------------------------------
 
-class AltErgoPool {
-  constructor(url, size) {
-    this.url = url;
+class ProverPool {
+  constructor(prover, size) {
+    this.prover = prover;
+    this.url = sitePath(PROVER_WORKER_PATHS[prover]);
     this.size = Math.max(1, size);
     this.slots = [];
     this.queue = [];
@@ -1200,9 +1238,9 @@ class AltErgoPool {
   }
 
   spawn(slot) {
-    const worker = new Worker(this.url);
+    const worker = proofWorker(this.url);
     worker.onmessage = (event) => this.onReply(slot, event.data);
-    worker.onerror = (event) => this.finish(slot, { kind: "error", message: `Alt-Ergo worker failed: ${event.message || "unknown error"}` });
+    worker.onerror = (event) => this.finish(slot, { kind: "error", message: `${this.prover} worker failed: ${event.message || "unknown error"}` });
     slot.worker = worker;
   }
 
@@ -1224,19 +1262,24 @@ class AltErgoPool {
       job.id = this.nextId;
       this.nextId += 1;
       job.started = performance.now();
-      if (!slot.worker) this.spawn(slot);
+      try {
+        if (!slot.worker) this.spawn(slot);
+      } catch (err) {
+        this.finish(slot, { kind: "error", message: err.message });
+        continue;
+      }
       const request = JSON.stringify({ id: job.id, filename: "task.smt2", content: job.text, steps: ALT_ERGO_STEPS_BOUND });
       slot.timer = setTimeout(() => {
         // A task past the limit is abandoned with its worker, since the worker
         // cannot be interrupted; the slot gets a fresh one for the next task.
         slot.worker.terminate();
         slot.worker = null;
-        this.finish(slot, { kind: "timeout", message: `no answer within ${ALT_ERGO_TIMEOUT_MS / 1000} s` });
-      }, ALT_ERGO_TIMEOUT_MS);
+        this.finish(slot, { kind: "timeout", message: `no answer within ${PROVER_TIMEOUT_MS / 1000} s` });
+      }, PROVER_TIMEOUT_MS);
       try {
         slot.worker.postMessage(request);
       } catch (err) {
-        this.finish(slot, { kind: "error", message: `could not post to the Alt-Ergo worker: ${err.message}` });
+        this.finish(slot, { kind: "error", message: `could not post to the ${this.prover} worker: ${err.message}` });
       }
     }
   }
@@ -1246,7 +1289,7 @@ class AltErgoPool {
     try {
       reply = typeof data === "string" ? JSON.parse(data) : data;
     } catch (err) {
-      this.finish(slot, { kind: "error", message: `Alt-Ergo worker sent unparsable data: ${err.message}` });
+      this.finish(slot, { kind: "error", message: `${this.prover} worker sent unparsable data: ${err.message}` });
       return;
     }
     if (!slot.job) return;
@@ -1263,7 +1306,7 @@ class AltErgoPool {
     } else if (status === "timeout") {
       this.finish(slot, { kind: "timeout", message: `step budget exhausted${detail ? ": " + detail : ""}` }, ms);
     } else if (status === "error") {
-      this.finish(slot, { kind: "error", message: detail || String((reply && reply.output) || "").trim() || "Alt-Ergo reported an error" }, ms);
+      this.finish(slot, { kind: "error", message: detail || String((reply && reply.output) || "").trim() || `${this.prover} reported an error` }, ms);
     } else {
       this.finish(slot, { kind: "error", message: `unexpected reply: ${JSON.stringify(reply).slice(0, 200)}` }, ms);
     }
@@ -1275,6 +1318,12 @@ class AltErgoPool {
     clearTimeout(slot.timer);
     slot.timer = null;
     slot.job = null;
+    // The WASM releases own a process/runtime per leaf. Drop it (including
+    // Z3's pthreads) on completion; a failed Alt-Ergo worker also needs replacing.
+    if (this.prover !== "alt-ergo" || outcome.kind === "error") {
+      if (slot.worker) slot.worker.terminate();
+      slot.worker = null;
+    }
     job.resolve({ ...outcome, ms: ms === undefined ? performance.now() - job.started : ms });
     this.pump();
   }
@@ -1291,9 +1340,9 @@ class AltErgoPool {
   }
 }
 
-function getAltErgoPool() {
-  if (!altErgoPool) altErgoPool = new AltErgoPool(sitePath(ALT_ERGO_WORKER_PATH), navigator.hardwareConcurrency || 2);
-  return altErgoPool;
+function getProverPool(prover) {
+  if (!proverPools.has(prover)) proverPools.set(prover, new ProverPool(prover, PROVER_WORKERS));
+  return proverPools.get(prover);
 }
 
 // ---- replay ---------------------------------------------------------------------
@@ -1313,11 +1362,11 @@ async function recheckSession(session, ui) {
   const cells = leafCells;
   const setLeaf = (key, state, text) => setLeafIn(cells, key, state, text);
   const totals = { attempted: 0, proved: 0, unproved: 0, timeout: 0, error: 0, skipped: 0, diverged: 0, missing: 0 };
-  // The leaves the session recorded with alt-ergo: what the run is measured against.
+  // Supported leaves: what the run is measured against.
   let total = 0;
   session.goals.forEach((goal, gi) => {
     walkTree(goal.tree, String(gi), 0, (n) => {
-      if (!n.tactic && n.prover === "alt-ergo") total += 1;
+      if (!n.tactic && canRecheck(n.prover)) total += 1;
     });
   });
   // Stops a cancelled run at the next await, leaving the unfinished leaves marked.
@@ -1332,8 +1381,7 @@ async function recheckSession(session, ui) {
   ui.status("Starting Why3...");
   const w = await getWhy3();
   checkpoint();
-  ui.log(`Why3 ${w.info.why3}, driver for ${w.info.prover}`);
-  const pool = getAltErgoPool();
+  ui.log(`Why3 ${w.info.why3}; printing tasks for their recorded provers.`);
 
   ui.status("Fetching the Coma file...");
   const coma = await fetchComa(session.id);
@@ -1353,13 +1401,13 @@ async function recheckSession(session, ui) {
   const proofs = [];
   let leafNo = 0;
 
-  // Every leaf of the subtree shows the state; only the alt-ergo ones are
+  // Every leaf of the subtree shows the state; only the supported ones are
   // counted, so the counters add up to `total`.
   const markSubtree = (node, key, state, text, counter) => {
     walkTree(node, key, 0, (n, k) => {
       if (n.tactic) return;
       setLeaf(k, state, text);
-      if (n.prover === "alt-ergo") totals[counter] += 1;
+      if (canRecheck(n.prover)) totals[counter] += 1;
     });
   };
 
@@ -1389,7 +1437,7 @@ async function recheckSession(session, ui) {
       return;
     }
     leafNo += 1;
-    if (node.prover !== "alt-ergo") {
+    if (!canRecheck(node.prover)) {
       setLeaf(key, "skipped", `recorded only (${node.prover})`);
       totals.skipped += 1;
       return;
@@ -1397,7 +1445,7 @@ async function recheckSession(session, ui) {
     let task;
     try {
       setLeaf(key, "running", "printing task");
-      task = await w.request({ cmd: "task", id: taskId });
+      task = await w.request({ cmd: "task", id: taskId, prover: node.prover });
     } catch (err) {
       checkpoint();
       ui.log(`task ${taskId}: ${err.message}`, true);
@@ -1407,9 +1455,9 @@ async function recheckSession(session, ui) {
     }
     checkpoint();
     totals.attempted += 1;
-    setLeaf(key, "running", "alt-ergo running");
+    setLeaf(key, "running", `${node.prover} running`);
     const n = leafNo;
-    const p = pool.prove(task.text).then((outcome) => {
+    const p = getProverPool(node.prover).prove(task.text).then((outcome) => {
       if (ui.cancelled()) return;
       const time = fmtMs(outcome.ms);
       const recorded = fmtTime(node.time);
@@ -1446,13 +1494,13 @@ async function recheckSession(session, ui) {
     await walk(goal.tree, String(gi), id);
   }
 
-  ui.status(`Waiting for Alt-Ergo on ${plural(totals.attempted, "leaf", "leaves")}...`);
+  ui.status(`Waiting for the provers on ${plural(totals.attempted, "leaf", "leaves")}...`);
   await Promise.all(proofs);
   checkpoint();
 
   const elapsed = performance.now() - started;
   const parts = [];
-  if (totals.skipped) parts.push(`${fmtCount(totals.skipped)} recorded with another prover`);
+  if (totals.skipped) parts.push(`${fmtCount(totals.skipped)} without a browser prover`);
   if (totals.diverged) parts.push(`${fmtCount(totals.diverged)} diverged`);
   if (totals.missing) parts.push(`${fmtCount(totals.missing)} not found`);
   if (totals.timeout) parts.push(`${fmtCount(totals.timeout)} timed out`);

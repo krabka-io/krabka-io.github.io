@@ -6,8 +6,9 @@
 # files reference. Output: the tar named by $1 holding
 #
 #   proof_worker.js      Why3 as a web worker, with its stdlib, the Creusot
-#                        prelude, why3.conf and the Alt-Ergo driver embedded
+#                        prelude, why3.conf and prover drivers embedded
 #   alt-ergo-worker.js   Alt-Ergo as a web worker
+#   smt-worker.js        Z3/cvc5 adapter, with pinned upstream JS/WASM binaries
 #   manifest.json        the versions above and the build time
 #   LICENSES/            the licences of what the bundle contains
 #
@@ -94,6 +95,9 @@ done < <(find "${why3}/stdlib" -name "*.mlw" -o -name "*.coma" | sort)
 for f in "${work}"/prelude/creusot/*.coma; do
   files+=("--file=${f}:/packages/creusot/$(basename "${f}")")
 done
+while IFS= read -r f; do
+  files+=("--file=${f}:/share/drivers/${f#"${why3}/drivers/"}")
+done < <(find "${why3}/drivers" -type f | sort)
 mkdir -p worker
 js_of_ocaml --effects=cps --extern-fs \
   --file="${src}/why3.conf:/why3.conf" --file="${src}/try_alt_ergo.drv:/try_alt_ergo.drv" \
@@ -111,10 +115,24 @@ cp "${why3}/LICENSE" "${bundle}/LICENSES/why3.LICENSE"
 cp "${alt_ergo}/LICENSE.md" "${bundle}/LICENSES/alt-ergo.LICENSE.md"
 cp -r "${alt_ergo}/licenses" "${bundle}/LICENSES/alt-ergo-licenses"
 cp "${work}/creusot/LICENSE" "${bundle}/LICENSES/creusot.LICENSE"
+echo "==> Z3 ${Z3_VERSION} and cvc5 ${CVC5_VERSION} browser releases"
+fetch "${Z3_WEB_URL}" "${Z3_WEB_SHA256}" z3-web.tgz
+mkdir -p z3-web
+tar -xzf z3-web.tgz -C z3-web
+fetch "${CVC5_WEB_URL}" "${CVC5_WEB_SHA256}" cvc5-web.zip
+busybox unzip -q cvc5-web.zip
+fetch "${CVC5_SOURCE_URL}" "${CVC5_SOURCE_SHA256}" cvc5-source.tgz
+tar -xzf cvc5-source.tgz
+node "${src}/stage-smt.mjs" "${work}/z3-web/package" "${work}/cvc5-Wasm" "${bundle}"
+cp "${src}/smt-worker.js" "${bundle}/smt-worker.js"
+cp "${work}/cvc5-cvc5-${CVC5_VERSION}/COPYING" "${bundle}/LICENSES/cvc5.COPYING"
+cp -r "${work}/cvc5-cvc5-${CVC5_VERSION}/licenses" "${bundle}/LICENSES/cvc5-licenses"
 cat > "${bundle}/manifest.json" <<JSON
 {
   "why3": "${WHY3_VERSION}",
   "alt_ergo": "${ALT_ERGO_VERSION}",
+  "z3": "${Z3_VERSION}",
+  "cvc5": "${CVC5_VERSION}",
   "creusot": "${CREUSOT_TAG}",
   "js_of_ocaml": "${JS_OF_OCAML_VERSION}",
   "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

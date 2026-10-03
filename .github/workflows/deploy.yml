@@ -100,7 +100,7 @@ jobs:
         run: npm run build:broker
 
       # The proof explorer's browser re-check needs Why3 and Alt-Ergo compiled
-      # to JavaScript. Bazel builds that bundle inside a Docker container
+      # to JavaScript and the pinned Z3/cvc5 WASM releases. Bazel builds that bundle inside a Docker container
       # (see why3-web/) and the compile takes about nine minutes: the
       # //why3-web:bundle genrule is unsandboxed and local, so Bazel's disk
       # cache never answers for it and it reruns opam and js_of_ocaml on every
@@ -129,6 +129,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check browser proof replay with Z3 and cvc5
+        run: |
+          npx playwright install --with-deps chromium
+          npm run check-proof-smt
 
       # The verification pages render the broker's synced docs/verification.md
       # as expandable rows. This fails when the catalog's layout has drifted so
