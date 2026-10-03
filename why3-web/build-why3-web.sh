@@ -8,7 +8,7 @@
 #   proof_worker.js      Why3 as a web worker, with its stdlib, the Creusot
 #                        prelude, why3.conf and prover drivers embedded
 #   alt-ergo-worker.js   Alt-Ergo as a web worker
-#   smt-worker.js        Z3/cvc5 adapter, with pinned upstream JS/WASM binaries
+#   smt-worker.js        Z3/cvc5/CVC4 adapter, with pinned JS/WASM solvers
 #   manifest.json        the versions above and the build time
 #   LICENSES/            the licences of what the bundle contains
 #
@@ -127,12 +127,16 @@ node "${src}/stage-smt.mjs" "${work}/z3-web/package" "${work}/cvc5-Wasm" "${bund
 cp "${src}/smt-worker.js" "${bundle}/smt-worker.js"
 cp "${work}/cvc5-cvc5-${CVC5_VERSION}/COPYING" "${bundle}/LICENSES/cvc5.COPYING"
 cp -r "${work}/cvc5-cvc5-${CVC5_VERSION}/licenses" "${bundle}/LICENSES/cvc5-licenses"
+echo "==> CVC4 ${CVC4_VERSION} browser build"
+bash "${src}/build-cvc4-web.sh" "${bundle}"
 cat > "${bundle}/manifest.json" <<JSON
 {
   "why3": "${WHY3_VERSION}",
   "alt_ergo": "${ALT_ERGO_VERSION}",
   "z3": "${Z3_VERSION}",
   "cvc5": "${CVC5_VERSION}",
+  "cvc4": "${CVC4_VERSION}",
+  "emscripten": "${EMSCRIPTEN_VERSION}",
   "creusot": "${CREUSOT_TAG}",
   "js_of_ocaml": "${JS_OF_OCAML_VERSION}",
   "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -1,6 +1,6 @@
 # why3-web
 
-Why3 and Alt-Ergo compiled to JavaScript, plus Z3 and cvc5 in WebAssembly, for the proof explorer's browser
+Why3 and Alt-Ergo compiled to JavaScript, plus Z3, cvc5 and CVC4 in WebAssembly, for the proof explorer's browser
 re-check at `/docs/proof-explorer`.
 
 The broker proves each `krabka-verified` kernel with Creusot, and why3find
@@ -8,8 +8,7 @@ records the session: which tactic split each verification condition and which
 prover discharged each leaf. The explorer shows those sessions. With this
 bundle present it can also replay one in the browser: Why3 loads the Coma file
 Creusot generated, splits it into the recorded conditions, applies the recorded
-tactics, and the recorded prover discharges each supported leaf. CVC4 remains
-recorded-only.
+tactics, and the recorded prover discharges each supported leaf.
 
 ## Contents of the bundle
 
@@ -17,11 +16,12 @@ recorded-only.
 | --- | --- |
 | `proof_worker.js` | Why3 as a web worker (`worker/proof_worker.ml`), with Why3's stdlib, the Creusot prelude, `why3.conf` and the prover drivers embedded |
 | `alt-ergo-worker.js` | Alt-Ergo over its Dolmen solving loop (`alt-ergo/ae_worker.ml`) |
-| `smt-worker.js` | Z3 and cvc5 adapter; one fresh WASM runtime per leaf |
+| `smt-worker.js` | Z3, cvc5 and CVC4 adapter; one fresh WASM runtime per leaf |
 | `z3-built.js`, `z3-built.wasm`, `z3-api.js` | the official `z3-solver` browser distribution and low-level API |
 | `cvc5.js`, `cvc5.wasm` | the official cvc5 Wasm release; its JS environment flags and guard are adapted for a worker |
+| `cvc4.js`, `cvc4.wasm` | CVC4 1.8 compiled from source with Emscripten; a modular CLI with its filesystem and entry point exposed |
 | `manifest.json` | the versions below and the build time; the page probes it to learn whether the bundle is present |
-| `LICENSES/` | Why3 (LGPL 2.1), Alt-Ergo (see its licence files) and Creusot (LGPL 2.1), Z3 (MIT) and cvc5 with its bundled third-party licences |
+| `LICENSES/` | Why3 (LGPL 2.1), Alt-Ergo (see its licence files) and Creusot (LGPL 2.1), Z3 (MIT) and cvc5/CVC4 with their bundled third-party licences |
 
 ## Pins
 
@@ -30,6 +30,14 @@ v0.13.0's `creusot-setup` installs on the proof machine, and the Creusot commit
 whose `prelude-generator` produces the Why3 prelude the Coma files reference.
 Z3 4.15.3 and cvc5 1.3.1 match Creusot's native solver pins; their official
 browser archives and cvc5's source licence archive are SHA-256 checked.
+CVC4 1.8 is compiled by `build-cvc4-web.sh` with Emscripten 3.1.74, GMP,
+ANTLR 3.4 and the SymFPU revision its release recommends. All source/toolchain
+archives are SHA-256 checked. Build scripts are adapted to use Python's
+built-in TOML parser and to preserve literal ampersands in modern Bash
+code generation, and three headers explicitly include `stddef.h` for libc++.
+ANTLR's unused debug handlers are omitted as in CVC4's
+own dependency build script. Native signal-stack/resource initialization is
+skipped in WebAssembly; the page enforces its budget by terminating the worker.
 `gen-prelude.mjs` is a port of that generator, so the builder needs no Rust.
 
 ## Build
@@ -46,7 +54,7 @@ npm run check-proof-smt              # real WASM workers and page replay in Chro
 ```
 
 `image.apko.yaml` and its lock are the Wolfi base with opam, a C toolchain and
-Node; opam builds the OCaml compiler pinned in `pins.env` inside the container,
+Node, Python, CMake and Java for CVC4; opam builds the OCaml compiler pinned in `pins.env` inside the container,
 because js_of_ocaml 6.2.0 does not accept the newest OCaml that Wolfi ships.
 Bazel assembles the builder image from that base plus the scripts and
 worker source here, loads it into Docker, runs `build-why3-web.sh` inside it,
@@ -73,7 +81,7 @@ The page and `proof_worker.js` exchange JSON strings:
 | `{"cmd":"ping"}` | `{"kind":"pong","why3":..,"prover":..}` |
 | `{"cmd":"load","name":..,"content":<coma>}` | `{"kind":"loaded","theories":[{"name":..,"goals":[{"id":..,"name":"vc_..","expl":..}]}]}` |
 | `{"cmd":"transform","id":..,"name":"split_vc"}` | `{"kind":"children","id":..,"children":[{"id":..,"expl":..}]}` |
-| `{"cmd":"task","id":..,"prover":"alt-ergo"|"z3"|"cvc5"}` | `{"kind":"task","id":..,"text":<SMT-LIB task>,"pretty":<sequent>}` |
+| `{"cmd":"task","id":..,"prover":"alt-ergo"|"z3"|"cvc5"|"cvc4"}` | `{"kind":"task","id":..,"text":<SMT-LIB task>,"pretty":<sequent>}` |
 
 Any failure answers `{"kind":"error",...}`.
 
@@ -105,7 +113,8 @@ time limit by terminating a worker.
   proves through Why3's `alt_ergo_26` SMT-LIB driver: same prover, same
   verification condition, same input language.
 
-Z3 and cvc5 use Why3's pinned `z3_4_12.drv` and `cvc5.drv`, including the
+Z3, cvc5 and CVC4 use Why3's pinned `z3_4_12.drv`, `cvc5.drv` and
+`cvc4_17.drv` (Why3's driver for CVC4 1.8), including the
 upstream driver imports embedded in the Why3 worker. Omitting `prover` keeps
 the Alt-Ergo driver for existing clients.
 
@@ -121,5 +130,5 @@ The first Z3 check reloads once and resumes the selected session; hosts that
 already send COOP/COEP headers need no reload. If isolation cannot be enabled,
 the panel reports why. Blob worker bootstraps inherit the page's isolation
 policy even though the bundle lives outside the service worker's scope; Z3's
-pthread workers use the same approach. The cvc5 and Alt-Ergo workers need no
+pthread workers use the same approach. The cvc5, CVC4 and Alt-Ergo workers need no
 isolation.

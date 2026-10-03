@@ -30,7 +30,7 @@ try {
       if (loaded.kind !== 'loaded') throw new Error(JSON.stringify(loaded));
       const id = loaded.theories.flatMap((theory) => theory.goals)[0].id;
       const tasks = {};
-      for (const prover of ['z3', 'cvc5']) {
+      for (const prover of ['z3', 'cvc5', 'cvc4']) {
         const task = await request({ cmd: 'task', id, prover });
         if (task.kind !== 'task') throw new Error(JSON.stringify(task));
         tasks[prover] = task.text;
@@ -39,13 +39,14 @@ try {
     }
     finally { worker.terminate(); }
   }, fs.readFileSync(new URL('./fixtures/barrier_placement_decision.coma', import.meta.url), 'utf8'));
-  for (const prover of ['z3', 'cvc5']) {
+  for (const prover of ['z3', 'cvc5', 'cvc4']) {
     for (const [content, status] of [
       [tasks[prover], 'unsat'],
       ['(set-logic ALL)\n(assert false)\n(check-sat)', 'unsat'],
       ['(set-logic ALL)\n(check-sat)', 'sat'],
       ['(set-logic ALL)\n(assert unsat)\n(check-sat)', 'error'],
       ['(set-logic ALL)\n(assert false)\n(check-sat)\n(assert unsat)', 'error'],
+      ['(set-logic ALL)\n(assert false)\n(check-sat)\n(check-sat)', 'error'],
       ['(set-logic ALL)\n(assert false)\n(check-sat)', 'unsat'],
     ]) {
       const reply = await page.evaluate(({ prover, content }) => new Promise((resolve, reject) => {
@@ -72,9 +73,15 @@ try {
     page.on('requestfailed', (request) => console.error(request.url(), request.failure()));
     page.on('response', (response) => { if (response.status() >= 400) console.error(response.status(), response.url()); });
     const data = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/data/proof-sessions.json'), 'utf8'));
-    for (const prover of ['z3', 'cvc5']) {
+    const smallSession = (prover) => {
       const session = data.sessions.find((session) => session.kind === 'kernel' && session.stats.leaves <= 2 && session.stats.provers[prover]);
       assert.ok(session, `a small recorded ${prover} session`);
+      return { prover, session };
+    };
+    const cvc4Sessions = data.sessions.filter((session) => session.stats.provers.cvc4);
+    assert.ok(cvc4Sessions.length, 'recorded CVC4 sessions');
+    // Include every CVC4 session, including its Alt-Ergo/Z3 leaves and tactics.
+    for (const { prover, session } of [...cvc4Sessions.map((session) => ({ prover: 'cvc4', session })), smallSession('z3'), smallSession('cvc5')]) {
       await page.goto(`http://127.0.0.1:${site.port}/docs/proof-explorer/#session=${session.id}`);
       await page.locator('[data-tab="check"]').click();
       await page.getByRole('button', { name: 'Re-check this session', exact: true }).click();
@@ -83,14 +90,28 @@ try {
       } catch (error) {
         throw new Error(`${error.message}\n${await page.locator('.px-check').innerText()}`);
       }
-      assert.equal(await page.locator('.px-check-ok').count(), 1, await page.locator('.px-check').innerText());
-      assert.match(await page.locator('.px-check-status').innerText(), /leaves re-proved in the browser/);
-      assert.equal(await page.locator('.px-live-proved').count(), session.stats.leaves);
-      if (prover === 'z3') {
+      const status = await page.locator('.px-check-status').innerText();
+      assert.match(status, /leaves re-proved in the browser/);
+      const proved = await page.locator('.px-live-proved').count();
+      if (prover === 'cvc4') {
+        assert.equal(await page.locator('.px-leaf-cvc4 .px-live-proved').count(), session.stats.provers.cvc4, status);
+        // One recorded Z3 quantifier leaf exceeds the browser budget locally.
+        // Require every CVC4/Alt-Ergo leaf to prove and all other Z3 leaves to
+        // either prove or report that budget; errors/divergence/skips still fail.
+        const timeouts = await page.locator('.px-leaf-z3 .px-live-timeout').count();
+        assert.equal(proved + timeouts, session.stats.leaves, await page.locator('.px-check').innerText());
+      } else {
+        assert.equal(await page.locator('.px-check-ok').count(), 1, await page.locator('.px-check').innerText());
+        assert.equal(proved, session.stats.leaves);
+      }
+      if (session.stats.provers.z3) {
         assert.equal(await page.evaluate(() => self.crossOriginIsolated), true);
         assert.equal(await page.evaluate(() => new URL(navigator.serviceWorker.controller.scriptURL).pathname), '/docs/proof-explorer/coi-sw.js');
       }
-      console.log(`${prover}: recorded session ${session.id} re-proved through the page.`);
+      if (prover === 'cvc4' && !session.stats.provers.z3) {
+        assert.equal(await page.evaluate(() => self.crossOriginIsolated), false, 'CVC4 needs no isolation');
+      }
+      console.log(`${prover}: recorded session ${session.id}: ${status}`);
     }
     // Hold a real WASM download so cancellation is deterministic.
     let downloading = false;

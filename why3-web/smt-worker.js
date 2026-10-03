@@ -1,4 +1,4 @@
-// Z3 and cvc5 use the same JSON protocol as the Alt-Ergo worker.
+// Z3, cvc5 and CVC4 use the same JSON protocol as the Alt-Ergo worker.
 // Each worker handles one leaf: cvc5's CLI exits, and Z3 owns pthread workers.
 const workerUrl = self.proofWorkerUrl || self.location.href;
 const prover = new URL(workerUrl).searchParams.get('prover');
@@ -41,6 +41,16 @@ self.onmessage = async ({ data }) => {
         Z3.del_context(context);
       }
       finish();
+    } else if (prover === 'cvc4') {
+      importScripts(asset('cvc4.js'));
+      const module = await createCvc4({
+        locateFile: asset,
+        print: (text) => { output += text + '\n'; },
+        printErr: (text) => { diagnostic += text + '\n'; },
+        onAbort: (text) => { diagnostic += String(text); finish(1); },
+      });
+      module.FS.writeFile('/task.smt2', request.content.replace(/^\(get-info :reason-unknown\)\s*$/gm, ''));
+      finish(module.callMain(['--lang=smt2', '/task.smt2']));
     } else if (prover === 'cvc5') {
       // The pinned non-modular CLI exposes FS/callMain as worker globals.
       self.Module = {
