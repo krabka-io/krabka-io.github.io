@@ -35,7 +35,7 @@ const brokerCrates = [
   { name: 'krabka-raft', desc: 'Metadata KRaft quorum (KIP-595 KraftController)' },
   { name: 'krabka-kraft-core', desc: 'Deterministic, sans-IO KRaft consensus core (KIP-595/996)' },
   { name: 'krabka-log', desc: 'Byte-compatible reader and writer for Apache Kafka\'s on-disk log format' },
-  { name: 'krabka-logfmt', desc: 'Structured-JSON tracing log formatter shared across Krabka services' },
+  { name: 'krabka-logfmt', desc: 'Structured-JSON tracing log formatter shared across krabka services' },
   { name: 'krabka-remote-storage', desc: 'KIP-405 tiered-storage SPI (RemoteStorageManager and RemoteLogMetadataManager) with reference implementations; ships the krabka-worm-verify binary' },
   { name: 'krabka-remote-storage-topic', desc: 'Topic-backed RemoteLogMetadataManager for tiered storage' },
   { name: 'krabka-object-store', desc: 'Unified object-store construction (S3-compatible, GCS, local filesystem) shared by tiered storage and the observability blockstore' },
@@ -55,7 +55,7 @@ const brokerCrates = [
 
 <DocsLayout
   title="Broker Engine Overview (krabka-broker)"
-  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the Krabka broker."
+  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the krabka broker."
   currentSlug="/docs/broker"
 >
   <div class="space-y-6 font-sans">
@@ -81,7 +81,7 @@ const brokerCrates = [
 
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <code>krabka-broker</code> is a native Rust, byte-exact drop-in replacement for Apache Kafka. It runs without the JVM, using asynchronous I/O in safe Rust. Its safety-critical decisions are Creusot-proved kernels and its failure orderings are Stateright models.
+        <code>krabka-broker</code> implements the Apache Kafka wire protocol in safe Rust, with asynchronous I/O and a <a href={getPath('/features/kraft')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">KRaft metadata quorum</a>. Selected decision-kernel contracts have <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a> proofs, and <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> models check failure sequences within stated bounds. The <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">compatibility matrix</a> lists supported APIs and implementation status.
       </p>
 
       <!-- Architecture & Engineering Guides -->
@@ -94,7 +94,7 @@ const brokerCrates = [
         </div>
         <ul class="space-y-2 text-sm text-gray-300 list-disc pl-5 marker:text-krab-400">
           <li>
-            <a href={getPath('/docs/broker/config-reference')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Broker Configuration Reference:</a> Comprehensive server properties, listener parameters, and storage thresholds.
+            <a href={getPath('/docs/broker/config-reference')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Broker Configuration Reference:</a> Server properties, listener parameters, and storage thresholds.
           </li>
           <li>
             <a href={getPath('/docs/broker/verification')} class="font-semibold text-krab-400 hover:text-krab-300 hover:underline transition-colors">Verification & Invariants:</a> Formal mathematical proofs with Creusot and model checking with Stateright.

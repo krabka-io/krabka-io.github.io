@@ -54,7 +54,7 @@ func main() {
 
 <DocsLayout
   title="Go Streams & Arrow"
-  description="Go client library for stream processing with Krabka: Apache Arrow batch processing, schema registry, and barrier cuts."
+  description="Go client library for stream processing with krabka: Apache Arrow batch processing, schema registry, and barrier cuts."
   currentSlug="/docs/streams-go"
 >
   <div class="space-y-6 font-sans">
@@ -66,7 +66,7 @@ func main() {
         </div>
         <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Go Streams & Arrow</h1>
         <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
-          Stream processing in Go featuring Apache Arrow batch acceleration, barrier cuts, and schema decoding via <code>krabka-streams-go</code>.
+          Stream processing in Go with Apache Arrow record batches, barrier cuts, and schema decoding via <code>krabka-streams-go</code>.
         </p>
       </div>
 
@@ -80,7 +80,7 @@ func main() {
 
     <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
       <p>
-        <code>krabka-streams-go</code> provides native Go stream processing primitives optimized for zero-copy column batching. Instead of per-record serialization overhead, streams operate on Apache Arrow record batches to maximize CPU cache locality.
+        <code>krabka-streams-go</code> processes Kafka records as <a href="https://arrow.apache.org/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Apache Arrow</a> batches. A consumer poll is decoded into a <a href={getPath('/docs/streams-go/columnar#the-batch-model')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">record batch</a>, passed through batch operators, and encoded back into Kafka records at a sink.
       </p>
 
       <!-- Architecture & Engineering Guides -->
@@ -188,8 +188,8 @@ func main() {
               <td class="py-2 px-4 text-gray-400">Native Go allocator and Record batches</td>
             </tr>
             <tr>
-              <td class="py-2 px-4 font-medium text-white">Krabka Broker</td>
-              <td class="py-2 px-4">Apache Kafka 4.x or a Krabka broker</td>
+              <td class="py-2 px-4 font-medium text-white">krabka Broker</td>
+              <td class="py-2 px-4">Apache Kafka 4.x or a krabka broker</td>
               <td class="py-2 px-4 text-gray-400">Wire-protocol compatibility</td>
             </tr>
           </tbody>

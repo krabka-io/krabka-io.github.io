@@ -32,8 +32,8 @@ const formatCmd = `krabka-format --log-dir /var/lib/krabka/data --cluster-id 3d7
 ---
 
 <BaseLayout
-  title="Native KRaft Consensus Quorum | Krabka"
-  description="Architecture and specifications for Krabka's native Rust KRaft metadata quorum engine (krabka-raft & krabka-kraft-core), KIP-595 wire compatibility, and dynamic quorum reconfiguration."
+  title="Native KRaft Consensus Quorum | krabka"
+  description="Architecture and specifications for krabka's native Rust KRaft metadata quorum engine (krabka-raft & krabka-kraft-core), KIP-595 wire compatibility, and dynamic quorum reconfiguration."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
@@ -44,7 +44,7 @@ const formatCmd = `krabka-format --log-dir /var/lib/krabka/data --cluster-id 3d7
         Native KRaft Consensus Quorum
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
-        Krabka implements the Apache Kafka KRaft consensus protocol directly in memory-safe Rust (<code class="text-krab-300 font-mono text-sm">krabka-raft</code> and <code class="text-krab-300 font-mono text-sm">krabka-kraft-core</code>), with leader elections, metadata compaction, and no ZooKeeper dependency. The election and quorum decisions are Creusot-proved kernels, and the consensus engine has a Stateright model.
+        krabka implements the Apache Kafka KRaft consensus protocol directly in <a href={getPath('/verification#memory-safety')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">memory-safe Rust</a> (<code class="text-krab-300 font-mono text-sm">krabka-raft</code> and <code class="text-krab-300 font-mono text-sm">krabka-kraft-core</code>), with leader elections, metadata compaction, and no ZooKeeper dependency. The election and quorum decisions are <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a>-proved kernels, and the consensus engine has a <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a> model.
       </p>
     </div>
 
@@ -55,7 +55,7 @@ const formatCmd = `krabka-format --log-dir /var/lib/krabka/data --cluster-id 3d7
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">KIP-595 Wire RPC Interoperability</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Krabka speaks the exact KIP-595 Raft RPC protocol on the wire. Controller voters communicate via native Rust serialization of metadata records (<code class="font-mono text-xs text-krab-300">PartitionRecord</code>, <code class="font-mono text-xs text-krab-300">TopicRecord</code>, <code class="font-mono text-xs text-krab-300">UserScramCredentialRecord</code>) matching JVM Kafka byte-for-byte.
+          krabka speaks the exact KIP-595 Raft RPC protocol on the wire. Controller voters communicate via native Rust serialization of metadata records (<code class="font-mono text-xs text-krab-300">PartitionRecord</code>, <code class="font-mono text-xs text-krab-300">TopicRecord</code>, <code class="font-mono text-xs text-krab-300">UserScramCredentialRecord</code>) matching JVM Kafka byte-for-byte.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
@@ -89,7 +89,7 @@ const formatCmd = `krabka-format --log-dir /var/lib/krabka/data --cluster-id 3d7
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">In-Memory Metadata Image & Snapshots</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Metadata logs are periodically compacted into zero-copy in-memory snapshot states (<code class="font-mono text-xs text-krab-300">krabka-metadata</code>). When a new node joins or an existing broker reconnects after a network partition, snapshot catch-up avoids replaying the full historical log.
+          <code class="font-mono text-xs text-krab-300">krabka-metadata</code> maintains an in-memory metadata image. A node can catch up from a metadata snapshot when it joins or reconnects after a network partition.
         </p>
       </div>
 
@@ -97,7 +97,7 @@ const formatCmd = `krabka-format --log-dir /var/lib/krabka/data --cluster-id 3d7
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <h2 class="text-2xl font-bold text-white font-sans">Formally Verified Kernels & Deterministic Seeding</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          Core consensus invariants and quota token buckets are mathematically verified using the <strong class="text-white">Creusot</strong> deductive verification tool (<code class="font-mono text-xs text-krab-300">krabka-verified</code>, <code class="font-mono text-xs text-krab-300">krabka-throttle</code>). Log directories are seeded deterministically with <code class="font-mono text-xs text-krab-300">krabka-format</code>.
+          <strong class="text-white">Creusot</strong> proves contracts on selected consensus and quota decision kernels in <code class="font-mono text-xs text-krab-300">krabka-verified</code>, which host crates such as <code class="font-mono text-xs text-krab-300">krabka-throttle</code> call. Log directories are seeded with <code class="font-mono text-xs text-krab-300">krabka-format</code>.
         </p>
         <div class="flex items-center justify-between gap-3">
           <h3 class="text-sm font-semibold text-gray-300 font-sans">Seed a log directory</h3>
