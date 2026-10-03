@@ -55,6 +55,13 @@ npm run check-seo
 npm run check-snippets
 npm run test:snippets
 
+# Compare published Krabka, Kafka 4.3.1, and Redpanda; update dated repo results
+# Native Linux/amd64 Docker, JDK 17+, 14 logical CPUs, 34 GiB available RAM
+npm run benchmark -- --dry-run
+npm run benchmark -- --smoke
+npm run benchmark
+npm run test:benchmark
+
 # Execute an integration suite; run these sequentially, with port 9092 free.
 # Docker is required. Rust, Go, Java, Python, and Node.js use their native tools;
 # the Java suite needs JDK 21, Gradle 9.6.1 and Maven; Helm needs kind/kubectl/helm.
@@ -139,6 +146,8 @@ npm run preview
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
 - **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`. `src/utils/verification-catalog.ts` parses that file at build time and `src/utils/verification-data.ts` joins it with the site's data files; the counts on the homepage and the verification page come from that parse, so they follow the broker's catalog rather than hand-maintained copy.
 - The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
+
+Local broker benchmark tasks are documented in [benchmarks/README.md](benchmarks/README.md). `npm run benchmark` runs the RF1/RF3 three-way comparison and updates repository reports after the full matrix passes. These reports are separate from the website's performance claims.
 
 ### 7. Aggregated Helm Chart Repository
 
