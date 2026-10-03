@@ -29,6 +29,7 @@ const PROVER_WORKER_PATHS = {
   "alt-ergo": WHY3_WEB_DIR + "alt-ergo-worker.js",
   z3: WHY3_WEB_DIR + "smt-worker.js?prover=z3",
   cvc5: WHY3_WEB_DIR + "smt-worker.js?prover=cvc5",
+  cvc4: WHY3_WEB_DIR + "smt-worker.js?prover=cvc4",
 };
 const PROVER_WORKERS = Math.max(1, Math.min(2, navigator.hardwareConcurrency || 2));
 const RESUME_CHECK_KEY = "krabka-proof-recheck";
@@ -1018,6 +1019,7 @@ function renderCheckPanel(session) {
   if (bundle.alt_ergo) versions.push(`Alt-Ergo ${bundle.alt_ergo}`);
   if (bundle.z3) versions.push(`Z3 ${bundle.z3}`);
   if (bundle.cvc5) versions.push(`cvc5 ${bundle.cvc5}`);
+  if (bundle.cvc4) versions.push(`CVC4 ${bundle.cvc4}`);
   if (bundle.creusot) versions.push(`Creusot prelude ${bundle.creusot}`);
   shead.appendChild(el("span", "px-section-hint", versions.join(", ") + (bundle.built ? `, built ${String(bundle.built).slice(0, 10)}` : "")));
 

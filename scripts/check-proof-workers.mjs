@@ -32,13 +32,13 @@ assert.equal(goals.length, 1);
 assert.equal(goals[0].name, 'vc_barrier_placement_decision');
 const task = why3({ cmd: 'task', id: goals[0].id });
 assert.equal(task.kind, 'task');
-for (const prover of ['z3', 'cvc5']) {
+for (const prover of ['z3', 'cvc5', 'cvc4']) {
   const printed = why3({ cmd: 'task', id: goals[0].id, prover });
   assert.equal(printed.kind, 'task', JSON.stringify(printed));
   assert.match(printed.text, /\(check-sat\)/);
   assert.notEqual(printed.text, task.text, `${prover} must use its own driver`);
 }
-assert.equal(why3({ cmd: 'task', id: goals[0].id, prover: 'cvc4' }).kind, 'error');
+assert.equal(why3({ cmd: 'task', id: goals[0].id, prover: 'unsupported' }).kind, 'error');
 
 const altErgo = worker('alt-ergo-worker.js');
 let id = 0;
