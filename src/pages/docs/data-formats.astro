@@ -1,0 +1,128 @@
+---
+import CodeBlock from '../../components/CodeBlock.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const serdes = [
+  { serde: 'StringSerde / I64Serde / BytesSerde', type: 'String / i64 / Bytes', feature: 'built in', use: 'Primitive keys and values.' },
+  { serde: 'SchemaSerde<T, JsonSerde<T>>', type: 'any serde type that derives schemars::JsonSchema', feature: 'built in', use: 'Confluent JSON Schema.' },
+  { serde: 'SchemaSerde<T, ProtobufSerde<T>>', type: 'a prost Message that also implements prost_reflect::ReflectMessage', feature: 'built in', use: 'Confluent Protobuf, resolved through prost-reflect.' },
+  { serde: 'SchemaSerde<T, AvroSerde<T>>', type: 'apache_avro::AvroSchema', feature: 'built in', use: 'Confluent Avro.' },
+  { serde: 'PolarsIpcSerde', type: 'polars::DataFrame', feature: 'polars', use: 'Columnar values as Arrow IPC.' },
+  { serde: 'ArrowIpcSerde', type: 'arrow::RecordBatch', feature: 'arrow', use: 'Interchange with arrow-rs.' },
+  { serde: 'ColumnarSerde<T>', type: 'columnar::Columnar', feature: 'columnar', use: 'Zero-copy native columnar values.' },
+];
+
+const models = [
+  { model: 'Row model', api: 'Processor API and the high-level DSL', driver: 'TopologyTestDriver', note: 'Processes one record at a time. This is the model that matches Kafka Streams.' },
+  { model: 'Columnar model', api: 'ColumnarTopology with Polars DataFrame edges', driver: 'ColumnarTestDriver', note: 'Vectorized aggregation over batches instead of single records.' },
+];
+
+const cargo = `[dependencies]
+krabka-client-streams = { version = "0.4", features = ["polars", "arrow"] }`;
+---
+
+<DocsLayout
+  title="Serdes & Data Formats"
+  description="Every serde krabka-streams-rs ships: Confluent Avro, Protobuf and JSON Schema through the registry, plus Arrow, Polars and native columnar values for vectorized work."
+  currentSlug="/docs/data-formats"
+>
+  <div class="space-y-6 font-sans">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Serdes & Data Formats</h1>
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        Pick the encoding your topic carries, then hand it to the topology.
+      </p>
+    </div>
+
+    <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+      <p>
+        A serde turns a Rust value into the bytes on a topic and back. The schema serdes resolve schema
+        IDs against a <a href={getPath('/docs/streams-java/schema-registry')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Confluent-compatible registry</a> and write the Confluent wire format, so a Java
+        consumer reads what a Rust producer wrote. The columnar serdes are self-describing <a href="https://arrow.apache.org/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Arrow</a> IPC
+        and need no registry.
+      </p>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Serde</th>
+              <th class="py-3 px-4">Rust type</th>
+              <th class="py-3 px-4">Cargo feature</th>
+              <th class="py-3 px-4">Use it for</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {serdes.map((s) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-mono font-bold text-white text-xs">{s.serde}</td>
+                <td class="py-3 px-4 font-mono text-gray-400 text-xs">{s.type}</td>
+                <td class="py-3 px-4 font-mono text-krab-300 text-xs whitespace-nowrap">{s.feature}</td>
+                <td class="py-3 px-4 text-gray-300">{s.use}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Enable the ones you need</h2>
+
+      <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3 not-prose">
+        <div class="flex items-center justify-between text-xs text-gray-400">
+          <span>Cargo.toml:</span>
+          <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-colors text-xs" data-copy={cargo}>
+            Copy
+          </button>
+        </div>
+        <CodeBlock code={cargo} lang="toml" />
+      </div>
+
+      <p>
+        The primitive and schema serdes are always available. The three columnar serdes each sit behind
+        a Cargo feature, so a build that does not touch Arrow does not compile Arrow.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Two processing models</h2>
+
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400 font-sans">
+            <tr>
+              <th class="py-3 px-4">Model</th>
+              <th class="py-3 px-4">Build it with</th>
+              <th class="py-3 px-4">Test it with</th>
+              <th class="py-3 px-4">Notes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-sans">
+            {models.map((m) => (
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-4 font-bold text-white text-xs whitespace-nowrap">{m.model}</td>
+                <td class="py-3 px-4 text-gray-300">{m.api}</td>
+                <td class="py-3 px-4 font-mono text-krab-300 text-xs whitespace-nowrap">{m.driver}</td>
+                <td class="py-3 px-4 text-gray-400">{m.note}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Both test drivers run a topology with no broker, so a unit test needs no cluster.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
+        <a href={getPath('/docs/streams-rs')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Rust Client & Streams →</div>
+          <p class="text-xs text-gray-400 mt-1">Native Tokio async producer, consumer, and streaming DSL client architecture.</p>
+        </a>
+        <a href={getPath('/docs/streams-java/schema-registry')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
+          <div class="text-sm font-bold text-white">Schema Registry Guide →</div>
+          <p class="text-xs text-gray-400 mt-1">Schema registration, Avro/Protobuf/JSON serdes, and wire-format compatibility.</p>
+        </a>
+      </div>
+    </div>
+  </div>
+</DocsLayout>

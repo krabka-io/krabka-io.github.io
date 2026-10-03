@@ -1,0 +1,57 @@
+{
+  "name": "krabka-website",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro dev",
+    "start": "astro dev",
+    "sync-docs": "node scripts/sync-docs.mjs",
+    "sync-proofs": "node --experimental-strip-types scripts/sync-proofs.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "test:benchmark": "node --test scripts/benchmark.test.mjs",
+    "build:playground": "bash playground/build.sh",
+    "build:why3-web": "bash why3-web/install.sh",
+    "build:broker": "bash playground/broker-wasi/build.sh",
+    "build:site": "astro build",
+    "build": "npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build",
+    "check-links": "node scripts/check-links.mjs",
+    "check-catalog": "node --experimental-strip-types scripts/check-catalog.mjs",
+    "check-seo": "node scripts/check-seo.mjs",
+    "check-api-links": "node scripts/check-api-links.mjs",
+    "check-lab": "node scripts/check-lab.mjs",
+    "check-lab-presets": "node scripts/check-lab-presets.mjs",
+    "check-lab-migrate": "node scripts/check-lab-migrate.mjs",
+    "check-lab-clusters": "node scripts/check-lab-clusters.mjs",
+    "check-lab-external": "node scripts/check-lab-external.mjs",
+    "check-lab-logs-ui": "node scripts/check-lab-logs-ui.mjs",
+    "check-lab-logs": "node scripts/check-lab-logs.mjs",
+    "check-real-broker": "node scripts/check-real-broker.mjs",
+    "check-wasi": "node scripts/check-wasi.mjs",
+    "check-proof-highlight": "node scripts/check-proof-highlight.mjs",
+    "check-proof-workers": "node scripts/check-proof-workers.mjs",
+    "check-proof-smt": "node scripts/check-proof-smt.mjs",
+    "check-proof-readability": "node scripts/check-proof-readability.mjs",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check-snippets": "node scripts/check-snippets.mjs",
+    "test:snippets": "node --test scripts/snippets/extract.test.mjs"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.2",
+    "@astrojs/sitemap": "^3.7.4",
+    "@astrojs/starlight": "^0.42.4",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.5",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/typography": "^0.5.20",
+    "playwright": "1.63.0"
+  }
+}

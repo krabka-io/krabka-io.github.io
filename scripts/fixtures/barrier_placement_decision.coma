@@ -1,0 +1,36 @@
+(* #"/workspace/crates/verified/src/barrier/cut_classification.rs" 90 0 90 91 *)
+
+let%span sord = "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/creusot-std-0.13.0/src/logic/ord.rs" 34 8 34 21
+let%span scut_classification = "/workspace/crates/verified/src/barrier/cut_classification.rs" 91 30 91 31
+let%span scut_classification'0 = "/workspace/crates/verified/src/barrier/cut_classification.rs" 88 10 88 85
+
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_BarrierPlacementDecision = Reject | Accept
+
+predicate ge_log_Int [@inline:trivial] (self: int) (other: int) = [%#sord] other <= self
+
+meta "rewrite_def" predicate ge_log_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let barrier_placement_decision [#"/workspace/crates/verified/src/barrier/cut_classification.rs" 90 0 90 91]
+  (requested: bool) (offset: Int64.t) (return (x: t_BarrierPlacementDecision)) = (! bb0
+  [ bb0 = any [ br0 -> {requested = false} (! bb4) | br1 -> {requested} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_7 <- Int64.ge offset ([%#scut_classification] (0: Int64.t)) ] s1
+    | s1 = any [ br0 -> {_7 = false} (! bb4) | br1 -> {_7} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- Accept ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- Reject ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_BarrierPlacementDecision = Any.any_l ()
+  | & requested: bool = requested
+  | & offset: Int64.t = offset
+  | & _7: bool = Any.any_l () ])
+  [ return (result: t_BarrierPlacementDecision) ->
+  {[@stop_split] [@expl:barrier_placement_decision ensures] [%#scut_classification'0] (result = Accept)
+    = (requested /\ ge_log_Int (Int64.to_int offset) 0)}
+    (! return {result}) ]

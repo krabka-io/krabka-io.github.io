@@ -1,0 +1,85 @@
+[package]
+name = "krabka-broker-wasi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "Apache-2.0"
+authors = ["The Krabka Authors"]
+publish = false
+description = "The real krabka-broker as a WASI command for the Cluster Lab: it runs in a Web Worker on the site's browser WASI runtime, as a node of the lab's world"
+repository = "https://github.com/krabka-io/krabka-io.github.io"
+
+[workspace]
+# Its own workspace root, like `wasi-guest/` next door: the broker's graph
+# stays out of the `krabka-playground` build and its lockfile.
+
+[[bin]]
+# The module the lab page loads: `krabka-broker.wasm`.
+name = "krabka-broker"
+path = "src/main.rs"
+
+[lints.rust]
+# The krabka workspaces forbid `unsafe_code`. This crate adopts the
+# descriptors the lab's WASI runtime preopens, which only `from_raw_fd` can
+# do, so it denies `unsafe_code` everywhere but at those adoption sites, and
+# each of them says why it is sound.
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+
+[dependencies]
+# The real broker, the formatter it boots from and the raft crate that tells
+# a formatted metadata log from an empty one, at the krabka-broker main commit
+# with the producer delivery API: the broker builds for wasm32-wasip1
+# and takes every socket from its embedder.
+krabka-broker = { git = "https://github.com/krabka-io/krabka-broker", rev = "505d7c890d46d3937f35e92753c65733f3bf4b88" }
+krabka-format = { git = "https://github.com/krabka-io/krabka-broker", rev = "505d7c890d46d3937f35e92753c65733f3bf4b88" }
+krabka-raft = { git = "https://github.com/krabka-io/krabka-broker", rev = "505d7c890d46d3937f35e92753c65733f3bf4b88" }
+# The seam every outbound connection of the broker goes through.
+krabka-client-core = "0.4.0"
+serde_json = "1"
+thiserror = "2"
+# `.cargo/config.toml` sets the `--cfg tokio_unstable` that tokio's `net`
+# needs on wasm32-wasip1.
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+uuid = "1"
+
+[dev-dependencies]
+assert2 = "0.4"
+# The broker's durations, read back as `std::time::Duration` in the tests.
+krabka-units = "0.4.0"
+
+[profile.release]
+# The module ships to every reader who puts a real broker on the canvas, so
+# size counts; fat LTO and one codegen unit let the linker drop what the lab
+# never reaches. A panic traps, which the lab reports as the process's end.
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# The broker workspace's `[patch.crates-io]` block, so its sibling crates
+# resolve to the revisions the broker builds with. Keep it in step with the
+# root `Cargo.toml` of krabka-broker at the revision above. Its three path
+# entries (`krabka-authz`, `krabka-audit`, `krabka-telemetry`) point at the
+# broker's own crates, which the git dependency brings at that revision, and
+# nothing in this graph asks crates.io for them.
+[patch.crates-io]
+krabka-client-admin = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
+krabka-client-consumer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
+krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
+krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
+krabka-compression = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-ids = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-metadata = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-protocol = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-security = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-trace-context = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "0b226cb203420d89de489ba1dab95a89c0b79b92" }
+krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "a7b5964f7536b07a36a1f440d4af65c0bf6609dd" }

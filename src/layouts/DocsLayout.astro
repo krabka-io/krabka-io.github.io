@@ -1,0 +1,361 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { getPath } from '../utils/paths';
+
+interface Props {
+  title?: string;
+  description?: string;
+  currentSlug?: string;
+  wide?: boolean;
+  headings?: { depth: number; slug: string; text: string }[];
+  // A markdown page under src/pages sets `layout` to this file and passes the
+  // three props in its frontmatter instead.
+  frontmatter?: { title: string; description: string; currentSlug: string };
+}
+
+const { frontmatter, headings = [] } = Astro.props;
+const title = frontmatter?.title ?? Astro.props.title ?? '';
+const description = frontmatter?.description ?? Astro.props.description ?? '';
+const currentSlug = frontmatter?.currentSlug ?? Astro.props.currentSlug ?? '';
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const hasToc = toc.length > 0;
+
+// An .astro page styles its own body. A markdown page has no classes of its
+// own, so it takes the same `markdown-body` styling as the synced guides,
+// including the scroll container around each table.
+const proseClass = frontmatter ? 'markdown-body' : '';
+
+const docSections = [
+  {
+    category: 'Start Here',
+    items: [
+      { label: 'Introduction', slug: '/docs' },
+      { label: 'Quickstart Guide', slug: '/docs/quickstart' },
+      { label: 'Consensus Playground', slug: '/docs/playground' },
+      { label: 'Cluster Lab', slug: '/docs/lab' },
+      { label: 'Verification Playground', slug: '/docs/verification-playground' },
+      { label: 'Proof Explorer', slug: '/docs/proof-explorer' },
+      { label: 'Correctness & Verification', slug: '/verification' },
+    ],
+  },
+  {
+    category: 'Architecture',
+    items: [
+      { label: 'Ecosystem Architecture', slug: '/docs/architecture' },
+      { label: 'Runtime Architecture', slug: '/docs/runtime-architecture' },
+      { label: 'Milestone 23 Qualification', slug: '/docs/qualification' },
+    ],
+  },
+  {
+    category: 'Core Broker (krabka-broker)',
+    items: [
+      { label: 'Overview & Quickstart', slug: '/docs/broker' },
+      { label: 'Broker Configuration Reference', slug: '/docs/broker/config-reference' },
+      { label: 'Verification', slug: '/docs/broker/verification' },
+      { label: 'Kafka KIP Matrix', slug: '/docs/kip-matrix' },
+      { label: 'Kafka KIP Compatibility Matrix', slug: '/docs/broker/kip_matrix' },
+      { label: 'Kafka KIP Inventory', slug: '/docs/broker/kip_inventory' },
+      { label: 'Ecosystem Qualification', slug: '/docs/broker/qualification' },
+      { label: 'Format Divergences', slug: '/docs/broker/format-divergences' },
+      { label: 'Roadmap', slug: '/docs/broker/roadmap' },
+      { label: 'Mutation Sweep Baseline', slug: '/docs/broker/mutants-baseline' },
+      { label: 'Docgen Contract', slug: '/docs/broker/docgen-contract' },
+      { label: 'Release Process', slug: '/docs/broker/releasing' },
+    ],
+  },
+  {
+    category: 'Java Streams (krabka-streams-java)',
+    items: [
+      { label: 'Overview & Quickstart', slug: '/docs/streams-java' },
+      { label: 'Getting Started', slug: '/docs/streams-java/getting-started' },
+      { label: 'Architecture', slug: '/docs/streams-java/architecture' },
+      { label: 'Configuration', slug: '/docs/streams-java/configuration' },
+      { label: 'API Reference', slug: '/docs/streams-java/api-reference' },
+      { label: 'Columnar Processing', slug: '/docs/streams-java/columnar' },
+      { label: 'Columnar Operators', slug: '/docs/streams-java/columnar-operators' },
+      { label: 'Serdes', slug: '/docs/streams-java/serdes' },
+      { label: 'Schema Registry', slug: '/docs/streams-java/schema-registry' },
+      { label: 'Barrier Alignment', slug: '/docs/streams-java/barriers' },
+      { label: 'Coordination', slug: '/docs/streams-java/coordination' },
+      { label: 'Testing', slug: '/docs/streams-java/testing' },
+      { label: 'Runtime Constraints', slug: '/docs/streams-java/limitations' },
+      { label: 'Troubleshooting', slug: '/docs/streams-java/troubleshooting' },
+      { label: 'Build and Release', slug: '/docs/streams-java/build-and-release' },
+    ],
+  },
+  {
+    category: 'Go Streams (krabka-streams-go)',
+    items: [
+      { label: 'Overview & Quickstart', slug: '/docs/streams-go' },
+      { label: 'Getting Started', slug: '/docs/streams-go/getting-started' },
+      { label: 'Configuration', slug: '/docs/streams-go/configuration' },
+      { label: 'Columnar Processing', slug: '/docs/streams-go/columnar' },
+      { label: 'Serdes', slug: '/docs/streams-go/serdes' },
+      { label: 'Schema Registry', slug: '/docs/streams-go/schema-registry' },
+      { label: 'Barrier Cuts', slug: '/docs/streams-go/barriers' },
+      { label: 'Coordination Primitives', slug: '/docs/streams-go/coordination' },
+      { label: 'Testing', slug: '/docs/streams-go/testing' },
+      { label: 'Architecture', slug: '/docs/streams-go/architecture' },
+    ],
+  },
+  {
+    category: 'Operations & Deployment',
+    items: [
+      { label: 'Kubernetes Operator', slug: '/docs/operator' },
+      { label: 'Helm Chart Repository', slug: '/docs/helm-charts' },
+      { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
+    ],
+  },
+  {
+    category: 'Ecosystem & Connect',
+    items: [
+      { label: 'Rust Client & Streams', slug: '/docs/streams-rs' },
+      { label: 'Serdes & Data Formats', slug: '/docs/data-formats' },
+      { label: 'PostgreSQL CDC Source', slug: '/docs/connect-postgres' },
+    ],
+  },
+];
+
+const normalize = (p: string) => p.replace(/\/$/, '') || '/';
+const currentNorm = normalize(currentSlug || Astro.url.pathname);
+
+const isItemActive = (slug: string) => {
+  const normSlug = normalize(slug);
+  const fullSlug = normalize(getPath(slug));
+  return currentNorm === normSlug || currentNorm === fullSlug;
+};
+
+const isCategoryActive = (sec: typeof docSections[0]) => {
+  return sec.items.some((item) => {
+    if (isItemActive(item.slug)) return true;
+    const itemNorm = normalize(item.slug);
+    if (item.slug !== '/docs' && currentNorm.startsWith(itemNorm + '/')) return true;
+    const fullNorm = normalize(getPath(item.slug));
+    if (item.slug !== '/docs' && currentNorm.startsWith(fullNorm + '/')) return true;
+    return false;
+  });
+};
+
+const activeSection = docSections.find((sec) => isCategoryActive(sec));
+const activeCategory = activeSection?.category || 'Docs';
+// A synced guide's title carries its component, "Roadmap (Broker)"; the crumb
+// already names the category, so it matches the sidebar and the page heading.
+const crumbTitle = title.replace(/ \((Broker|Java Streams|Go Streams|Rust Streams|Connect|Operator|CLI)\)$/, '');
+
+const breadcrumbData = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://krabka.io/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Docs",
+      "item": "https://krabka.io/docs"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": activeCategory,
+      "item": `https://krabka.io${currentSlug}`
+    },
+    {
+      "@type": "ListItem",
+      "position": 4,
+      "name": title,
+      "item": `https://krabka.io${currentSlug}`
+    }
+  ]
+};
+---
+
+<BaseLayout
+  title={`${title} | krabka Documentation`}
+  description={description}
+  type="article"
+>
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbData)} slot="head" />
+
+  <div class:list={['mx-auto px-4 sm:px-6 lg:px-8 py-10 font-sans', Astro.props.wide ? 'max-w-[112rem]' : 'max-w-[90rem]']}>
+    <div class:list={['grid grid-cols-1 gap-8', Astro.props.wide ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : 'lg:grid-cols-12']}>
+      
+      <!-- Sticky Left Sidebar -->
+      <aside aria-label="Documentation menu" class:list={[!Astro.props.wide && 'lg:col-span-3']}>
+        <!-- The page-wide skip link lands here, at the top of the menu; this one jumps past it. -->
+        <a href="#docs-article" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-krab-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">Skip to article</a>
+        <!-- Below lg the whole menu folds behind one summary, so the page starts
+             at its content. From lg up the script below keeps it open. -->
+        <details id="docs-nav" open class="lg:contents">
+          <summary class="flex cursor-pointer select-none items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-sm font-semibold text-gray-100 lg:hidden">
+            <span>Documentation menu</span>
+            <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+          </summary>
+        <!-- Only from lg up is the menu a sticky column that scrolls on its own; on a phone it
+             is part of the page flow so it does not become a nested scroller. -->
+        <div class="mt-3 space-y-4 lg:sticky lg:top-24 lg:mt-0 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-3">
+          <div class="pb-2 border-b border-white/10 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wider text-gray-300">
+              Documentation
+            </span>
+          </div>
+
+          <!-- Standalone API Reference Directory Nav Component -->
+          <div class="pt-0.5">
+            <a
+              href={getPath('/api')}
+              class="flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-gray-200 hover:text-white hover:bg-white/5 border border-white/10 bg-white/[0.02] transition-colors group"
+            >
+              <div class="flex items-center gap-2">
+                <svg class="h-3.5 w-3.5 text-krab-400 group-hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                </svg>
+                <span>API Reference Directory</span>
+              </div>
+              <span class="text-[11px] text-gray-400 font-mono">/api</span>
+            </a>
+          </div>
+
+          <nav class="space-y-2 text-sm" aria-label="Documentation navigation">
+            {docSections.map((sec) => {
+              const active = isCategoryActive(sec);
+              const isOpen = active || sec.category === 'Start Here';
+
+              return (
+                <details class="group rounded-lg border border-white/5 bg-white/[0.02] overflow-hidden" open={isOpen}>
+                  <summary class="flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300 hover:text-white cursor-pointer select-none list-none transition-colors">
+                    <span class={active ? 'text-krab-400 font-bold' : ''}>{sec.category}</span>
+                    <svg class="h-3 w-3 text-gray-500 transition-transform duration-200 group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </summary>
+                  <ul class="px-2 pb-2 pt-1 space-y-0.5">
+                    {sec.items.map((item) => {
+                      const itemUrl = getPath(item.slug);
+                      const activeItem = isItemActive(item.slug);
+                      return (
+                        <li>
+                          <a
+                            href={itemUrl}
+                            aria-current={activeItem ? 'page' : undefined}
+                            class={`block px-2.5 py-1.5 lg:py-1 rounded-md text-xs transition-colors ${
+                              activeItem
+                                ? 'bg-krab-500/15 text-krab-400 font-semibold'
+                                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {item.label}
+                          </a>
+
+                          {activeItem && hasToc && (
+                            <div class="my-2 ml-2 pl-2.5 border-l border-krab-500/30 space-y-1">
+                              <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block pt-0.5 pb-1">
+                                On This Page
+                              </span>
+                              <ul>
+                                {toc.map((heading) => (
+                                  <li class={heading.depth === 3 ? 'pl-2' : ''}>
+                                    <a
+                                      href={`#${heading.slug}`}
+                                      class="block py-1.5 text-[11px] text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                                    >
+                                      {heading.text}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </details>
+              );
+            })}
+          </nav>
+
+          <!-- Fallback: When page has TOC but its slug is not a direct item in the navigation tree -->
+          {!docSections.some((sec) => sec.items.some((item) => isItemActive(item.slug))) && hasToc && (
+            <div class="pt-3 border-t border-white/10">
+              <span class="text-xs font-semibold uppercase tracking-wider text-gray-400 block pb-2">
+                On This Page
+              </span>
+              <ul class="border-l border-krab-500/30 pl-2.5 ml-1">
+                {toc.map((heading) => (
+                  <li class={heading.depth === 3 ? 'pl-2' : ''}>
+                    <a
+                      href={`#${heading.slug}`}
+                      class="block py-1.5 text-xs text-gray-400 hover:text-white transition-colors line-clamp-2 leading-snug"
+                    >
+                      {heading.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        </details>
+        <script is:inline>
+          (function () {
+            var nav = document.getElementById('docs-nav');
+            var wide = window.matchMedia('(min-width: 64rem)');
+            if (!wide.matches) nav.open = false;
+            wide.addEventListener('change', function (e) { nav.open = e.matches; });
+          })();
+        </script>
+      </aside>
+
+      <!-- Main Docs Content (Takes full remaining 9 columns) -->
+      <div id="docs-article" tabindex="-1" class:list={['docs-page min-w-0 space-y-4 focus:outline-none', !Astro.props.wide && 'lg:col-span-9']}>
+        <!-- Breadcrumbs UI. The links pad out to a 28px hit area without growing the row. -->
+        <nav aria-label="Breadcrumb" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400 pb-2">
+          <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Home</a>
+          <span aria-hidden="true">/</span>
+          <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Docs</a>
+          {activeSection && (
+            <>
+              <span aria-hidden="true">/</span>
+              <a href={getPath(activeSection.items[0].slug)} class="-my-1.5 py-1.5 hover:text-white transition-colors">{activeSection.category}</a>
+            </>
+          )}
+          <span aria-hidden="true">/</span>
+          <span class="text-gray-200 font-medium" aria-current="page">{crumbTitle}</span>
+        </nav>
+
+        <div class:list={['frosted-card rounded-2xl border border-white/10 space-y-6', Astro.props.wide ? 'p-4 sm:p-6' : 'p-4 sm:p-8 lg:p-10']}>
+          <!-- Active Development Notice -->
+          <div class="rounded-lg border border-krab-500/20 bg-krab-500/5 px-4 py-3 text-xs text-gray-400 flex items-start gap-3">
+            <svg class="h-4 w-4 text-krab-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div class="leading-relaxed">
+              <span class="font-medium text-gray-200">Active Development:</span> krabka is greenfield software under active development. Wire protocol features, configuration properties, and APIs may change prior to stable general availability. If you find a documentation error, please <a href="https://github.com/krabka-io" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">open an issue on GitHub</a>.
+            </div>
+          </div>
+
+          {frontmatter ? (
+            <>
+              <div class="border-b border-white/10 pb-4">
+                <h1 class="text-3xl font-extrabold text-white sm:text-4xl">{title}</h1>
+              </div>
+              <div class={proseClass}>
+                <slot />
+              </div>
+            </>
+          ) : (
+            <slot />
+          )}
+        </div>
+      </div>
+
+    </div>
+  </div>
+</BaseLayout>

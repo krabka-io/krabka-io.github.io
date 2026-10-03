@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "vulnerabilityAlerts": {
+    "enabled": true
+  },
+  "npm": {
+    "rangeStrategy": "auto"
+  },
+  "packageRules": [
+    {
+      "description": "Automatically merge minor and patch updates for dev dependencies",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Automatically merge patch updates for production dependencies",
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Group all Astro-related dependencies together",
+      "groupName": "Astro dependencies",
+      "schedule": ["after 9am on Monday"],
+      "matchPackageNames": [
+        "/astro/",
+        "/@astrojs/.+/"
+      ]
+    },
+    {
+      "description": "Group all Tailwind-related dependencies together",
+      "groupName": "Tailwind dependencies",
+      "matchPackageNames": [
+        "/tailwind/",
+        "/@tailwindcss/.+/"
+      ]
+    }
+  ],
+  "schedule": [
+    "before 3am on Monday"
+  ]
+}

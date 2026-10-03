@@ -1,0 +1,159 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getPath } from '../../utils/paths';
+import versionsData from '../../data/versions.json';
+
+import apiReference from '../../data/api-reference.json';
+
+// Each reference is published by its own repository to GitHub Pages, under
+// https://krabka.io/<repo>/. The links are absolute because those trees are not
+// part of this site's build.
+const SITE = 'https://krabka.io';
+
+type VersionInfo = { version?: string; activeRelease?: string };
+const versions = versionsData as Record<string, VersionInfo>;
+
+const apiModules = apiReference.map((entry) => {
+  const info = entry.versionKey ? versions[entry.versionKey] : undefined;
+  const release = info?.activeRelease || (info?.version ? `v${info.version}` : null);
+  return {
+    ...entry,
+    release,
+    apiHref: new URL(entry.apiPath, SITE).href,
+  };
+});
+---
+
+<BaseLayout
+  title="API Reference Directory | krabka"
+  description="Compiler-generated API reference documentation for the krabka broker, wire protocol, clients, tools, and the Java and Go streams libraries (Rustdoc, Javadoc, Godoc)."
+>
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 font-sans">
+    <!-- Breadcrumb -->
+    <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-gray-400 pb-4">
+      <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Home</a>
+      <span>/</span>
+      <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white transition-colors">Docs</a>
+      <span>/</span>
+      <span class="text-gray-200 font-medium">API Reference Directory</span>
+    </nav>
+
+    <!-- Header -->
+    <div class="border-b border-white/10 pb-4 mb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+          API Reference Directory
+        </h1>
+        <p class="mt-2 text-sm text-gray-400 max-w-2xl leading-relaxed">
+          Compiler-generated reference trees for the broker, clients, tools, and streams libraries, in each language's native documentation format, all served under krabka.io. The schema registry, gres, and observability repositories do not publish one yet.
+        </p>
+      </div>
+
+      <!-- Quick Filter -->
+      <div class="w-full md:w-64 shrink-0">
+        <label for="api-search" class="sr-only">Filter APIs</label>
+        <div class="relative">
+          <input
+            type="text"
+            id="api-search"
+            placeholder="Filter components..."
+            class="w-full rounded-lg bg-slate-900/90 border border-white/10 px-3.5 py-2 text-xs text-white placeholder-gray-400 focus:border-krab-500 focus:outline-none"
+          />
+          <svg class="absolute right-3 top-2.5 h-3.5 w-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Reference Directory Table. Below lg each row is a card, so the
+         documentation links are never pushed off-screen. -->
+    <div class="frosted-card rounded-xl overflow-hidden border border-white/10 mb-8">
+      <table class="block lg:table w-full text-left text-xs border-collapse" id="api-table">
+        <thead class="hidden lg:table-header-group bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold">
+          <tr>
+            <th scope="col" class="py-3 px-5 lg:w-full">Component</th>
+            <th scope="col" class="py-3 px-4">Format</th>
+            <th scope="col" class="py-3 px-4">Language</th>
+            <th scope="col" class="py-3 px-4">Latest release</th>
+            <th scope="col" class="py-3 px-5 text-right">Documentation</th>
+          </tr>
+        </thead>
+        <tbody class="block lg:table-row-group divide-y divide-white/5">
+          {apiModules.map((mod) => (
+            <tr class="api-row flex flex-wrap gap-x-4 gap-y-1 p-5 lg:table-row lg:p-0 hover:bg-white/[0.02] transition-colors" data-search={`${mod.name} ${mod.repo} ${mod.language} ${mod.format}`.toLowerCase()}>
+              <td class="w-full lg:w-auto lg:py-3.5 lg:px-5">
+                <a href={mod.apiHref} class="inline-block py-1.5 font-semibold text-white text-sm hover:text-krab-400 transition-colors lg:py-0">
+                  {mod.name}
+                </a>
+                <p class="text-xs text-gray-400 mt-0.5 max-w-md">
+                  {mod.summary}
+                </p>
+              </td>
+
+              <td class="min-w-0! whitespace-nowrap text-gray-300 font-medium lg:py-3.5 lg:px-4">
+                {mod.format}
+              </td>
+
+              <td class="min-w-0! whitespace-nowrap text-gray-400 lg:py-3.5 lg:px-4">
+                {mod.language}
+              </td>
+
+              <td class="min-w-0! whitespace-nowrap text-gray-300 lg:py-3.5 lg:px-4">
+                {mod.release ?? 'main'}
+              </td>
+
+              <td class="w-full mt-1 lg:mt-0 lg:w-auto lg:py-3.5 lg:px-5 lg:text-right lg:whitespace-nowrap">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 lg:flex-col lg:items-end lg:gap-1">
+                  <a
+                    href={mod.apiHref}
+                    class="inline-block py-2 font-semibold text-krab-400 hover:text-white transition-colors lg:py-0"
+                  >
+                    Browse {mod.format} Reference
+                  </a>
+                  <a
+                    href={getPath(mod.guideHref)}
+                    class="inline-block py-2 text-gray-400 hover:text-gray-200 transition-colors lg:py-0"
+                  >
+                    View Guides
+                  </a>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p id="api-empty" role="status" class="hidden px-5 py-8 text-center text-sm text-gray-400">No components match this filter.</p>
+    </div>
+
+    <!-- Editorial Explanation Text (Clean, no bubbles) -->
+    <div class="pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2">
+      <p>
+        Every reference is generated from source docstrings by its own repository's build (Bazel <code class="text-gray-300">rust_doc</code> for Rust, Javadoc for Java, godoc for Go), rendered from the <code class="text-gray-300">main</code> branch, and published from that repository to <code class="text-gray-300">https://krabka.io/&lt;repository&gt;/</code>. The release column names the latest tagged release; the reference itself follows <code class="text-gray-300">main</code>.
+      </p>
+      <p>
+        For architectural overviews, memory management specifications, and runnable tutorials, consult the <a href={getPath('/docs')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Documentation Hub</a>.
+      </p>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  const searchInput = document.getElementById('api-search') as HTMLInputElement | null;
+  const rows = document.querySelectorAll<HTMLTableRowElement>('.api-row');
+  const empty = document.getElementById('api-empty');
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      let shown = 0;
+      rows.forEach((row) => {
+        const text = row.getAttribute('data-search') || '';
+        const match = text.includes(q);
+        row.style.display = match ? '' : 'none';
+        if (match) shown++;
+      });
+      empty?.classList.toggle('hidden', shown > 0);
+    });
+  }
+</script>

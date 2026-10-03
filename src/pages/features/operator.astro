@@ -1,0 +1,129 @@
+---
+import CodeBlock from '../../components/CodeBlock.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const crdSnippet = `apiVersion: krabka.io/v1alpha1
+kind: Kafka
+metadata:
+  name: streaming-production
+  namespace: streaming
+spec:
+  kafkaVersion: "4.0.0"
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+    - name: external
+      port: 9094
+      type: loadbalancer
+      tls: true
+  interBrokerListenerName: plain
+  metricsConfig: {}
+---
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: streaming
+  labels:
+    krabka.io/cluster: streaming-production
+spec:
+  roles: [Controller, Broker]
+  replicas: 5
+  nodeIdStart: 0
+  resources:
+    requests:
+      cpu: "1"
+      memory: 512Mi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+  storage:
+    type: PersistentClaim
+    size: 100Gi
+    deleteClaim: false`;
+---
+
+<BaseLayout
+  title="Kubernetes Native Operator | krabka"
+  description="Declarative cluster provisioning, CRDs (Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaConnector), automated rolling updates, and partition rebalancing with krabka-operator."
+>
+  <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div class="mb-8">
+      <a href={getPath('/features')} class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
+        Back to Features Overview
+      </a>
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+        Kubernetes Native Operator
+      </h1>
+      <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
+        Deploy, scale, and rebalance krabka clusters natively on Kubernetes. The operator watches <a href={getPath('/docs/operator#custom-resources')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">custom resource definitions</a> (CRDs in group <code class="text-krab-300 font-mono text-sm">krabka.io/v1alpha1</code>) to automate node pool provisioning, rolling updates, user auth, and partition balancing.
+      </p>
+    </div>
+
+    <div class="space-y-8 [&>div>p]:max-w-3xl [&>div>ul]:max-w-3xl">
+      
+      <!-- Section A: CRD Architecture -->
+      <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Declarative Custom Resources (<code class="text-krab-400 font-mono text-xl">krabka.io/v1alpha1</code>)</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          The operator watches these custom resources. Their manifests can be applied directly or through GitOps tools such as ArgoCD or Flux:
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 text-xs font-sans">
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">Kafka</strong>
+            <p class="text-gray-400 mt-1">Declares the cluster version label, listeners, authorization, metrics, and tiered storage.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaNodePool</strong>
+            <p class="text-gray-400 mt-1">Dedicated pools of broker or controller nodes with distinct CPU/RAM and disk sizing.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaTopic</strong>
+            <p class="text-gray-400 mt-1">Declares partitions, replication factor, and topic configuration such as retention.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaUser</strong>
+            <p class="text-gray-400 mt-1">Automates SCRAM credential generation, TLS identities, ACLs, and quotas.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaRebalance</strong>
+            <p class="text-gray-400 mt-1">Asks krabka-rebalancer for a partition movement plan in full, addBrokers or removeBrokers mode, and executes it once the proposal is approved.</p>
+          </div>
+          <div class="bg-black/30 p-3 rounded-lg border border-white/5">
+            <strong class="text-white font-mono font-bold">KafkaConnector</strong>
+            <p class="text-gray-400 mt-1">Provisions PostgreSQL CDC source connectors.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section B: CRD Code Sample -->
+      <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-bold text-white font-sans">Sample Kafka and KafkaNodePool CRDs</h2>
+          <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={crdSnippet}>
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            <span>Copy CRD</span>
+          </button>
+        </div>
+        <CodeBlock code={crdSnippet} lang="yaml" />
+      </div>
+
+      <!-- Section C: Rolling Restarts & Automation -->
+      <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
+        <h2 class="text-2xl font-bold text-white font-sans">Rolling Upgrades & Automated Rebalancing</h2>
+        <p class="text-gray-300 leading-relaxed font-sans text-sm">
+          Each node pool renders as a StatefulSet with the RollingUpdate strategy, so pods restart one at a time and each must become Ready before the next one cycles. A PodDisruptionBudget with maxUnavailable 1 guards each pool against voluntary disruption.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="mt-12 pt-8 border-t border-white/10 flex justify-between items-center font-sans text-sm">
+      <a href={getPath('/features/streams')} class="text-gray-400 hover:text-white">Polyglot Streams</a>
+      <a href={getPath('/verification')} class="text-krab-400 hover:text-krab-300 font-semibold">Correctness & Verification</a>
+    </div>
+  </div>
+</BaseLayout>

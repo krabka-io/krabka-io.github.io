@@ -1,0 +1,96 @@
+name: Website snippets
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # The getting started guides are synced from sibling repositories on main.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snippets-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snippets:
+    name: snippets (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [check, compose, helm, rust, go, java, python, javascript]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Test snippet extraction and coverage
+        run: node --test scripts/snippets/extract.test.mjs
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        if: matrix.suite == 'rust'
+        with:
+          toolchain: 1.98.1
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v6.0.0
+        if: matrix.suite == 'go'
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        if: matrix.suite == 'java'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+        if: matrix.suite == 'java'
+        with:
+          gradle-version: '9.6.1'
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        if: matrix.suite == 'helm'
+        with:
+          version: 'v3.19.0'
+      - name: Install kind
+        if: matrix.suite == 'helm'
+        run: |
+          curl -fsSL --retry 3 https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64 -o /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+      - name: Test the website examples
+        shell: bash
+        run: |
+          mkdir -p .snippets
+          npm run check-snippets -- ${{ matrix.suite }} 2>&1 | tee .snippets/${{ matrix.suite }}.log
+      - name: Preserve extracted sources and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: snippets-${{ matrix.suite }}
+          path: |
+            .snippets/**/*.md
+            .snippets/**/*.sh
+            .snippets/**/*.go
+            .snippets/rust/src/**/*.rs
+            .snippets/**/*.java
+            .snippets/python/app.py
+            .snippets/javascript/app.cjs
+            .snippets/**/*.toml
+            .snippets/**/*.xml
+            .snippets/**/*.kts
+            .snippets/**/go.mod
+            .snippets/**/go.sum
+            .snippets/**/Cargo.lock
+            .snippets/javascript/package*.json
+            .snippets/docker-compose.yml
+            .snippets/admin.properties
+            .snippets/inventory.json
+            .snippets/*.log
+            .snippets/java/**/*.java.txt
+            .snippets/kind-logs/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
