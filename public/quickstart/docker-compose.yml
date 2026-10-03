@@ -10,7 +10,7 @@ services:
 
   # One-shot: initialize KRaft metadata on a fresh writable volume.
   broker-format:
-    image: ghcr.io/krabka-io/krabka-broker@sha256:d904478424431650314950e390e00107aee089464747208f573206a95c8d0c24
+    image: ghcr.io/krabka-io/krabka-broker@sha256:54ae711e5a7c8bdb03414402722f5c41dd50980ab315ab84d0803cca775fb463
     platform: linux/amd64
     restart: "no"
     entrypoint: ["/usr/bin/krabka-format"]
@@ -29,7 +29,7 @@ services:
 
   # Krabka standalone KRaft controller & broker node
   broker:
-    image: ghcr.io/krabka-io/krabka-broker@sha256:d904478424431650314950e390e00107aee089464747208f573206a95c8d0c24
+    image: ghcr.io/krabka-io/krabka-broker@sha256:54ae711e5a7c8bdb03414402722f5c41dd50980ab315ab84d0803cca775fb463
     platform: linux/amd64
     restart: unless-stopped
     command:
@@ -37,6 +37,7 @@ services:
       - "--advertised-listener=localhost:9092"
       - "--log-dir=/data"
       - "--process-roles=controller,broker"
+      - "--offsets-topic-replication-factor=1"
     environment:
       RUST_LOG: "info"
       KRABKA_METRICS_LISTEN_ADDR: "0.0.0.0:9404"

@@ -47,6 +47,6 @@ export function websiteSnippets(root) {
   const versions = JSON.parse(readFileSync(`${root}/src/data/versions.json`));
   return Object.keys(pages).flatMap(page => astroSnippets(
     readFileSync(`${root}/src/pages/${page}.astro`, 'utf8'), page,
-    (versions['streams-java']?.activeRelease || 'v1.4.1').replace(/^v/, ''),
+    (versions['streams-java']?.activeRelease || 'v1.4.2').replace(/^v/, ''),
   ));
 }
