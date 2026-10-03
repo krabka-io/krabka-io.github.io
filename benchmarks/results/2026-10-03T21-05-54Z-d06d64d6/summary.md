@@ -1,5 +1,3 @@
-[Dated report and per-trial results](results/2026-10-03T21-05-54Z-d06d64d6/summary.md)
-
 # Krabka, Kafka 4.3.1, and Redpanda — local benchmark
 
 Run: 2026-10-03T21-05-54Z-d06d64d6. Completed: 2026-10-03T21:55:43.496Z.

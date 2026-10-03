@@ -2,6 +2,8 @@
 
 `npm run benchmark` compares published Krabka, Kafka **4.3.1**, and Redpanda containers on the local host. It runs six producer/consumer cases at RF1 and RF3, with three independent repetitions and a rotating vendor order. A complete run writes dated machine-readable results and a Markdown report under `results/`, then replaces `latest.md`. Results are local measurements, not production qualification.
 
+The latest Krabka **0.7.0** collections passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
+
 ```sh
 # Check prerequisites and resolve immutable image references without starting containers
 npm run benchmark -- --dry-run
@@ -19,7 +21,7 @@ npm run benchmark -- --suite curves --smoke
 npm run benchmark -- --suite curves
 
 # Compare a different published Krabka or Redpanda image (tag or registry digest)
-npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v0.6.1 \
+npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v0.7.0 \
   --redpanda-image docker.redpanda.com/redpandadata/redpanda:v26.2.2
 
 # Focused measurement and publication checks, without Docker
@@ -34,7 +36,7 @@ npm run test:benchmark
 - The **curves suite** requires the same CPUs but only **20 GiB available RAM**: at most 12 GiB of brokers plus the 4 GiB client and 4 GiB host headroom. It requires 150 GiB free disk for full runs or 24 GiB for smoke. This fits the current 16-logical-CPU host with about 61 GiB total RAM. Only one vendor/cluster runs at a time; each case gets fresh storage, which is removed before the next case. Other containers are left running.
 - At least **150 GiB free disk** for a full run, or **4 GiB** for smoke, both at the checkout and Docker storage. Data uses Docker volumes and is deleted after each cluster repetition; measurements and logs remain.
 - At least **24,728 available Linux AIO slots** (`fs.aio-max-nr - fs.aio-nr`). Redpanda networking AIO is explicitly limited to 1,024 control blocks per shard so three nodes fit the usual 65,536-slot host limit consistently. This setting and the host limit are recorded; no sysctl is changed.
-- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to `raw.githubusercontent.com` for the pinned Java workload. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v0.6.1, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
+- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to `raw.githubusercontent.com` for the pinned Java workload. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v0.7.0, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
 
 The runner owns only its uniquely named and labeled containers, volumes, and networks. It does not change host settings, stop other containers, commit, push, or deploy. Avoid other heavy work while measuring. Concurrent invocations in the same checkout fail; a hard-killed process can leave `.benchmarks/runner.lock`, which contains its PID and run ID. Inspect that process and its labeled Docker resources before manually removing a stale lock.
 
