@@ -28,7 +28,101 @@ npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v0.7.0 \
 npm run test:benchmark
 ```
 
-## Prerequisites
+## OpenMessaging on Google Cloud
+
+The manual **OpenMessaging broker benchmarks** Actions workflow uses the organization's
+[Cyclenerd Google Cloud runners](https://github.com/Cyclenerd/google-cloud-github-runner).
+Its default label, `gcp-ubuntu-24-04-16core`, requests an ephemeral Linux/amd64 VM
+with 16 vCPUs, 64 GB RAM and a 600 GB SSD under the upstream default template.
+`gcp-ubuntu-24-04-32core` is also selectable. Actual resources are checked and recorded;
+customized organization templates must satisfy the prerequisites below.
+
+```sh
+gh workflow run openmessaging.yml -f mode=full
+# Shorten all 13 workloads to one minute at 5,000 messages/s, without backlog
+gh workflow run openmessaging.yml -f mode=smoke
+# Run a narrower workload or repeat the comparison three times
+gh workflow run openmessaging.yml -f mode=full \
+  -f workloads=1-topic-16-partitions-1kb -f repetitions=3
+
+# The same runner works on a prepared Linux host; no npm install is needed
+npm run benchmark -- --suite openmessaging --dry-run
+npm run benchmark -- --suite openmessaging --smoke --workloads simple-workload
+npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
+```
+
+Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
+and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
+Only `workflow_dispatch` triggers this workflow. Every trial gets fresh broker
+storage, and vendors run sequentially on the same VM with the same CPU affinity,
+4 CPU quotas, 10 GiB memory limits, and a separate 4 GiB client. Multiple rounds
+rotate vendor order. The workflow has a 24-hour deadline; individual workloads
+have their upstream duration plus 30 minutes for startup, sustainable-rate probing,
+and backlog drain (five extra minutes in smoke). Large backlog cases can hit that
+deadline, which is retained as a failure. Smoke is a wiring check, not a performance
+measurement of the original workload.
+
+The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
+with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
+**Kafka 3.6.1 client against every broker**, including the Kafka **4.3.1 server**.
+The driver code is unmodified. The common configuration follows upstream
+`kafka-exactly-once.yaml`: idempotence, `acks=all`, one in-flight request, 1 MiB
+batches and 1 ms linger, with no compression. This means idempotent production,
+not transactional exactly-once application processing. Topic retention is unlimited;
+Kafka/Krabka use minISR1/minISR2, while Redpanda uses Raft majorities and
+`write.caching=true`. This measures buffered writes, without a claim of identical
+crash durability. OMB creates topics and consumers; the existing Kafka 4.3.1 admin
+client checks cluster readiness before each trial.
+`OpenMessagingMain.java` calls upstream `main` and exits when it returns, because
+upstream's Kafka topic creator leaves a non-daemon scheduler alive. It does not
+change workload execution or treat missing result files as success.
+
+The default catalog is the 13 workloads listed in the linked
+[OpenMessaging documentation](https://openmessaging.cloud/docs/benchmarks/):
+
+| Workload name for `workloads` / `--workloads` |
+|---|
+| `simple-workload` |
+| `1-topic-1-partition-1kb` |
+| `1-topic-1-partition-100b` |
+| `1-topic-16-partitions-1kb` |
+| `backlog-1-topic-1-partition-1kb` |
+| `backlog-1-topic-16-partitions-1kb` |
+| `max-rate-1-topic-1-partition-1p-1c-1kb` |
+| `max-rate-1-topic-1-partition-1p-1c-100b` |
+| `1-topic-3-partition-100b-3producers` |
+| `max-rate-1-topic-16-partitions-1kb` |
+| `max-rate-1-topic-16-partitions-100b` |
+| `max-rate-1-topic-100-partitions-1kb` |
+| `max-rate-1-topic-100-partitions-100b` |
+
+Two single-partition maximum-rate filenames now include `1p-1c` upstream. Full
+runs retain upstream payloads, rates, partition counts, backlog sizes, and durations;
+only the payload path is adapted to the container mount. Full runs warm up for the
+upstream default one minute. OMB may additionally probe sustainable rates when
+`producerRate=0`. The default matrix is 78 trials and takes many hours. The
+100 GB backlog cases need **450 GiB free disk** in both the checkout filesystem and
+Docker storage; full runs without backlog need 150 GiB, and smoke needs 4 GiB.
+Maximum-rate cases have no record ceiling and can outgrow a fixed disk. The runner
+monitors both filesystems and aborts with diagnostics before free space falls below
+20 GiB (1 GiB in smoke). Choose a larger worker or narrower matrix if this occurs.
+
+Actions retains `provenance.json`, effective/upstream YAML, immutable image and
+source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
+250 ms CPU/memory time series, and failure diagnostics for 30 days. A complete
+matrix also produces `summary.md` and a job summary with publish/consume rates,
+publish/end-to-end p99 latency, CPU seconds and peak RSS. Resource windows include
+startup of the benchmark client, warm-up, probing, measurement and shutdown.
+OMB does **not** check exact delivery counts or duplicate sequences. Missing or
+truncated result series, zero publish/consume traffic, publish errors, OOMs,
+logged client/consumer errors and missing resource counters fail the run,
+including when upstream exits zero after
+catching a workload exception. Failed trials are recorded and the remaining matrix
+is attempted; failed matrices do not produce a successful summary. Artifacts stay
+under `.benchmarks/<run-id>/`; this suite never rewrites `latest.md`, commits, pushes,
+or publishes website performance claims.
+
+## Local runner prerequisites
 
 - Node >=22.12 and JDK >=17 (`java` and `javac`). No Bazel build, sibling checkout, npm dependencies, or Docker Compose is needed.
 - Native Linux/amd64 with a local Docker daemon, cgroup v2, readable `/proc` and cgroup resource counters, CPU affinity/quota and memory/swap limits enabled. Remote Docker, Docker Desktop, and emulated images are rejected.

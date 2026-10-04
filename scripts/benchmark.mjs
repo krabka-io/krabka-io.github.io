@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
+import { OMB, ombCases, ombWorkload, ombDriver, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
@@ -29,14 +30,18 @@ const { values: options } = parseArgs({ options: {
   'krabka-image': { type: 'string', default: DEFAULT_IMAGES.krabka },
   'redpanda-image': { type: 'string', default: DEFAULT_IMAGES.redpanda },
   'suite': { type: 'string', default: 'throughput' },
+  'workloads': { type: 'string', default: 'all' },
+  'replication-factors': { type: 'string', default: '1,3' },
+  'repetitions': { type: 'string' },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
 } });
 if (options.help) {
-  console.log(`Usage: npm run benchmark -- [--suite throughput|curves] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
+  console.log(`Usage: npm run benchmark -- [--suite throughput|curves|openmessaging] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
 Full: 108 measured trials, three repetitions, RF1/RF3, all three vendors.
 Curves: 72 trials; RF1 load/memory sweeps and RF3 leader pause/resume; max 16 GiB RAM including client.
+OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --replication-factors 1,3; --repetitions 1..3.
 Smoke: all cases once, short durations/counts; never publishes.
 Dry run: validates the host and resolves images; starts no containers and publishes nothing.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
@@ -49,7 +54,13 @@ See benchmarks/README.md for methodology and retained artifacts.`);
 }
 
 async function main() {
-  assert.ok(['throughput', 'curves'].includes(options.suite), 'suite must be throughput or curves');
+  assert.ok(['throughput', 'curves', 'openmessaging'].includes(options.suite), 'suite must be throughput, curves, or openmessaging');
+  const omb = options.suite === 'openmessaging';
+  assert.ok(omb || (options.workloads === 'all' && options['replication-factors'] === '1,3' && options.repetitions === undefined),
+    '--workloads, --replication-factors and --repetitions require --suite openmessaging');
+  const replicationFactors = options['replication-factors'].split(',').map(Number);
+  assert.ok(replicationFactors.length && new Set(replicationFactors).size === replicationFactors.length
+    && replicationFactors.every(rf => [1, 3].includes(rf)), 'replication-factors must be 1, 3, or 1,3');
   const curves = options.suite === 'curves';
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')}-${randomUUID().slice(0, 8)}`;
   const artifacts = path.join(ROOT, '.benchmarks', runId);
@@ -68,8 +79,9 @@ async function main() {
   let resourceCreationStarted = false;
   const trials = [];
   const failures = [];
-  const repetitions = options.smoke ? 1 : 3;
-  const cases = curves ? curveCases(options.smoke)
+  const repetitions = options.smoke ? 1 : Number(options.repetitions ?? (omb ? 1 : 3));
+  assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
+  const cases = omb ? ombCases(options.workloads) : curves ? curveCases(options.smoke)
     : CASES.map(c => options.smoke ? { ...c, records: c.bytes > 1024 ? 200 : 2000 } : { ...c });
   const provenance = {
     schema_version: 1, suite: options.suite, run_id: runId, started_at: new Date().toISOString(),
@@ -86,6 +98,16 @@ async function main() {
       durability: 'buffered writes; no identical crash-durability claim',
     },
   };
+  if (omb) {
+    provenance.workload_source = OMB;
+    provenance.replication_factors = replicationFactors;
+    Object.assign(provenance.contract, { partitions: 'from upstream workload', batch_bytes: 1048576, linger_ms: 1,
+      compression: 'none', max_in_flight_requests: 1, client_heap_bytes: 2 * GIB,
+      delivery_verification: 'OMB rates/latencies only; no sequence or exact delivery check',
+      warmup_minutes: options.smoke ? 0 : 1, smoke_overrides: options.smoke ? { minutes: 1, rate: 5000, backlog_gb: 0 } : null });
+    delete provenance.contract.warmup_records;
+    delete provenance.contract.workload_timeout_seconds;
+  }
   if (curves) {
     provenance.workload_source = { path: 'benchmarks/BenchmarkTimeline.java', license: 'Apache-2.0',
       sha256: createHash('sha256').update(await fs.readFile(path.join(ROOT, 'benchmarks/BenchmarkTimeline.java'))).digest('hex') };
@@ -211,7 +233,10 @@ async function main() {
     assert.ok(memoryAvailable >= requiredMemory, `need ${requiredMemory / GIB} GiB available RAM; found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
     const disk = await fs.statfs(ROOT);
     const freeDisk = disk.bavail * disk.bsize;
-    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : 150) * GIB;
+    // OMB backlog files retain 100 GB logical data with RF3. Allow replica
+    // storage, headers and drain traffic; fresh volumes bound accumulation.
+    const ombBacklog = omb && cases.some(c => c.id.startsWith('backlog-'));
+    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : ombBacklog ? 450 : 150) * GIB;
     assert.ok(freeDisk >= requiredDisk, `insufficient disk: ${(freeDisk / GIB).toFixed(1)} GiB free`);
     const dockerDisk = await fs.statfs(info.DockerRootDir);
     const dockerFreeDisk = dockerDisk.bavail * dockerDisk.bsize;
@@ -249,7 +274,8 @@ async function main() {
     provenance.runner = {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
-        'scripts/benchmark-curves.mjs', 'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
+        'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'benchmarks/OpenMessagingMain.java',
+        'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
     console.log(`benchmark ${runId}: ${provenance.mode}; artifacts ${artifacts}`);
@@ -297,6 +323,20 @@ async function main() {
       [name, createHash('sha256').update(await fs.readFile(path.join(artifacts, 'libs', name))).digest('hex')])));
     provenance.client_java = await oneShot(['--entrypoint', 'java', kafkaImage, '--version'], 'client-version');
     await save();
+
+    let ombRuntime;
+    if (omb) {
+      console.log(`Building OpenMessaging ${OMB.commit}`);
+      ombRuntime = await prepareOmb(artifacts, command, oneShot);
+      provenance.openmessaging = ombRuntime.provenance;
+      for (const workload of cases) {
+        const source = await fs.readFile(path.join(ombRuntime.source, workload.upstream_file), 'utf8');
+        const effective = ombWorkload(source, options.smoke);
+        Object.assign(workload, { config: effective.config, source_sha256: effective.sha256 });
+        await fs.writeFile(path.join(artifacts, `${workload.id}.yaml`), effective.yaml);
+      }
+      await save();
+    }
 
     const clientArgs = (extra = []) => [
       '--network', network, '--cpuset-cpus', provenance.cpu_sets.client.join(','),
@@ -565,7 +605,64 @@ rpk:
       console.log(`Curve ${trials.length}: ${vendor} ${workload.id}, ${workload.memory_gib} GiB/broker: ${result.curve.records_per_second.toFixed(0)} ack records/s, ${result.curve.latency_ms_p99.toFixed(2)} ms p99`);
     }
 
-    if (curves) {
+    if (omb) {
+      for (const rf of replicationFactors) for (let repetition = 1; repetition <= repetitions; repetition++) {
+        const offset = (repetition - 1) % VENDORS.length;
+        const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
+        for (const workload of cases) for (const vendor of order) {
+          const directory = path.join(artifacts, `rf${rf}-${vendor}-${repetition}-${workload.id}`);
+          await fs.mkdir(directory);
+          console.log(`OMB RF${rf} ${vendor} ${workload.id} round ${repetition}/${repetitions}`);
+          try {
+            const brokers = await launchCluster(vendor, rf, `${repetition}-${workload.id}`, directory);
+            await fs.copyFile(path.join(artifacts, `${workload.id}.yaml`), path.join(directory, 'workload.yaml'));
+            await fs.copyFile(path.join(ombRuntime.source, workload.upstream_file), path.join(directory, 'upstream-workload.yaml'));
+            await fs.writeFile(path.join(directory, 'driver.yaml'), ombDriver(vendor, rf));
+            const timeout = (workload.config.testDurationMinutes + (options.smoke ? 5 : 30)) * 60_000;
+            const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
+              () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
+                '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--cpus', String(provenance.cpu_sets.client.length),
+                '--memory', '4g', '--memory-swap', '4g', '--ulimit', 'nofile=131072:131072',
+                '--volume', `${ombRuntime.source}:/src:ro`, '--volume', `${ombRuntime.m2}:/m2:ro`,
+                '--volume', `${path.join(ROOT, 'benchmarks/OpenMessagingMain.java')}:/bench/OpenMessagingMain.java:ro`,
+                '--volume', `${directory}:/output`, '--workdir', '/src', '--entrypoint', 'java', OMB.build_image,
+                '-Xms256m', '-Xmx2g', '-cp', ombRuntime.classpath, '/bench/OpenMessagingMain.java',
+                '--drivers', '/output/driver.yaml', '--output', '/output/result.json', '/output/workload.yaml'],
+              `omb-${vendor}-${rf}-${workload.id}`, { output: path.join(directory, 'workload'), timeout }),
+            async () => {
+              // Duration-based maximum-rate workloads have no record ceiling.
+              // Abort before filling a shared disk, including Docker storage.
+              for (const location of [ROOT, info.DockerRootDir]) {
+                const disk = await fs.statfs(location);
+                assert.ok(disk.bavail * disk.bsize > (options.smoke ? 1 : 20) * GIB,
+                  `OMB disk reserve exhausted at ${location}`);
+              }
+            });
+            const result = JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8'));
+            const logs = await Promise.all(['stdout', 'stderr'].map(stream => fs.readFile(path.join(directory, `workload.${stream}`), 'utf8')));
+            validateOmbResult(result, vendor, rf, workload.config, logs.join('\n'));
+            const timeline = resourceTimeSeries(measurement.samples, measurement.startedAt);
+            const metrics = { cpu_seconds: timeline.samples.at(-1).cluster.cpu_seconds,
+              rss_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.rss_bytes)),
+              working_set_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.working_set_bytes)) };
+            const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline };
+            await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(trial, null, 2)}\n`);
+            trials.push(trial);
+            console.log(`OMB passed ${vendor} RF${rf} ${workload.id}: ${result.aggregatedEndToEndLatency99pct.toFixed(2)} ms end-to-end p99`);
+          } catch (error) {
+            controller.signal.throwIfAborted();
+            const failure = { vendor, rf, repetition, case: workload, error: error.message, artifacts: path.basename(directory) };
+            failures.push(failure);
+            await fs.writeFile(path.join(directory, 'failure.json'), `${JSON.stringify(failure, null, 2)}\n`);
+            console.error(`OMB failed ${vendor} RF${rf} ${workload.id}: ${error.message}`);
+          }
+          await cleanup();
+          provenance.completed_trials = trials.length;
+          provenance.failed_trials = failures.length;
+          await save();
+        }
+      }
+    } else if (curves) {
       for (let repetition = 1; repetition <= repetitions; repetition++) {
         const offset = (repetition - 1) % VENDORS.length;
         const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
@@ -614,13 +711,16 @@ rpk:
       await fs.writeFile(path.join(artifacts, 'collection.json'), `${JSON.stringify({
         run_id: runId, status: 'failed', attempted_trials: trials.length + failures.length,
         successful_trials: trials.length, failures, trials }, null, 2)}\n`);
-      throw new Error(`Completed ${trials.length + failures.length} curve attempts: ${trials.length} passed, ${failures.length} failed. Diagnostics and valid captures retained in ${artifacts}; results not published.`);
+      throw new Error(`Completed ${trials.length + failures.length} benchmark attempts: ${trials.length} passed, ${failures.length} failed. Diagnostics and valid captures retained in ${artifacts}; results not published.`);
     }
     provenance.status = 'complete';
     provenance.completed_at = new Date().toISOString();
     provenance.host.load_average_at_end = os.loadavg();
     await save();
-    if (options.smoke) console.log(`Smoke passed: ${trials.length} trials. Results retained only in ${artifacts}`);
+    if (omb) {
+      await writeOmbReport(artifacts, provenance, trials);
+      console.log(`OpenMessaging passed: ${trials.length} trials; ${artifacts}/summary.md`);
+    } else if (options.smoke) console.log(`Smoke passed: ${trials.length} trials. Results retained only in ${artifacts}`);
     else {
       await publishResults(ROOT, provenance, trials, controller.signal);
       console.log(`Published ${trials.length} trials to benchmarks/results/${runId}/ and benchmarks/latest${curves ? '-curves' : ''}.md`);
