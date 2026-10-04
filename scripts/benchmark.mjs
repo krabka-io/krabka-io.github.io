@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
 import { OMB, ombCases, ombWorkload, ombDriver, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
@@ -127,10 +128,12 @@ async function main() {
   }
   const save = () => fs.writeFile(path.join(artifacts, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
 
-  async function command(executable, args, { timeout = 120_000, output, ignoreAbort = false } = {}) {
+  async function command(executable, args, { timeout = 120_000, output, streamOutput = false, ignoreAbort = false } = {}) {
     if (!ignoreAbort) controller.signal.throwIfAborted();
     await fs.appendFile(path.join(artifacts, 'commands.jsonl'),
       `${JSON.stringify({ at: new Date().toISOString(), executable, args, timeout })}\n`);
+    if (streamOutput) return runLoggedCommand(executable, args, { output, timeout,
+      ...(ignoreAbort ? {} : { signal: controller.signal }) });
     return new Promise((resolve, reject) => {
       execFile(executable, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 32 * 1024 ** 2,
         ...(ignoreAbort ? {} : { signal: controller.signal }) }, async (error, stdout, stderr) => {
@@ -178,7 +181,8 @@ async function main() {
     }
     for (const [id, label] of containers) {
       try {
-        await docker(['logs', id], { output: path.join(artifacts, `${label}.container`), ignoreAbort: true, timeout: 30_000 });
+        await docker(['logs', id], { output: path.join(artifacts, `${label}.container`), streamOutput: true,
+          ignoreAbort: true, timeout: 30_000 });
       } catch { /* A created container may never have started. */ }
       try { await removeContainer(id); } catch (error) { errors.push(error.message); }
     }
@@ -274,7 +278,8 @@ async function main() {
     provenance.runner = {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
-        'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'benchmarks/OpenMessagingMain.java',
+        'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
+        'benchmarks/OpenMessagingMain.java',
         'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
@@ -628,7 +633,7 @@ rpk:
                 '--volume', `${directory}:/output`, '--workdir', '/src', '--entrypoint', 'java', OMB.build_image,
                 '-Xms256m', '-Xmx2g', '-cp', ombRuntime.classpath, '/bench/OpenMessagingMain.java',
                 '--drivers', '/output/driver.yaml', '--output', '/output/result.json', '/output/workload.yaml'],
-              `omb-${vendor}-${rf}-${workload.id}`, { output: path.join(directory, 'workload'), timeout }),
+              `omb-${vendor}-${rf}-${workload.id}`, { output: path.join(directory, 'workload'), timeout, streamOutput: true }),
             async () => {
               // Duration-based maximum-rate workloads have no record ceiling.
               // Abort before filling a shared disk, including Docker storage.

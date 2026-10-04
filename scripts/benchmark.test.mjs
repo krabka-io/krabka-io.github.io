@@ -7,6 +7,27 @@ import { gunzipSync } from 'node:zlib';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
 import { ombCases, ombWorkload, ombDriver, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { runLoggedCommand } from './benchmark-command.mjs';
+
+test('long benchmark logs are retained beyond execFile limits and failures remain bounded', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-logs-'));
+  const output = path.join(directory, 'workload');
+  try {
+    await runLoggedCommand(process.execPath, ['-e', 'process.stdout.write("x".repeat(34 * 1024 ** 2)); process.stderr.write("diagnostic");'],
+      { output, timeout: 30_000 });
+    assert.equal((await fs.stat(`${output}.stdout`)).size, 34 * 1024 ** 2);
+    assert.equal(await fs.readFile(`${output}.stderr`, 'utf8'), 'diagnostic');
+    await assert.rejects(runLoggedCommand(process.execPath, ['-e',
+      'process.stderr.write("x".repeat(10000) + "failure tail"); process.exitCode = 7;'], { output, timeout: 30_000 }), error => {
+      assert.match(error.message, /exit 7/);
+      assert.match(error.message, /failure tail/);
+      assert.ok(error.message.length < 4000);
+      return true;
+    });
+    await assert.rejects(runLoggedCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+      { output, timeout: 50 }), /SIGKILL/);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
 
 test('OpenMessaging rejects failed or truncated upstream captures and incomplete matrices', async () => {
   const config = { topics: 1, partitionsPerTopic: 16, messageSize: 1024, testDurationMinutes: 1 };
