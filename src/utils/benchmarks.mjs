@@ -16,7 +16,8 @@ function loadReport(pointer) {
   const trials = fs.readdirSync(path.join(directory, 'trials')).filter(name => name.endsWith('.json'))
     .map(name => JSON.parse(fs.readFileSync(path.join(directory, 'trials', name), 'utf8')));
   validateComplete(provenance, trials);
-  return { provenance, trials, sourceURL: 'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/results/' + match[1] };
+  const sourceURL = 'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/results/' + match[1];
+  return { provenance, trials, sourceURL, fileBaseURL: sourceURL.replace('/tree/', '/blob/') };
 }
 const throughput = loadReport('latest.md');
 const curves = loadReport('latest-curves.md');
@@ -32,6 +33,8 @@ export const vendors = VENDORS.map(id => ({
 }));
 export const sourceURL = throughput.sourceURL;
 export const curveSourceURL = curves.sourceURL;
+export const provenanceURL = throughput.fileBaseURL + '/provenance.json';
+export const curveProvenanceURL = curves.fileBaseURL + '/provenance.json';
 export const methodologyURL = 'https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md';
 
 export const results = [1, 3].map(rf => ({
@@ -98,7 +101,7 @@ export function viewerData(key, repetition) {
       time_series: { started_at: trial.time_series.started_at, sampling_interval_ms: trial.time_series.sampling_interval_ms,
         samples: trial.time_series.samples.map(sample => ({ elapsed_ms: sample.elapsed_ms,
           cluster: Object.fromEntries(resourceKeys.map(k => [k, sample.cluster[k]])) })) },
-      sourceURL: report.sourceURL + '/trials/rf' + workload.rf + '-' + vendor.id + '-' + repetition + '-' + workload.id + '.json',
+      sourceURL: report.fileBaseURL + '/trials/rf' + workload.rf + '-' + vendor.id + '-' + repetition + '-' + workload.id + '.json',
     };
   }) };
 }

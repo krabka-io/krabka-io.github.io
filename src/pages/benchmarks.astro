@@ -2,7 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 import BenchmarkGraphs from '../components/BenchmarkGraphs.astro';
-import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, methodologyURL, format } from '../utils/benchmarks.mjs';
+import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, provenanceURL, curveProvenanceURL, methodologyURL, format } from '../utils/benchmarks.mjs';
 
 const completed = new Date(curveProvenance.completed_at).toISOString();
 const curveVendors = vendors.map(v => ({ ...v, ...curveProvenance.images[v.id], version: curveProvenance.images[v.id].requested.split(':').at(-1).replace(/^v/, '') }));
@@ -81,7 +81,7 @@ npm run benchmark -- --suite curves`;
             <dd class="mt-2 font-mono text-xs text-gray-400 break-all">{vendor.reference}</dd>
           </div>)}
         </dl>
-        <p class="mt-5 text-sm text-gray-300">The <a href={`${curveSourceURL}/provenance.json`} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">curve provenance</a> and <a href={`${sourceURL}/provenance.json`} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">throughput provenance</a> record exact CPU sets, allocations, image and client hashes, and topic configurations.</p>
+        <p class="mt-5 text-sm text-gray-300">The <a href={curveProvenanceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">curve provenance</a> and <a href={provenanceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">throughput provenance</a> record exact CPU sets, allocations, image and client hashes, and topic configurations.</p>
       </details>
       <details class="mt-6 rounded-xl border border-white/10 p-5">
         <summary class="cursor-pointer font-semibold text-white">Earlier failed capture</summary>

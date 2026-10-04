@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { viewerCases, viewerData } from '../src/utils/benchmarks.mjs';
+import { viewerCases, viewerData, provenanceURL, curveProvenanceURL } from '../src/utils/benchmarks.mjs';
 import { GRAPH_GROUPS, averageData, averagePoints, timelineSeries, timelineExtent, faultEvents, overviewSeries, plot, nearestPoint, tickLabel } from '../src/utils/benchmark-chart.mjs';
 
 test('independent clocks align at measurement start; null intervals remain gaps', () => {
@@ -91,12 +91,18 @@ test('all average views retain three sources and average whole-trial values and 
 
 test('published matrices expose every capture, exact values, source links and summary ranges', () => {
   assert.equal(viewerCases.length, 20);
+  for (const url of [provenanceURL, curveProvenanceURL]) {
+    assert.match(url, /^https:\/\/github\.com\/krabka-io\/krabka-io\.github\.io\/blob\/main\/benchmarks\/results\/[^/]+\/provenance\.json$/);
+    assert.ok(fs.existsSync('benchmarks/' + url.split('/benchmarks/')[1]));
+  }
   for (const workload of viewerCases) for (const repetition of [1, 2, 3]) {
     const data = viewerData(workload.key, repetition);
+    assert.match(data.case.sourceURL, /\/tree\/main\/benchmarks\/results\/[^/]+$/);
     assert.equal(data.trials.length, 3);
     const extent = timelineExtent(data);
     assert.ok(extent[0] < extent[1]);
     for (const trial of data.trials) {
+      assert.match(trial.sourceURL, /^https:\/\/github\.com\/krabka-io\/krabka-io\.github\.io\/blob\/main\/benchmarks\/results\/[^/]+\/trials\/[^/]+\.json$/);
       const source = trial.sourceURL.split('/benchmarks/')[1];
       const raw = JSON.parse(fs.readFileSync('benchmarks/' + source, 'utf8'));
       assert.deepEqual(trial.metrics, raw.metrics);
