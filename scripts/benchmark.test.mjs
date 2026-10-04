@@ -6,6 +6,47 @@ import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
+import { ombCases, ombWorkload, ombDriver, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+
+test('OpenMessaging rejects failed or truncated upstream captures and incomplete matrices', async () => {
+  const config = { topics: 1, partitionsPerTopic: 16, messageSize: 1024, testDurationMinutes: 1 };
+  const capture = { driver: 'krabka-rf3', topics: 1, partitions: 16, messageSize: 1024,
+    publishRate: Array(6).fill(5000), consumeRate: Array(6).fill(5000),
+    publishErrorRate: Array(6).fill(0), backlog: Array(6).fill(0),
+    aggregatedPublishLatency99pct: 1, aggregatedEndToEndLatency99pct: 2 };
+  validateOmbResult(capture, 'krabka', 3, config);
+  validateOmbResult({ ...capture, aggregatedEndToEndLatency99pct: 0 }, 'krabka', 3, config);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed'), /logged an error/);
+  assert.throws(() => validateOmbResult({}, 'krabka', 3, config));
+  assert.throws(() => validateOmbResult({ ...capture, publishErrorRate: [0, 0, 0, 0, 0, 1] }, 'krabka', 3, config), /publish errors/);
+  assert.throws(() => validateOmbResult({ ...capture, consumeRate: Array(6).fill(0) }, 'krabka', 3, config), /consumed no/);
+  assert.throws(() => validateOmbResult({ ...capture, publishRate: [5000] }, 'krabka', 3, config), /truncated/);
+  assert.throws(() => validateOmbResult({ ...capture, driver: 'kafka-rf3' }, 'krabka', 3, config), /wrong OMB driver/);
+  await assert.rejects(writeOmbReport('/unused', { cases: [{}], replication_factors: [1, 3], repetitions: 1 }, []), /incomplete/);
+});
+
+test('OpenMessaging catalog and smoke configuration keep comparison settings consistent', () => {
+  assert.equal(ombCases().length, 13);
+  assert.throws(() => ombCases('../outside'), /unknown/);
+  assert.throws(() => ombCases('simple-workload,simple-workload'), /duplicate/);
+  const source = 'topics: 1\npartitionsPerTopic: 16\nmessageSize: 1024\npayloadFile: "payload/payload-1Kb.data"\nproducerRate: 100000\nconsumerBacklogSizeGB: 100\ntestDurationMinutes: 15\n';
+  const full = ombWorkload(source, false);
+  assert.equal(full.config.consumerBacklogSizeGB, 100);
+  assert.equal(full.config.testDurationMinutes, 15);
+  assert.match(full.yaml, /payloadFile: "\/src\/payload\/payload-1Kb.data"/);
+  const smoke = ombWorkload(source, true);
+  assert.equal(smoke.config.consumerBacklogSizeGB, 0);
+  assert.equal(smoke.config.producerRate, 5000);
+  assert.equal(smoke.config.testDurationMinutes, 1);
+  assert.equal(full.sha256, smoke.sha256);
+  for (const vendor of ['krabka', 'kafka', 'redpanda']) {
+    const driver = ombDriver(vendor, 3);
+    assert.match(driver, /acks=all\n  enable.idempotence=true/);
+    assert.match(driver, /replicationFactor: 3/);
+    assert.match(driver, /batch.size=1048576/);
+    assert.match(driver, vendor === 'redpanda' ? /write.caching=true/ : /min.insync.replicas=2/);
+  }
+});
 
 const broker = (id, cpu, rss, current, inactive = 0) => ({ id, cpu_usage_us: cpu, rss_bytes: rss,
   memory_current_bytes: current, inactive_file_bytes: inactive, anon_bytes: rss / 2, oom_kill: 0 });

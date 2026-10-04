@@ -149,6 +149,8 @@ npm run preview
 
 Local broker benchmark tasks are documented in [benchmarks/README.md](benchmarks/README.md). `npm run benchmark` runs the RF1/RF3 three-way comparison and updates repository reports after the full matrix passes. These reports are separate from the website's performance claims.
 
+The manual **OpenMessaging broker benchmarks** workflow runs the upstream Kafka workload catalog against Krabka, Kafka 4.3.1, and Redpanda on the organization's Google Cloud runners. It retains results and diagnostics as Actions artifacts; see [the benchmark instructions](benchmarks/README.md#openmessaging-on-google-cloud).
+
 ### 7. Aggregated Helm Chart Repository
 
 Users add one repository URL:
