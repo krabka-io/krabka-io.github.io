@@ -1,0 +1,394 @@
+---
+import { viewerCases, viewerData } from '../utils/benchmarks.mjs';
+import { COLORS, DASHES, GRAPH_GROUPS, timelineSeries, timelineExtent, faultEvents, plot, svgMarkup, number } from '../utils/benchmark-chart.mjs';
+import { getPath } from '../utils/paths';
+const initial = viewerData('curves-recovery', 1);
+const extent = timelineExtent(initial);
+const categories = [{ id: 'recovery', name: 'Recovery' }, { id: 'load', name: 'Load' }, { id: 'memory', name: 'Memory' }, { id: 'throughput', name: 'Throughput' }];
+const payload = JSON.stringify({ cases: viewerCases, initial, base: getPath('/benchmarks/data/') }).replace(/</g, '\\u003c');
+---
+
+<section id="viewer" aria-labelledby="viewer-heading" data-benchmark-viewer class="mt-10 scroll-mt-24">
+  <h2 id="viewer-heading" class="sr-only">Explore the benchmark results</h2>
+  <div class="viewer-controls">
+    <fieldset class="category-control">
+      <legend>Experiment</legend>
+      <div class="category-buttons">
+        {categories.map(category => <button type="button" data-category={category.id} aria-pressed={category.id === 'recovery'}>{category.name}</button>)}
+      </div>
+    </fieldset>
+    <label class="case-control">Case
+      <select data-case-select>{viewerCases.filter(c => c.category === 'recovery').map(c => <option value={c.key}>{c.label}</option>)}</select>
+    </label>
+    <label>Repetition
+      <select data-repetition>
+        {[1, 2, 3].map(r => <option value={r}>{r} of 3</option>)}
+        <option value="average">Average of 3</option>
+      </select>
+    </label>
+    <label>Time window
+      <select data-window>
+        <option value="full">Full capture</option>
+        <option value="measurement">Measurement</option>
+        <option value="fault">Around the pause</option>
+      </select>
+    </label>
+  </div>
+  <p data-status role="status" class="mt-3 text-sm text-gray-400"></p>
+  <div class="mt-5 flex flex-wrap gap-x-6 gap-y-3" data-legend>
+    {initial.trials.map((trial, i) => <span class="inline-flex items-center gap-2 text-sm font-medium" style={'color:' + COLORS[i]}>
+      <svg width="30" height="10" aria-hidden="true"><path d="M0,5H30" stroke={COLORS[i]} stroke-width="2.5" stroke-dasharray={DASHES[i]} /></svg>
+      <span>{trial.name} {trial.version}</span>
+    </span>)}
+  </div>
+  <p data-context class="mt-4 text-sm text-gray-300">RF3 · 1 KiB random records · LZ4 · 20,000 offered records/s · 4 GiB per broker</p>
+  <p data-experiment-note class="mt-2 max-w-5xl text-sm text-gray-400 leading-relaxed">Pause the leader of partition 0 after 15 measured seconds; resume it after 10 seconds. Colored bands and lines show each broker’s actual pause and resume times.</p>
+
+  <div data-overview hidden class="mt-8">
+    <h3 class="text-xl font-semibold text-white">Across all three repetitions</h3>
+    <p class="mt-2 text-sm text-gray-400">Points are medians; vertical bars show the min–max range. Summary p99 comes from each trial’s measured records, including drain.</p>
+    <div class="chart-grid mt-4">
+      {[0, 1].map(i => <article data-overview-chart={i} class="chart-card">
+        <div class="chart-header"><h4 data-title></h4><select data-metric aria-label={'Comparison ' + (i + 1) + ' metric'}></select><button type="button" data-log aria-pressed="false">Log scale</button></div>
+        <p data-unit class="chart-unit"></p>
+        <svg data-plot viewBox="0 0 640 345" role="img" tabindex="0"></svg>
+        <p data-inspection class="inspection"></p>
+        <dl data-readings class="chart-readings"></dl>
+      </article>)}
+    </div>
+    <p class="mt-3 text-sm text-gray-400">Choose a point to view that case over time. Offered backlog can include records that never reached the producer; check it before treating a load as sustainable.</p>
+  </div>
+
+  <div class="mt-8">
+    <div class="flex flex-wrap items-baseline justify-between gap-3">
+      <h3 class="text-xl font-semibold text-white">Measurements over time</h3>
+      <a data-source href={initial.case.sourceURL} class="text-sm text-krab-400 underline underline-offset-4">Published report and raw trials ↗</a>
+    </div>
+    <p data-axis-note class="mt-2 text-sm text-gray-400 leading-relaxed">Zero is the start of measurement. Negative time is warm-up; shading after 60 s marks drain. Broker and client clocks are aligned by their UTC start times.</p>
+    <p data-average-note hidden class="mt-3 text-sm text-gray-400 leading-relaxed">One-second averages give each repetition equal weight. Only complete seconds shared by all three captures are shown; missing samples leave gaps. Latency shows the mean of interval p99 values.</p>
+    <div class="chart-grid mt-5">
+      {GRAPH_GROUPS.map(group => {
+        const metric = group.metrics[0];
+        const reference = group.id === 'delivery' ? initial.case.rate : null;
+        const graph = plot(timelineSeries(initial, metric), extent, false, reference);
+        return <article data-chart={group.id} class="chart-card">
+          <div class="chart-header">
+            <h4>{group.title}</h4>
+            <select data-metric aria-label={group.title + ' metric'}>{group.metrics.map(m => <option value={m.key}>{m.label}</option>)}</select>
+            {['latency', 'memory', 'lag'].includes(group.id) && <button type="button" data-log aria-pressed="false">Log scale</button>}
+          </div>
+          <p data-unit class="chart-unit">{metric.unit}</p>
+          <svg data-plot viewBox="0 0 640 345" role="img" tabindex="0" aria-label={group.title + ' over measured seconds'} set:html={svgMarkup(graph, {
+            id: 'clip-' + group.id, label: group.title + ' over measured seconds', axis: 'Seconds from measurement start',
+            events: faultEvents(initial), duration: initial.case.seconds, reference,
+          })} />
+          <p data-inspection class="inspection">Last recorded sample</p>
+          <dl data-readings class="chart-readings">
+            {graph.lines.map(line => <div><dt style={'color:' + line.color}>{line.name}</dt><dd>{number(line.points.at(-1)?.y, metric.digits)}<small>{number(line.points.at(-1)?.x, 2)} s</small></dd></div>)}
+          </dl>
+          <p data-chart-note class="chart-note">{group.note}</p>
+        </article>;
+      })}
+    </div>
+    <p class="mt-4 text-sm text-gray-400">Hover or tap a graph, or focus a graph and press the arrow keys. Lines stop when their data ends. Log scales omit zero values.</p>
+  </div>
+
+  <details class="mt-8 rounded-xl border border-white/10 p-4 sm:p-5" open>
+    <summary data-summary-heading class="cursor-pointer text-base font-semibold text-white">Selected repetition: totals and fault timing</summary>
+    <div data-trial-summaries class="mt-4 grid gap-4 md:grid-cols-3">
+      {initial.trials.map((trial, i) => <article class="trial-summary">
+        <h4 style={'color:' + COLORS[i]}>{trial.name}</h4>
+        <dl>
+          <div><dt>Recovery after resume</dt><dd>{number(trial.curve.recovery_seconds, 2)} s</dd></div>
+          <div><dt>Acknowledged rate</dt><dd>{number(trial.curve.records_per_second)} records/s</dd></div>
+          <div><dt>Whole-trial p99</dt><dd>{number(trial.curve.latency_ms_p99, 2)} ms</dd></div>
+        </dl>
+        <a href={trial.sourceURL}>Raw trial ↗</a>
+      </article>)}
+    </div>
+    <p data-summary-note class="mt-4 text-sm text-gray-400">Recovery requires three consecutive post-resume intervals at ≥90% of offered acknowledgment rate and ≤100 ms worth of acknowledged backlog. This measures a process stall with the same storage.</p>
+  </details>
+  <noscript><p class="mt-4 text-sm text-gray-300">These graphs show recovery, repetition 1. Enable JavaScript to change cases and inspect samples. The published report above contains all results.</p></noscript>
+  <script type="application/json" data-viewer-data set:html={payload} />
+</section>
+
+<style is:global>
+  [data-benchmark-viewer] {
+  .viewer-controls { display:flex; flex-wrap:wrap; align-items:end; gap:1rem; padding:1.25rem; border:1px solid #ffffff1a; border-radius:1rem; background:#0f172ab3; }
+  label, legend { font-size:.75rem; color:#a6afc1; }
+  .viewer-controls label { display:flex; flex-direction:column; gap:.5rem; }
+  legend { margin-bottom:.5rem; }
+  .category-buttons { display:flex; flex-wrap:wrap; gap:.25rem; }
+  button, select { border:1px solid #ffffff26; border-radius:.5rem; background:#0f172a; color:#e5e7eb; padding:.6rem .7rem; font-size:.8rem; max-width:100%; }
+  button { cursor:pointer; }
+  button[aria-pressed='true'] { background:#ff6b4a20; color:#ffad97; border-color:#ff6b4a80; }
+  button:focus-visible, select:focus-visible, svg:focus-visible { outline:2px solid #ff8063; outline-offset:3px; }
+  .case-control { flex:1; min-width:0; flex-basis:16rem; }
+  .chart-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1.25rem; }
+  .chart-card { min-width:0; padding:1.25rem; border:1px solid #ffffff14; border-radius:1rem; background:linear-gradient(135deg,#ffffff05,#ffffff02); }
+  .chart-header { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; }
+  h4 { font-size:1rem; font-weight:600; color:white; }
+  .chart-header h4 { flex:1; flex-basis:10rem; }
+  .chart-header select { font-size:.75rem; }
+  .chart-header button { font-size:.75rem; padding:.55rem .6rem; }
+  .chart-unit { margin-top:.75rem; font-size:.75rem; color:#a6afc1; }
+  [data-plot] { display:block; width:100%; margin-top:.25rem; border-radius:.5rem; }
+  [data-case] { cursor:pointer; }
+  [data-case]:focus-visible { outline:2px solid white; outline-offset:3px; }
+  .inspection { font-size:.75rem; color:#a6afc1; margin-top:.5rem; min-height:1rem; }
+  .chart-readings { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; margin-top:.5rem; font-variant-numeric:tabular-nums; }
+  .chart-readings div { padding:.65rem; background:#0003; border-radius:.5rem; min-width:0; }
+  .chart-readings dt { font-size:.7rem; font-weight:500; }
+  .chart-readings dd { font-size:.9rem; font-weight:600; margin-top:.25rem; overflow-wrap:anywhere; color:white; }
+  .chart-readings small { display:block; margin-top:.2rem; font-size:.65rem; color:#a6afc1; font-weight:400; }
+  .chart-note { font-size:.75rem; color:#a6afc1; line-height:1.5; margin-top:1rem; }
+  .trial-summary { padding:1rem; border-radius:.75rem; background:#ffffff04; font-size:.8rem; }
+  .trial-summary dl { margin-top:.75rem; }
+  .trial-summary dl div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:.25rem .75rem; margin-top:.65rem; }
+  .trial-summary dt { color:#a6afc1; }
+  .trial-summary dd { color:white; font-variant-numeric:tabular-nums; }
+  .trial-summary a { display:inline-block; margin-top:1rem; color:#ffad97; text-decoration:underline; text-underline-offset:3px; }
+  [hidden] { display:none !important; }
+  @media(max-width:767px) {
+    .chart-grid { grid-template-columns:minmax(0,1fr); }
+    .chart-card { padding:1rem; }
+    .viewer-controls { padding:1rem; gap:.75rem; }
+    .category-control { width:100%; }
+    .category-buttons { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .category-buttons button { padding:.6rem .3rem; font-size:.75rem; }
+  }
+  }
+</style>
+
+<script>
+  import { COLORS, GRAPH_GROUPS, OVERVIEW_GROUPS, number, averageData, timelineSeries, timelineExtent, faultEvents, overviewSeries, plot, svgMarkup, nearestPoint } from '../utils/benchmark-chart.mjs';
+  const root = document.querySelector<HTMLElement>('[data-benchmark-viewer]');
+  if (root) {
+    const config = JSON.parse(root.querySelector('[data-viewer-data]')!.textContent!);
+    const cases = config.cases;
+    const caseSelect = root.querySelector<HTMLSelectElement>('[data-case-select]')!;
+    const repetition = root.querySelector<HTMLSelectElement>('[data-repetition]')!;
+    const windowSelect = root.querySelector<HTMLSelectElement>('[data-window]')!;
+    const status = root.querySelector<HTMLElement>('[data-status]')!;
+    let data = config.initial;
+    let request = 0;
+    let position: number | null = null;
+    let inspections: ((x: number | null) => void)[] = [];
+    const cache = new Map([[data.case.key + '-1', data]]);
+    const element = (tag: string, content: string, className = '') => {
+      const node = document.createElement(tag); node.textContent = content; node.className = className; return node;
+    };
+    function inspect(x: number | null) {
+      position = x;
+      for (const update of inspections) update(x);
+    }
+    function draw(card: HTMLElement, group, series, extent, options, overview = false) {
+      const select = card.querySelector<HTMLSelectElement>('[data-metric]')!;
+      const selected = select.value;
+      select.replaceChildren(...group.metrics.map(m => new Option(m.label, m.key)));
+      if (group.metrics.some(m => m.key === selected)) select.value = selected;
+      const metric = group.metrics.find(m => m.key === select.value)!;
+      const lines = series(metric);
+      const graph = plot(lines, extent, card.querySelector('[data-log]')?.getAttribute('aria-pressed') === 'true', options.reference);
+      card.querySelector('[data-unit]')!.textContent = metric.unit;
+      if (card.querySelector('[data-title]')) card.querySelector('[data-title]')!.textContent = group.title;
+      const svg = card.querySelector<SVGSVGElement>('[data-plot]')!;
+      const label = group.title + ', ' + metric.label + ' in ' + metric.unit + '. ' + options.axis + '. Use arrow keys to inspect values.';
+      svg.setAttribute('aria-label', label);
+      svg.innerHTML = svgMarkup(graph, { ...options, label, overview });
+      const crosshair = svg.querySelector('[data-crosshair]')!;
+      const update = (x: number | null) => {
+        const cursor = overview && x !== null ? nearestPoint(lines[0].points, x)?.x ?? x : x;
+        card.querySelector('[data-inspection]')!.textContent = cursor === null ? overview ? 'Highest tested setting · median and range'
+          : data.repetition === 'average' ? 'Last averaged second' : 'Last recorded sample'
+          : number(cursor, overview ? 0 : 2) + (overview ? data.case.category === 'load' ? ' offered records/s' : ' GiB per broker' : ' s');
+        crosshair.setAttribute('d', cursor === null ? '' : 'M' + graph.x(cursor) + ',28V254');
+        card.querySelector('[data-readings]')!.replaceChildren(...lines.map(line => {
+          const point = cursor === null ? line.points.at(-1) : nearestPoint(line.points, cursor);
+          const div = element('div', '');
+          const dt = element('dt', line.name); dt.style.color = line.color;
+          const dd = element('dd', point && Number.isFinite(point.y) ? number(point.y, metric.digits) : point ? 'No samples' : 'Outside capture');
+          if (point) dd.append(element('small', overview
+            ? number(point.low, metric.digits) + '–' + number(point.high, metric.digits)
+            : number(point.x, 2) + ' s' + (point.phase ? ' · ' + point.phase : '')
+              + (point.contributors !== undefined ? ' · ' + point.contributors + ' of 3 repetitions' : '')));
+          div.append(dt, dd); return div;
+        }));
+      };
+      if (!overview) inspections.push(update);
+      let cursor = graph.minX;
+      svg.onpointermove = event => {
+        const rect = svg.getBoundingClientRect();
+        cursor = graph.minX + Math.min(1, Math.max(0, ((event.clientX - rect.left) / rect.width * 640 - 70) / 540)) * (graph.maxX - graph.minX);
+        if (overview) update(cursor); else inspect(cursor);
+      };
+      svg.onpointerleave = () => { if (overview) update(null); else inspect(null); };
+      svg.onkeydown = event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        cursor = event.key === 'Home' ? graph.minX : event.key === 'End' ? graph.maxX
+          : Math.max(graph.minX, Math.min(graph.maxX, cursor + (event.key === 'ArrowLeft' ? -1 : 1) * (graph.maxX - graph.minX) / 50));
+        if (overview) update(cursor); else inspect(cursor);
+      };
+      update(overview ? null : position);
+    }
+    function render() {
+      inspections = [];
+      const c = data.case;
+      const curve = c.suite === 'curves';
+      const averaged = data.repetition === 'average';
+      root!.querySelector('[data-context]')!.textContent = 'RF' + c.rf + ' · ' + (curve ? '1 KiB random records · LZ4' : c.label.replace(/^RF\d · /, ''))
+        + ' · ' + (c.rate > 0 ? number(c.rate) + ' offered records/s' : 'Unlimited offered load')
+        + ' · ' + (curve ? c.memory_gib : 10) + ' GiB per broker · ' + (averaged ? 'average of 3 repetitions' : 'repetition ' + data.repetition);
+      root!.querySelector('[data-experiment-note]')!.textContent = c.kind === 'recovery'
+        ? 'Pause the leader of partition 0 after 15 measured seconds; resume it after 10 seconds. Colored bands and lines show each broker’s '
+          + (averaged ? 'mean pause and resume times across three repetitions.' : 'actual pause and resume times.')
+        : c.category === 'load' ? 'Compare scheduled load with actual delivery, latency, and records left waiting at the producer.'
+        : c.category === 'memory' ? 'The offered load is unlimited. Compare delivered throughput under 2, 4, and 8 GiB broker limits.'
+        : 'Fixed-record workloads. Throughput and latency are whole-trial summaries; this suite records only broker CPU and memory over time.';
+      root!.querySelector('[data-axis-note]')!.textContent = curve
+        ? 'Zero is the start of measurement. Negative time is warm-up; shading after ' + c.seconds + ' s marks drain. Broker and client clocks are aligned by their UTC start times.'
+        : 'Time is seconds from the start of broker resource capture, including client initialization. All lines share the same time scale.';
+      root!.querySelector<HTMLElement>('[data-average-note]')!.hidden = !averaged;
+      root!.querySelector('[data-summary-heading]')!.textContent = averaged
+        ? 'Average of 3 repetitions: totals and fault timing' : 'Selected repetition: totals and fault timing';
+      const source = root!.querySelector<HTMLAnchorElement>('[data-source]')!;
+      source.href = c.sourceURL;
+      for (const [i, label] of [...root!.querySelectorAll('[data-legend] span span')].entries()) label.textContent = data.trials[i].name + ' ' + data.trials[i].version;
+      windowSelect.options[1].disabled = !curve;
+      windowSelect.options[2].disabled = c.kind !== 'recovery';
+      if (windowSelect.selectedOptions[0].disabled) windowSelect.value = 'full';
+      const extent = timelineExtent(data, windowSelect.value);
+      if (position !== null) position = Math.min(extent[1], Math.max(extent[0], position));
+      for (const group of GRAPH_GROUPS) {
+        const card = root!.querySelector<HTMLElement>('[data-chart="' + group.id + '"]')!;
+        card.hidden = !curve && group.metrics[0].source !== 'resource';
+        if (card.hidden) continue;
+        card.querySelector('[data-chart-note]')!.textContent = averaged && group.id === 'latency'
+          ? 'Arithmetic mean of recorded interval p99 values across three repetitions. This is not a pooled latency quantile.'
+          : group.id === 'delivery' && c.rate < 0
+            ? 'Acknowledgment or consumption rate in each recorded interval. This case has no fixed offered rate.' : group.note;
+        draw(card, group, m => timelineSeries(data, m), extent, {
+          id: 'clip-' + group.id, axis: curve ? 'Seconds from measurement start' : 'Seconds from resource capture start',
+          events: faultEvents(data), duration: curve ? c.seconds : undefined,
+          reference: group.id === 'delivery' && c.rate > 0 ? c.rate : null,
+        });
+      }
+      const overview = root!.querySelector<HTMLElement>('[data-overview]')!;
+      overview.hidden = !OVERVIEW_GROUPS[c.category];
+      if (!overview.hidden) OVERVIEW_GROUPS[c.category].forEach((group, i) => {
+        const card = overview.querySelector<HTMLElement>('[data-overview-chart="' + i + '"]')!;
+        const values = cases.filter(item => item.category === c.category).map(item => c.category === 'load' ? item.rate : item.memory_gib);
+        draw(card, group, m => overviewSeries(cases, c.category, m), [Math.min(...values), Math.max(...values)], {
+          id: 'clip-overview-' + i, axis: c.category === 'load' ? 'Offered records/s' : 'GiB memory budget per broker',
+        }, true);
+      });
+      root!.querySelector('[data-trial-summaries]')!.replaceChildren(...data.trials.map((trial, i) => {
+        const article = element('article', '', 'trial-summary');
+        const heading = element('h4', trial.name); heading.style.color = COLORS[i];
+        const dl = element('dl', '');
+        const stats = [
+          ['Acknowledged rate', number((trial.curve ?? trial.metrics).records_per_second) + ' records/s'],
+          [averaged ? 'Mean trial p99' : 'Whole-trial p99', number((trial.curve ?? trial.metrics).latency_ms_p99, 2) + ' ms'],
+          [averaged ? 'Mean peak working set' : 'Peak cluster working set', number(trial.metrics.working_set_peak_bytes / 1048576, 1) + ' MiB'],
+        ];
+        if (curve) stats.push(['End offered backlog', number(trial.curve.offered_backlog_at_measurement_end) + ' records']);
+        else stats.push(['CPU per record', number(trial.metrics.cpu_us_per_record, 2) + ' µs']);
+        if (c.kind === 'recovery') {
+          const range = c.summaries[i].metrics.recovery_seconds;
+          stats.push(['Recovery, median of 3', range.median === null ? 'Not observed in every repetition' : number(range.median, 2) + ' s (' + number(range.min, 2) + '–' + number(range.max, 2) + ')']);
+          stats.unshift([averaged ? 'Mean recovery after resume' : 'Recovery after resume', trial.curve.recovery_seconds === null
+            ? averaged ? 'Not observed in every repetition' : 'Not observed' : number(trial.curve.recovery_seconds, 2) + ' s']);
+          for (const event of trial.events) stats.push([(event.action === 'pause' ? 'Pause completed' : 'Resume completed') + (averaged ? ' (mean)' : ''),
+            number(event.elapsed_ms / 1000 - c.warmup_seconds, 3) + ' s' + (averaged ? '' : ' · broker ' + event.broker_id)]);
+        }
+        for (const [name, value] of stats) { const row = element('div', ''); row.append(element('dt', name), element('dd', value)); dl.append(row); }
+        article.append(heading, dl);
+        for (const [index, raw] of (trial.repetitions ?? [trial]).entries()) {
+          const a = element('a', averaged ? 'Raw trial ' + (index + 1) + ' ↗' : 'Raw trial ↗') as HTMLAnchorElement;
+          a.href = raw.sourceURL; a.style.marginRight = '.75rem'; article.append(a);
+        }
+        return article;
+      }));
+      root!.querySelector('[data-summary-note]')!.textContent = c.kind === 'recovery'
+        ? 'Recovery requires three consecutive post-resume intervals at ≥90% of offered acknowledgment rate and ≤100 ms worth of acknowledged backlog. This measures a process stall with the same storage.'
+        : averaged ? 'These are arithmetic means of the three whole-trial values. Mean trial p99 is not a pooled latency quantile.'
+        : 'These are whole-trial values for the selected repetition. Summary p99 uses measured records, including drain in the curves suite. Report summaries never average interval p99 values.';
+      inspect(position);
+      resizeLabels();
+    }
+    function resizeLabels() {
+      for (const svg of root!.querySelectorAll<SVGSVGElement>('[data-plot]')) {
+        const width = svg.getBoundingClientRect().width;
+        if (width) for (const label of svg.querySelectorAll('text')) label.setAttribute('font-size', String(11 * 640 / width));
+      }
+    }
+    async function load() {
+      const sequence = ++request;
+      const key = caseSelect.value + '-' + repetition.value;
+      status.textContent = 'Loading samples…';
+      root!.setAttribute('aria-busy', 'true');
+      try {
+        const capture = async (id: string) => {
+          if (!cache.has(id)) {
+            const response = await fetch(config.base + id + '.json');
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            cache.set(id, await response.json());
+          }
+          return cache.get(id);
+        };
+        if (repetition.value === 'average') {
+          const captures = await Promise.all([1, 2, 3].map(r => capture(caseSelect.value + '-' + r)));
+          cache.set(key, averageData(captures));
+        } else {
+          await capture(key);
+        }
+        if (sequence !== request) return;
+        data = cache.get(key); position = null; render();
+        history.replaceState(null, '', '#' + key);
+        status.textContent = 'Published run ' + data.case.run_id + (data.repetition === 'average'
+          ? ' · Average of 9 trials: 3 repetitions per broker' : ' · 3 broker trials shown');
+      } catch {
+        if (sequence !== request) return;
+        status.textContent = 'Samples could not load. Choose the case again to retry; the previous graphs remain visible.';
+      } finally {
+        if (sequence === request) root!.setAttribute('aria-busy', 'false');
+      }
+    }
+    function chooseCategory(next: string, key?: string) {
+      caseSelect.replaceChildren(...cases.filter(c => c.category === next).map(c => new Option(c.label, c.key)));
+      if (key) caseSelect.value = key;
+      for (const button of root!.querySelectorAll<HTMLButtonElement>('[data-category]')) button.setAttribute('aria-pressed', String(button.dataset.category === next));
+    }
+    root.addEventListener('change', event => {
+      const target = event.target as HTMLElement;
+      if (target === caseSelect || target === repetition) load(); else render();
+    });
+    root.addEventListener('click', event => {
+      const target = event.target as Element;
+      const button = target.closest<HTMLButtonElement>('button');
+      if (button?.dataset.category) { chooseCategory(button.dataset.category); load(); }
+      if (button?.hasAttribute('data-log')) { button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true')); render(); }
+      const point = target.closest<SVGElement>('[data-case]');
+      if (point?.dataset.case) { caseSelect.value = point.dataset.case; load(); }
+    });
+    root.addEventListener('keydown', event => {
+      const point = (event.target as Element).closest<SVGElement>('[data-case]');
+      if (point?.dataset.case && ['Enter', ' '].includes(event.key)) {
+        event.preventDefault(); caseSelect.value = point.dataset.case; load();
+      }
+    });
+    window.addEventListener('resize', resizeLabels);
+    function applyHash() {
+      const key = location.hash.slice(1);
+      if (key === 'rf1' || key === 'rf3') {
+        chooseCategory('throughput', 'throughput-' + key + '-1k-random-lz4'); load(); return;
+      }
+      const selected = cases.find(c => [1, 2, 3, 'average'].some(r => c.key + '-' + r === key));
+      if (selected) { chooseCategory(selected.category, selected.key); repetition.value = key.slice(selected.key.length + 1); load(); }
+    }
+    window.addEventListener('hashchange', applyHash);
+    render(); status.textContent = 'Published run ' + data.case.run_id + ' · 3 broker trials shown';
+    applyHash();
+  }
+</script>

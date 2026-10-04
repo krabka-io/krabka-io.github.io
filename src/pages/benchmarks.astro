@@ -1,0 +1,99 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import BenchmarkGraphs from '../components/BenchmarkGraphs.astro';
+import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, methodologyURL, format } from '../utils/benchmarks.mjs';
+
+const completed = new Date(curveProvenance.completed_at).toISOString();
+const curveVendors = vendors.map(v => ({ ...v, ...curveProvenance.images[v.id], version: curveProvenance.images[v.id].requested.split(':').at(-1).replace(/^v/, '') }));
+const repeat = `# Resolve and check the pinned images and local prerequisites
+npm run benchmark -- --suite curves --dry-run
+
+# Capture load, memory, and recovery on a Linux host with Docker
+npm run benchmark -- --suite curves`;
+---
+
+<BaseLayout title="Broker benchmarks | krabka" description="Explore broker measurements over time: delivery rate, p99 latency, backlog, CPU, memory, and leader recovery for krabka, Apache Kafka, and Redpanda.">
+  <div class="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <header class="max-w-4xl">
+      <p class="mb-3 text-sm font-semibold text-krab-400">Local broker comparison</p>
+      <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">Broker benchmarks</h1>
+      <p class="mt-4 text-base text-gray-300 leading-relaxed">
+        {curveVendors.map(v => `${v.name} ${v.version}`).join(', ')} on the same host.
+        Follow delivery, latency, backlog, CPU, and memory through a leader pause, or compare load and memory limits.
+      </p>
+      <p class="mt-4 text-sm text-gray-400">Curves completed <time datetime={completed}>{completed.slice(0, 10)} at {completed.slice(11, 16)} UTC</time> · {curveProvenance.repetitions} repetitions per case · 72 curve trials and 108 throughput trials</p>
+      <div class="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold">
+        <a href="#viewer" class="text-krab-400 underline underline-offset-4 hover:text-krab-300">Explore the graphs</a>
+        <a href="#methodology" class="text-krab-400 underline underline-offset-4 hover:text-krab-300">Methodology</a>
+        <a href={curveSourceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">Curve report on GitHub</a>
+      </div>
+    </header>
+
+    <details class="mt-6 rounded-xl border border-krab-500/30 bg-krab-500/5 p-4 max-w-5xl">
+      <summary class="cursor-pointer text-sm font-semibold text-white">Buffered-write comparison · scope and durability</summary>
+      <p class="mt-2 text-sm text-gray-300 leading-relaxed">
+        These measurements use buffered writes. Kafka and krabka acknowledge in-sync replication; Redpanda acknowledges a Raft majority with <code>write.caching=true</code>.
+        This run does not establish equal crash durability or production readiness. The results apply to these images, host settings, and workloads.
+        Shared-host noise and client bottlenecks can affect the measurements.
+      </p>
+    </details>
+
+    <BenchmarkGraphs />
+
+    <section id="methodology" aria-labelledby="methodology-heading" class="mt-16 scroll-mt-24">
+      <h2 id="methodology-heading" class="text-2xl font-bold text-white sm:text-3xl">Methodology and resource settings</h2>
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <article class="frosted-card rounded-2xl p-6 min-w-0">
+          <h3 class="text-lg font-semibold text-white">Host and broker limits</h3>
+          <ul class="mt-4 list-disc pl-5 space-y-3 text-sm text-gray-300 leading-relaxed">
+            <li>{provenance.host.cpu_model}; {provenance.host.logical_cpus} logical CPUs; {format(provenance.host.memory_total_bytes / 1073741824, 1)} GiB RAM; native Linux/amd64 and local Docker.</li>
+            <li>Each broker has four logical CPUs with a four-core quota, zero swap, and CPU sets that include SMT siblings. RF3 graphs sum all three brokers.</li>
+            <li>Curves use 4 GiB per broker for load and recovery, and 2, 4, or 8 GiB for memory cases. Kafka’s heap is one quarter of the budget, capped at 1 GiB. Redpanda allocates three quarters to application memory and one eighth to reserve.</li>
+            <li>The throughput suite uses 10 GiB per broker: Kafka has a 1 GiB heap; Redpanda has 8 GiB application memory and 1 GiB reserve.</li>
+            <li>The Java client has separate CPUs, a 4 GiB memory limit, and a 2 GiB heap. All brokers use Kafka {curveVendors.find(v => v.id === 'kafka').version} client jars.</li>
+          </ul>
+        </article>
+        <article class="frosted-card rounded-2xl p-6 min-w-0">
+          <h3 class="text-lg font-semibold text-white">Workload and repetitions</h3>
+          <ul class="mt-4 list-disc pl-5 space-y-3 text-sm text-gray-300 leading-relaxed">
+            <li>{provenance.contract.partitions} partitions, <code>acks=all</code>, idempotence, {format(provenance.contract.batch_bytes)}-byte batches, and {provenance.contract.linger_ms} ms linger. All replicas must be in sync before each case.</li>
+            <li>Curves use five seconds of warm-up and 30 seconds of measurement, or 60 seconds for recovery. Load and memory use RF1; recovery uses RF3. All use 1 KiB random records with LZ4.</li>
+            <li>Rate-limited curves timestamp the scheduled send time, so latency includes producer pacing and backpressure. The client can drain for up to 60 seconds after scheduling stops.</li>
+            <li>Throughput cases warm up {format(provenance.contract.warmup_records[1])} records for RF1 and {format(provenance.contract.warmup_records[3])} for RF3. Earlier-case topics and cache remain until the cluster repetition ends.</li>
+            <li>The consumer validates every sequence and the exact acknowledged count. All measured trials have zero duplicate sequences and zero producer errors.</li>
+          </ul>
+        </article>
+      </div>
+      <div class="mt-6 max-w-4xl space-y-4 text-sm text-gray-300 leading-relaxed">
+        <p>Workload intervals target one second; broker resources target 250 ms. Individual repetitions retain actual sample times; the average view uses one-second bins with equal weight per repetition. Interval phases are assigned by interval start, so a boundary interval can overlap the next phase. Summary p99 is the histogram quantile for measured records, including drain. Report summaries never average interval p99 values.</p>
+        <p>Acknowledged backlog is <code>acknowledged - consumed</code>, rather than committed consumer-group offset lag. Offered backlog also includes scheduled records that did not reach the producer. Latency covers submitted records, so low latency alone does not establish sustainable throughput.</p>
+        <p>CPU uses broker cgroup counters from client startup through shutdown. CPU per record divides total broker CPU by acknowledged records. RF3 memory peaks use simultaneous cluster sums. The first CPU sample has no preceding interval and is left empty.</p>
+        <p>Working set is <code>memory.current - inactive_file</code>. RSS excludes most disk page cache. Redpanda reserves memory in advance, so RSS depends on its configured memory budget.</p>
+        <p>Recovery pauses a process and resumes the same container and storage. These runs exclude machine failures, power loss, restarts, TLS, authentication, tiered storage, compaction, and forced per-append fsync.</p>
+      </div>
+      <details class="frosted-card rounded-2xl mt-6 p-5 sm:p-6">
+        <summary class="cursor-pointer font-semibold text-white hover:text-krab-400">Pinned images and provenance</summary>
+        <dl class="mt-5 space-y-5 text-sm">
+          {curveVendors.map(vendor => <div>
+            <dt class="font-semibold text-white">{vendor.name} {vendor.version}</dt>
+            <dd class="mt-1 font-mono text-xs text-gray-300 break-all">{vendor.requested}</dd>
+            <dd class="mt-2 font-mono text-xs text-gray-400 break-all">{vendor.reference}</dd>
+          </div>)}
+        </dl>
+        <p class="mt-5 text-sm text-gray-300">The <a href={`${curveSourceURL}/provenance.json`} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">curve provenance</a> and <a href={`${sourceURL}/provenance.json`} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">throughput provenance</a> record exact CPU sets, allocations, image and client hashes, and topic configurations.</p>
+      </details>
+      <details class="mt-6 rounded-xl border border-white/10 p-5">
+        <summary class="cursor-pointer font-semibold text-white">Earlier failed capture</summary>
+        <p class="mt-3 max-w-4xl text-sm text-gray-300 leading-relaxed">The archived collection from 07:52 UTC contains 71 passing trials and one failed krabka 0.6.1 recovery trial with 59 duplicate sequences. It is separate from the completed runs shown above. Its <a href="https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/diagnostics/2026-10-03T07-52-36Z-230b0a75" class="text-krab-400 underline underline-offset-4">report, compressed telemetry, and failure logs</a> remain available for inspection.</p>
+      </details>
+    </section>
+
+    <section aria-labelledby="repeat-heading" class="mt-14 max-w-4xl">
+      <h2 id="repeat-heading" class="text-2xl font-bold text-white">Repeat the comparison</h2>
+      <p class="mt-3 mb-5 text-sm text-gray-300 leading-relaxed">From this website repository, use Node 22.12 or later, JDK 17 or later, and native Linux/amd64 with local Docker. Check the benchmark instructions for resource requirements and deadlines.</p>
+      <CodeBlock code={repeat} lang="bash" />
+      <p class="mt-5 text-sm text-gray-300">See the <a href={methodologyURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">benchmark instructions</a>, the <a href={curveSourceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">72 curve trials</a>, or the <a href={sourceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">108 throughput trials</a>.</p>
+    </section>
+  </div>
+</BaseLayout>

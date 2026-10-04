@@ -12,12 +12,9 @@ export default defineConfig({
   // glued words together (`<strong>WebAssembly</strong>` + newline + `and`
   // rendered as "WebAssemblyand").
   compressHTML: false,
-  // Pages that left this site. Benchmarks were retired in favor of the
-  // verification story; observability and gres moved to their own repositories
-  // as part of the broader Krabka ecosystem.
+  // Legacy routes; observability and gres moved to their own repositories.
   redirects: {
-    '/benchmarks': '/verification',
-    '/docs/benchmarks': '/verification',
+    '/docs/benchmarks': '/benchmarks',
     // The quickstart files are served from /quickstart/ (docker-compose.yml and
     // friends); the guide is under /docs, which is where trimming a file URL lands.
     '/quickstart': '/docs/quickstart',
