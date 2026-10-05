@@ -1,11 +1,8 @@
-// Every h2 to h4 in the page's main content gets an id, when it has none, and a
-// "#" link to itself, so any section can be linked to. Safe to call twice.
-const slugify = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .trim()
-    .replace(/\s+/g, '-');
+import { slugify } from './slugify.mjs';
+
+// Every h2 to h4 in the page's main content gets a "#" link to itself, so any
+// section can be linked to. The build gives each one an id (heading-ids.mjs);
+// a heading a script adds later gets one here. Safe to call twice.
 
 export function enhanceHeadings(): HTMLElement[] {
   const main = document.getElementById('main');

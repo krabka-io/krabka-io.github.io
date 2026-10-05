@@ -157,7 +157,10 @@ const isCategoryActive = (sec: typeof docSections[0]) => {
   });
 };
 
-const activeSection = docSections.find((sec) => isCategoryActive(sec));
+// An exact item match wins over a parent prefix, so /docs/broker/qualification
+// belongs to Project Internals, not to Core Broker through /docs/broker.
+const activeSection =
+  docSections.find((sec) => sec.items.some((item) => isItemActive(item.slug))) ?? docSections.find((sec) => isCategoryActive(sec));
 const activeCategory = activeSection?.category || 'Docs';
 // A synced guide's title carries its component, "Roadmap (Broker)"; the crumb
 // already names the category, so it matches the sidebar and the page heading.
@@ -249,7 +252,7 @@ const isDocsHome = currentNorm === normalize(getPath('/docs'));
 
           <nav class="space-y-2 text-sm" aria-label="Documentation navigation">
             {docSections.map((sec) => {
-              const active = isCategoryActive(sec);
+              const active = sec === activeSection;
               const isOpen = active || sec.category === 'Start Here';
 
               return (

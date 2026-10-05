@@ -4,6 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
 import krabkaTheme from './src/utils/krabka-shiki-theme.mjs';
+import headingIds from './src/utils/heading-ids.mjs';
 
 export default defineConfig({
   site: 'https://krabka.io',
@@ -29,7 +30,7 @@ export default defineConfig({
     '/api/streams-go/latest': 'https://krabka.io/krabka-streams-go/',
     '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
-  integrations: [sitemap()],
+  integrations: [sitemap(), headingIds()],
   markdown: {
     // Astro's default Sätteri pipeline, with one plugin and the site's code
     // theme: synced guides carry wide tables, and each gets its own scroll

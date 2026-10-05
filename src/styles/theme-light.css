@@ -100,6 +100,7 @@
   pre.astro-code,
   :has(> .code-block),
   .dark-island,
+  [data-benchmark-viewer],
   #krabka-lab,
   #krabka-kernels,
   #krabka-playground,
@@ -217,6 +218,11 @@
 }
 
 /* A dark card on a light page is opaque: a translucent one turns grey. */
-:root[data-theme='light'] .dark-island {
+:root[data-theme='light'] :is(.dark-island, [data-benchmark-viewer]) {
   background-color: var(--color-ocean-900);
+}
+
+:root[data-theme='light'] [data-benchmark-viewer] {
+  padding: 1.25rem;
+  border-radius: 1rem;
 }

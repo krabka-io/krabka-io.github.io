@@ -214,6 +214,7 @@ const versionKeys: Record<string, string> = {
   'krabka-client-rs': 'client-rs',
   'krabka-streams-java': 'streams-java',
   'krabka-streams-go': 'streams-go',
+  'krabka-streams-rs': 'streams-rs',
   'krabka-cli': 'cli',
   'krabka-connect': 'connect',
   'krabka-operator': 'operator',
