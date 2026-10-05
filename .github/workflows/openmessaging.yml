@@ -59,6 +59,9 @@ jobs:
           java-version: 17
       - name: Check measurement and failure handling
         run: npm run test:benchmark
+      - name: Authenticate private Google Cloud image pulls
+        if: startsWith(inputs.krabka_image, 'us-central1-docker.pkg.dev/')
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
       - name: Run OpenMessaging against all three brokers
         env:
           BENCHMARK_MODE: ${{ inputs.mode }}
