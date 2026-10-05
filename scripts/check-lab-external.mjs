@@ -78,6 +78,10 @@ const BROKER_BUILD = '/playground/broker/krabka-broker.wasm';
 // KRABKA_CONFIG it becomes.
 const RECONFIGURED = { replica_lag_time_max_ms: 10000, min_insync_replicas: 1, rack: 'a', num_partitions: 3 };
 const RECONFIGURED_FILE_CONFIG = '{"rack":"a","runtime":{"num_partitions":3,"default_min_insync_replicas":1},"replica_lag_time_max":"10000ms"}';
+// What the process gets: the scenario's one broker also sizes its internal topics to one replica.
+const ONE_BROKER_INTERNAL = '"offsets_topic_replication_factor":1,"transaction_state_replication_factor":1,"share_state_replication_factor":1,"barrier_state_replication_factor":1,"transaction_state_min_isr":1';
+const PROCESS_CONFIG = `{"runtime":{${ONE_BROKER_INTERNAL}}}`;
+const RECONFIGURED_PROCESS_CONFIG = `{"rack":"a","runtime":{"num_partitions":3,"default_min_insync_replicas":1,${ONE_BROKER_INTERNAL}},"replica_lag_time_max":"10000ms"}`;
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/opt/pw-browsers';
 
 // Sends the guest in small pieces, with its length, so that the page has a
@@ -361,13 +365,13 @@ async function realBroker(context, base, errors) {
   const clusterId = expectedClusterId(scenarioId);
   check(
     'the process runs with the contract environment',
-    canonical(running.state.env) === canonical({ KRABKA_NODE_ID: '4', KRABKA_HOST: '10.0.0.4', KRABKA_VOTERS: '4@10.0.0.4:9093', KRABKA_CLUSTER_ID: clusterId, KRABKA_CONFIG: '{}' }),
+    canonical(running.state.env) === canonical({ KRABKA_NODE_ID: '4', KRABKA_HOST: '10.0.0.4', KRABKA_VOTERS: '4@10.0.0.4:9093', KRABKA_CLUSTER_ID: clusterId, KRABKA_CONFIG: PROCESS_CONFIG }),
     JSON.stringify(running.state.env),
   );
   const env = await page.evaluate(() => window.T.command(4, 'ENV'));
   const expectedEnv = [
     `KRABKA_CLUSTER_ID=${clusterId}`,
-    'KRABKA_CONFIG={}',
+    `KRABKA_CONFIG=${PROCESS_CONFIG}`,
     'KRABKA_DIAL_FD=6',
     'KRABKA_HOST=10.0.0.4',
     'KRABKA_LISTEN_FDS=4,5',
@@ -379,7 +383,7 @@ async function realBroker(context, base, errors) {
   ].join('\n');
   check('the process sees the volume, two listeners and the dialer, and the whole environment', env === expectedEnv, JSON.stringify(env));
   const line = await readyLine(page, 4, 1);
-  check('the guest accepted the contract and recorded its first boot', line === `ready node=4 host=10.0.0.4 cluster=${clusterId} voters=4@10.0.0.4:9093 listeners=9092,9093 config={} boots=1`, line);
+  check('the guest accepted the contract and recorded its first boot', line === `ready node=4 host=10.0.0.4 cluster=${clusterId} voters=4@10.0.0.4:9093 listeners=9092,9093 config=${PROCESS_CONFIG} boots=1`, line);
   // A combined-mode broker reaches its own controller over the network: the
   // guest dials 10.0.0.4:9093 at boot, through the world and back into itself.
   const booted = await selfDial(page, 4);
@@ -543,7 +547,7 @@ async function realBroker(context, base, errors) {
   const readyAgain = JSON.parse(reconfigured).state.stdout.find((l) => l.startsWith('ready '));
   check(
     'a configuration change restarts the process from nothing with its FileConfig in KRABKA_CONFIG',
-    readyAgain.endsWith(`config=${RECONFIGURED_FILE_CONFIG} boots=1`),
+    readyAgain.endsWith(`config=${RECONFIGURED_PROCESS_CONFIG} boots=1`),
     readyAgain,
   );
 
@@ -677,6 +681,14 @@ async function checkContract() {
     canonical(env) === canonical({ KRABKA_NODE_ID: '258', KRABKA_HOST: '10.0.1.2', KRABKA_VOTERS: '2@10.0.0.2:9093,3@10.0.0.3:9093', KRABKA_CLUSTER_ID: 'AAAAAAAAAAAAAAAAAAAAAA', KRABKA_CONFIG: '{"rack":"b"}' }),
     JSON.stringify(env),
   );
+  const one = m.fitInternalTopics({ rack: 'a', runtime: { offsets_topic_replication_factor: 1, num_partitions: 4 } }, 1);
+  check(
+    'one broker gets single-replica internal topics, keeping what the scenario set',
+    canonical(one) === canonical({ rack: 'a', runtime: { num_partitions: 4, offsets_topic_replication_factor: 1, transaction_state_replication_factor: 1, share_state_replication_factor: 1, barrier_state_replication_factor: 1, transaction_state_min_isr: 1 } }),
+    JSON.stringify(one),
+  );
+  const three = { rack: 'b' };
+  check('three brokers keep the broker defaults for internal topics', m.fitInternalTopics(three, 3) === three);
   const ids = ['b6cd1ed5-86cc-410a-ace6-5699cf81895e', 'abc', ''];
   const clusters = await Promise.all(ids.map((id) => m.clusterIdFor(id)));
   const badCluster = ids.filter((id, i) => clusters[i] !== expectedClusterId(id) || !/^[A-Za-z0-9_][A-Za-z0-9_-]{21}$/.test(clusters[i]));

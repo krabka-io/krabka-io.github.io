@@ -25,7 +25,6 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { pathToFileURL } from 'url';
-import { recordBatchFields } from '../public/playground/lab/storage-panel.js';
 import { DIST_DIR, NETWORK_PROBE, STEP_TIMEOUT, args, checker, launchOrExit, newLabContext, nodeState, openLab, openScenario, serve, waitFor, watchErrors } from './lab-check-lib.mjs';
 
 const WEBRTC = !args.has('--no-webrtc');
@@ -117,16 +116,7 @@ async function main() {
     process.exit(1);
   }
   await checkInflate();
-  const batches = new Uint8Array(122);
-  const batchView = new DataView(batches.buffer);
-  for (const start of [0, 61]) {
-    batchView.setInt32(start + 8, 49);
-    batches[start + 16] = 2;
-  }
-  batchView.setBigInt64(61, 42n);
-  batchView.setInt32(61 + 57, 3);
-  const fields = recordBatchFields(batches, batches.length);
-  check('RecordBatch byte labels follow both batch boundaries', fields.some((f) => f.start === 61 && f.label === 'Base offset: 42') && fields.some((f) => f.start === 118 && f.label === 'Record count: 3'));
+  // The analyzers' decoders have their own check: npm run check-lab-analyzer.
 
   const browser = await launchOrExit();
   const { server, port } = await serve(DIST_DIR);
@@ -195,6 +185,20 @@ async function main() {
       check('the close button restores network bytes', !(await dock.evaluate((el) => el.classList.contains('lab-expanded'))));
     }
     await page.setViewportSize({ width: 1400, height: 1000 });
+    // The analyzer: every frame is captured; a selected frame opens full-window with its bytes.
+    await page.locator('#krabka-lab .lab-net-views .lab-tab', { hasText: 'Frames' }).click();
+    await waitFor(page, `document.querySelectorAll('#krabka-lab .lab-net-spacer .lab-net-row').length > 0`, 'captured frames in the Network tab');
+    const captured = await page.evaluate(() => window.krabkaLab.capture.frames.length);
+    check('the capture records the frames on the network', captured > 0, `${captured} frames`);
+    await page.locator('#krabka-lab .lab-net-spacer .lab-net-row', { hasText: 'data' }).last().click();
+    await waitFor(page, `document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hx .lab-bv-b').length > 0`, 'the selected frame in the hex view');
+    const hovered = await page.evaluate(() => {
+      const byte = document.querySelector('#krabka-lab .lab-net-detail .lab-bv-hx .lab-bv-b');
+      byte.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hov').length))));
+    });
+    check('a selected frame expands the details and its bytes light up under the pointer', hovered > 0 && await dock.evaluate((el) => el.classList.contains('lab-expanded')), `${hovered} lit bytes`);
+    await dock.locator('.lab-expand').click();
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
     if (args.has('--expand-only')) {
       console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);

@@ -285,6 +285,23 @@ export function votersOf(scenario) {
   return ids.sort((a, b) => a - b);
 }
 
+// The broker's internal topics default to three replicas (and two in-sync
+// for transactions), like Kafka's. A cluster with fewer brokers could never
+// create them: a consumer group would wait forever for `__consumer_offsets`.
+// Below three brokers they take what the cluster has, as a Kafka quickstart's
+// `server.properties` does.
+const INTERNAL_TOPIC_FACTORS = ["offsets_topic_replication_factor", "transaction_state_replication_factor", "share_state_replication_factor", "barrier_state_replication_factor"];
+
+/** `fileConfig` with its internal topics' replication capped to `brokers`. */
+export function fitInternalTopics(fileConfig, brokers) {
+  if (brokers >= 3) return fileConfig;
+  const n = Math.max(1, brokers);
+  const runtime = { ...fileConfig.runtime };
+  for (const key of INTERNAL_TOPIC_FACTORS) runtime[key] ??= n;
+  runtime.transaction_state_min_isr ??= Math.min(2, n);
+  return { ...fileConfig, runtime };
+}
+
 /**
  * The environment of the process behind node `nodeId`, on top of what the
  * runtime sets (`KRABKA_LISTEN_FDS`, `KRABKA_LISTEN_PORTS`, `KRABKA_DIAL_FD`).
@@ -721,7 +738,7 @@ export class ExternalHost {
       this.unavailable(node, reason);
       return;
     }
-    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.id), fileConfig: config.fileConfig, logLevel: this.hooks.logLevel?.(node.id) });
+    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.id), fileConfig: fitInternalTopics(config.fileConfig, (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length), logLevel: this.hooks.logLevel?.(node.id) });
     await this.volumeBusy.get(node.volume);
     if (gen !== node.gen) return;
     this.clock ??= new wasi.WasiClock({ mode: "host", timeMs: this.clockMs });
@@ -1304,8 +1321,9 @@ export class ExternalHost {
     return (await runtime()).listVolumeFiles(volume);
   }
 
-  async volumeFileRange(volume, path, offset, length) {
-    return (await runtime()).readVolumeFileRange(volume, path, offset, length);
+  /** A whole stored file, as last committed, or null when it is gone. */
+  async volumeFile(volume, path) {
+    return (await runtime()).readVolumeFile(volume, path);
   }
 
   /** Forgets one volume; a process that runs on it keeps it. */

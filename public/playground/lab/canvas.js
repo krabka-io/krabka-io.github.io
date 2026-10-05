@@ -27,9 +27,9 @@ const DRAG_THRESHOLD = 4;
 const LONG_PRESS_MS = 500;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
-// Fit never zooms out below this: card text stays about 8px or more, and a
+// Fit never zooms out below this: card text stays near 10px or more, and a
 // graph wider than the box is panned instead (the Fit button still shows all).
-const MIN_FIT_ZOOM = 0.7;
+const MIN_FIT_ZOOM = 0.8;
 // Edges drawn faint: connections and a streams app's internal topics, not
 // the data flow of the scenario's own topics.
 const FAINT_EDGES = new Set(["bootstrap", "ping", "registry", "changelog", "repartition"]);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { viewerCases, viewerData, provenanceURL, curveProvenanceURL } from '../src/utils/benchmarks.mjs';
-import { GRAPH_GROUPS, averageData, averagePoints, timelineSeries, timelineExtent, faultEvents, overviewSeries, plot, nearestPoint, tickLabel } from '../src/utils/benchmark-chart.mjs';
+import { GRAPH_GROUPS, averageData, averagePoints, timelineSeries, timelineExtent, faultEvents, overviewSeries, plot, nearestPoint, tickLabel, niceTicks } from '../src/utils/benchmark-chart.mjs';
 
 test('independent clocks align at measurement start; null intervals remain gaps', () => {
   const data = { case: { suite: 'curves', warmup_seconds: 5, seconds: 30 }, trials: [{
@@ -131,4 +131,10 @@ test('published matrices expose every capture, exact values, source links and su
   }
   assert.throws(() => viewerData('diagnostics-failed', 1));
   assert.throws(() => viewerData('curves-recovery', 4));
+});
+
+test('time ticks land on round values inside the extent', () => {
+  assert.deepEqual(niceTicks(-5.7, 62), [0, 20, 40, 60]);
+  assert.deepEqual(niceTicks(0, 1), [0, 0.25, 0.5, 0.75, 1]);
+  assert.deepEqual(niceTicks(10, 10.3), [10, 10.1, 10.2, 10.3]);
 });

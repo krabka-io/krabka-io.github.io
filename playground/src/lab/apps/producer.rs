@@ -399,7 +399,7 @@ impl ProducerNode {
         if config.topic.is_empty() {
             return Err(bad("`topic` is empty".to_string()));
         }
-        let rate = Rate::from_json(&config.rate_per_sec).map_err(&bad)?;
+        let rate = Rate::from_json(&config.rate_per_sec).map_err(bad)?;
         let acks = Acks::from_wire(config.acks)
             .ok_or_else(|| bad(format!("`acks` is {}; use -1, 0 or 1", config.acks)))?;
         let compression = Compression::parse(&config.compression).ok_or_else(|| {
@@ -413,7 +413,7 @@ impl ProducerNode {
             .map(|k| Template::parse(&k.pattern))
             .transpose()
             .map_err(|e| bad(format!("`key.pattern`: {e}")))?;
-        let value = parse_value(config.value).map_err(&bad)?;
+        let value = parse_value(config.value).map_err(bad)?;
         let headers = config
             .headers
             .into_iter()
@@ -427,7 +427,7 @@ impl ProducerNode {
             .serialization
             .map(|s| parse_serialization(s, &config.topic))
             .transpose()
-            .map_err(&bad)?;
+            .map_err(bad)?;
         let producer_config = ProducerConfig {
             acks,
             linger_ms: config.linger_ms,

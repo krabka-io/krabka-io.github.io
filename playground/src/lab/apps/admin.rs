@@ -7,8 +7,10 @@
 //! the metadata names, with `timeout_ms` 30 000, as `kafka-topics --create`
 //! does. `NOT_CONTROLLER`, `COORDINATOR_NOT_AVAILABLE`, the other retriable
 //! codes and a lost connection make it try again 500 ms later. A scenario
-//! topic whose replica count fits its bootstrap brokers also retries an early
-//! `INVALID_REPLICATION_FACTOR` while those brokers register.
+//! topic whose replica count fits its bootstrap brokers also retries
+//! `INVALID_REPLICATION_FACTOR` while those brokers register: every 500 ms
+//! for the 30 s of `timeout_ms`, then every 5 s, for a broker that starts
+//! cut off or down registers only once the reader heals or restarts it.
 //!
 //! Commands: `{"cmd":"create_topic","name":..,"partitions":..,"replication_factor":..}`
 //! and `{"cmd":"delete_topic","name":..}` queue the work and answer at once;
@@ -40,6 +42,9 @@ use crate::lab::{
 const ADMIN_TIMEOUT_MS: i32 = 30_000;
 /// The wait before a failed request goes out again.
 const RETRY_MS: Millis = 500;
+/// The wait between retries of a scenario topic whose brokers have not all
+/// registered, once `ADMIN_TIMEOUT_MS` of retries has passed.
+const SLOW_RETRY_MS: Millis = 5_000;
 
 /// Where a topic of the admin node is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,6 +84,18 @@ struct Managed {
     attempts: u32,
     /// The topic came from the config, so it counts for `topics_created`.
     from_config: bool,
+}
+
+impl Managed {
+    /// The wait before the topic's next request after a retriable `code`.
+    fn retry_delay(&self, code: i16) -> Millis {
+        let waited = u64::from(self.attempts) * RETRY_MS > ADMIN_TIMEOUT_MS as u64;
+        if code == codes::INVALID_REPLICATION_FACTOR && waited {
+            SLOW_RETRY_MS
+        } else {
+            RETRY_MS
+        }
+    }
 }
 
 /// The admin node. See the module documentation.
@@ -322,11 +339,10 @@ impl AdminNode {
                     && topic.from_config
                     && topic.spec.replication_factor > 0
                     && usize::try_from(topic.spec.replication_factor)
-                        .is_ok_and(|replicas| replicas <= self.bootstrap.len())
-                    && u64::from(topic.attempts) * RETRY_MS <= ADMIN_TIMEOUT_MS as u64) =>
+                        .is_ok_and(|replicas| replicas <= self.bootstrap.len())) =>
             {
                 self.client.note_error(code, &Target::Controller);
-                topic.retry_at = now + RETRY_MS;
+                topic.retry_at = now + topic.retry_delay(code);
                 topic.error = Some(code);
                 ctx.event(
                     "admin_retry",
@@ -764,6 +780,29 @@ mod tests {
             [codes::INVALID_REPLICATION_FACTOR].into();
         remote.run_for(2_000);
         assert!(remote.statuses() == vec![status("orders", "created", Value::Null, 2)]);
+
+        // A broker that starts cut off registers only when the reader heals
+        // it, which can be long after the 30 s budget: the admin keeps
+        // asking, every 5 s once the budget is spent.
+        let mut remote = Remote::new(json!({
+            "bootstrap": [1, 2, 3],
+            "topics": [{ "name": "orders", "partitions": 3, "replication_factor": 3 }],
+        }));
+        remote.state.borrow_mut().knobs.create_topics_errors =
+            vec![codes::INVALID_REPLICATION_FACTOR; 70].into();
+        remote.run_for(60_000);
+        assert!(
+            remote.statuses()
+                == vec![status(
+                    "orders",
+                    "pending",
+                    json!(codes::INVALID_REPLICATION_FACTOR),
+                    66
+                )]
+        );
+        remote.run_for(30_000);
+        assert!(remote.statuses() == vec![status("orders", "created", Value::Null, 71)]);
+        assert!(remote.events("admin_error").is_empty());
     }
 
     #[test]

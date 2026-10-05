@@ -24,6 +24,18 @@ export const FAULT = {
   loss: (a, b, permille) => ({ kind: "loss", a, b, permille }),
 };
 
+// The links of node `id` cut one by one (a partition, or a scenario's cut
+// link), apart from the node's own isolation.
+export function cutLinks(snapshot, id) {
+  return (snapshot?.links || []).filter((l) => l.cut && (l.a === id || l.b === id));
+}
+
+// Whether Reconnect has anything to restore: Reconnect heals the node's cut
+// links as well as its isolation, as "restore every link" says.
+export function cutOff(snapshot, id) {
+  return Boolean(snapshot?.nodes?.find((n) => n.id === id)?.isolated) || cutLinks(snapshot, id).length > 0;
+}
+
 // A one-line description for toasts and the timeline.
 export function describeFault(f, nodeName) {
   const n = (id) => (nodeName ? nodeName(id) : `#${id}`);
@@ -55,7 +67,7 @@ export class FaultBar {
     this.linkCap = el("span", "lab-faults-cap", "Link");
     this.nodeGroup.appendChild(this.nodeCap);
     this.linkGroup.appendChild(this.linkCap);
-    this.hint = el("span", "lab-faults-hint", "Pick a second node: link controls");
+    this.hint = el("span", "lab-faults-hint", "Shift+click a second card for link faults");
     this.root.append(el("strong", "lab-faults-title", "Break things"), this.nodeGroup, this.hint, this.linkGroup);
     container.appendChild(this.root);
     this.buildNodeGroup();
@@ -123,7 +135,7 @@ export class FaultBar {
         this.killBtn.disabled = !s.alive;
         this.restartBtn.disabled = s.alive;
         this.isolateBtn.disabled = s.isolated;
-        this.reconnectBtn.disabled = !s.isolated;
+        this.reconnectBtn.disabled = !cutOff(snapshot, a);
       }
     }
     for (const c of [this.partitionBtn, this.healBtn, this.latencyInput, this.latencyBtn, this.lossInput, this.lossBtn, this.resetBtn, this.bytesBtn]) c.disabled = !two;

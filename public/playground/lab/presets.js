@@ -252,7 +252,7 @@ export const PRESETS = [
   {
     id: "rack-split",
     name: "Two racks, one broker cut off",
-    description: "Three real brokers span two racks. Broker 3 starts isolated; heal its links and inspect the quorum and replica state.",
+    description: "Three real brokers span two racks, and broker 3 starts cut off, so the three-replica topic and the consumer group wait for it. Select broker 3 and press Reconnect, then inspect the quorum and replica state.",
     scenario: {
       version: 1, seed: 35, name: "Two racks, one broker cut off",
       links: { default_latency_ms: 5 },

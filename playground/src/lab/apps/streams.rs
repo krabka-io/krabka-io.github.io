@@ -385,8 +385,8 @@ impl StreamsNode {
         if config.application_id.is_empty() {
             return Err(bad("`application_id` is empty".to_string()));
         }
-        let topology = TopologySpec::parse(&config.topology).map_err(&bad)?;
-        let compiled = CompiledTopology::new(&config.application_id, &topology).map_err(&bad)?;
+        let topology = TopologySpec::parse(&config.topology).map_err(bad)?;
+        let compiled = CompiledTopology::new(&config.application_id, &topology).map_err(bad)?;
         let serializer = config
             .serialize
             .map(|s| {

@@ -14,11 +14,12 @@ const real = [
 const controls = [
   { control: 'Play / Pause, Step, Settle, Speed', effect: 'The page owns the clock. Nothing moves until it advances simulated time; Settle runs until nothing is due. The speed control runs slow events, like a broker session timeout, faster.' },
   { control: 'Drag a card', effect: 'Moves the node. Positions are saved with the scenario and shared with the link.' },
-  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables link controls and Network bytes for that pair. Open a frame for its hex and ASCII bytes; hover a decoded field for its byte key.' },
+  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables the link controls, and Network bytes opens the Network tab on that link.' },
   { control: 'Break things bar', effect: 'Always above the canvas. With one node selected: Kill halts it with its state kept, Restart boots it from that state, Wipe boots it from nothing, Isolate and Reconnect cut and restore every link of the node. With two selected: Partition and Heal cut and restore one link, and Latency and Loss set its delay and drop rate.' },
   { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command as JSON, faults, remove.' },
   { control: 'Inspector', effect: 'With nothing selected it lists every node and its health. For a selected node it shows State (a real broker’s process, log and network activity; a client’s assignment, positions, commits and lag; or a streams app’s tasks, stores and topology), Config (edits the node and restarts it), and Raw JSON. Its command bar sends a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
-  { control: 'Events, Logs, Network bytes, Storage', effect: 'The tabs under the canvas: everything the cluster recorded, the brokers’ own log lines, the frames on a selected link, and what each node keeps in this browser.' },
+  { control: 'Events, Logs, Network, Storage', effect: 'The tabs under the canvas: everything the cluster recorded, the brokers’ own log lines, every frame on the virtual network, and what each node keeps in this browser, down to the broker’s files.' },
+  { control: 'Field tree and hex', effect: 'A selected frame or file decodes into its fields beside its bytes. Pointing at a byte lights its whole field in hex and ASCII and names it; clicking selects it in the tree; selecting a field lights its bytes. Each kind of field has its colour, and neighbouring fields alternate shade. With the hex focused, ← and → step through the fields and ↑ goes to the enclosing one. Below the hex, the bytes at the pointer read as every integer width, a varint, a float and text.' },
   { control: 'Tour, ?', effect: 'The tour walks through the controls in a minute and can kill and restart a broker for you. The ? button lists the shortcuts: Space plays and pauses, K and R kill and restart the selected node, F fits the canvas.' },
 ];
 ---
@@ -104,8 +105,7 @@ const controls = [
       <h2 class="text-xl font-bold text-white pt-2">Saving, sharing, hosting</h2>
       <p>
         The scenario autosaves to this browser; the <strong class="text-white">Saved in this browser</strong> list on the Scenarios tab reopens it with its durable
-        state. In the <strong class="text-white">Storage</strong> tab under the canvas, open a real broker volume, then a file, to inspect its
-        committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
+        state. The <strong class="text-white">Storage</strong> tab under the canvas shows what is kept per node and can forget it on request. <strong class="text-white">Browse</strong> opens a real broker's disk, read from its committed IndexedDB bytes. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
       </p>
       <p>
         <strong class="text-white">Invite a tab</strong> in the Session section of the Connect tab makes a link that another tab or another machine
@@ -142,6 +142,42 @@ const controls = [
         <code class="font-mono text-krab-300">KRABKA_LOG</code> environment variable, read when its process starts, so applying a new level restarts the broker on
         the disk it has, after asking. It is a setting of this browser, not part of the node's configuration, which is why it
         does not wipe the disk.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Network</h2>
+      <p>
+        The <strong class="text-white">Network</strong> tab records every frame the virtual network carries, from the moment the scenario
+        starts: opens, closes and up to 64 KiB of each payload. It pairs each Kafka request with its response by connection and
+        correlation id. <strong class="text-white">Exchanges</strong> lists the pairs, <strong class="text-white">Frames</strong> lists everything,
+        and <strong class="text-white">Statistics</strong> gives per-API counts, failures, bytes and round-trip percentiles with a histogram,
+        and per-link bytes and throughput. Times are lab milliseconds. <em>RTT</em> runs from the request leaving the client to the
+        response reaching it; <em>server</em> runs from the request reaching the broker to the response leaving it; the rest is the
+        link, both ways.
+      </p>
+      <p>
+        A selected exchange decodes field by field from the Kafka message schemas krabka-protocol generates its codecs from:
+        the headers, every request and response version, record batches with their CRC-32C recomputed and their records
+        (gzip, snappy, lz4 and zstd opened in the page), and
+        krabka's own controller RPCs by name. The filter takes words and terms such as <code class="font-mono text-krab-300">api:fetch</code>,
+        <code class="font-mono text-krab-300">node:broker-1</code>, <code class="font-mono text-krab-300">port:9093</code>,
+        <code class="font-mono text-krab-300">err</code>, <code class="font-mono text-krab-300">slow:50</code> and
+        <code class="font-mono text-krab-300">pending</code>. <strong class="text-white">pcapng</strong> exports what the filter shows as raw IPv4 and TCP
+        between the nodes' 10.0.x.y addresses, timestamped in lab milliseconds. Wireshark opens it and its Kafka dissector
+        decodes port 9092 (Decode As maps 9093 too), up to the API versions that Wireshark release knows;
+        <strong class="text-white">JSON</strong> keeps every frame's bytes and <strong class="text-white">CSV</strong> one row per exchange.
+        The status line says how many frames the capture lost: dropped before the page read them, evicted to stay within its
+        64 MiB, or skipped while capture was paused.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">A broker's disk</h2>
+      <p>
+        <strong class="text-white">Browse</strong> in the Storage tab, or <strong class="text-white">Browse disk</strong> in a broker's inspector,
+        opens its log directory by partition. A partition lists its segments and checks them together: every batch CRC, segment
+        names against their first offsets, offsets across segment boundaries, and the leader-epoch checkpoint against the
+        batches. A segment shows its batches as a byte map and a table, then the decoded batches and records; the KRaft
+        metadata log decodes into its metadata records, and <code class="font-mono text-krab-300">__consumer_offsets</code> into offset commits.
+        An offset or time index is checked entry by entry against the batch it points at. Producer-state snapshots, checkpoints
+        and the quorum state decode too.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Connect kafkactl from your computer</h2>

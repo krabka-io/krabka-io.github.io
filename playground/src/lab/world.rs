@@ -140,10 +140,21 @@ pub struct InFlight {
     pub label: String,
 }
 
-/// A bounded view of one frame sent across a link.
+/// How many payload bytes of a frame the capture keeps; `size` is the whole length.
+pub const CAPTURE_BYTES: usize = 65_536;
+/// How many frames the capture holds between two drains. The page drains it
+/// on every animation frame, so it fills only while the page is not reading;
+/// then the oldest go, and `WireDrain::dropped` counts them.
+pub const CAPTURE_FRAMES: usize = 2_048;
+
+/// One frame sent across a link, as the capture records it.
 #[derive(Clone, Serialize)]
 pub struct WireFrame {
+    /// When it was sent.
     pub at: Millis,
+    /// When the link delivers it: `at` plus the link latency, behind earlier
+    /// frames of the same connection and direction.
+    pub deliver_at: Millis,
     pub src: Endpoint,
     pub dst: Endpoint,
     pub conn: ConnId,
@@ -151,6 +162,14 @@ pub struct WireFrame {
     pub label: String,
     pub size: usize,
     pub bytes: String,
+}
+
+/// The frames captured since the last drain, and how many the bounded capture
+/// lost in between.
+#[derive(Serialize)]
+pub struct WireDrain {
+    pub frames: Vec<WireFrame>,
+    pub dropped: u64,
 }
 
 /// One node as the page sees it.
@@ -221,7 +240,8 @@ pub struct World {
     external_out: Vec<TimedFrame>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
-    wire: BTreeMap<(NodeId, NodeId), VecDeque<WireFrame>>,
+    wire: VecDeque<WireFrame>,
+    wire_dropped: u64,
     topics: Vec<TopicSpec>,
     rng: Rng,
 }
@@ -249,7 +269,8 @@ impl World {
             external_out: Vec::new(),
             events: EventLog::default(),
             delivered: BTreeMap::new(),
-            wire: BTreeMap::new(),
+            wire: VecDeque::new(),
+            wire_dropped: 0,
             topics: Vec::new(),
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
         }
@@ -426,7 +447,6 @@ impl World {
         self.close_connections_of(id, false);
         self.nodes.remove(&id);
         self.links.retain(|(a, b), _| *a != id && *b != id);
-        self.wire.retain(|(a, b), _| *a != id && *b != id);
         self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_removed", serde_json::json!({}));
     }
@@ -715,7 +735,7 @@ impl World {
             .unwrap_or(0);
         let at = (self.now + latency).max(floor);
         self.last_delivery.insert((key.0, key.1, direction), at);
-        self.record_wire(&frame);
+        self.record_wire(&frame, at);
         if self.is_hosted(b) {
             self.schedule(at, Item::Deliver(frame));
         } else {
@@ -731,25 +751,23 @@ impl World {
         }
     }
 
-    fn record_wire(&mut self, frame: &Frame) {
+    fn record_wire(&mut self, frame: &Frame, deliver_at: Millis) {
         let (kind, size, bytes) = match &frame.payload {
             Payload::Open => ("open", 0, String::new()),
             Payload::Close => ("close", 0, String::new()),
             Payload::Data(data) => (
                 "data",
                 data.len(),
-                super::net::b64::encode(&data[..data.len().min(16_384)]),
+                super::net::b64::encode(&data[..data.len().min(CAPTURE_BYTES)]),
             ),
         };
-        let history = self
-            .wire
-            .entry(pair(frame.src.node, frame.dst.node))
-            .or_default();
-        if history.len() == 40 {
-            history.pop_front();
+        if self.wire.len() == CAPTURE_FRAMES {
+            self.wire.pop_front();
+            self.wire_dropped += 1;
         }
-        history.push_back(WireFrame {
+        self.wire.push_back(WireFrame {
             at: self.now,
+            deliver_at,
             src: frame.src,
             dst: frame.dst,
             conn: frame.conn,
@@ -764,12 +782,13 @@ impl World {
         self.links.get(&pair(a, b)).copied().unwrap_or_default()
     }
 
-    #[must_use]
-    pub fn wire_frames(&self, a: NodeId, b: NodeId) -> Vec<WireFrame> {
-        self.wire
-            .get(&pair(a, b))
-            .map(|frames| frames.iter().cloned().collect())
-            .unwrap_or_default()
+    /// Every frame sent since the last drain, in send order, and how many the
+    /// bounded capture dropped meanwhile.
+    pub fn drain_wire(&mut self) -> WireDrain {
+        WireDrain {
+            frames: self.wire.drain(..).collect(),
+            dropped: std::mem::take(&mut self.wire_dropped),
+        }
     }
 
     fn link_mut(&mut self, a: NodeId, b: NodeId) -> &mut Link {
@@ -1173,7 +1192,7 @@ impl World {
                 }
             }
             let now = self.now;
-            self.record_wire(&frame);
+            self.record_wire(&frame, now);
             self.schedule(now, Item::Deliver(frame));
         }
     }
@@ -1273,22 +1292,31 @@ mod tests {
     }
 
     #[test]
-    fn wire_history_is_pair_scoped_and_bounded() {
+    fn the_capture_drains_every_frame_once_and_counts_what_it_drops() {
         let mut w = TestWorld::from_scenario(&scenario());
-        w.run_for(5_000);
-        let frames = w.world().wire_frames(NodeId(1), NodeId(3));
-        assert!(frames.len() == 40);
+        w.run_for(1_000);
+        let first = w.world_mut().drain_wire();
+        assert!(first.dropped == 0);
+        // The pinger talks to echo-a only, over a 10 ms link.
         assert!(
-            frames
+            first
+                .frames
+                .iter()
+                .all(|f| [NodeId(1), NodeId(3)].contains(&f.src.node))
+        );
+        assert!(first.frames.iter().all(|f| f.deliver_at == f.at + 10));
+        assert!(
+            first
+                .frames
                 .iter()
                 .any(|f| f.kind == "data" && !f.bytes.is_empty())
         );
-        assert!(
-            frames
-                .iter()
-                .all(|f| f.src.node == NodeId(1) || f.src.node == NodeId(3))
-        );
-        assert!(w.world().wire_frames(NodeId(1), NodeId(2)).is_empty());
+        assert!(w.world_mut().drain_wire().frames.is_empty());
+        // Left undrained, the capture keeps the newest frames and counts the rest.
+        w.run_for(400_000);
+        let later = w.world_mut().drain_wire();
+        assert!(later.frames.len() == CAPTURE_FRAMES);
+        assert!(later.dropped > 0);
     }
 
     #[test]
@@ -1397,14 +1425,14 @@ mod tests {
         let mut world = World::from_scenario_hosted(&scenario(), &[NodeId(1)]).unwrap();
         let client = Endpoint::client(NodeId(3));
         let server = Endpoint::kafka(NodeId(1));
-        let before = world.wire_frames(NodeId(1), NodeId(3)).len();
+        drop(world.drain_wire());
         world.push_ingress(vec![
             Frame::data(client, server, ConnId(7), Bytes::from_static(b"stray")),
             Frame::close(client, server, ConnId(7)),
         ]);
         world.step_until(1);
         assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 0);
-        assert!(world.wire_frames(NodeId(1), NodeId(3)).len() == before);
+        assert!(world.drain_wire().frames.is_empty());
         world.push_ingress(vec![
             Frame::open(client, server, ConnId(8)),
             Frame::data(client, server, ConnId(8), Bytes::from_static(b"hello")),
@@ -1413,7 +1441,8 @@ mod tests {
         assert!(world.node_snapshot(NodeId(1)).unwrap()["frames"] == 2);
         assert!(
             world
-                .wire_frames(NodeId(1), NodeId(3))
+                .drain_wire()
+                .frames
                 .iter()
                 .filter(|f| f.src == client && f.conn == ConnId(8))
                 .count()

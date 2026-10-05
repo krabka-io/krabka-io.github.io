@@ -13,6 +13,7 @@
 import { el, button, select, plural } from "./dom.js";
 import { kindOf, renderState, commandObject, statusLine } from "./kinds.js";
 import { buildForm } from "./forms.js";
+import { cutOff } from "./faults.js";
 
 const STATE_INTERVAL_MS = 250;
 const RAW_INTERVAL_MS = 500;
@@ -269,7 +270,8 @@ export class Inspector {
     const offline = this.hostOffline(n);
     // The id is in the key: two nodes can share a name and kind, and the
     // buttons below close over the id.
-    const key = [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, hostedBy, offline, session?.role, session?.peersKey].join("|");
+    const cut = cutOff(this.data?.snapshot, n.id);
+    const key = [n.id, n.name, n.kind, n.alive, n.isolated, cut, n.hosted, hostedBy, offline, session?.role, session?.peersKey].join("|");
     if (key === this.headKey) return;
     this.headKey = key;
     this.glyph.textContent = k.glyph;
@@ -323,7 +325,7 @@ export class Inspector {
       const fault = (label, command, title, cls = "") => this.actions.appendChild(button(label, `lab-btn-sm ${cls}`.trim(), () => this.hooks.onCommand(n.id, command), { title, data: { fault: command } }));
       if (n.alive) fault("Kill", "kill", "Halt the node; its disk survives", "lab-danger");
       else fault("Restart", "restart", "Boot again from the kept state", "lab-primary");
-      if (n.isolated) fault("Reconnect", "reconnect", "Restore every link of the node");
+      if (cut) fault("Reconnect", "reconnect", "Restore every link of the node");
       else fault("Isolate", "isolate", "Cut every link of the node");
     }
     if (n.kind === "krabka-broker" && n.hosted) {

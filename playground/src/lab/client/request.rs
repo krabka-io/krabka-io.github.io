@@ -69,7 +69,6 @@ impl<R: Encode> RequestBody for R {
 pub type Decoder = Box<dyn Fn(&[u8], i16) -> Result<Box<dyn Any>, ProtocolError>>;
 
 /// The decoder of the response to `R`.
-#[must_use]
 pub fn decoder_for<R>() -> Decoder
 where
     R: ProtocolRequest,

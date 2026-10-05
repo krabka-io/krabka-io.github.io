@@ -47,19 +47,21 @@ if command -v wasm-bindgen >/dev/null 2>&1 &&
   [[ "$(wasm-bindgen --version | awk '{print $2}')" == "${wb_version}" ]]; then
   wasm_bindgen="$(command -v wasm-bindgen)"
 else
-  cached="${tools_dir}/${wb_version}/wasm-bindgen"
+  triple="x86_64-unknown-linux-musl"
+  exe=""
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) triple="aarch64-apple-darwin" ;;
+    Darwin-x86_64) triple="x86_64-apple-darwin" ;;
+    Linux-aarch64) triple="aarch64-unknown-linux-gnu" ;;
+    MINGW*-x86_64 | MSYS*-x86_64 | CYGWIN*-x86_64) triple="x86_64-pc-windows-msvc" exe=".exe" ;;
+  esac
+  cached="${tools_dir}/${wb_version}/wasm-bindgen${exe}"
   if [[ ! -x "${cached}" ]]; then
-    triple="x86_64-unknown-linux-musl"
-    case "$(uname -s)-$(uname -m)" in
-      Darwin-arm64) triple="aarch64-apple-darwin" ;;
-      Darwin-x86_64) triple="x86_64-apple-darwin" ;;
-      Linux-aarch64) triple="aarch64-unknown-linux-gnu" ;;
-    esac
     name="wasm-bindgen-${wb_version}-${triple}"
     url="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${wb_version}/${name}.tar.gz"
     echo "    downloading ${url}"
     mkdir -p "${tools_dir}/${wb_version}"
-    curl -sSfL "${url}" | tar xz -C "${tools_dir}/${wb_version}" --strip-components=1 "${name}/wasm-bindgen"
+    curl -sSfL "${url}" | tar xz -C "${tools_dir}/${wb_version}" --strip-components=1 "${name}/wasm-bindgen${exe}"
   fi
   wasm_bindgen="${cached}"
 fi
@@ -74,7 +76,7 @@ echo "==> Building krabka-playground (release)"
 # CARGO_TARGET_DIR is relative to the crate, not to the caller.
 target_dir="${CARGO_TARGET_DIR:-${crate_dir}/target}"
 case "${target_dir}" in
-  /*) ;;
+  /* | [A-Za-z]:[/]*) ;; # absolute, POSIX or Windows (Git Bash may print D:/...)
   *) target_dir="${crate_dir}/${target_dir}" ;;
 esac
 wasm_in="${target_dir}/wasm32-unknown-unknown/release/krabka_playground.wasm"

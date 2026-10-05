@@ -16,12 +16,13 @@ import { LabWorld, SPEEDS } from "./world.js";
 import { Canvas } from "./canvas.js";
 import { Inspector } from "./inspector.js";
 import { Timeline } from "./timeline.js";
-import { FaultBar, FAULT, describeFault } from "./faults.js";
+import { FaultBar, FAULT, describeFault, cutLinks, cutOff } from "./faults.js";
 import { Palette } from "./palette.js";
 import { TabSet } from "./tabs.js";
 import { Tour } from "./tour.js";
 import { StoragePanel } from "./storage-panel.js";
 import { NetworkPanel } from "./network-panel.js";
+import { Capture } from "./capture.js";
 import { LabStorage } from "./storage.js";
 import { Session, joinCodeFromUrl, NAME_MAX } from "./session.js";
 import { KINDS, KIND_ORDER, kindOf, defaultName, probeAvailability, suggestedConfig, commandObject } from "./kinds.js";
@@ -60,6 +61,7 @@ class LabApp {
     this.toasts = new Toasts(root);
 
     this.storage = new LabStorage({ onError: (err, ctx) => this.toasts.error(err, ctx) });
+    this.capture = new Capture({ onChange: () => this.networkPanel?.changed() });
     this.session = new Session({
       onPeers: () => this.onPeers(),
       onScenario: (doc, hosting) => this.onSessionScenario(doc, hosting),
@@ -104,7 +106,12 @@ class LabApp {
       onEvents: (events) => this.timeline.append(events),
       onEgress: (frames) => this.session.sendEgress(frames),
       onDurable: (ops) => this.storage.queueOps(this.world.id, ops),
-      onLoad: (doc, images) => this.storage.resetMirror(images),
+      onWire: (frames, dropped) => this.capture.add(frames, dropped),
+      onLoad: (doc, images) => {
+        this.storage.resetMirror(images);
+        // A capture belongs to one run of one scenario: its clock starts again.
+        this.capture.clear();
+      },
       onChange: (opts) => this.onChange(opts),
       onReset: () => this.onReset(),
       onClock: () => this.renderClock(),
@@ -133,6 +140,11 @@ class LabApp {
   buildLayout() {
     const root = this.root;
     root.classList.add("lab-app");
+    // The lab ends at the bottom of the window: its height is the window's less what sits above it.
+    const fitTop = () => root.style.setProperty("--lab-top", `${Math.round(root.getBoundingClientRect().top + window.scrollY)}px`);
+    fitTop();
+    window.addEventListener("resize", fitTop);
+    document.fonts?.ready.then(fitTop);
     this.toolbar = el("div", "lab-toolbar");
     root.appendChild(this.toolbar);
     this.buildToolbar();
@@ -196,7 +208,7 @@ class LabApp {
       tabs: [
         { id: "events", label: "Events", title: "Everything the cluster recorded, newest at the bottom" },
         { id: "logs", label: "Logs", title: "What the real brokers log, with filters and a setting for how much they log" },
-        { id: "network", label: "Network bytes", title: "Frames and payload bytes on a link between two nodes" },
+        { id: "network", label: "Network", title: "Every frame on the virtual network: Kafka exchanges decoded field by field, timings and statistics" },
         { id: "storage", label: "Storage", title: "What each node keeps in this browser" },
       ],
       hooks: {
@@ -231,11 +243,15 @@ class LabApp {
       toast: (message) => this.toasts.info(message),
       onBadge: (badge) => this.renderLogBadge(badge),
     });
-    this.networkHint = el("p", "lab-dock-empty", "Select a node, then Shift+click a second one (on touch, long-press it and pick \"Pick as second node\") to see the frames and bytes on the link between them.");
-    this.dock.panel("network").appendChild(this.networkHint);
     this.networkPanel = new NetworkPanel(this.dock.panel("network"), {
-      frames: (a, b) => this.world.wireFrames(a, b),
+      capture: this.capture,
       nodeName: (id) => this.nodeName(id),
+      selection: () => this.selection,
+      scenario: () => {
+        const doc = this.world.scenario();
+        return { id: this.world.id, name: doc?.name, seed: doc?.seed };
+      },
+      expand: () => this.expandDock(),
     });
 
     // Right column: the inspector.
@@ -256,7 +272,6 @@ class LabApp {
         this.dock.show("storage");
         await this.storagePanel.refresh();
         await this.storagePanel.browseVolume(volumeName(this.world.id, id));
-        this.storagePanel.volumeExplorer.scrollIntoView({ block: "nearest" });
       },
       formCtx: () => ({ nodes: this.nodeList() }),
       peerName: (id) => this.session.peerName(id),
@@ -269,7 +284,8 @@ class LabApp {
       nodes: () => this.nodeList(),
       volumes: () => (hasRealBroker(this.world.scenario()) ? this.external.volumes(this.world.id) : Promise.resolve([])),
       volumeFiles: (volume) => this.external.volumeFiles(volume),
-      volumeFileRange: (volume, path, offset, length) => this.external.volumeFileRange(volume, path, offset, length),
+      volumeFile: (volume, path) => this.external.volumeFile(volume, path),
+      expand: () => this.expandDock(),
       onForgetVolume: (volume) => this.forgetVolume(volume),
       onForgetNode: (id) => this.forgetNode(id),
       onForgetScenario: () => this.forgetScenario(),
@@ -336,6 +352,11 @@ class LabApp {
     this.dock.root.classList.toggle("lab-dock-collapsed", collapsed);
     // The label says what a press does, so it carries no expanded state too.
     this.dockToggle.textContent = collapsed ? "Show" : "Hide";
+  }
+
+  // Drill-downs open the details full-window: the analyzers need the room.
+  expandDock() {
+    if (this.expandedPanel !== this.dock.root) this.dock.root._expandControl.click();
   }
 
   showNetwork() {
@@ -735,7 +756,7 @@ class LabApp {
         "Several tabs, on one machine or across the internet, can each host a share of the nodes. Frames between tabs travel over WebRTC data channels; there is no server. After a tab connects, select a node and pick its host in the inspector. Each tab keeps its own clock, speed and event counts.",
       ),
     );
-    const nameRow = el("label", "lab-field-inline");
+    const nameRow = el("label", "lab-field-inline lab-name-row");
     const nameInput = el("input", "lab-input lab-input-sm");
     nameInput.value = s.name;
     nameInput.setAttribute("aria-label", "Your peer name");
@@ -881,7 +902,6 @@ class LabApp {
     this.timeline.setNodes(this.nodeList());
     this.palette.update({ scenario, availability: this.availability, role: this.session.role, saveState: this.saveState });
     this.nameEl.textContent = scenario?.name || "Untitled scenario";
-    this.networkHint.hidden = !this.networkPanel.root.hidden;
     this.dock.setBadge("events", this.timeline.events.length ? fmtNum(this.timeline.events.length) : "");
     this.renderClock(snap);
   }
@@ -994,7 +1014,7 @@ class LabApp {
       { separator: true },
       { label: snap?.alive ? "Kill" : "Restart", command: snap?.alive ? "kill" : "restart" },
       { label: "Wipe (restart from nothing)", command: "wipe" },
-      { label: snap?.isolated ? "Reconnect" : "Isolate", command: snap?.isolated ? "reconnect" : "isolate" },
+      cutOff(this.world.snapshot(), id) ? { label: "Reconnect", command: "reconnect" } : { label: "Isolate", command: "isolate" },
       { separator: true },
       { label: "Remove", command: "remove", danger: true, disabled: !editable },
     ];
@@ -1075,6 +1095,8 @@ class LabApp {
   }
 
   fault(f, { quiet = false } = {}) {
+    // Reconnect restores every link of the node: its cut links heal too.
+    if (f.kind === "reconnect") for (const l of cutLinks(this.world.snapshot(), f.node)) this.fault(FAULT.heal(l.a, l.b), { quiet: true });
     if (this.world.fault(f)) {
       this.session.broadcastFault(f);
       if (!quiet) this.toasts.info(describeFault(f, (id) => this.nodeName(id)));

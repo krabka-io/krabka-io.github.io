@@ -633,6 +633,7 @@ export class LabWorld {
     if (!this.lab) return;
     this.pumpEgress();
     this.drainDurable();
+    this.drainWire();
     if (!force && wallNow - this.lastSnapshotWall < SNAPSHOT_INTERVAL_MS) return;
     this.lastSnapshotWall = wallNow;
     const snap = this.guard("snapshot", () => JSON.parse(this.lab.snapshot()));
@@ -656,10 +657,13 @@ export class LabWorld {
     return this.snapshotCache;
   }
 
-  wireFrames(a, b) {
-    if (!this.lab || a == null || b == null) return [];
-    const raw = this.guard("read wire frames", () => this.lab.wireFrames(a, b));
-    return raw ? this.guard("parse wire frames", () => JSON.parse(raw)) || [] : [];
+  // Hand every frame sent since the last drain to the capture.
+  drainWire() {
+    if (!this.lab || !this.hooks.onWire) return;
+    const raw = this.guard("drain wire", () => this.lab.drainWire());
+    if (!raw || raw.length <= 25) return; // {"frames":[],"dropped":0}
+    const drained = this.guard("parse wire", () => JSON.parse(raw));
+    if (drained && (drained.frames.length || drained.dropped)) this.hooks.onWire(drained.frames, drained.dropped);
   }
 
   // ---- faults and commands ------------------------------------------------------------
