@@ -1,0 +1,259 @@
+---
+import CodeBlock from '../../components/CodeBlock.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const commit = '9df7a58ec6f0e78b582e7d69c60b208a9c73644e';
+const sourceUrl = `https://github.com/krabka-io/krabka-rebalancer/blob/${commit}`;
+const buildCode = `git clone https://github.com/krabka-io/krabka-rebalancer.git
+cd krabka-rebalancer
+git checkout ${commit}
+cargo build --release -p krabka-rebalancer --bin krabka-rebalancer
+
+./target/release/krabka-rebalancer \\
+  --bootstrap-servers 127.0.0.1:9092 \\
+  --listen-addr 127.0.0.1:9300 \\
+  --data-dir ./rebalancer-data`;
+const helmCode = `# Run from the checked-out krabka-rebalancer repository.
+# Replace bootstrapServers with brokers reachable from the pod.
+helm upgrade --install demo ./charts/krabka-rebalancer \\
+  --namespace kafka --create-namespace \\
+  --set-string fullnameOverride=demo-rebalancer \\
+  --set-string bootstrapServers=demo-broker-headless.kafka.svc:9092
+
+kubectl -n kafka port-forward service/demo-rebalancer 9300:9300`;
+const inspectCode = `curl -fsS http://127.0.0.1:9300/readyz
+
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/GetState \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d '{}'
+
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/CreateProposal \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d '{"goals":["RackAware","ReplicaDistribution","LeaderDistribution"]}'`;
+const reviewCode = `# Copy the id returned by CreateProposal after reviewing its movements.
+PROPOSAL_ID='replace-with-proposal-id'
+
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/DryRunProposal \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d "{\\"id\\":\\"$PROPOSAL_ID\\"}"
+
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/GetProposal \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d "{\\"id\\":\\"$PROPOSAL_ID\\"}"`;
+const executeCode = `# This request changes broker assignments. Use the reviewed proposal id.
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/ExecuteProposal \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d "{\\"id\\":\\"$PROPOSAL_ID\\",\\"throttleBytesPerSec\\":\\"50000000\\"}"
+
+# Poll GetProposal until Completed, Failed, or Cancelled.
+curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/GetProposal \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d "{\\"id\\":\\"$PROPOSAL_ID\\"}"`;
+const cancelCode = `curl -fsS http://127.0.0.1:9300/krabka.rebalancer.v1.Rebalancer/CancelExecution \\
+  -H 'Content-Type: application/json' \\
+  -H 'Connect-Protocol-Version: 1' \\
+  -d "{\\"id\\":\\"$PROPOSAL_ID\\"}"`;
+const capacityCode = `version: 1
+brokers:
+  1:
+    max_replicas: 4096
+    disk_bytes: 1099511627776
+    network_in_bytes_per_sec: 125000000
+    network_out_bytes_per_sec: 125000000
+    cpu_cores: 8.0
+  2:
+    max_replicas: 4096
+    disk_bytes: 1099511627776
+    network_in_bytes_per_sec: 125000000
+    network_out_bytes_per_sec: 125000000
+    cpu_cores: 8.0`;
+const rebalanceCode = `apiVersion: krabka.io/v1alpha1
+kind: KafkaRebalance
+metadata:
+  name: demo-balance
+  namespace: kafka
+  labels:
+    krabka.io/cluster: demo
+spec:
+  mode: full
+  goals: [RackAware, ReplicaDistribution, LeaderDistribution]
+  throttleBytesPerSec: 50000000`;
+const approveCode = `kubectl -n kafka get kafkarebalance demo-balance -o yaml
+
+# After checking status.optimizationResult and the proposal:
+kubectl -n kafka annotate kafkarebalance demo-balance \\
+  krabka.io/rebalance=approve --overwrite
+
+kubectl -n kafka get kafkarebalance demo-balance -w
+
+# Request a new proposal, or cancel an execution that is running:
+# kubectl -n kafka annotate kafkarebalance demo-balance krabka.io/rebalance=refresh --overwrite
+# kubectl -n kafka annotate kafkarebalance demo-balance krabka.io/rebalance=stop --overwrite`;
+
+const settings = [
+  ['--bootstrap-servers', 'KRABKA_BOOTSTRAP_SERVERS', 'Required', 'Comma-separated broker host:port list.'],
+  ['--listen-addr', 'KRABKA_REBALANCER_LISTEN_ADDR', '0.0.0.0:9300', 'Connect RPC, health, readiness, and metrics bind address.'],
+  ['--data-dir', 'KRABKA_DATA_DIR', '/var/lib/krabka-rebalancer', 'Writable proposal and anomaly storage.'],
+  ['--scrape-interval-secs', 'KRABKA_SCRAPE_INTERVAL_SECS', '10', 'Cluster metadata snapshot interval in seconds.'],
+  ['--imbalance-threshold-pct', 'KRABKA_IMBALANCE_THRESHOLD_PCT', '10', 'Soft-goal spread threshold, calculated as (max − min) × 100 / total.'],
+  ['--max-movements-per-proposal', 'KRABKA_MAX_MOVEMENTS_PER_PROPOSAL', '256', 'Maximum movements in a proposal.'],
+  ['--min-topic-leaders-per-broker', 'KRABKA_MIN_TOPIC_LEADERS_PER_BROKER', '0', 'Minimum topic leaders on each broker; zero disables this goal.'],
+  ['--proposal-ring-buffer-size', 'KRABKA_PROPOSAL_RING_BUFFER_SIZE', '20', 'Recent proposal capacity.'],
+  ['--broker-capacity-file', 'KRABKA_BROKER_CAPACITY_FILE', 'Empty', 'Capacity YAML loaded at startup.'],
+  ['--metrics-scrape-targets', 'KRABKA_METRICS_SCRAPE_TARGETS', 'Empty', 'Static id:host:port targets; empty uses broker metadata discovery.'],
+  ['--metrics-port', 'KRABKA_REBALANCER_METRICS_PORT', '9404', 'Discovered broker metrics port; static targets override it.'],
+  ['--metrics-scrape-interval-secs', 'KRABKA_METRICS_SCRAPE_INTERVAL_SECS', '30', 'Broker metrics polling interval in seconds.'],
+  ['--metrics-retention-secs', 'KRABKA_METRICS_RETENTION_SECS', '43200', 'Rolling metrics retention in seconds (12 hours).'],
+  ['--default-throttle-bytes-per-sec', 'KRABKA_DEFAULT_THROTTLE_BYTES_PER_SEC', '50000000', 'KIP-73 replication rate per broker direction.'],
+  ['--execute-deadline-secs', 'KRABKA_EXECUTE_DEADLINE_SECS', '1800', 'Execution deadline; timeout cancels reassignments and fails the proposal.'],
+  ['--reassignment-poll-interval-secs', 'KRABKA_REASSIGNMENT_POLL_INTERVAL_SECS', '5', 'Reassignment completion polling interval.'],
+  ['--reassignment-batch-size', 'KRABKA_REASSIGNMENT_BATCH_SIZE', '200', 'Maximum movements in one reassignment request.'],
+  ['--reassignment-request-timeout', 'KRABKA_REBALANCER_REASSIGNMENT_REQUEST_TIMEOUT', '60s', 'Broker timeout for submit and cancel requests.'],
+  ['--broker-evacuation-token', 'KRABKA_REBALANCER_BROKER_EVACUATION_TOKEN', 'Empty', 'Bearer credential for broker removal; empty disables removal.'],
+  ['--broker-evacuation-token-file', 'KRABKA_REBALANCER_BROKER_EVACUATION_TOKEN_FILE', 'Unset', 'Credential file read on every protected request; takes precedence over the token.'],
+  ['--state-topic-name', 'KRABKA_REBALANCER_STATE_TOPIC', '__krabka_rebalancer_state', 'Compacted executor state topic.'],
+  ['--state-topic-replication', 'KRABKA_REBALANCER_STATE_TOPIC_REPLICATION', '3', 'Initial replication factor; invalid replication factor retries with one replica.'],
+  ['--state-load-timeout-secs', 'KRABKA_REBALANCER_STATE_LOAD_TIMEOUT_SECS', '60', 'State loading warning and recovery wait deadline.'],
+  ['--client-dispatch-queue-capacity', 'KRABKA_REBALANCER_CLIENT_DISPATCH_QUEUE_CAPACITY', 'Client default', 'Positive client queue capacity.'],
+  ['--client-frame-max', 'KRABKA_REBALANCER_CLIENT_FRAME_MAX', '100MiB', 'Positive client frame limit.'],
+];
+const detectorSettings = [
+  ['tick-interval-secs', '30', 'Rule evaluation interval; zero disables detection and automatic proposals.'],
+  ['broker-death-threshold-secs', '60', 'Minimum broker absence before BrokerDeath.'],
+  ['under-replicated-threshold-secs', '120', 'Minimum time with ISR smaller than replicas.'],
+  ['disk-pressure-pct', '0.85', 'Disk capacity fraction for a warning.'],
+  ['disk-critical-pct', '0.95', 'Disk capacity fraction for critical severity.'],
+  ['slow-broker-multiplier', '2.0', 'CPU use multiplier against the cluster median.'],
+  ['slow-broker-min-cores', '0.5', 'Minimum CPU use for a slow-broker anomaly.'],
+  ['mute-window-secs', '900', 'Mute interval after an automatic proposal.'],
+  ['auto-trigger-enabled', 'false', 'Opt in to automatic proposal creation.'],
+];
+const runtimeSettings = [
+  ['recovery-load-poll-interval', '100ms'], ['executor-drain-timeout', '10s'],
+  ['ingester-join-timeout', '5s'], ['scraper-http-timeout', '5s'],
+  ['cancel-drain-timeout', '5s'], ['cancel-drain-poll-interval', '25ms'],
+  ['detector-history-capacity', '10'], ['state-topic-create-timeout', '10s'],
+  ['state-loader-poll-interval', '100ms'], ['state-loader-quiet-polls', '5'],
+  ['state-fetch-max', '1MiB'], ['state-produce-retry-attempts', '50'],
+  ['state-produce-retry-backoff', '200ms'], ['state-produce-timeout', '10s'],
+  ['state-topic-min-cleanable-dirty-ratio', '1%'], ['state-topic-segment-interval', '1m'],
+];
+const hardGoals = ['PreferredLeaderIdempotency', 'RackAware', 'ReplicaCapacity', 'DiskCapacity', 'NetworkInCapacity', 'NetworkOutCapacity', 'CpuCapacity'];
+const softGoals = ['ReplicaDistribution', 'LeaderDistribution', 'TopicReplicaDistribution', 'MinTopicLeadersPerBroker', 'DiskUsage', 'LeaderBytesIn', 'NetworkInUsage', 'NetworkOutUsage', 'CpuUsage'];
+const methods = [
+  ['GetState', '{}', 'Latest brokers, topics, ISR, and in-flight reassignments.'],
+  ['CreateProposal', 'goals, mode, brokers', 'Compute and store a proposal without executing it.'],
+  ['DryRunProposal', 'id', 'Stored proposal summary; estimatedBytesMoved currently returns zero.'],
+  ['GetProposal', 'id', 'Movements, status, timestamps, and failureReason.'],
+  ['ListProposals', 'limit', 'Recent proposals; zero uses the full buffer capacity.'],
+  ['ExecuteProposal', 'id, throttleBytesPerSec?', 'Start asynchronous execution of a computed proposal.'],
+  ['CancelExecution', 'id', 'Request cancellation; poll the returned proposal until terminal.'],
+  ['GetAnomalies', 'limit, includeResolved?', 'Anomaly history; includeResolved defaults to true.'],
+];
+---
+
+<DocsLayout title="Partition rebalancer" description="Install and configure krabka-rebalancer, select optimization goals, review partition proposals, execute reassignments, and use KafkaRebalance with the operator." currentSlug="/docs/rebalancer">
+  <div class="space-y-6 font-sans">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Partition rebalancer</h1>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-gray-400">Use <code>krabka-rebalancer</code> to compute partition placement proposals, review their movements, and run throttled broker reassignments.</p>
+    </div>
+    <div class="space-y-6 text-sm leading-relaxed text-gray-300">
+      <aside class="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200">
+        The rebalancer is under active development. This page describes <a href={`${sourceUrl}/crates/rebalancer/src/bin/rebalancer.rs`} class="underline underline-offset-2">source revision <code>{commit.slice(0, 7)}</code></a>, which can include changes after a published release. Check your installed version before applying settings.
+      </aside>
+      <nav aria-label="Rebalancer guides" class="grid gap-3 sm:grid-cols-2">
+        <a href={getPath('/docs/rebalancer/reference')} class="rounded-xl border border-white/10 p-4 hover:border-krab-500/50"><span class="font-semibold text-white">Library reference →</span><p class="mt-1 text-xs text-gray-400">Crate installation and an in-memory optimizer example.</p></a>
+        <a href={getPath('/docs/rebalancer/broker-tests')} class="rounded-xl border border-white/10 p-4 hover:border-krab-500/50"><span class="font-semibold text-white">Broker integration test scope →</span><p class="mt-1 text-xs text-gray-400">The cross-repository fixture requirement and standalone CI boundary.</p></a>
+      </nav>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Install and start</h2>
+      <p>Start a broker first with the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline">quickstart</a>. Build the service from the pinned source revision, then bind it to localhost for local use. The data directory must be writable.</p>
+      <CodeBlock code={buildCode} lang="bash" />
+      <p>For Kubernetes, install the chart from the same checkout. <code>fullnameOverride</code> makes the Service name match the operator's default endpoint for cluster <code>demo</code>. The chart uses one replica, a <code>Recreate</code> update strategy, and a persistent volume for local history. Its default image tag comes from <code>Chart.yaml</code>; use <code>image.tag</code> or <code>image.digest</code> for your chosen service build.</p>
+      <CodeBlock code={helmCode} lang="bash" />
+
+      <h2 class="pt-2 text-xl font-bold text-white">Create and review a proposal</h2>
+      <p>The service exposes Connect RPC at <code>/krabka.rebalancer.v1.Rebalancer/&lt;Method&gt;</code>. All methods use POST. Check <code>/readyz</code>, read the cluster snapshot, then compute a proposal. Creation stores the plan without changing broker assignments.</p>
+      <CodeBlock code={inspectCode} lang="bash" />
+      <p>Review every movement's topic, partition, old and new replica lists, and leader change. A <code>newLeader</code> value of <code>-1</code> means Kafka elects the replacement; the proposal does not enforce a particular leader. Use the returned proposal ID for later calls.</p>
+      <CodeBlock code={reviewCode} lang="bash" />
+      <p><code>DryRunProposal</code> returns the stored summary. Its <code>estimatedBytesMoved</code> is currently zero, so it cannot estimate transfer size. A proposal with no movements needs no execution; ordinary full/add execution rejects an empty plan.</p>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Execute, monitor, and cancel</h2>
+      <p>Execute only after checking the plan. The service permits one execution at a time. The response marks the proposal as executing; it does not mean reassignment is complete. Poll <code>GetProposal</code> for completion and inspect <code>failureReason</code> on failure. The throttle is bytes per second per broker direction.</p>
+      <CodeBlock code={executeCode} lang="bash" />
+      <p>To stop an active execution, call <code>CancelExecution</code>. Cancellation can return while the proposal is still executing if its drain timeout expires. Keep polling for <code>Cancelled</code>, <code>Failed</code>, or <code>Completed</code>.</p>
+      <CodeBlock code={cancelCode} lang="bash" />
+      <p>The executor applies the replication throttle, submits reassignments, waits for completion, then attempts to clear the throttle. Check logs after a failure: a throttle cleanup failure is logged even when the proposal reaches a terminal state.</p>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Proposal modes and broker removal</h2>
+      <div class="overflow-x-auto rounded-lg border border-white/10">
+        <table class="w-full text-left text-xs"><thead class="bg-white/5 text-gray-300"><tr><th class="p-3">API mode</th><th class="p-3">Inputs and behavior</th></tr></thead><tbody class="divide-y divide-white/10">
+          <tr><td class="p-3"><code>PROPOSAL_MODE_FULL</code></td><td class="p-3">Optimize the current cluster with selected goals. Broker list must be empty. An omitted mode uses full.</td></tr>
+          <tr><td class="p-3"><code>PROPOSAL_MODE_ADD_BROKERS</code></td><td class="p-3">Supply a nonempty broker list. Selected goals can place replicas on current replica hosts and the listed brokers.</td></tr>
+          <tr><td class="p-3"><code>PROPOSAL_MODE_REMOVE_BROKERS</code></td><td class="p-3">Supply a nonempty broker list and empty goals. Evacuate all listed brokers. A bearer credential is required.</td></tr>
+        </tbody></table>
+      </div>
+      <p>Add and remove modes require unique broker IDs already present in the cluster snapshot. They reject in-flight reassignments, offline partitions, and under-replicated partitions. Removal also requires enough surviving brokers to preserve every partition's replication factor and enough movement budget to evacuate all selected brokers.</p>
+      <p>Removal is disabled until the service has a nonempty evacuation token or token file. Send <code>Authorization: Bearer &lt;token&gt;</code> when creating, executing, or cancelling a removal proposal. The token file takes precedence and is read on each request, so projected Secret rotation takes effect without a restart. The Helm chart accepts <code>brokerEvacuationAuth.existingSecret</code> and <code>brokerEvacuationAuth.key</code>.</p>
+      <p>The removal planner selects replacement brokers by replica count. It does not run the rack or capacity goals. Check that the surviving brokers have enough capacity and that the proposed replicas meet your rack placement requirements before approval.</p>
+      <p>Before executing a removal plan, the service checks the current assignments again. If they changed, create a new proposal and review it. A completed evacuation request with no movements confirms that the selected brokers hold no replicas. Review the resulting cluster state before removing broker workloads. Keep the service reachable only by callers authorized to change cluster assignments; the evacuation credential protects the removal mode.</p>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Goals and broker capacities</h2>
+      <p>An empty <code>goals</code> list selects all 16 registered goals. Hard goals run before soft goals. If the movement cap prevents a hard goal from being satisfied, optimization fails. Soft goals use the remaining movement budget.</p>
+      <div class="space-y-3 rounded-lg border border-white/10 p-4 text-xs">
+        <p class="font-semibold text-white">Hard goals</p><ul class="grid gap-2 sm:grid-cols-2">{hardGoals.map(goal => <li><code>{goal}</code></li>)}</ul>
+        <p class="pt-2 font-semibold text-white">Soft goals</p><ul class="grid gap-2 sm:grid-cols-2">{softGoals.map(goal => <li><code>{goal}</code></li>)}</ul>
+      </div>
+      <p>Set <code>--broker-capacity-file capacity.yaml</code> to load capacity limits at startup. Missing broker entries or fields mean no limit for that broker or resource. Without a capacity file, the five capacity goals make no changes. Replace the example limits with the measured capacities of your brokers.</p>
+      <CodeBlock code={capacityCode} lang="yaml" />
+      <p>With Helm, use <code>brokerCapacities</code> for the map under <code>brokers</code>; the chart writes the versioned capacity file. <code>brokerCapacityFile</code> overrides that map and requires you to provide the file. Usage goals need broker metrics. The scraper discovers each broker host from metadata and uses port <code>9404</code>, or you can set static targets such as <code>--metrics-scrape-targets 1:broker-1:9404,2:broker-2:9404</code>.</p>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Configure the service</h2>
+      <p>Flags take precedence over their environment variables. Time values without a <code>-secs</code> suffix accept units, such as <code>60s</code> and <code>100ms</code>. Resource counts must be positive where the parser requires them.</p>
+      <div class="overflow-x-auto rounded-lg border border-white/10">
+        <table class="w-full text-left text-xs"><thead class="bg-white/5 text-gray-300"><tr><th class="p-3">Flag and environment variable</th><th class="p-3">Default</th><th class="p-3">Purpose</th></tr></thead><tbody class="divide-y divide-white/10">{settings.map(([flag, env, value, purpose]) => <tr><td class="p-3 align-top"><code class="break-all">{flag}</code><code class="mt-1 block break-all text-[11px] text-gray-400">{env}</code></td><td class="p-3 align-top"><code class="break-all">{value}</code></td><td class="p-3 align-top">{purpose}</td></tr>)}</tbody></table>
+      </div>
+      <details class="rounded-lg border border-white/10 p-4">
+        <summary class="cursor-pointer font-semibold text-white">Anomaly detector settings</summary>
+        <p class="mt-3">Prefix these flags with <code>--detector-</code>. Their environment variables use <code>KRABKA_DETECTOR_</code>, uppercase names, and underscores. Automatic proposal creation defaults to disabled. Detection still records broker death, under-replication, disk pressure, and slow-broker anomalies.</p>
+        <div class="mt-3 overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">Flag suffix</th><th class="p-2">Default</th><th class="p-2">Purpose</th></tr></thead><tbody class="divide-y divide-white/10">{detectorSettings.map(([flag, value, purpose]) => <tr><td class="p-2"><code>{flag}</code></td><td class="p-2"><code>{value}</code></td><td class="p-2">{purpose}</td></tr>)}</tbody></table></div>
+        <p class="mt-3"><code>--anomaly-ring-buffer-size</code> (<code>KRABKA_ANOMALY_RING_BUFFER_SIZE</code>) defaults to <code>200</code>. Disk threshold flags take fractions: <code>0.85</code> means 85 percent.</p>
+      </details>
+      <details class="rounded-lg border border-white/10 p-4">
+        <summary class="cursor-pointer font-semibold text-white">Runtime and state-topic settings</summary>
+        <p class="mt-3">Prefix the names below with <code>--</code>. Environment variables use <code>KRABKA_REBALANCER_</code>, uppercase names, and underscores. The cancellation polling interval must be smaller than its drain timeout. Protocol timeout values must be positive whole milliseconds within a signed 32-bit range. The state-topic dirty ratio must be greater than zero and smaller than one.</p>
+        <div class="mt-3 overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr><th class="p-2">Flag name</th><th class="p-2">Default</th></tr></thead><tbody class="divide-y divide-white/10">{runtimeSettings.map(([flag, value]) => <tr><td class="p-2"><code>{flag}</code></td><td class="p-2"><code>{value}</code></td></tr>)}</tbody></table></div>
+      </details>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Use KafkaRebalance with the operator</h2>
+      <p>Install the <a href={getPath('/docs/operator')} class="text-krab-400 underline">operator and its CRDs</a>, and deploy a rebalancer reachable from the operator. The <a href={getPath('/docs/operator/crds/kafkarebalance')} class="text-krab-400 underline">KafkaRebalance field explorer</a> lists its specification and status fields. The cluster label is required. The default endpoint is <code>http://&lt;cluster&gt;-rebalancer.&lt;namespace&gt;.svc.cluster.local:9300</code>; use <code>spec.endpoint</code> to override it.</p>
+      <CodeBlock code={rebalanceCode} lang="yaml" />
+      <p>The operator computes a proposal and reports <code>ProposalReady</code>. Check <code>status.optimizationResult</code> and use <code>status.sessionId</code> to inspect the full proposal through <code>GetProposal</code>. Approve it with the annotation below. The operator enters <code>Rebalancing</code>, then reports <code>Ready</code> or <code>NotReady</code>.</p>
+      <CodeBlock code={approveCode} lang="bash" />
+      <p>For <code>spec.mode: addBrokers</code> or <code>removeBrokers</code>, provide <code>spec.brokers</code>. Removal uses the same-namespace Secret <code>&lt;cluster&gt;-rebalancer-auth</code>, key <code>token</code>, unless <code>spec.authorizationSecretRef</code> supplies another name and key. The service and operator must use the same credential. Keep <code>spec.goals</code> absent or empty for removal.</p>
+
+      <h2 class="pt-2 text-xl font-bold text-white">API reference</h2>
+      <p>Use the <a href={`${sourceUrl}/crates/rebalancer/proto/krabka/rebalancer/v1/rebalancer.proto`} class="text-krab-400 underline">versioned protobuf schema</a> to generate clients. JSON requests use camelCase field names; protobuf 64-bit integer values can use decimal strings.</p>
+      <div class="overflow-x-auto rounded-lg border border-white/10"><table class="w-full text-left text-xs"><thead class="bg-white/5"><tr><th class="p-3">Method</th><th class="p-3">Request</th><th class="p-3">Result</th></tr></thead><tbody class="divide-y divide-white/10">{methods.map(([method, request, result]) => <tr><td class="p-3"><code>{method}</code></td><td class="p-3"><code>{request}</code></td><td class="p-3">{result}</td></tr>)}</tbody></table></div>
+
+      <h2 class="pt-2 text-xl font-bold text-white">Readiness, recovery, and troubleshooting</h2>
+      <ul class="list-disc space-y-3 pl-5">
+        <li><code>GET /healthz</code> checks the running HTTP service. <code>GET /readyz</code> returns 503 until a cluster snapshot exists and the state topic has loaded. <code>GET /metrics</code> exposes OpenMetrics under the <code>krabka_rebalancer</code> prefix.</li>
+        <li>Proposal history lives in <code>proposals.json</code> and anomaly history in <code>anomalies.json</code> under the data directory. Preserve this directory across restarts. The internal compacted Kafka topic stores the in-flight execution record.</li>
+        <li>If state loading exceeds its timeout, the loader keeps retrying and readiness stays false until loading succeeds. Startup recovery can stop waiting at this deadline; check logs and the proposal state before starting another operation.</li>
+        <li><code>Unavailable</code> means a snapshot or state load is still missing. <code>InvalidArgument</code> includes unknown goal names and incompatible mode inputs. <code>FailedPrecondition</code> includes an unsatisfied goal, unstable cluster state, insufficient surviving brokers, stale removal assignments, an empty plan, or another active execution.</li>
+        <li><code>PermissionDenied</code> during broker removal means evacuation is disabled or the credential does not match. Check the configured token file or Secret without writing its value to logs.</li>
+      </ul>
+      <p>Implementation references: <a href={`${sourceUrl}/crates/rebalancer/src/api/handlers.rs`} class="text-krab-400 underline">RPC handlers</a>, <a href={`${sourceUrl}/crates/rebalancer/src/optimizer/mod.rs`} class="text-krab-400 underline">optimizer safety checks</a>, <a href={`${sourceUrl}/crates/rebalancer/src/config.rs`} class="text-krab-400 underline">runtime validation</a>, <a href={`${sourceUrl}/charts/krabka-rebalancer/values.yaml`} class="text-krab-400 underline">Helm values</a>, and <a href="https://docs.rs/krabka-rebalancer" class="text-krab-400 underline">Rust API documentation</a>.</p>
+    </div>
+  </div>
+</DocsLayout>

@@ -4,12 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { rewriteDocLinks } from './rewrite-doc-links.mjs';
+import { load } from 'js-yaml';
 
 const ROOT_DIR = process.cwd();
 const CONTENT_DOCS_DIR = path.join(ROOT_DIR, 'src', 'content', 'docs');
 
 // Component configurations
-const COMPONENTS = [
+export const COMPONENTS = [
   {
     name: 'streams-java',
     repo: 'krabka-streams-java',
@@ -30,6 +31,31 @@ const COMPONENTS = [
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-broker'),
     docsSubdir: 'broker',
     required: ['verification.md', 'config-reference.md', 'operations/backup-restore.md', 'operations/deploy.md', 'operations/runbooks/restore-from-archive.md', 'operations/metrics.md', 'operations/scaling.md'],
+  },
+  {
+    name: 'operator', repo: 'krabka-operator', docsSubdir: 'operator',
+    localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-operator'),
+    guides: [{ source: 'README.md', destination: 'reference.md' }],
+    crdsDir: 'charts/krabka-operator/crds',
+    requiredKinds: ['Kafka', 'KafkaNodePool', 'KafkaTopic', 'KafkaUser', 'KafkaConnector', 'KafkaRebalance', 'SchemaRegistry', 'KafkaGrpcGateway'],
+  },
+  {
+    name: 'rebalancer', repo: 'krabka-rebalancer', docsSubdir: 'rebalancer',
+    localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-rebalancer'),
+    guides: [
+      { source: 'crates/rebalancer/README.md', destination: 'reference.md' },
+      { source: 'crates/rebalancer/tests/broker/README.md', destination: 'broker-tests.md' },
+    ],
+  },
+  {
+    name: 'gateway', repo: 'krabka-gateway', docsSubdir: 'gateway',
+    localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-gateway'),
+    guides: [
+      { source: 'README.md', destination: 'reference.md' },
+      { source: 'demo/gitlab/README.md', destination: 'gitlab-ingestion.md' },
+      { source: 'demo/cloudevents/README.md', destination: 'cloudevents.md' },
+      { source: 'demo/github-firehose/README.md', destination: 'github-firehose.md' },
+    ],
   },
 ];
 
@@ -60,40 +86,58 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
       const destDocsDir = path.join(staged, comp.docsSubdir);
       fs.rmSync(destDocsDir, { recursive: true, force: true });
       fs.mkdirSync(destDocsDir, { recursive: true });
-      let sourceDocsDir = path.join(comp.localRepoDir, 'docs');
-      if (!fs.existsSync(sourceDocsDir)) {
+      let sourceRepoDir = comp.localRepoDir;
+      if (!fs.existsSync(path.join(sourceRepoDir, comp.guides?.[0]?.source ?? 'docs'))) {
         const tempCloneDir = path.join(clones, comp.repo);
         console.log(`  → Fetching docs from GitHub (krabka-io/${comp.repo})...`);
         execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse', `https://github.com/krabka-io/${comp.repo}.git`, tempCloneDir], { stdio: 'pipe', timeout: 120000 });
-        execFileSync('git', ['-C', tempCloneDir, 'sparse-checkout', 'set', 'docs'], { stdio: 'pipe', timeout: 120000 });
-        sourceDocsDir = path.join(tempCloneDir, 'docs');
+        const directories = comp.guides ? [...new Set(comp.guides.map(({ source }) => path.posix.dirname(source)).filter((dir) => dir !== '.'))] : ['docs'];
+        if (comp.crdsDir) directories.push(comp.crdsDir);
+        if (directories.length) execFileSync('git', ['-C', tempCloneDir, 'sparse-checkout', 'set', ...directories], { stdio: 'pipe', timeout: 120000 });
+        sourceRepoDir = tempCloneDir;
       }
-      if (!fs.existsSync(sourceDocsDir)) throw new Error(`No documentation directory for ${comp.name}`);
+      const sourceDocsDir = path.join(sourceRepoDir, 'docs');
+      if (!comp.guides && !fs.existsSync(sourceDocsDir)) throw new Error(`No documentation directory for ${comp.name}`);
       try {
-        const [commit, date] = execFileSync('git', ['-C', sourceDocsDir, 'log', '-1', '--format=%H%x09%cI'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split('\t');
-        const branch = execFileSync('git', ['-C', sourceDocsDir, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        const [commit, date] = execFileSync('git', ['-C', sourceRepoDir, 'log', '-1', '--format=%H%x09%cI'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split('\t');
+        const branch = execFileSync('git', ['-C', sourceRepoDir, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
         sources[comp.docsSubdir] = { repo: comp.repo, branch, commit, date };
       } catch {
         // Non-git local documentation has no commit provenance.
       }
-      const files = markdownFiles(sourceDocsDir);
+      const guides = comp.guides ?? markdownFiles(sourceDocsDir).map((file) => ({ source: `docs/${file}`, destination: file }));
+      const files = guides.map(({ destination }) => destination);
       if (!files.length) throw new Error(`No markdown guides found for ${comp.name}`);
       for (const required of comp.required ?? []) {
         const file = files.find((file) => file.toLowerCase() === required.toLowerCase());
-        if (!file || !fs.readFileSync(path.join(sourceDocsDir, file), 'utf8').trim()) throw new Error(`${comp.name}: required guide ${required} is missing or empty`);
+        if (!file || !fs.readFileSync(path.join(sourceRepoDir, guides.find(({ destination }) => destination === file).source), 'utf8').trim()) throw new Error(`${comp.name}: required guide ${required} is missing or empty`);
       }
       if (new Set(files.map((file) => file.toLowerCase())).size !== files.length) throw new Error(`${comp.name}: duplicate documentation paths after case normalization`);
       const publishedFiles = new Set(files.map((file) => file.toLowerCase()));
-      for (const file of files) {
-        const srcFile = path.join(sourceDocsDir, file);
+      const publishedPaths = new Map(guides.map(({ source, destination }) => [source.toLowerCase(), destination]));
+      if (sources[comp.docsSubdir]) sources[comp.docsSubdir].files = Object.fromEntries(guides.map(({ source, destination }) => [destination, source]));
+      for (const { source, destination: file } of guides) {
+        const srcFile = path.join(sourceRepoDir, source);
         const destFile = path.join(destDocsDir, file);
         let content = fs.readFileSync(srcFile, 'utf8');
+        if (!content.trim()) throw new Error(`${comp.name}: required guide ${source} is empty`);
 
         // Rewrite relative markdown links and code links to prevent 404 errors
-        content = rewriteDocLinks(content, { docsSubdir: comp.docsSubdir, repo: comp.repo, sourceFile: file, sourceRef: sources[comp.docsSubdir]?.commit ?? 'main', publishedFiles });
+        content = rewriteDocLinks(content, { docsSubdir: comp.docsSubdir, repo: comp.repo, sourceFile: file, sourcePath: comp.guides ? source : undefined, sourceRef: sources[comp.docsSubdir]?.commit ?? 'main', publishedFiles, publishedPaths });
 
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.writeFileSync(destFile, content);
+      }
+      if (comp.crdsDir) {
+        const crdsDir = path.join(sourceRepoDir, comp.crdsDir);
+        const resources = fs.readdirSync(crdsDir).filter((file) => /\.ya?ml$/i.test(file)).sort().map((file) => {
+          const crd = load(fs.readFileSync(path.join(crdsDir, file), 'utf8'));
+          if (crd?.kind !== 'CustomResourceDefinition' || !crd.spec?.names?.kind || !crd.spec?.versions?.length || crd.spec.versions.some((version) => !version.schema?.openAPIV3Schema)) throw new Error(`${comp.name}: invalid CRD ${file}`);
+          return { ...crd, _sourcePath: `${comp.crdsDir}/${file}` };
+        });
+        for (const kind of comp.requiredKinds ?? []) if (!resources.some((crd) => crd.spec.names.kind === kind)) throw new Error(`${comp.name}: required CRD ${kind} is missing`);
+        if (new Set(resources.map((crd) => crd.spec.names.kind)).size !== resources.length) throw new Error(`${comp.name}: duplicate CRD kind`);
+        fs.writeFileSync(path.join(destDocsDir, 'crds.json'), JSON.stringify({ resources, source: { repo: comp.repo, path: comp.crdsDir, ...sources[comp.docsSubdir] } }, null, 2) + '\n');
       }
       console.log(`  ✓ Synced and transformed ${files.length} markdown guide(s) to ${destDocsDir}`);
     }
