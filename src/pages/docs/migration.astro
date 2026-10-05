@@ -1,0 +1,143 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+import { getPath } from '../../utils/paths';
+
+// Summarized from the broker's own operations guides, which hold the full
+// procedure and are kept in step with its MirrorMaker 2 test suite.
+const brokerDocs = 'https://github.com/krabka-io/krabka-broker/blob/main/docs/operations';
+
+const differences = [
+  { area: 'Wire protocol', kafka: 'Kafka protocol', krabka: 'The same protocol, byte-compatible. Clients, the admin CLI and librdkafka work unchanged.' },
+  { area: 'Runtime', kafka: 'JVM', krabka: 'One native Rust binary. No heap tuning and no garbage collector.' },
+  { area: 'Metadata', kafka: 'KRaft quorum', krabka: 'A native KRaft quorum (KIP-595 RPCs). No ZooKeeper.' },
+  { area: 'Metrics', kafka: 'JMX MBeans', krabka: 'Prometheus on /metrics. No JMX port; each series names the MBean it replaces.' },
+  { area: 'Broker plugins', kafka: 'JVM classes loaded into the broker', krabka: 'None. Custom authorizers, metrics reporters and interceptors have nothing to load into.' },
+  { area: 'Correctness evidence', kafka: 'Tests', krabka: 'Tests plus Creusot-proved decision kernels and Stateright model checks.' },
+];
+
+const carried = [
+  ['Records, with keys, values, headers and timestamps', 'Yes'],
+  ['Topic partition counts and topic configs', 'Yes, with sync.topic.configs'],
+  ['Consumer-group positions', 'Yes, translated, with sync.group.offsets.enabled=true'],
+  ['Topic ACLs', 'Yes, when the source has an authorizer and sync.topic.acls is on'],
+  ['Offsets as numbers', 'No: target offsets differ; read positions from krabka after cutover'],
+  ['Transactional state and producer ids', 'No: restart transactional producers against krabka'],
+  ['SCRAM credentials, delegation tokens, quotas', 'No: create them on krabka first'],
+  ['Schema registry subjects', 'No: use the registry’s own export, or mirror _schemas and cut the registry over'],
+];
+
+const mm2 = `clusters = prod, krabka
+prod.bootstrap.servers = kafka-1.example.com:9092
+krabka.bootstrap.servers = krabka-1.example.com:9092
+
+prod->krabka.enabled = true
+prod->krabka.topics = .*
+prod->krabka.groups = .*
+
+sync.topic.configs.enabled = true
+sync.group.offsets.enabled = true
+sync.group.offsets.interval.seconds = 10
+emit.checkpoints.interval.seconds = 10`;
+---
+
+<DocsLayout
+  title="Migrating from Apache Kafka"
+  description="How krabka differs from Apache Kafka, which Kafka tools work against it, and how to move a running Kafka cluster onto krabka with MirrorMaker 2."
+  currentSlug="/docs/migration"
+>
+  <div class="space-y-6 font-sans">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Migrating from Apache Kafka</h1>
+      <p class="text-gray-400 mt-2 text-sm max-w-2xl leading-relaxed">
+        What changes, what keeps working, and how to move a running cluster.
+      </p>
+    </div>
+
+    <div class="space-y-6 text-sm text-gray-300 leading-relaxed">
+      <p>
+        krabka serves the Apache Kafka wire protocol, so applications move by changing their bootstrap address. The work
+        is in what sits beside the protocol: JMX, broker plugins, and the data already in your cluster. krabka is pre-1.0;
+        check the <a href={getPath('/docs/broker/kip_matrix')} class="text-krab-400 hover:text-krab-300 underline underline-offset-2">KIP matrix</a>
+        for the features your applications use before you plan a cutover.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">How krabka differs from Apache Kafka</h2>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400">
+            <tr><th class="py-3 px-4">Area</th><th class="py-3 px-4">Apache Kafka</th><th class="py-3 px-4">krabka</th></tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            {differences.map((d) => (
+              <tr>
+                <td class="py-3 px-4 font-semibold text-white whitespace-nowrap">{d.area}</td>
+                <td class="py-3 px-4 text-gray-400">{d.kafka}</td>
+                <td class="py-3 px-4 text-gray-300">{d.krabka}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p>
+        For throughput, latency and memory against Kafka and Redpanda on the same hardware, see the
+        <a href={getPath('/benchmarks')} class="text-krab-400 hover:text-krab-300 underline underline-offset-2">benchmarks</a>.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Which tools keep working</h2>
+      <p>
+        The line is the interface a tool reads. A tool that speaks the Kafka protocol works: the
+        <code class="font-mono text-krab-300">kafka-*.sh</code> admin commands, every client library, lag monitors such as
+        Burrow and kafka-lag-exporter, dashboards such as AKHQ, Kafdrop and Redpanda Console, MirrorMaker 2, Kafka Connect
+        workers and schema registries.
+      </p>
+      <p>
+        A tool that needs a broker-side JVM does not: Cruise Control (use
+        <a href={getPath('/docs/runtime-architecture')} class="text-krab-400 hover:text-krab-300 underline underline-offset-2">krabka-rebalancer</a>),
+        JMX exporters and <code class="font-mono text-krab-300">jmx_prometheus_javaagent</code> (scrape
+        <code class="font-mono text-krab-300">/metrics</code>), and the JMX views of CMAK or Conduktor. Tools with both a
+        protocol path and a JMX path keep the protocol path. The full list is in
+        <a href={`${brokerDocs}/ecosystem-support.md`} target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 underline underline-offset-2">ecosystem-support.md</a>.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Move the data with MirrorMaker 2</h2>
+      <p>
+        MirrorMaker 2 treats krabka as an ordinary Kafka cluster: run the stock
+        <code class="font-mono text-krab-300">connect-mirror-maker.sh</code> from a Kafka release and install nothing on
+        either side. The broker's test suite runs this procedure with MirrorMaker 2 from Kafka 4.3.1 on every change.
+      </p>
+      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-white/10 uppercase text-gray-400">
+            <tr><th class="py-3 px-4">What</th><th class="py-3 px-4">Carried over?</th></tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            {carried.map(([what, how]) => (
+              <tr><td class="py-3 px-4 text-gray-200">{what}</td><td class="py-3 px-4 text-gray-300">{how}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p>A minimal <code class="font-mono text-krab-300">mm2.properties</code> mirroring a cluster aliased <code class="font-mono text-krab-300">prod</code>:</p>
+      <CodeBlock code={mm2} lang="properties" />
+      <p>
+        Set <code class="font-mono text-krab-300">sync.group.offsets.enabled</code> to <code class="font-mono text-krab-300">true</code>;
+        without it every migrated consumer starts from the beginning or the end. Mirrored topics carry the source alias as a
+        prefix (<code class="font-mono text-krab-300">prod.orders</code>) unless you choose
+        <code class="font-mono text-krab-300">IdentityReplicationPolicy</code> before the first record arrives.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Cut over</h2>
+      <ol class="list-decimal space-y-2 pl-5">
+        <li>Wait until MirrorMaker 2's consumer lag on the source stays near zero.</li>
+        <li>Move consumers one group at a time: stop the group on Kafka, wait one <code class="font-mono text-krab-300">sync.group.offsets.interval.seconds</code>, check its position on krabka with <code class="font-mono text-krab-300">kafka-consumer-groups.sh --describe</code>, then start it against krabka and confirm its lag falls.</li>
+        <li>Move producers last: stop them on Kafka, let the mirror drain, start them against krabka, then stop MirrorMaker 2.</li>
+      </ol>
+      <p>
+        Moving producers before their consumers splits a topic across two clusters. The step-by-step procedure, including
+        ACL sync and cleanup, is
+        <a href={`${brokerDocs}/migrate-from-kafka.md`} target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 underline underline-offset-2">migrate-from-kafka.md</a>.
+      </p>
+    </div>
+  </div>
+</DocsLayout>

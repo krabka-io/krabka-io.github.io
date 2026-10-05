@@ -1,6 +1,24 @@
 @config "../../tailwind.config.mjs";
 @import "tailwindcss";
 
+@theme {
+  --color-krab-50: #fff5f2;
+  --color-krab-100: #ffe8e1;
+  --color-krab-200: #ffd4c7;
+  --color-krab-300: #ffb39e;
+  --color-krab-400: #ff8466;
+  --color-krab-500: #ff4d2e; /* Cooked Dungeness Vermilion */
+  --color-krab-600: #e0300f; /* primary button fill: white text on it clears 4.5:1 */
+  --color-krab-700: #c82408;
+  --color-krab-800: #a4210b;
+  --color-krab-900: #872110;
+  --color-krab-950: #4a0c03;
+  --color-ocean-700: #1e293b;
+  --color-ocean-800: #0f172a;
+  --color-ocean-900: #0c1322; /* Deep Pacific Ocean Navy */
+  --color-ocean-950: #080d1a; /* Darkest Ocean Abyss */
+}
+
 :root {
   --sl-color-accent-low: #2a0b06;
   --sl-color-accent: #ff4d2e;
@@ -19,12 +37,12 @@
 }
 
 body {
-  background-color: #080d1a;
+  background-color: var(--color-ocean-950);
   background-image: 
     radial-gradient(ellipse 80% 50% at 50% -20%, rgba(30, 58, 138, 0.22), transparent 70%),
-    radial-gradient(ellipse 60% 40% at 100% 30%, rgba(15, 23, 42, 0.4), transparent 60%);
+    radial-gradient(ellipse 60% 40% at 100% 30%, color-mix(in srgb, var(--color-ocean-800) 40%, transparent), transparent 60%);
   background-attachment: fixed;
-  color: #f3f4f6;
+  color: var(--color-gray-100);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -41,10 +59,10 @@ p, li, dd, blockquote {
 
 /* Frosted glass card with subtle cool blueish tint */
 .frosted-card {
-  background: rgba(15, 23, 42, 0.72);
+  background: color-mix(in srgb, var(--color-ocean-800) 72%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--color-white) 8%, transparent);
 }
 
 .frosted-card:hover {
@@ -86,7 +104,7 @@ p, li, dd, blockquote {
  * keeps its own background colour. */
 :is(.frosted-card, .overflow-hidden, .overflow-x-auto):has(> table),
 .markdown-body .table-wrap {
-  --edge-cover: #0e1527;
+  --edge-cover: var(--color-ocean-900);
   --edge-glow: rgba(255, 77, 46, 0.3);
   background-image:
     linear-gradient(to right, var(--edge-cover) 30%, transparent),
@@ -111,7 +129,7 @@ p, li, dd, blockquote {
   overflow-x: auto;
   padding: 1rem;
   background: #050811;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--color-white) 8%, transparent);
   border-radius: 0.75rem;
   line-height: 1.65;
   -webkit-overflow-scrolling: touch;
@@ -178,16 +196,16 @@ p, li, dd, blockquote {
 }
 
 ::-webkit-scrollbar-track {
-  background: #080d1a;
+  background: var(--color-ocean-950);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--color-ocean-700);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--color-slate-700);
 }
 
 /* Details and Summary reset */
@@ -210,7 +228,7 @@ summary {
 
 /* Markdown prose and table styling */
 .markdown-body {
-  color: #d1d5db;
+  color: var(--color-gray-300);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.875rem;
   line-height: 1.65;
@@ -219,11 +237,11 @@ summary {
 .markdown-body h1 {
   font-size: 1.875rem;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--color-white);
   margin-top: 0;
   margin-bottom: 1.25rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-white) 10%, transparent);
   letter-spacing: -0.02em;
 }
 
@@ -236,11 +254,11 @@ summary {
 .markdown-body h2 {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--color-white);
   margin-top: 2rem;
   margin-bottom: 0.75rem;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-white) 8%, transparent);
   scroll-margin-top: 1.5rem;
 }
 
@@ -250,7 +268,7 @@ summary {
 .markdown-body h3 {
   font-size: 1rem;
   font-weight: 600;
-  color: #f3f4f6;
+  color: var(--color-gray-100);
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   scroll-margin-top: 1.5rem;
@@ -259,7 +277,7 @@ summary {
 .markdown-body h4 {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #e5e7eb;
+  color: var(--color-gray-200);
   margin-top: 1.25rem;
   margin-bottom: 0.4rem;
 }
@@ -272,7 +290,7 @@ summary {
 
 .markdown-body p {
   margin-bottom: 1rem;
-  color: #d1d5db;
+  color: var(--color-gray-300);
 }
 
 /* Running text stops at a readable line length; tables and code use the full width. */
@@ -281,14 +299,14 @@ summary {
 }
 
 .markdown-body a {
-  color: #ff8466;
+  color: var(--color-krab-400);
   text-decoration: none;
   font-weight: 500;
   transition: color 0.15s ease;
 }
 
 .markdown-body a:hover {
-  color: #ffb39e;
+  color: var(--color-krab-300);
   text-decoration: underline;
 }
 
@@ -304,9 +322,9 @@ summary {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin: 1.5rem 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid color-mix(in srgb, var(--color-white) 12%, transparent);
   border-radius: 0.75rem;
-  background-color: rgba(15, 23, 42, 0.4);
+  background-color: color-mix(in srgb, var(--color-ocean-800) 40%, transparent);
 }
 
 .markdown-body table {
@@ -363,13 +381,13 @@ summary {
     position: sticky;
     left: 0;
     z-index: 1;
-    background: #0e1527;
+    background: var(--color-ocean-900);
   }
 }
 
 /* Translucent, so the edge glow of a scrolling table shows through the header. */
 .markdown-body thead {
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--color-white) 3%, transparent);
 }
 
 .markdown-body th {
@@ -379,16 +397,16 @@ summary {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #9ca3af;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-gray-400);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-white) 12%, transparent);
   vertical-align: bottom;
   overflow-wrap: break-word;
 }
 
 .markdown-body td {
   padding: 0.625rem 0.875rem;
-  color: #d1d5db;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--color-gray-300);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-white) 6%, transparent);
   font-size: 0.8125rem;
   vertical-align: top;
   line-height: 1.5;
@@ -397,7 +415,7 @@ summary {
 
 .markdown-body td:first-child {
   font-weight: 500;
-  color: #f3f4f6;
+  color: var(--color-gray-100);
 }
 
 /* The key column of a reference table holds one identifier per cell. Where the
@@ -433,12 +451,12 @@ summary {
 }
 
 .markdown-body .table-wrap::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: color-mix(in srgb, var(--color-white) 15%, transparent);
   border-radius: 3px;
 }
 
 .markdown-body .table-wrap::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--color-white) 25%, transparent);
 }
 
 .markdown-body tr:last-child td {
@@ -446,7 +464,7 @@ summary {
 }
 
 .markdown-body tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--color-white) 3%, transparent);
 }
 
 /* On a phone a table of three or more columns (the wrap-tables plugin marks it
@@ -473,9 +491,9 @@ summary {
   .markdown-body .table-wrap[data-stack] tr {
     margin-bottom: 0.75rem;
     padding: 0.25rem 0;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid color-mix(in srgb, var(--color-white) 12%, transparent);
     border-radius: 0.75rem;
-    background: rgba(15, 23, 42, 0.4);
+    background: color-mix(in srgb, var(--color-ocean-800) 40%, transparent);
   }
 
   .markdown-body .table-wrap[data-stack] td {
@@ -507,7 +525,7 @@ summary {
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: #9ca3af;
+    color: var(--color-gray-400);
   }
 
   /* A cell between the first and the last is usually a short value (Type,
@@ -536,7 +554,7 @@ summary {
 
 .markdown-body li {
   margin-bottom: 0.4rem;
-  color: #d1d5db;
+  color: var(--color-gray-300);
 }
 
 .markdown-body li > ul,
@@ -566,15 +584,15 @@ summary {
 .docs-page code:not(pre code, :is(h1, h2, h3, h4) code, [id^="krabka-"] code, .el code) {
   display: inline-block;
   max-width: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ff8466;
+  background: color-mix(in srgb, var(--color-white) 8%, transparent);
+  color: var(--color-krab-400);
   font-family: 'JetBrains Mono', monospace;
   padding: 0.15rem 0.4rem;
   border-radius: 0.35rem;
   font-size: max(0.85em, 11px);
   line-height: 1.35;
   vertical-align: baseline;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid color-mix(in srgb, var(--color-white) 6%, transparent);
   overflow-wrap: break-word;
 }
 
@@ -602,7 +620,7 @@ samp,
 
 .markdown-body pre {
   background: #050811 !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid color-mix(in srgb, var(--color-white) 12%, transparent) !important;
   border-radius: 0.75rem !important;
   padding: 1.25rem !important;
   overflow-x: auto;
@@ -637,13 +655,13 @@ samp,
   padding: 0.75rem 1rem;
   margin: 1.5rem 0;
   border-radius: 0 0.5rem 0.5rem 0;
-  color: #9ca3af;
+  color: var(--color-gray-400);
   font-style: italic;
 }
 
 .markdown-body hr {
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid color-mix(in srgb, var(--color-white) 10%, transparent);
   margin: 2rem 0;
 }
 
@@ -714,4 +732,48 @@ samp,
     content: " (" attr(href) ")";
     overflow-wrap: anywhere;
   }
+}
+
+/* The "#" link after a heading: shown on hover or focus, and always on touch. */
+#main a.heading-anchor {
+  margin-left: 0.4em;
+  color: var(--color-gray-400);
+  font-weight: 500;
+  text-decoration: none;
+  border: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#main :is(h2, h3, h4):hover > a.heading-anchor,
+#main a.heading-anchor:focus-visible {
+  opacity: 1;
+}
+
+#main a.heading-anchor:hover {
+  color: var(--color-krab-400);
+}
+
+@media (hover: none) {
+  #main a.heading-anchor {
+    opacity: 0.6;
+  }
+}
+
+/* The section in view, in the docs' "On this page" lists. */
+.toc-list a.toc-active {
+  border-color: var(--color-krab-500);
+  color: var(--color-krab-400);
+}
+
+/* Theme toggle: a sun in the dark theme, a moon in the light one. */
+:root[data-theme='light'] .theme-icon-sun,
+:root:not([data-theme='light']) .theme-icon-moon {
+  display: none;
+}
+
+/* Long verification ledgers: rows off screen skip layout and paint until near. */
+.el-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 3.25rem;
 }

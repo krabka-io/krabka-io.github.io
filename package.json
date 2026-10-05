@@ -16,8 +16,8 @@
     "build:playground": "bash playground/build.sh",
     "build:why3-web": "bash why3-web/install.sh",
     "build:broker": "bash playground/broker-wasi/build.sh",
-    "build:site": "astro build",
-    "build": "npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build",
+    "build:site": "astro build && pagefind --site dist",
+    "build": "npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && pagefind --site dist",
     "check-links": "node scripts/check-links.mjs",
     "check-catalog": "node --experimental-strip-types scripts/check-catalog.mjs",
     "check-seo": "node scripts/check-seo.mjs",
@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
+    "pagefind": "^1.5.2",
     "playwright": "1.63.0"
   }
 }

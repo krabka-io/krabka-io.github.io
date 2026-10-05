@@ -196,3 +196,98 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
     })) as EcosystemRepo[];
   }
 }
+
+export interface Release {
+  repo: string;
+  tag: string;
+  name: string;
+  url: string;
+  date: string | null;
+  notes: string;
+}
+
+// Version keys in versions.json, by repository, for the release dates the
+// offline fallback reads.
+const versionKeys: Record<string, string> = {
+  'krabka-broker': 'broker',
+  'krabka-protocol': 'protocol',
+  'krabka-client-rs': 'client-rs',
+  'krabka-streams-java': 'streams-java',
+  'krabka-streams-go': 'streams-go',
+  'krabka-cli': 'cli',
+  'krabka-connect': 'connect',
+  'krabka-operator': 'operator',
+  'krabka-gateway': 'gateway',
+  'krabka-rebalancer': 'rebalancer',
+};
+
+let releasesCache: Promise<Release[]> | null = null;
+
+/** Recent releases across the ecosystem, newest first, for /releases and its feed. */
+export function getReleases(): Promise<Release[]> {
+  releasesCache ??= loadReleases();
+  return releasesCache;
+}
+
+async function loadReleases(): Promise<Release[]> {
+  const repos = fallbackData.map((item) => item.repo);
+  const offline = async (): Promise<Release[]> => {
+    const { default: versions } = await import('../data/versions.json');
+    return fallbackData
+      .filter((item) => item.releaseVersion && item.releaseUrl)
+      .map((item) => ({
+        repo: item.repo,
+        tag: item.releaseVersion!,
+        name: `${item.repo} ${item.releaseVersion}`,
+        url: item.releaseUrl!,
+        date: (versions as Record<string, { releaseDate?: string }>)[versionKeys[item.repo]]?.releaseDate ?? null,
+        notes: '',
+      }))
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  };
+
+  const token = resolveGitHubToken();
+  if (!token) return offline();
+  try {
+    const response = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: { 'User-Agent': 'krabka-website-builder', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        query: `query {
+          organization(login: "krabka-io") {
+            repositories(first: 30) {
+              nodes {
+                name
+                releases(first: 5, orderBy: {field: CREATED_AT, direction: DESC}) {
+                  nodes { tagName name url publishedAt isDraft description }
+                }
+              }
+            }
+          }
+        }`,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return offline();
+    const nodes = (await response.json())?.data?.organization?.repositories?.nodes ?? [];
+    const releases: Release[] = nodes
+      .filter((n: { name: string }) => repos.includes(n.name))
+      .flatMap((n: { name: string; releases: { nodes: any[] } }) =>
+        n.releases.nodes
+          .filter((r) => !r.isDraft && r.publishedAt)
+          .map((r) => ({
+            repo: n.name,
+            tag: r.tagName,
+            // Some repositories title a release by its tag alone; name the repository too.
+            name: r.name?.toLowerCase().includes(n.name.replace('krabka-', '')) ? r.name : `${n.name} ${r.name || r.tagName}`,
+            url: r.url,
+            date: r.publishedAt,
+            notes: (r.description ?? '').trim(),
+          })),
+      )
+      .sort((a: Release, b: Release) => (b.date ?? '').localeCompare(a.date ?? ''));
+    return releases.length ? releases : offline();
+  } catch {
+    return offline();
+  }
+}

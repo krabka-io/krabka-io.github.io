@@ -12,6 +12,8 @@ export default defineConfig({
   // glued words together (`<strong>WebAssembly</strong>` + newline + `and`
   // rendered as "WebAssemblyand").
   compressHTML: false,
+  // Fetch a page when its link is hovered or focused, so moving between docs is quick.
+  prefetch: true,
   // Legacy routes; observability and gres moved to their own repositories.
   redirects: {
     '/docs/benchmarks': '/benchmarks',
