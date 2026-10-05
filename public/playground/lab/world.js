@@ -656,10 +656,9 @@ export class LabWorld {
     if (!force && wallNow - this.lastSnapshotWall < SNAPSHOT_INTERVAL_MS) return;
     this.lastSnapshotWall = wallNow;
     const snap = this.guard("snapshot", () => JSON.parse(this.lab.snapshot()));
-    if (snap) {
-      this.snapshotCache = snap;
-      this.hooks.onSnapshot(snap);
-    }
+    if (snap) this.snapshotCache = snap;
+    // Events first: the experiment and the invariant checks the snapshot
+    // drives must see what happened up to it (a fault step, a reset).
     const count = this.guard("count events", () => this.lab.eventCount());
     if (count != null && Number(count) > this.eventIndex) {
       const events = this.guard("read events", () => JSON.parse(this.lab.eventsSince(this.eventIndex)));
@@ -670,6 +669,7 @@ export class LabWorld {
         this.eventIndex = Number(count);
       }
     }
+    if (snap) this.hooks.onSnapshot(snap);
   }
 
   snapshot() {

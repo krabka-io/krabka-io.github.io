@@ -179,7 +179,11 @@ await check('the sampler takes one row per lab second with rates, lag, RTTs and 
   assert.equal(third.produce, 0); // a restarted producer counts from zero: no negative rate
   assert.equal(third.fetch_p99, 20);
   assert.equal(third.min_isr, null);
-  assert.equal(s.rows.length, 3);
+  // One producer restarts while the other keeps going: the drop of one does
+  // not cancel the progress of the other.
+  const fourth = s.sample({ now: 4200, nodes: [{ id: 4, kind: 'producer', state: { acked: 0 } }, { id: 8, kind: 'producer', state: { acked: 80 } }] }, capture);
+  assert.equal(fourth.produce, 50);
+  assert.equal(s.rows.length, 4);
   assert.deepEqual(rtts(null, 0, 1), { produce_p50: null, produce_p99: null, fetch_p50: null, fetch_p99: null });
 });
 

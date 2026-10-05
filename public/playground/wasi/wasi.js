@@ -650,7 +650,7 @@ export class Wasi {
     this.stats.disk.slowMs += performance.now() - started;
   }
 
-  /** EIO for a write or a sync on a failing disk, else 0. */
+  /** EIO for anything that changes the volume (writes, syncs, resizes, creates, renames, unlinks) on a failing disk, else 0. */
   #diskError() {
     if (this.#disk() !== DISK.EIO) return 0;
     this.stats.disk.eio++;
@@ -901,6 +901,7 @@ export class Wasi {
     if ((d.rightsBase & (RIGHTS.FD_FILESTAT_SET_SIZE | RIGHTS.FD_WRITE)) === 0n) return E.BADF;
     const n = safeNumber(size);
     if (n < 0) return E.FBIG;
+    if (this.#diskError()) return E.IO;
     return this.fs.truncate(d.inode, n);
   }
 
@@ -1095,6 +1096,7 @@ export class Wasi {
     const size = safeNumber(len);
     if (start < 0 || size < 0) return E.FBIG;
     const end = start + size;
+    if (this.#diskError()) return E.IO;
     return end > d.inode.size ? this.fs.truncate(d.inode, end) : E.SUCCESS;
   }
 
@@ -1150,6 +1152,8 @@ export class Wasi {
       directory: (oflags & OFLAGS.DIRECTORY) !== 0,
       write: (base & RIGHTS.FD_WRITE) !== 0n,
     };
+    // Creating or truncating a file writes to the disk.
+    if ((how.create || how.trunc) && this.#diskError()) return E.IO;
     const inode = this.fs.open(dir.inode, path, how);
     if (typeof inode === "number") return inode;
     this.stats.fs.opens++;
@@ -1164,6 +1168,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.mkdir(dir.inode, path);
   }
 
@@ -1172,6 +1177,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.rmdir(dir.inode, path);
   }
 
@@ -1180,6 +1186,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.unlink(dir.inode, path);
   }
 
@@ -1192,6 +1199,7 @@ export class Wasi {
     if (typeof fromPath === "number") return fromPath;
     const toPath = this.#path(toPtr, toLen);
     if (typeof toPath === "number") return toPath;
+    if (this.#diskError()) return E.IO;
     return this.fs.rename(from.inode, fromPath, to.inode, toPath);
   }
 

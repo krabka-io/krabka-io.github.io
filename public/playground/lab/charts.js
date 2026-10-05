@@ -54,7 +54,7 @@ export class Sampler {
 
   reset() {
     this.rows = [];
-    this.last = null; // { t, acked, processed }
+    this.last = null; // { t, counts: Map("producer:4:acked" → n) }
   }
 
   // Takes a row when the snapshot is in a later lab second than the last row.
@@ -63,23 +63,31 @@ export class Sampler {
     if (!snapshot?.nodes) return null;
     const t = snapshot.now ?? 0;
     if (this.last && Math.floor(t / 1000) <= Math.floor(this.last.t / 1000)) return null;
-    const of = (kind, field) => sum(snapshot.nodes.filter((n) => n.kind === kind && typeof n.state?.[field] === "number").map((n) => n.state[field]));
-    const acked = of("producer", "acked");
-    const processed = of("consumer", "processed");
+    // Each node's counter, so a restart that resets one does not cancel the
+    // progress of the others.
+    const counts = new Map();
+    for (const [kind, field] of [["producer", "acked"], ["consumer", "processed"]]) {
+      for (const n of snapshot.nodes) if (n.kind === kind && typeof n.state?.[field] === "number") counts.set(`${kind}:${n.id}`, n.state[field]);
+    }
+    const delta = (kind) => {
+      let d = 0;
+      for (const [key, v] of counts) if (key.startsWith(`${kind}:`)) d += Math.max(0, v - (this.last.counts.get(key) ?? v));
+      return d;
+    };
     const consumers = snapshot.nodes.filter((n) => n.kind === "consumer" && typeof n.state?.lag === "number");
     const row = { t, produce: null, consume: null, lag: consumers.length ? sum(consumers.map((n) => n.state.lag)) : null };
     if (this.last) {
       const dt = (t - this.last.t) / 1000;
-      // A restarted node counts from zero again: no negative rates.
-      row.produce = Math.max(0, acked - this.last.acked) / dt;
-      row.consume = Math.max(0, processed - this.last.processed) / dt;
+      // A restarted node counts from zero again: its drop is not a negative rate.
+      row.produce = delta("producer") / dt;
+      row.consume = delta("consumer") / dt;
     }
     Object.assign(row, rtts(capture, this.last ? this.last.t : -Infinity, t));
     const c = clusterOf(snapshot);
     const parts = (c?.topics || []).flatMap((tp) => tp.partitions || []);
     row.min_isr = parts.length ? Math.min(...parts.map((p) => (p.isr || []).length)) : null;
     row.urp = parts.length ? parts.filter((p) => (p.isr || []).length < (p.replicas || []).length).length : null;
-    this.last = { t, acked, processed };
+    this.last = { t, counts };
     this.rows.push(row);
     if (this.rows.length > this.maxRows) this.rows.shift();
     return row;

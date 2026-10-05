@@ -107,6 +107,7 @@ export function validateExperiment(exp, scenario = null) {
       for (const k of ["at", "by", "after", "since"]) if (c[k] != null && !isTime(c[k])) errors.push(`${where}: \`${k}\` is a lab time in ms`);
       const t = c.at ?? c.by;
       if (isTime(t) && isTime(exp.end) && t > exp.end) errors.push(`${where}: ${c.at != null ? "at" : "by"} ${t} is after the end (${exp.end})`);
+      if (isTime(c.after) && isTime(t ?? exp.end) && c.after > (t ?? exp.end)) errors.push(`${where}: after ${c.after} is later than ${t != null ? (c.at != null ? "at" : "by") : "the end"} (${t ?? exp.end}), so it could never be decided`);
       for (const k of spec.needs) if (c[k] == null || c[k] === "") errors.push(`${where}: \`${c.check}\` needs \`${k}\``);
       if (spec.op) {
         if (!OPS[c.op]) errors.push(`${where}: \`op\` is one of ${Object.keys(OPS).join(" ")}`);
@@ -276,8 +277,26 @@ export class ExperimentRunner {
     this.fresh = [];
     if (this.checks.some((c) => c.status === "pending" && c.spec.check === "kafka_error")) this.scan();
     const final = rel >= this.end;
-    for (const c of this.checks) if (c.status === "pending" && this.decide(c, snap, rel, final)) changed = true;
-    if (final) {
+    // Responses sent by `until` that wait for decoding: later traffic must
+    // not hold a decision back.
+    const decoding = (until) => this.scanning || (this.hooks.capture?.scanQueue || []).some((ex) => ex.req.at <= until);
+    let deferred = false;
+    for (const c of this.checks) {
+      if (c.status !== "pending") continue;
+      // A due kafka_error waits for the responses still being decoded, then
+      // the same snapshot is judged again.
+      const due = c.spec.at ?? c.spec.by ?? this.end;
+      if (c.spec.check === "kafka_error" && (final || rel >= due) && decoding(this.t0 + due)) {
+        deferred = true;
+        continue;
+      }
+      if (this.decide(c, snap, rel, final)) changed = true;
+    }
+    if (deferred) {
+      this.drain(snap.now).then(() => this.tick(snap));
+    } else if (final) {
+      // A check that could not be decided by the end did not hold.
+      for (const c of this.checks) if (c.status === "pending") Object.assign(c, { status: "fail", t: rel, observed: c.observed ?? "not decided by the end" });
       this.state = this.checks.some((c) => c.status === "fail") || this.steps.some((s) => s.status === "error") ? "failed" : "passed";
       for (const s of this.steps) if (s.status === "pending") s.status = "skipped";
       changed = true;
@@ -285,6 +304,15 @@ export class ExperimentRunner {
       this.hooks.onEnd?.(this);
     }
     if (changed) this.hooks.onChange?.();
+  }
+
+  // Decodes the queued responses sent by `until`, after any scan in progress.
+  async drain(until) {
+    while (this.scanning) await new Promise((resolve) => setTimeout(resolve, 5));
+    while ((this.hooks.capture?.scanQueue || []).some((ex) => ex.req.at <= until)) {
+      await this.scan();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 
   // Decodes the capture's queued responses a few ms at a time, for kafka_error.
@@ -387,10 +415,12 @@ export class ExperimentRunner {
       case "kafka_error": {
         const exchanges = this.hooks.capture?.exchanges || [];
         const from = this.t0 + (spec.after ?? 0);
+        // A decision that waited for decoding still counts only its window.
+        const until = this.t0 + (spec.at ?? spec.by ?? this.end);
         for (let i = exchanges.length - 1; i >= 0; i--) {
           const ex = exchanges[i];
           if (ex.req.at < from) break;
-          if (!ex.errors?.includes(spec.error)) continue;
+          if (ex.req.at > until || !ex.errors?.includes(spec.error)) continue;
           if (spec.node != null && ex.client.node !== Number(spec.node) && ex.server.node !== Number(spec.node)) continue;
           return { ok: true, observed: `at ${fmtMs(ex.req.at - this.t0)}, ${this.hooks.nodeName(ex.client.node)} → ${this.hooks.nodeName(ex.server.node)}` };
         }

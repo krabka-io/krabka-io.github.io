@@ -187,6 +187,15 @@ check('the pcapng export is well-formed raw IPv4 with consistent TCP streams', (
       if (seqs.has(key)) assert.equal(seq, seqs.get(key), `sequence continues on ${key}`);
       seqs.set(key, (seq + payload) >>> 0);
       assert.ok(cap >= 40 && cap <= 40 + payload);
+      if (cap === 40 + payload) {
+        // The TCP checksum over the pseudo-header, header and payload sums to all ones.
+        let t = 6 + 20 + payload;
+        for (let i = 12; i < 20; i += 2) t += v.getUint16(p + i);
+        for (let i = 20; i < cap - 1; i += 2) t += v.getUint16(p + i);
+        if (cap % 2) t += v.getUint8(p + cap - 1) << 8;
+        while (t > 0xffff) t = (t & 0xffff) + (t >>> 16);
+        assert.equal(t, 0xffff, `TCP checksum on ${key}`);
+      }
     }
     pos += len;
   }
