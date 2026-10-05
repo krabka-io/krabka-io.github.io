@@ -43,7 +43,7 @@ spec:
 const installOperatorYaml = `# Add Helm chart repository and install the operator
 helm repo add krabka https://krabka.io/charts
 helm repo update
-helm install krabka-operator krabka/krabka-operator --version 0.5.0 --skip-crds \\
+helm install krabka-operator krabka/krabka-operator --version 0.5.0 \\
   --namespace krabka-system --create-namespace`;
 ---
 
@@ -93,7 +93,12 @@ helm install krabka-operator krabka/krabka-operator --version 0.5.0 --skip-crds 
         All custom resource definitions managed by the operator in API group <code class="text-krab-300 font-mono">krabka.io/v1alpha1</code>:
       </p>
 
-      <div class="frosted-card rounded-xl overflow-hidden border border-white/10 not-prose">
+      <a href={getPath('/docs/operator/crds')} class="block rounded-xl border border-krab-500/30 bg-krab-500/5 px-4 py-3 hover:border-krab-500/60">
+        <span class="block font-semibold text-white">Open the CRD explorer →</span>
+        <span class="mt-1 block text-xs text-gray-400">Find fields in all eight resources. Check nested types, required fields, defaults, allowed values, and validation rules.</span>
+      </a>
+
+      <div class="frosted-card rounded-xl overflow-x-auto border border-white/10 not-prose">
         <table class="w-full text-left text-xs border-collapse">
           <thead class="bg-slate-950/80 border-b border-white/10 uppercase tracking-wider text-gray-400 font-semibold font-sans">
             <tr>
@@ -113,6 +118,16 @@ helm install krabka-operator krabka/krabka-operator --version 0.5.0 --skip-crds 
           </tbody>
         </table>
       </div>
+
+      <h2 class="text-xl font-bold text-white pt-2">Approve a rebalance</h2>
+      <p>Create a <a href={getPath('/docs/operator/crds/kafkarebalance')} class="text-krab-400 underline">KafkaRebalance</a> with the <code>krabka.io/cluster</code> label. The operator asks the <a href={getPath('/docs/rebalancer')} class="text-krab-400 underline">rebalancer</a> for a proposal and reports <code>ProposalReady</code> in <code>status.conditions</code>. Read <code>status.optimizationResult</code> before approval.</p>
+      <CodeBlock lang="bash" code={`kubectl get kafkarebalance demo-rebalance -n default -o yaml
+kubectl annotate kafkarebalance demo-rebalance -n default krabka.io/rebalance=approve --overwrite
+# Recompute a proposal or stop an execution:
+kubectl annotate kafkarebalance demo-rebalance -n default krabka.io/rebalance=refresh --overwrite
+kubectl annotate kafkarebalance demo-rebalance -n default krabka.io/rebalance=stop --overwrite`} />
+      <p>The state moves through <code>PendingProposal</code>, <code>ProposalReady</code>, and <code>Rebalancing</code> to <code>Ready</code> or <code>NotReady</code>. A stopped execution reports <code>Stopped</code>. The <code>removeBrokers</code> mode needs a bearer token in a Secret in the resource's namespace. Set <code>spec.authorizationSecretRef</code>, or use the derived Secret <code>&lt;cluster&gt;-rebalancer-auth</code> with key <code>token</code>.</p>
+      <p>Use <a href={getPath('/docs/gateway')} class="text-krab-400 underline">gateway documentation</a> with the <a href={getPath('/docs/operator/crds/kafkagrpcgateway')} class="text-krab-400 underline">KafkaGrpcGateway reference</a> to configure gRPC access and webhook ingestion.</p>
 
       <div class="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
         <strong class="font-semibold text-amber-200">Component images:</strong>

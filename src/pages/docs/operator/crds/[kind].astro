@@ -1,0 +1,227 @@
+---
+import DocsLayout from '../../../../layouts/DocsLayout.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import CrdField from '../../../../components/CrdField.astro';
+import snapshot from '../../../../content/docs/operator/crds.json';
+import fieldValues from '../../../../data/operator-field-values.json';
+import { dump } from 'js-yaml';
+import { flattenSchema, kindSlug, schemaExample, schemaTree } from '../../../../utils/operator-crds.mjs';
+import { getPath } from '../../../../utils/paths';
+
+export function getStaticPaths() {
+  return snapshot.resources.map((resource) => ({ params: { kind: kindSlug(resource) }, props: { resource } }));
+}
+
+const { resource } = Astro.props;
+const kind = resource.spec.names.kind;
+const resources = [...snapshot.resources].sort((a, b) => a.spec.names.kind.localeCompare(b.spec.names.kind));
+const versions = resource.spec.versions.map((version) => {
+  const fields = flattenSchema(version.schema.openAPIV3Schema);
+  return { ...version, fields, tree: schemaTree(fields) };
+});
+const source = { ...snapshot.source, path: resource._sourcePath };
+const sourceRef = source.commit ?? source.branch ?? 'main';
+const sourceUrl = `https://github.com/krabka-io/${source.repo}/blob/${sourceRef}/${source.path}`;
+const behaviorSource = fieldValues._source;
+const behaviorSourceUrl = `https://github.com/krabka-io/${behaviorSource.repo}/tree/${behaviorSource.commit}/${behaviorSource.path}`;
+const count = versions.reduce((total, version) => total + version.fields.length, 0);
+const servedVersion = versions.find((version) => version.served) ?? versions[0];
+const exampleManifest = {
+  apiVersion: `${resource.spec.group}/${servedVersion.name}`, kind,
+  metadata: { name: kind === 'Kafka' ? 'my-cluster' : 'example', ...(resource.spec.scope === 'Namespaced' ? { namespace: 'default' } : {}), ...(kind !== 'Kafka' ? { labels: { 'krabka.io/cluster': 'my-cluster' } } : {}) },
+  spec: schemaExample(servedVersion.schema.openAPIV3Schema.properties.spec, 'spec', kind, fieldValues),
+};
+const template = dump(exampleManifest, { lineWidth: 90, noRefs: true });
+---
+
+<DocsLayout
+  title={`${kind} CRD reference`}
+  description={`${kind} operator API reference: all nested spec and status fields, required fields, types, defaults, enums, and schema validation.`}
+  currentSlug={`/docs/operator/crds/${kindSlug(resource)}`}
+  source={source}
+  wide
+>
+  <article class="crd-explorer" data-crd-explorer>
+    <header>
+      <a href={getPath('/docs/operator/crds')} class="back-link">All operator CRDs</a>
+      <h1>{kind}</h1>
+      <p>Expand a field to see its description, example, and default behavior. Nested fields are grouped under their parent.</p>
+      <dl class="resource-meta">
+        <div><dt>API group</dt><dd><code>{resource.spec.group}</code></dd></div>
+        <div><dt>Scope</dt><dd>{resource.spec.scope}</dd></div>
+        <div><dt>Resource name</dt><dd><code>{resource.spec.names.plural}</code></dd></div>
+        <div><dt>Short names</dt><dd><code>{resource.spec.names.shortNames?.join(', ') || 'None'}</code></dd></div>
+      </dl>
+      <p class="guidance">Required fields must be present when their parent object exists. <code>[]</code> denotes an array item; <code>{'{key}'}</code> denotes a map value. <code>status</code> is written by the operator. Reconcile-time checks and runtime defaults can add requirements beyond the schema.</p>
+      <p class="guidance">Examples are illustrative JSON values. Open “View JSON example” for an object or array. Adapt names, endpoints, and credentials to your cluster. Kubernetes applies schema defaults when the containing object exists. Runtime and omission notes describe operator behavior. Status examples show reported data.</p>
+      <p class="guidance">Runtime notes and domain examples were reviewed against <a href={behaviorSourceUrl} class="back-link" target="_blank" rel="noopener noreferrer">operator source at {behaviorSource.commit.slice(0, 7)}</a>.</p>
+      <a href={sourceUrl} class="back-link" target="_blank" rel="noopener noreferrer">View the complete CRD manifest at {sourceRef.slice(0, 7)}</a>
+    </header>
+
+    <nav aria-label="Custom resources" class="resource-links" data-pagefind-ignore>
+      {resources.map((item) => <a href={getPath(`/docs/operator/crds/${kindSlug(item)}`)} aria-current={item.spec.names.kind === kind ? 'page' : undefined}>{item.spec.names.kind}</a>)}
+    </nav>
+
+    <details class="schema-code">
+      <summary>Example manifest</summary>
+      <div class="field-body">
+        <p class="guidance">This example includes the required <code>spec</code> fields. Adapt its values and create any referenced resources before applying it.</p>
+        <button type="button" class="copy-btn" data-copy={template} aria-label={`Copy ${kind} manifest template`}>Copy template</button>
+        <CodeBlock code={template} lang="yaml" />
+      </div>
+    </details>
+
+    <form class="field-filters" data-field-filters hidden role="search" aria-label="Filter CRD fields" data-pagefind-ignore>
+      <div>
+        <label for="field-kind">Resource kind</label>
+        <select id="field-kind">{resources.map((item) => <option value={getPath(`/docs/operator/crds/${kindSlug(item)}`)} selected={item.spec.names.kind === kind}>{item.spec.names.kind}</option>)}</select>
+      </div>
+      <div class="search-control">
+        <label for="field-search">Search fields</label>
+        <input id="field-search" type="search" placeholder="Field path, description, or allowed value" autocomplete="off" />
+      </div>
+      <div>
+        <label for="field-section">Section</label>
+        <select id="field-section"><option value="">All sections</option><option value="spec">spec</option><option value="status">status</option><option value="resource">Resource schema</option></select>
+      </div>
+      <div>
+        <label for="field-required">Requirement</label>
+        <select id="field-required"><option value="">All requirements</option><option value="Required">Required</option><option value="Optional">Optional</option><option value="Array item">Array items</option><option value="Map value">Map values</option><option value="Schema option">Schema options</option></select>
+      </div>
+      <button type="reset">Reset</button>
+      <p class="result-count" data-field-count aria-live="polite">{count} schema entries</p>
+    </form>
+
+    <nav aria-label="Schema sections" class="section-links">
+      {versions.map((version) => <>{['spec', 'status', 'resource'].map((section) => <a href={`#${version.name}-${section}`}>{versions.length > 1 ? `${version.name} · ` : ''}{section === 'resource' ? 'Resource schema' : section}</a>)}</>)}
+    </nav>
+    <p class="no-results" data-no-fields hidden>No fields match. Change the search or reset the filters.</p>
+
+    {versions.map((version) => (
+      <section class="schema-version" aria-label={`API version ${version.name}`}>
+        <h2>{resource.spec.group}/{version.name}</h2>
+        <p class="version-meta">{version.served ? 'Served API version' : 'Not served'} · {version.storage ? 'Storage version' : 'Not the storage version'} · {version.fields.length} schema entries</p>
+        <details class="schema-code" data-pagefind-ignore>
+          <summary>Complete OpenAPI schema (JSON)</summary>
+          <div class="field-body">
+            <button type="button" class="copy-btn schema-copy" hidden aria-label={`Copy ${kind} ${version.name} OpenAPI schema`}>Copy schema</button>
+            <pre>{JSON.stringify(version.schema.openAPIV3Schema, null, 2)}</pre>
+          </div>
+        </details>
+        {['spec', 'status', 'resource'].map((section) => (
+          <section data-field-section aria-labelledby={`${version.name}-${section}`}>
+            <h3 id={`${version.name}-${section}`}>{section === 'resource' ? 'Resource schema' : section}</h3>
+            <div class="field-list">
+              {version.tree.filter((field) => field.section === section).map((field) => <CrdField field={field} kind={kind} values={fieldValues} version={version.name} manifest={exampleManifest} />)}
+            </div>
+          </section>
+        ))}
+      </section>
+    ))}
+  </article>
+</DocsLayout>
+
+<script>
+  const explorer = document.querySelector<HTMLElement>('[data-crd-explorer]');
+  if (explorer) {
+    const form = explorer.querySelector<HTMLFormElement>('[data-field-filters]')!;
+    const search = form.querySelector<HTMLInputElement>('#field-search')!;
+    const section = form.querySelector<HTMLSelectElement>('#field-section')!;
+    const requirement = form.querySelector<HTMLSelectElement>('#field-required')!;
+    const resourceKind = form.querySelector<HTMLSelectElement>('#field-kind')!;
+    const entries = [...explorer.querySelectorAll<HTMLElement>('[data-field-entry]')];
+    const searchable = entries.map((entry) => entry.dataset.ownSearch!);
+    const count = form.querySelector<HTMLElement>('[data-field-count]')!;
+    const empty = explorer.querySelector<HTMLElement>('[data-no-fields]')!;
+    const filter = () => {
+      const query = search.value.toLowerCase().trim();
+      const matches = new Set<HTMLElement>();
+      entries.forEach((entry, index) => {
+        entry.hidden = !((!section.value || entry.dataset.section === section.value)
+          && (!requirement.value || entry.dataset.requirement!.startsWith(requirement.value))
+          && (!query || searchable[index].includes(query)));
+        entry.toggleAttribute('data-field-match', !entry.hidden);
+        entry.removeAttribute('data-field-context');
+        if (!entry.hidden) matches.add(entry);
+      });
+      matches.forEach((entry) => {
+        let ancestor: HTMLElement | null = entry;
+        while (ancestor) {
+          ancestor.hidden = false;
+          ancestor.toggleAttribute('data-field-context', !matches.has(ancestor));
+          if (query || section.value || requirement.value) ancestor.querySelector<HTMLDetailsElement>(':scope > .field-details')!.open = true;
+          ancestor = ancestor.parentElement?.closest<HTMLElement>('[data-field-entry]') ?? null;
+        }
+      });
+      explorer.querySelectorAll<HTMLElement>('[data-field-section]').forEach((group) => {
+        group.hidden = ![...group.querySelectorAll<HTMLElement>('[data-field-entry]')].some((entry) => !entry.hidden);
+      });
+      count.textContent = `${matches.size} of ${entries.length} schema entries`;
+      empty.hidden = matches.size > 0;
+    };
+    const openHash = () => {
+      const target = document.getElementById(window.location.hash.slice(1));
+      if (target && explorer.contains(target)) {
+        form.reset();
+        filter();
+        let entry = target.closest<HTMLElement>('[data-field-entry]');
+        while (entry) {
+          entry.querySelector<HTMLDetailsElement>(':scope > .field-details')!.open = true;
+          entry = entry.parentElement?.closest<HTMLElement>('[data-field-entry]') ?? null;
+        }
+        target.scrollIntoView({ block: 'start' });
+      }
+    };
+    form.hidden = false;
+    explorer.querySelectorAll<HTMLButtonElement>('.schema-copy').forEach((button) => {
+      button.dataset.copy = button.closest('details')!.querySelector('pre')!.textContent!;
+      button.hidden = false;
+    });
+    form.addEventListener('submit', (event) => event.preventDefault());
+    form.addEventListener('input', filter);
+    resourceKind.addEventListener('change', () => window.location.assign(resourceKind.value));
+    form.addEventListener('reset', () => requestAnimationFrame(filter));
+    window.addEventListener('hashchange', openHash);
+    openHash();
+  }
+</script>
+
+<style>
+  .crd-explorer { --crd-border: color-mix(in oklab, var(--color-white) 12%, transparent); --crd-panel: color-mix(in oklab, var(--color-white) 2%, transparent); color: var(--color-gray-300); font-size: .875rem; line-height: 1.65; min-width: 0; }
+  .crd-explorer header { border-bottom: 1px solid var(--crd-border); padding-bottom: 1.25rem; }
+  h1 { color: var(--color-white); font-size: clamp(1.8rem, 5vw, 2.4rem); font-weight: 700; margin: .5rem 0; overflow-wrap: anywhere; }
+  h2 { color: var(--color-white); font-size: 1.25rem; font-weight: 650; margin-top: 2rem; overflow-wrap: anywhere; }
+  h3 { color: var(--color-white); font: 600 1.1rem ui-monospace, monospace; margin: 1.5rem 0 .75rem; scroll-margin-top: 6rem; }
+  code { font-family: ui-monospace, monospace; font-size: .85em; }
+  .back-link { color: var(--color-krab-300); font-size: .8rem; text-decoration: underline; text-underline-offset: 3px; }
+  .resource-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+  .resource-meta dt, .guidance, .version-meta { color: var(--color-gray-400); font-size: .75rem; }
+  .resource-meta dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+  .guidance { margin: .75rem 0; }
+  .resource-links, .section-links { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.25rem 0; }
+  .resource-links a, .section-links a { border: 1px solid var(--crd-border); border-radius: .4rem; color: var(--color-gray-300); padding: .4rem .6rem; font-size: .75rem; overflow-wrap: anywhere; }
+  .resource-links a[aria-current], .resource-links a:hover, .section-links a:hover { border-color: var(--color-krab-400); color: var(--color-krab-300); background: var(--crd-panel); }
+  .field-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; border: 1px solid var(--crd-border); border-radius: .75rem; padding: 1rem; background: var(--crd-panel); }
+  .field-filters[hidden], [hidden] { display: none !important; }
+  .field-filters > div { min-width: 0; }
+  .field-filters label { display: block; color: var(--color-gray-300); font-size: .75rem; margin-bottom: .3rem; }
+  .search-control { flex: 1 1 17rem; }
+  input, select, button { border: 1px solid var(--crd-border); border-radius: .4rem; background: var(--color-ocean-800); color: var(--color-gray-200); font: inherit; font-size: .8rem; min-height: 2.6rem; padding: .45rem .65rem; max-width: 100%; }
+  input { width: 100%; }
+  input::placeholder { color: var(--color-gray-400); }
+  button { cursor: pointer; }
+  a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--color-krab-400); outline-offset: 3px; }
+  .result-count { flex-basis: 100%; color: var(--color-gray-400); font-size: .75rem; margin: 0; }
+  .no-results { border: 1px solid var(--crd-border); padding: 1rem; border-radius: .5rem; }
+  .version-meta { margin: .25rem 0 1rem; }
+  .field-list { display: grid; gap: .4rem; }
+  .schema-code { border: 1px solid var(--crd-border); border-radius: .5rem; margin: .75rem 0; }
+  .schema-code button { margin-bottom: .75rem; }
+  summary { cursor: pointer; padding: .7rem; list-style-position: inside; scroll-margin-top: 6rem; }
+  .field-body { border-top: 1px solid var(--crd-border); padding: .75rem; min-width: 0; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .75rem/1.65 ui-monospace, monospace; margin: 0; }
+  @media (max-width: 40rem) {
+    .field-filters > div:not(.search-control) { flex: 1 1 10rem; }
+    select { width: 100%; }
+  }
+</style>

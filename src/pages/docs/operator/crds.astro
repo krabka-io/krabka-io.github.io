@@ -1,0 +1,40 @@
+---
+import DocsLayout from '../../../layouts/DocsLayout.astro';
+import snapshot from '../../../content/docs/operator/crds.json';
+import { flattenSchema, kindSlug } from '../../../utils/operator-crds.mjs';
+import { getPath } from '../../../utils/paths';
+
+const resources = [...snapshot.resources].sort((a, b) => a.spec.names.kind.localeCompare(b.spec.names.kind));
+const counts = resources.map((resource) => resource.spec.versions.reduce((count, version) => count + flattenSchema(version.schema.openAPIV3Schema).length, 0));
+---
+
+<DocsLayout
+  title="Operator CRD explorer"
+  description="Explore every operator custom resource, including nested spec and status fields, examples, defaults, enums, and schema validation."
+  currentSlug="/docs/operator/crds"
+>
+  <article class="space-y-6 text-sm leading-relaxed text-gray-300">
+    <header class="space-y-3 border-b border-white/10 pb-5">
+      <p class="text-xs text-krab-300">Kubernetes operator · API reference</p>
+      <h1 class="text-3xl font-bold text-white sm:text-4xl">Operator CRD explorer</h1>
+      <p>Choose a resource to inspect its complete <code>spec</code> and <code>status</code> schema. Search field paths or descriptions, then open a field for its example, default behavior, allowed values, and validation rules.</p>
+      <p class="text-xs text-gray-400">Schema source: <a href={`https://github.com/krabka-io/${snapshot.source.repo}/tree/${snapshot.source.commit ?? 'main'}/${snapshot.source.path}`} class="text-krab-300 hover:underline">{snapshot.source.repo}@{snapshot.source.commit?.slice(0, 7) ?? 'main'}</a>. This reference can include unreleased changes. Reconcile-time checks and runtime defaults can add requirements beyond the schema. See the <a href={getPath('/docs/operator')} class="text-krab-300 hover:underline">operator guide</a> for deployment instructions.</p>
+    </header>
+
+    <section aria-labelledby="resources-heading">
+      <h2 id="resources-heading" class="mb-4 text-xl font-semibold text-white">Custom resources</h2>
+      <ul class="grid list-none gap-3 p-0 sm:grid-cols-2">
+        {resources.map((resource, index) => (
+          <li class="min-w-0">
+            <a href={getPath(`/docs/operator/crds/${kindSlug(resource)}`)} class="block h-full rounded-xl border border-white/10 bg-white/[0.02] p-4 transition-colors hover:border-krab-400/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-krab-400">
+              <span class="break-words font-mono font-semibold text-krab-300">{resource.spec.names.kind}</span>
+              <span class="mt-2 block break-words text-xs text-gray-400">{resource.spec.group}/{resource.spec.versions.map((version) => version.name).join(', ')} · {resource.spec.scope}</span>
+              <span class="mt-2 block text-xs text-gray-300">{counts[index]} schema entries · {resource.spec.names.plural}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+    <p class="text-xs text-gray-400">Array entries use <code>[]</code>. Map values use <code>{'{key}'}</code>. Required fields must be present when their parent object exists. Schema options show the requirements for that option.</p>
+  </article>
+</DocsLayout>

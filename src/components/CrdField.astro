@@ -1,0 +1,108 @@
+---
+import CrdDescription from './CrdDescription.astro';
+import { fieldDefault, fieldExample, schemaFacts } from '../utils/operator-crds.mjs';
+
+const { field, kind, values, version, manifest, depth = 0 } = Astro.props;
+const id = `${version}-${field.id}`;
+const example = field.path === '$' ? manifest : fieldExample(field, kind, values);
+const exampleJson = JSON.stringify(example, null, 2);
+const complexExample = example !== null && typeof example === 'object';
+const defaultValue = fieldDefault(field, kind, values);
+const schemaDefault = defaultValue.label === 'Schema default';
+const compactDefault = {
+  'No schema default': 'Not declared',
+  'No independent default': 'Defined by the parent',
+  'No resource default': 'None',
+}[defaultValue.label];
+const facts = schemaFacts(field.schema).filter(([label]) => label !== 'Allowed values');
+const search = [field.path, field.context, field.type, field.requirement, field.schema.description, exampleJson, defaultValue.label, defaultValue.value, ...schemaFacts(field.schema).flat()].join(' ').toLowerCase();
+const requirement = field.requirement.replace(/ in parent$/, '');
+---
+
+<div class:list={['field-entry', field.children.length > 0 && 'field-group']} data-field-entry data-field-path={field.path} data-section={field.section} data-requirement={field.requirement} data-own-search={search}>
+  <details class="field-details" open={depth === 0}>
+    <summary id={id} title={field.path} aria-label={`${field.path} — ${field.type}, ${field.requirement}`}>
+      <code class="field-name">{field.name}</code>
+      <span class="field-type">{field.type}{field.schema.format ? ` (${field.schema.format})` : ''}</span>
+      <span class:list={['requirement', field.requirement.startsWith('Required') && 'required']}>{requirement}</span>
+      {field.children.length > 0 && <span class="child-count">{field.children.length} {field.children.length === 1 ? 'field' : 'fields'}</span>}
+    </summary>
+    <div class="field-body">
+      {field.context && <p class="option-context">{field.context}</p>}
+      {field.schema.description && <CrdDescription text={field.schema.description} />}
+      <dl class:list={['field-values', complexExample && 'complex-values']}>
+        <div data-field-example data-example={exampleJson}>
+          <dt>Example</dt>
+          <dd>
+            {complexExample ? <details class="value-example" data-example-disclosure>
+              <summary>View JSON example</summary>
+              <pre>{exampleJson}</pre>
+            </details> : <code class="value-code" data-value>{exampleJson}</code>}
+          </dd>
+        </div>
+        <div data-field-default data-default={defaultValue.value}>
+          <dt>Default <span class="default-origin">{defaultValue.label}</span></dt>
+          <dd>{schemaDefault ? <code class="value-code" data-value>{defaultValue.value}</code>
+            : compactDefault ? <span title={defaultValue.value}>{compactDefault}</span>
+            : <CrdDescription text={defaultValue.value} />}</dd>
+        </div>
+      </dl>
+      {field.schema.enum && <div class="allowed-values"><span>Allowed values</span>{field.schema.enum.map((value) => <code>{JSON.stringify(value)}</code>)}</div>}
+      {facts.length > 0 && <details class="field-validation">
+        <summary>Validation and schema details</summary>
+        <dl class="schema-facts">{facts.map(([label, value]) => <div><dt>{label}</dt><dd><pre>{value}</pre></dd></div>)}</dl>
+      </details>}
+    </div>
+    {field.children.length > 0 && <div class="field-children" data-field-children>
+      {field.children.map((child) => <Astro.self field={child} kind={kind} values={values} version={version} manifest={manifest} depth={depth + 1} />)}
+    </div>}
+  </details>
+  <a href={`#${id}`} class="field-link" aria-label={`Link to ${field.path}${field.context ? ` (${field.context})` : ''}`}>#</a>
+</div>
+
+<style>
+  .field-entry { position: relative; border: 1px solid var(--crd-border); border-radius: .5rem; min-width: 0; background: var(--crd-panel); }
+  .field-entry[hidden] { display: none !important; }
+  .field-details { min-width: 0; }
+  .field-details > summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; cursor: pointer; padding: .85rem 2.75rem .85rem .85rem; list-style: none; scroll-margin-top: 6rem; }
+  .field-details > summary::-webkit-details-marker { display: none; }
+  .field-details > summary::before { content: '›'; color: var(--color-gray-400); font-size: 1rem; transition: transform .15s; }
+  .field-details[open] > summary::before { transform: rotate(90deg); }
+  code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  .field-name { color: var(--color-krab-200); font-size: .85rem; min-width: 0; }
+  .field-type, .requirement, .child-count { font-size: .7rem; color: var(--color-gray-400); }
+  .required { color: var(--color-amber-300); }
+  .child-count { margin-left: auto; }
+  .field-body { border-top: 1px solid var(--crd-border); padding: .85rem; min-width: 0; }
+  .field-entry[data-field-context] > .field-details > .field-body { display: none; }
+  .option-context { color: var(--color-amber-300); font-size: .75rem; margin: 0 0 .6rem; overflow-wrap: anywhere; }
+  .field-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin: .85rem 0 0; }
+  .complex-values { grid-template-columns: minmax(0, 1fr) auto; }
+  .complex-values > [data-field-default] { order: -1; }
+  .complex-values:has([data-example-disclosure][open]) { grid-template-columns: minmax(0, 1fr); }
+  .field-values > div { min-width: 0; border-left: 2px solid var(--crd-border); padding-left: .75rem; }
+  dt { color: var(--color-gray-400); font-size: .7rem; margin-bottom: .35rem; }
+  .default-origin { margin-left: .4rem; font-size: .65rem; }
+  dd { margin: 0; min-width: 0; font-size: .8rem; overflow-wrap: anywhere; }
+  .value-code { display: inline-block; border-radius: .3rem; padding: .15rem .4rem; background: var(--crd-panel); color: var(--color-gray-200); font-size: .8rem; white-space: pre-wrap; }
+  .value-example > summary, .field-validation > summary { cursor: pointer; color: var(--color-gray-300); font-size: .75rem; list-style-position: inside; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .75rem/1.65 ui-monospace, monospace; margin: .6rem 0 0; padding: .65rem; border-radius: .3rem; background: var(--crd-panel); }
+  .allowed-values { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .85rem; font-size: .7rem; color: var(--color-gray-400); }
+  .allowed-values code { border: 1px solid var(--crd-border); border-radius: .3rem; padding: .1rem .3rem; font-size: .7rem; }
+  .allowed-values > span { margin-right: .25rem; }
+  .field-validation { border-top: 1px solid var(--crd-border); padding-top: .75rem; margin-top: .85rem; }
+  .schema-facts { display: grid; gap: .6rem; margin: .75rem 0 0; }
+  .schema-facts > div { display: grid; grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr); gap: .5rem; }
+  .schema-facts pre { margin: 0; }
+  .field-children { display: grid; gap: .4rem; padding: 0 .65rem .65rem; border-left: 2px solid var(--crd-border); margin-left: .65rem; min-width: 0; }
+  .field-children .field-children { margin-left: 0; padding-right: 0; }
+  .field-link { position: absolute; top: .75rem; right: .7rem; color: var(--color-gray-400); text-decoration: none; font-size: .85rem; padding: .2rem; }
+  summary:focus-visible, a:focus-visible { outline: 2px solid var(--color-krab-400); outline-offset: 3px; }
+  summary:target { outline: 2px solid var(--color-krab-400); outline-offset: -2px; border-radius: .4rem; }
+  @media (max-width: 40rem) {
+    .field-values { grid-template-columns: minmax(0, 1fr); gap: .8rem; }
+    .field-children { margin-left: .3rem; padding-left: .3rem; padding-right: .3rem; }
+    .field-children .field-children { border-left: 0; padding-left: 0; }
+    .schema-facts > div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  }
+</style>

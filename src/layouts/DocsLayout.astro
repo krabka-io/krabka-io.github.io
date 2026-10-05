@@ -119,9 +119,35 @@ const docSections = [
       { label: 'Restore from Archive', slug: '/docs/broker/operations/runbooks/restore-from-archive' },
       { label: 'Metrics & Alerts', slug: '/docs/broker/operations/metrics' },
       { label: 'Scale a Cluster', slug: '/docs/broker/operations/scaling' },
-      { label: 'Kubernetes Operator', slug: '/docs/operator' },
       { label: 'Helm Chart Repository', slug: '/docs/helm-charts' },
       { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
+    ],
+  },
+  {
+    category: 'Kubernetes Operator',
+    items: [
+      { label: 'Overview & Install', slug: '/docs/operator' },
+      { label: 'CRD Explorer', slug: '/docs/operator/crds' },
+      ...['Kafka', 'KafkaNodePool', 'KafkaTopic', 'KafkaUser', 'KafkaConnector', 'KafkaRebalance', 'SchemaRegistry', 'KafkaGrpcGateway'].map((kind) => ({ label: kind, slug: `/docs/operator/crds/${kind.toLowerCase()}` })),
+      { label: 'Upstream Reference', slug: '/docs/operator/reference' },
+    ],
+  },
+  {
+    category: 'Rebalancer',
+    items: [
+      { label: 'Overview & Workflow', slug: '/docs/rebalancer' },
+      { label: 'Configuration & API', slug: '/docs/rebalancer/reference' },
+      { label: 'Broker Integration Tests', slug: '/docs/rebalancer/broker-tests' },
+    ],
+  },
+  {
+    category: 'Gateway',
+    items: [
+      { label: 'Overview & Configuration', slug: '/docs/gateway' },
+      { label: 'Upstream Reference', slug: '/docs/gateway/reference' },
+      { label: 'CloudEvents Ingestion', slug: '/docs/gateway/cloudevents' },
+      { label: 'GitLab Ingestion', slug: '/docs/gateway/gitlab-ingestion' },
+      { label: 'GitHub Firehose', slug: '/docs/gateway/github-firehose' },
     ],
   },
   {
@@ -181,7 +207,7 @@ const activeSection =
 const activeCategory = activeSection?.category || 'Docs';
 // A synced guide's title carries its component, "Roadmap (Broker)"; the crumb
 // already names the category, so it matches the sidebar and the page heading.
-const crumbTitle = title.replace(/ \((Broker|Java Streams|Go Streams|Rust Streams|Connect|Operator|CLI)\)$/, '');
+const crumbTitle = title.replace(/ \((Broker|Java Streams|Go Streams|Rust Streams|Connect|Operator|Gateway|Rebalancer|CLI)\)$/, '');
 
 const site = Astro.site ?? 'https://krabka.io';
 const pageUrl = new URL(Astro.url.pathname, site).href;

@@ -10,7 +10,7 @@ import path from 'node:path';
 const CODE_OR_LINK = /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))|``[^`]+``|`[^`\n]+`)|\[([^\]]+)\]\(([^)]+)\)|\[(`[^`\n]+`)\](?![(\[:])/gm;
 
 /** Rewrite relative links in a synced guide so they resolve on krabka.io or GitHub. */
-export function rewriteDocLinks(content, { docsSubdir, repo, sourceFile = '', sourceRef = 'main', publishedFiles }) {
+export function rewriteDocLinks(content, { docsSubdir, repo, sourceFile = '', sourcePath, sourceRef = 'main', publishedFiles, publishedPaths }) {
   return content.replace(CODE_OR_LINK, (match, code, _fence, label, target, intraDoc, offset) => {
     if (code) return match;
     if (intraDoc) return intraDoc;
@@ -23,12 +23,17 @@ export function rewriteDocLinks(content, { docsSubdir, repo, sourceFile = '', so
     const matchPath = /^([^?#]*)([?#].*)?$/.exec(target);
     const rawPath = decodeURIComponent(matchPath[1]);
     const suffix = matchPath[2] ?? '';
-    const repoPath = path.posix.normalize(path.posix.join('docs', path.posix.dirname(sourceFile), rawPath));
+    const base = sourcePath ? path.posix.dirname(sourcePath) : path.posix.join('docs', path.posix.dirname(sourceFile));
+    const repoPath = path.posix.normalize(path.posix.join(base, rawPath));
     if (repoPath.startsWith('../')) throw new Error(`Documentation link leaves the repository: ${target}`);
+
+    // Explicitly imported READMEs can live outside docs/ and link to each other.
+    const imported = publishedPaths?.get(repoPath.toLowerCase());
+    if (imported) return `[${label}](/docs/${docsSubdir}/${imported.replace(/\.md$/i, '').toLowerCase()}${suffix})`;
 
     // 1. Link to sibling markdown guide in the same docs collection
     const guide = repoPath.startsWith('docs/') ? repoPath.slice(5).toLowerCase() : null;
-    if (/\.md$/i.test(repoPath) && guide && (!publishedFiles || publishedFiles.has(guide) || !guide.includes('/') || guide.startsWith('operations/'))) {
+    if (!sourcePath && /\.md$/i.test(repoPath) && guide && (!publishedFiles || publishedFiles.has(guide) || !guide.includes('/') || guide.startsWith('operations/'))) {
       const slug = repoPath.slice(5).replace(/\.md$/i, '').toLowerCase();
       const destUrl = slug === 'index' ? `/docs/${docsSubdir}` : `/docs/${docsSubdir}/${slug}`;
       return `[${label}](${destUrl}${suffix})`;

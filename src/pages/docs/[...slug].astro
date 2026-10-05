@@ -26,6 +26,8 @@ const componentLabelMap: Record<string, string> = {
   'broker': 'Broker',
   'connect': 'Connect',
   'operator': 'Operator',
+  'gateway': 'Gateway',
+  'rebalancer': 'Rebalancer',
   'cli': 'CLI',
 };
 
@@ -52,7 +54,7 @@ const fileName =
 // Written by scripts/sync-docs.mjs: the commit each component's guides came from.
 const sourcesFile = 'src/content/docs/sources.json';
 const sources = fs.existsSync(sourcesFile) ? JSON.parse(fs.readFileSync(sourcesFile, 'utf8')) : {};
-const source = { repo: repoName, path: `docs/${fileName}`, ...sources[component] };
+const source = { repo: repoName, ...sources[component], path: sources[component]?.files?.[fileName] ?? `docs/${fileName}` };
 
 // A synced guide that the site also renders in a purpose-built form gets a
 // pointer to that form above the verbatim document.

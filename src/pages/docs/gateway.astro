@@ -1,0 +1,224 @@
+---
+import CodeBlock from '../../components/CodeBlock.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const revision = '49870fd8e5f708274ff69a3e64a092844e2f8809';
+const source = `https://github.com/krabka-io/krabka-gateway/blob/${revision}`;
+const sourceTree = `https://github.com/krabka-io/krabka-gateway/tree/${revision}`;
+const install = `git clone https://github.com/krabka-io/krabka-gateway.git
+cd krabka-gateway
+git checkout ${revision}
+cargo build --release -p krabka-gateway --bin krabka-gateway`;
+const start = `KRABKA_BOOTSTRAP_SERVERS=127.0.0.1:9092 \\
+KRABKA_GATEWAY_LISTEN_ADDR=127.0.0.1:9500 \\
+KRABKA_GATEWAY_ADVERTISED_ADDR=127.0.0.1:9500 \\
+./target/release/krabka-gateway
+
+# In another terminal
+curl --fail http://127.0.0.1:9500/healthz
+curl --fail http://127.0.0.1:9500/readyz`;
+const produce = `# Create the events topic before sending records.
+curl --fail-with-body http://127.0.0.1:9500/v1/produce/events \\
+  -H 'Content-Type: application/json' \\
+  -H 'Idempotency-Key: example-delivery-1' \\
+  --data-binary '{"message":"hello krabka"}'`;
+const outbound = `[[allowed_targets]]
+scheme = "https"
+host = "hooks.example.com"
+
+[[subscriptions]]
+name = "events-delivery"
+source_topics = ["events"]
+target_url = "https://hooks.example.com/events"
+dead_letter_topic = "events-delivery-dlq"
+max_attempts = 5
+base_backoff = "500ms"
+max_backoff = "30s"
+request_timeout = "10s"
+content_mode = "cloud_events_structured"`;
+const configGroups = [
+  {
+    title: 'Connection and identity',
+    rows: [
+      ['bootstrap-servers', 'KRABKA_BOOTSTRAP_SERVERS', 'Required; comma-separated host:port list'],
+      ['listen-addr', 'KRABKA_GATEWAY_LISTEN_ADDR', '0.0.0.0:9500'],
+      ['advertised-addr', 'KRABKA_GATEWAY_ADVERTISED_ADDR', 'Required; host:port reachable by peer replicas'],
+      ['client-id', 'KRABKA_GATEWAY_CLIENT_ID', 'krabka-gateway'],
+      ['client-dispatch-queue-capacity', 'KRABKA_GATEWAY_CLIENT_DISPATCH_QUEUE_CAPACITY', '64; must be positive'],
+      ['client-frame-max', 'KRABKA_GATEWAY_CLIENT_FRAME_MAX', '100MiB; maximum 100MiB'],
+    ],
+  },
+  {
+    title: 'Deduplication and internal topics',
+    rows: [
+      ['dedup-topic', 'KRABKA_GATEWAY_DEDUP_TOPIC', '__krabka_grpc_dedup'],
+      ['dedup-partitions', 'KRABKA_GATEWAY_DEDUP_PARTITIONS', '8; positive partition count'],
+      ['dedup-window', 'KRABKA_GATEWAY_DEDUP_WINDOW', '1h; retention and guarantee horizon'],
+      ['dedup-ownership-group', 'KRABKA_GATEWAY_DEDUP_OWNERSHIP_GROUP', '<client-id>-dedup-owners'],
+      ['dedup-txn-id-prefix', 'KRABKA_GATEWAY_DEDUP_TXN_PREFIX', 'krabka-gw-dedup'],
+      ['membership-topic', 'KRABKA_GATEWAY_MEMBERSHIP_TOPIC', '__krabka_gateway_membership'],
+      ['internal-topic-replication-factor', 'KRABKA_GATEWAY_INTERNAL_TOPIC_REPLICATION_FACTOR', '3'],
+      ['internal-topic-allow-replication-fallback', 'KRABKA_GATEWAY_INTERNAL_TOPIC_ALLOW_REPLICATION_FALLBACK', 'true; set false to require the requested replication factor'],
+      ['internal-topic-create-timeout', 'KRABKA_GATEWAY_INTERNAL_TOPIC_CREATE_TIMEOUT', '10s'],
+      ['internal-topic-segment', 'KRABKA_GATEWAY_INTERNAL_TOPIC_SEGMENT', '1m'],
+      ['internal-topic-min-cleanable-dirty-ratio', 'KRABKA_GATEWAY_INTERNAL_TOPIC_MIN_CLEANABLE_DIRTY_RATIO', '1%'],
+      ['consumer-poll-timeout', 'KRABKA_GATEWAY_CONSUMER_POLL_TIMEOUT', '500ms'],
+      ['ownership-warmup-empty-polls', 'KRABKA_GATEWAY_OWNERSHIP_WARMUP_EMPTY_POLLS', '2; must be positive'],
+      ['readiness-poll-interval', 'KRABKA_GATEWAY_READINESS_POLL_INTERVAL', '250ms'],
+    ],
+  },
+  {
+    title: 'HTTP ingress, egress, and schemas',
+    rows: [
+      ['webhooks-config', 'KRABKA_GATEWAY_WEBHOOKS_CONFIG', 'Unset; TOML file with [[endpoints]]'],
+      ['outbound-webhooks-config', 'KRABKA_GATEWAY_OUTBOUND_WEBHOOKS_CONFIG', 'Unset; TOML file with [[subscriptions]] and [[allowed_targets]]'],
+      ['produce-max-body', 'KRABKA_GATEWAY_PRODUCE_MAX_BODY', '2MiB; generic HTTP produce limit'],
+      ['forward-max-body', 'KRABKA_GATEWAY_FORWARD_MAX_BODY', '2MiB; peer forwarding limit'],
+      ['schema-registry-url', 'KRABKA_GATEWAY_SCHEMA_REGISTRY_URL', 'Unset; raw bytes pass through'],
+      ['schema-registry-latest-cache-ttl', 'KRABKA_GATEWAY_SCHEMA_REGISTRY_LATEST_CACHE_TTL', '5s'],
+      ['schema-registry-frame-raw', 'KRABKA_GATEWAY_SCHEMA_REGISTRY_FRAME_RAW', 'false'],
+    ],
+  },
+  {
+    title: 'Listener TLS and peer trust',
+    rows: [
+      ['tls-cert', 'KRABKA_GATEWAY_TLS_CERT', 'Unset; PEM certificate chain'],
+      ['tls-key', 'KRABKA_GATEWAY_TLS_KEY', 'Unset; PEM private key; required with tls-cert'],
+      ['tls-client-ca', 'KRABKA_GATEWAY_TLS_CLIENT_CA', 'Unset; CA for incoming client certificates'],
+      ['tls-client-auth', 'KRABKA_GATEWAY_TLS_CLIENT_AUTH', 'disabled; accepts optional or required'],
+      ['tls-trust-roots', 'KRABKA_GATEWAY_TLS_TRUST_ROOTS', 'Falls back to tls-client-ca; trust for peer forwarding'],
+      ['tls-reload-interval', 'KRABKA_GATEWAY_TLS_RELOAD_INTERVAL', '30s'],
+    ],
+  },
+  {
+    title: 'Authorization and broker TLS',
+    rows: [
+      ['authz', 'KRABKA_GATEWAY_AUTHZ', 'off; simple enables ACL checks'],
+      ['authz-super-users', 'KRABKA_GATEWAY_AUTHZ_SUPER_USERS', 'Empty; comma-separated principal names that bypass ACL checks'],
+      ['acl-refresh-interval', 'KRABKA_GATEWAY_ACL_REFRESH_INTERVAL', '30s'],
+      ['bearer', 'KRABKA_GATEWAY_BEARER', 'off; unsecured is for development and tests'],
+      ['bearer-principal-claim', 'KRABKA_GATEWAY_BEARER_PRINCIPAL_CLAIM', 'sub'],
+      ['bearer-allowable-clock-skew', 'KRABKA_GATEWAY_BEARER_ALLOWABLE_CLOCK_SKEW', '30s; zero is allowed'],
+      ['broker-tls-cert', 'KRABKA_GATEWAY_BROKER_TLS_CERT', 'Unset; PEM client certificate chain'],
+      ['broker-tls-key', 'KRABKA_GATEWAY_BROKER_TLS_KEY', 'Unset; PEM private key; required with broker-tls-cert'],
+      ['broker-tls-ca', 'KRABKA_GATEWAY_BROKER_TLS_CA', 'Unset; trust roots used with a broker client certificate and key'],
+      ['broker-tls-server-name', 'KRABKA_GATEWAY_BROKER_TLS_SERVER_NAME', 'Unset; required with broker client certificate and key'],
+    ],
+  },
+];
+const guides = [
+  ['reference', 'Repository guide', 'Builds, SDK toolchains, the protobuf contract, and conformance checks.'],
+  ['cloudevents', 'CloudEvents', 'Binary and structured HTTP ingress, record headers, and outbound delivery.'],
+  ['github-firehose', 'GitHub webhook firehose', 'Signed ingress and a Rust Streams application that preserves event payloads.'],
+  ['gitlab-ingestion', 'GitLab ingestion', 'Signing tokens, external secrets, replica settings, and consumer responsibilities.'],
+];
+---
+
+<DocsLayout title="Application Gateway" description="Run krabka-gateway for Connect-RPC, HTTP publishing, share queues, signed webhooks, and CloudEvents. Includes configuration, security, and operations." currentSlug="/docs/gateway">
+  <div class="markdown-body">
+    <h1>Application Gateway</h1>
+    <p><code>krabka-gateway</code> accepts application requests over Connect-RPC and HTTP, then uses native Kafka clients to reach the brokers. Use it for browser applications, functions, webhook receivers, and queue workers.</p>
+    <aside class="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-xs text-gray-400">
+      Runtime reference: <a href={`${source}/crates/gateway/src/bin/gateway.rs`}>krabka-gateway@{revision.slice(0, 7)}</a>, committed October 4, 2026. This revision is before 1.0 and may include unreleased changes. Check <a href={getPath('/versions')}>release status</a> and the source at your installed tag before deployment.
+    </aside>
+
+    <h2>Install and run locally</h2>
+    <p>The source build requires Rust 1.99.0 or newer. The workspace pins its sibling dependencies; build from the repository root. The gateway crate is not published to crates.io at this revision.</p>
+    <CodeBlock code={install} lang="bash" />
+    <p>Start a broker first and create the topics your application will use. Then run the gateway. Both the broker bootstrap list and the advertised gateway address are required.</p>
+    <CodeBlock code={start} lang="bash" />
+    <p>The listener above uses local plaintext HTTP. <code>/healthz</code> checks liveness. <code>/readyz</code> returns HTTP 503 until the deduplication state is ready, and HTTP 200 when the replica can accept traffic.</p>
+    <p>The container image is <code>ghcr.io/krabka-io/krabka-gateway</code>. Main branch builds use commit SHA tags; releases use version tags. Pin a tag or digest from the <a href="https://github.com/krabka-io/krabka-gateway/pkgs/container/krabka-gateway">container registry</a>. The image runs as user 65532 and contains no shell.</p>
+    <p>For Kubernetes, use the operator's <a href={getPath('/docs/operator/crds/kafkagrpcgateway')}><code>KafkaGrpcGateway</code> reference</a>. The <a href={getPath('/docs/operator')}>operator documentation</a> covers installation and reconciliation.</p>
+
+    <h2>Send a record over HTTP</h2>
+    <p><code>POST /v1/produce/{'{topic}'}</code> writes the request body to the named topic. An optional <code>Idempotency-Key</code> enables deduplication. The caller identity comes from listener authentication; with no authenticated identity it is <code>ANONYMOUS</code>.</p>
+    <CodeBlock code={produce} lang="bash" />
+    <p>A successful response contains <code>partition</code>, <code>offset</code>, and <code>deduplicated</code>. Retry an uncertain delivery with the same idempotency key. Use a new key for each distinct delivery.</p>
+
+    <h2>Connect-RPC contract and SDKs</h2>
+    <p>The <a href={`${source}/crates/gateway/proto/krabka/gateway/v1/gateway.proto`}>protobuf service contract</a> defines <code>krabka.gateway.v1.Gateway</code>. The gateway mounts Connect-RPC handlers for JSON and protobuf clients.</p>
+    <div class="overflow-x-auto">
+      <table>
+        <thead><tr><th scope="col">RPC</th><th scope="col">Behavior</th></tr></thead>
+        <tbody>
+          <tr><td><code>Send</code></td><td>Send a batch and inspect each record's partition, offset, deduplication result, or error.</td></tr>
+          <tr><td><code>SendStream</code></td><td>Send records over a bidirectional stream and receive delivery acknowledgments.</td></tr>
+          <tr><td><code>Subscribe</code></td><td>Start a topic subscription with a consumer group, then acknowledge records in explicit mode.</td></tr>
+          <tr><td><code>QueueAcquire</code></td><td>Acquire work from a KIP-932 share group and receive a session ID.</td></tr>
+          <tr><td><code>QueueAcknowledge</code></td><td>Accept, release, or reject acquired records; inspect each acknowledgment's result.</td></tr>
+          <tr><td><code>QueueRenew</code></td><td>Renew acquisition locks for work still held by the session.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Records accept raw bytes or a structured JSON body, optional keys, ordered headers, partitions, timestamps, and idempotency keys. <code>Send</code> acknowledgment modes are <code>ACKS_ALL</code>, <code>ACKS_LEADER</code>, and <code>ACKS_NONE</code>. Check per-record errors even when the RPC succeeds.</p>
+    <p>With <code>SubscribeStart.auto_commit=false</code>, send a <code>SubscribeAck</code> only after durable processing. Its offset is the delivered record's offset. The gateway commits the contiguous acknowledged frontier plus one; an acknowledgment above a gap cannot skip unfinished records. Automatic mode ignores explicit acknowledgments.</p>
+    <p>Queue sessions live in one gateway process. Leave <code>session_id</code> empty on the first acquisition, then reuse the returned ID on the same replica. The message limit is fixed when the session starts. This revision allows at most 1,024 sessions per process, 500 messages per acquisition, and a 30-second wait. <code>lock_duration_ms</code> must be <code>30000</code>; sessions expire after one minute of inactivity. Broker acquisition expiry controls redelivery.</p>
+    <p>Application SDKs are available in <a href={`${sourceTree}/crates/app-sdk`}>Rust</a>, <a href={`${sourceTree}/sdks/cpp`}>C++</a>, <a href={`${sourceTree}/sdks/go`}>Go</a>, <a href={`${sourceTree}/sdks/java`}>Java</a>, and <a href={`${sourceTree}/sdks/ts`}>TypeScript</a>. The <a href={getPath('/docs/gateway/reference')}>repository guide</a> lists toolchains and shared conformance checks. Use <a href={getPath('/docs/streams-rs')}>native clients</a> when your application needs Kafka administration or a direct broker connection.</p>
+
+    <h2>Schemas and subscription filters</h2>
+    <p>Set <code>--schema-registry-url</code> to a Confluent-compatible registry to encode structured records as Avro, JSON Schema, or Protobuf. A record's schema selector can specify a subject and registered ID. An empty subject uses <code>&lt;topic&gt;-value</code>; a zero ID resolves the latest schema. Without a registry, raw bytes pass through.</p>
+    <p>A subscription's <code>filter</code> is a SQL boolean expression over decoded fields, such as <code>status = 'PAID' AND total &gt; 100</code>. Leave it empty to deliver all authorized records. Arrow filtering requires the gateway's <code>arrow</code> feature, which is enabled in the default source build.</p>
+
+    <h2>Webhook ingress and CloudEvents</h2>
+    <p>Load <code>--webhooks-config</code> with a TOML file containing <code>[[endpoints]]</code>. Each endpoint supplies a name, target topic, service principal, body limit, and optional signature settings. Requests go to <code>POST /v1/webhooks/{'{name}'}</code>. Unconfigured names return HTTP 404.</p>
+    <p>Generic HMAC-SHA256 verification supports a signature header, hex or base64 encoding, and an optional prefix. <code>key_source</code> and <code>idempotency_source</code> accept a header name or a JSONPath expression. Named endpoints default to a 1MiB body limit. Use the <a href={`${source}/crates/gateway/src/webhook_config.rs`}>endpoint configuration reference</a> for all fields.</p>
+    <p>For Standard Webhooks, use <code>signature_mode="standard_webhooks"</code> with the complete signing token. The verifier authenticates the delivery ID, timestamp, and original body, then uses the signed <code>webhook-id</code> for deduplication. Preserve these bytes and headers through your proxy. The <a href={getPath('/docs/gateway/gitlab-ingestion')}>GitLab guide</a> covers secrets, replay tolerance, replica settings, and consumer recovery.</p>
+    <p>The gateway accepts CloudEvents binary and structured HTTP formats. Binary events store attributes in <code>ce_*</code> Kafka headers. Structured events retain their JSON envelope and content type. CloudEvents batch requests return HTTP 415. Follow the <a href={getPath('/docs/gateway/cloudevents')}>CloudEvents guide</a> for both ingress formats and the local round trip.</p>
+
+    <h2>Outbound webhook delivery</h2>
+    <p>Load <code>--outbound-webhooks-config</code> with source topics, a target URL, a retry policy, and an allowlist of target schemes and hosts. An empty allowlist denies all targets. Create the source and dead-letter topics before starting delivery.</p>
+    <CodeBlock code={outbound} lang="toml" />
+    <p>This example requires incoming records to carry valid CloudEvent attributes. Use <code>content_mode="envelope"</code> for the gateway JSON envelope, or <code>cloud_events_binary</code> for binary CloudEvents. <code>decode_to_json=true</code> uses the configured registry codec to decode values; it has no effect with the raw codec.</p>
+    <p>Each subscription uses its own consumer group unless you set <code>group_id</code>. Delivery retries use exponential backoff. With no dead-letter topic, the gateway logs and drops exhausted records after <code>max_attempts</code>. Configure a dead-letter topic when failed deliveries must be retained. Optional <code>signing_secret</code> adds an <code>X-Krabka-Signature</code> HMAC header; static headers can supply target authentication. Protect configuration files that contain secrets.</p>
+    <p>Outbound filters accept <code>json:&lt;JSONPath&gt;</code>. Header filters are rejected. See the <a href={`${source}/crates/gateway/src/outbound_config.rs`}>outbound configuration reference</a> for defaults and validation.</p>
+
+    <h2>Deduplication across replicas</h2>
+    <p>The gateway stores the payload and deduplication claim in one transaction. Replicas divide claim partitions through an ownership group, publish membership, and forward requests to the current owner. Claims must replay before a new owner accepts traffic. The default deduplication horizon is one hour.</p>
+    <p>Give every replica a unique client ID and a peer-reachable advertised address. Set an explicit shared ownership group when client IDs differ, and share the dedup topic, partition count, membership topic, and transaction prefix across that gateway deployment. Separate deployments need their own internal topic and transaction namespace.</p>
+    <p>The default internal-topic replication factor is three, with fallback enabled for smaller clusters. For a deployment that requires three replicas, set <code>--internal-topic-allow-replication-fallback=false</code> and verify topic replication and minimum ISR before accepting traffic. The gateway does not repair existing topic durability settings. The <a href={getPath('/docs/gateway/gitlab-ingestion')}>GitLab deployment guide</a> provides explicit three-broker settings.</p>
+    <p>Deduplication ends when its retained claim expires. Consumers must make their own durable effects safe to repeat. An HTTP timeout can occur after a transaction commits, so retries must preserve the delivery ID.</p>
+
+    <h2>Security</h2>
+    <p>The defaults use plaintext connections and <code>--authz=off</code>. Configure listener TLS with both <code>--tls-cert</code> and <code>--tls-key</code>. For mTLS, supply <code>--tls-client-ca</code> and <code>--tls-client-auth=required</code>. The same gateway certificate identifies the forwarder to peers; configure peer trust roots and use a certificate suitable for both roles.</p>
+    <p>Use <code>--authz=simple</code> to enforce ACL checks. Listener authentication provides the caller's principal; named webhooks use the endpoint's configured service principal, which defaults to <code>webhook:&lt;name&gt;</code>. Grant only the required topic and group permissions. Super-user names bypass ACL checks.</p>
+    <p><code>--bearer=unsecured</code> accepts unsigned JWTs for development and tests. This configuration surface does not provide signed JWKS validation. Do not use unsecured bearer validation as production authentication.</p>
+    <p>At this revision, broker TLS is enabled only when both <code>--broker-tls-cert</code> and <code>--broker-tls-key</code> are set, with <code>--broker-tls-server-name</code>. A broker CA file alone leaves the connection plaintext. Check the <a href={`${source}/crates/gateway/src/bin/gateway.rs`}>broker security builder</a> before configuring your deployment.</p>
+
+    <h2>Operations and troubleshooting</h2>
+    <ul>
+      <li>Route application traffic only to replicas passing <code>/readyz</code>. A live but unready replica may still be replaying ownership state.</li>
+      <li>Scrape <code>/metrics</code> for request counts and latency, dedup hits, forwarding outcomes, transaction results, owned partitions, and webhook delivery failures. Metrics use the <code>krabka_gateway_</code> prefix.</li>
+      <li>For readiness or forwarding failures, check broker connectivity, internal topic settings, ownership-group configuration, peer addresses, and TLS trust.</li>
+      <li>For HTTP 404 on a webhook, check its configured name. For HTTP 401, check signature bytes, token, headers, and clock freshness. HTTP 413 means the body exceeds the endpoint limit.</li>
+      <li>Webhook and outbound configuration files are read at startup. Roll replicas after a secret or configuration change. Listener certificates use the configured reload interval.</li>
+      <li>Shutdown marks the replica unready and drains active connections for up to eight seconds. Test response loss, owner replacement, broker failover, and rolling shutdown with your application's traffic before deployment.</li>
+    </ul>
+
+    <h2>Configuration reference</h2>
+    <p>CLI flags override environment variables. Supply units for dimensions, such as <code>500ms</code>, <code>1h</code>, <code>2MiB</code>, and <code>1%</code>; bare numbers are rejected for these values. Dedup retention and internal-topic time settings must resolve to exact whole milliseconds. Pass explicit values for boolean runtime options, such as <code>--internal-topic-allow-replication-fallback=false</code>.</p>
+    {configGroups.map((group, index) => (
+      <details open={index === 0} class="rounded-lg border border-white/10 px-4 py-3 my-3">
+        <summary class="cursor-pointer font-semibold text-white">{group.title} ({group.rows.length} settings)</summary>
+        <div class="overflow-x-auto mt-3">
+          <table class="text-xs">
+            <thead><tr><th scope="col">CLI flag</th><th scope="col">Environment variable</th><th scope="col">Default or requirement</th></tr></thead>
+            <tbody>{group.rows.map(([flag, env, value]) => <tr><td><code>--{flag}</code></td><td><code>{env}</code></td><td>{value}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </details>
+    ))}
+    <p>The <a href={`${source}/crates/gateway/src/bin/gateway.rs`}>CLI definitions</a> and <a href={`${source}/crates/gateway/src/config.rs`}>runtime defaults</a> specify the configuration at this revision. Run <code>krabka-gateway --help</code> for your installed binary.</p>
+
+    <h2>Guides and examples</h2>
+    <div class="not-prose grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {guides.map(([slug, title, description]) => (
+        <a href={getPath(`/docs/gateway/${slug}`)} class="block rounded-xl border border-white/10 p-4 hover:border-krab-500/50">
+          <span class="text-sm font-semibold text-white">{title} →</span>
+          <p class="mt-1 text-xs leading-relaxed text-gray-400">{description}</p>
+        </a>
+      ))}
+    </div>
+  </div>
+</DocsLayout>
