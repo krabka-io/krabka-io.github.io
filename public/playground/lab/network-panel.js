@@ -193,22 +193,25 @@ export class NetworkPanel {
     const [a, b] = this.hooks.selection() || [];
     const link = this.linkOnly.checked && a != null && b != null ? new Set([a, b]) : null;
     const name = (id) => this.hooks.nodeName(id).toLowerCase();
+    // An item is an exchange or a frame; a frame answers for its exchange's API,
+    // correlation, timing and errors, so a filter keeps both halves of an exchange.
     return (item) => {
       const f = item.req || item;
+      const ex = item.req ? item : item.exchange;
       if (link && !(link.has(f.src.node) && link.has(f.dst.node))) return false;
       for (const t of terms) {
         const [k, v] = t.includes(":") ? t.split(/:(.*)/) : [null, t];
-        const api = item.apiKey != null ? this.apiName(item.apiKey).toLowerCase() : (f.label || "").toLowerCase();
+        const api = ex ? this.apiName(ex.apiKey).toLowerCase() : (f.label || "").toLowerCase();
         const nodes = `${name(f.src.node)} ${name(f.dst.node)}`;
         let ok;
         if (k === "api") ok = api.includes(v);
         else if (k === "node") ok = nodes.includes(v);
         else if (k === "port") ok = String(f.src.port) === v || String(f.dst.port) === v;
         else if (k === "conn") ok = String(f.conn) === v;
-        else if (k === "corr") ok = String(item.corr) === v;
-        else if (k === "slow") ok = item.rtt != null && item.rtt >= Number(v);
-        else if (t === "err") ok = Boolean(item.errors?.length || item.problems?.length);
-        else if (t === "pending") ok = item.apiKey != null && !item.resp;
+        else if (k === "corr") ok = ex != null && String(ex.corr) === v;
+        else if (k === "slow") ok = ex?.rtt != null && ex.rtt >= Number(v);
+        else if (t === "err") ok = Boolean(ex?.errors?.length || ex?.problems?.length);
+        else if (t === "pending") ok = ex != null && !ex.resp;
         else ok = api.includes(t) || nodes.includes(t) || (f.label || "").toLowerCase().includes(t);
         if (!ok) return false;
       }
@@ -301,6 +304,7 @@ export class NetworkPanel {
 
   async select(item) {
     this.follow = false;
+    this.decodeGen = (this.decodeGen || 0) + 1;
     const isEx = item.apiKey != null && item.req;
     this.selectedId = isEx ? `x${item.id}` : `f${item.seq}`;
     this.renderRows();
@@ -342,7 +346,10 @@ export class NetworkPanel {
       b.classList.toggle("lab-tab-active", b.dataset.side === this.lastSide);
       b.setAttribute("aria-pressed", String(b.dataset.side === this.lastSide));
     }
+    // A slow decode (a big compressed batch) must not overwrite a later selection.
+    const gen = (this.decodeGen = (this.decodeGen || 0) + 1);
     const d = await decodeFrame(f.bytes, { size: f.size, request, answers: ex });
+    if (gen !== this.decodeGen) return;
     const buffers = { main: f.bytes };
     for (const [k, v] of d.buffers || []) buffers[k] = v;
     this.detail.show({ buffers, root: d.root, captured: f.bytes.length, size: f.size });
@@ -356,6 +363,13 @@ export class NetworkPanel {
     const box = el("div", "lab-net-timing");
     if (!ex.resp) {
       box.textContent = `sent ${fmtMs(ex.req.at)}, delivered ${fmtMs(ex.req.deliverAt)}; no response captured`;
+      return box;
+    }
+    // One side runs on another peer, whose clock is not this page's: only this side's times are known.
+    if (ex.rtt == null || ex.serverMs == null) {
+      box.textContent = ex.rtt != null
+        ? `RTT ${ex.rtt} ms = ${ex.req.deliverAt - ex.req.at} ms request + ${ex.rtt - (ex.req.deliverAt - ex.req.at)} ms on the server's peer (server and response link, not split: another clock)`
+        : `${ex.serverMs} ms server + ${ex.resp.deliverAt - ex.resp.at} ms response; the request came from another peer, so its link time and the RTT are unknown`;
       return box;
     }
     const up = ex.req.deliverAt - ex.req.at;
@@ -457,7 +471,7 @@ export class NetworkPanel {
 
   export(kind) {
     const match = this.matcher();
-    const frames = this.capture.frames.filter((f) => match(f.exchange && f.role === "request" ? f.exchange : f));
+    const frames = this.capture.frames.filter(match);
     const meta = this.hooks.scenario();
     const stamp = `${(meta.name || "scenario").replace(/[^\w-]+/g, "-")}-${Date.now()}`;
     if (kind === "pcapng") {

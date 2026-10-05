@@ -79,7 +79,7 @@ export class Capture {
     }
     for (const r of raw) {
       const bytes = r.kind === "data" ? b64bytes(r.bytes) : null;
-      const f = { seq: ++this.seq, at: r.at, deliverAt: r.deliver_at, src: r.src, dst: r.dst, conn: r.conn, kind: r.kind, size: r.size, label: r.label, bytes, role: null, exchange: null };
+      const f = { seq: ++this.seq, at: r.at, deliverAt: r.deliver_at, src: r.src, dst: r.dst, conn: r.conn, kind: r.kind, size: r.size, label: r.label, bytes, role: null, exchange: null, ingress: Boolean(r.ingress) };
       this.frames.push(f);
       this.bytes += bytes ? bytes.length : 0;
       const key = connKey(r);
@@ -115,8 +115,11 @@ export class Capture {
       if (!ex) return;
       this.pending.delete(key);
       ex.resp = f;
-      ex.rtt = f.deliverAt - ex.req.at;
-      ex.serverMs = f.at - ex.req.deliverAt;
+      // A frame from another peer carries this page's arrival time in both
+      // stamps, the sender's clock not being ours: what happened on the far
+      // side of that hop is unknown, so its share of the timing is null.
+      ex.rtt = ex.req.ingress ? null : f.deliverAt - ex.req.at;
+      ex.serverMs = f.ingress ? null : f.at - ex.req.deliverAt;
       f.exchange = ex;
       this.scanQueue.push(ex);
     }
@@ -173,8 +176,8 @@ export class Capture {
       if (ex.resp) {
         s.answered++;
         s.respBytes += ex.resp.size;
-        s.rtts.push(ex.rtt);
-        s.servers.push(ex.serverMs);
+        if (ex.rtt != null) s.rtts.push(ex.rtt);
+        if (ex.serverMs != null) s.servers.push(ex.serverMs);
       }
       if (ex.errors?.length) s.failed++;
     }
@@ -213,7 +216,7 @@ export class Capture {
       timeUnit: "lab milliseconds since the scenario started",
       dropped: this.dropped,
       evicted: this.evicted,
-      frames: frames.map((f) => ({ at: f.at, deliverAt: f.deliverAt, src: f.src, dst: f.dst, conn: f.conn, kind: f.kind, size: f.size, captured: f.bytes ? f.bytes.length : 0, label: f.label, bytes: enc(f.bytes) })),
+      frames: frames.map((f) => ({ at: f.at, deliverAt: f.deliverAt, src: f.src, dst: f.dst, conn: f.conn, kind: f.kind, size: f.size, captured: f.bytes ? f.bytes.length : 0, label: f.label, bytes: enc(f.bytes), ...(f.ingress && { ingress: true }) })),
     });
   }
 
@@ -223,7 +226,7 @@ export class Capture {
     for (const ex of exchanges) {
       rows.push([
         ex.req.at, q(`${nodeName(ex.client.node)}:${ex.client.port}`), q(`${nodeName(ex.server.node)}:${ex.server.port}`), ex.conn,
-        q(apiName(ex.apiKey)), ex.version, ex.corr, ex.req.size, ex.resp?.size ?? "", ex.rtt ?? "", ex.serverMs ?? "", ex.rtt != null ? ex.rtt - ex.serverMs : "",
+        q(apiName(ex.apiKey)), ex.version, ex.corr, ex.req.size, ex.resp?.size ?? "", ex.rtt ?? "", ex.serverMs ?? "", ex.rtt != null && ex.serverMs != null ? ex.rtt - ex.serverMs : "",
         q((ex.errors || []).join(" ")),
       ].join(","));
     }

@@ -104,7 +104,7 @@ export function rtts(capture, from, to) {
   for (let i = xs.length - 1; i >= 0; i--) {
     const ex = xs[i];
     if (ex.req.at < from - RTT_WINDOW_MS) break;
-    if (!ex.resp || !(ex.apiKey in got) || ex.resp.deliverAt <= from || ex.resp.deliverAt > to) continue;
+    if (!ex.resp || ex.rtt == null || !(ex.apiKey in got) || ex.resp.deliverAt <= from || ex.resp.deliverAt > to) continue;
     got[ex.apiKey].push(ex.rtt);
   }
   for (const [key, name] of [[0, "produce"], [1, "fetch"]]) {

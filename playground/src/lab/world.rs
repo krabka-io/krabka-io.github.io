@@ -218,6 +218,10 @@ pub struct WireFrame {
     pub label: String,
     pub size: usize,
     pub bytes: String,
+    /// It arrived from another peer: both stamps are this world's arrival
+    /// time, since the sender's clock is not this world's.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ingress: bool,
 }
 
 /// The frames captured since the last drain, and how many the bounded capture
@@ -886,7 +890,7 @@ impl World {
             .unwrap_or(0);
         let at = (self.now + latency).max(floor);
         self.last_delivery.insert((key.0, key.1, direction), at);
-        self.record_wire(&frame, at);
+        self.record_wire(&frame, at, false);
         if self.is_hosted(b) {
             self.schedule(at, Item::Deliver(frame));
         } else {
@@ -902,7 +906,7 @@ impl World {
         }
     }
 
-    fn record_wire(&mut self, frame: &Frame, deliver_at: Millis) {
+    fn record_wire(&mut self, frame: &Frame, deliver_at: Millis, ingress: bool) {
         let (kind, size, bytes) = match &frame.payload {
             Payload::Open => ("open", 0, String::new()),
             Payload::Close => ("close", 0, String::new()),
@@ -926,6 +930,7 @@ impl World {
             label: frame_label(frame),
             size,
             bytes,
+            ingress,
         });
     }
 
@@ -1385,7 +1390,7 @@ impl World {
                 }
             }
             let now = self.now;
-            self.record_wire(&frame, now);
+            self.record_wire(&frame, now, true);
             self.schedule(now, Item::Deliver(frame));
         }
     }
@@ -1744,7 +1749,7 @@ mod tests {
                 .drain_wire()
                 .frames
                 .iter()
-                .filter(|f| f.src == client && f.conn == ConnId(8))
+                .filter(|f| f.src == client && f.conn == ConnId(8) && f.ingress)
                 .count()
                 == 2
         );

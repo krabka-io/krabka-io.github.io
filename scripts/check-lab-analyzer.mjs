@@ -36,6 +36,10 @@ const checkAsync = async (name, fn) => {
   }
 };
 const fromB64 = (s) => Uint8Array.from(Buffer.from(s, 'base64'));
+// node:zlib compresses zstd from Node 22.15; on older Nodes the zstd checks are skipped, not failed.
+const checkZstd = typeof zlib.zstdCompressSync === 'function'
+  ? checkAsync
+  : async (name) => console.log(`  skip ${name}: Node ${process.version} has no zlib zstd (22.15+)`);
 const walk = (n, f) => {
   f(n);
   for (const c of n.children || []) walk(c, f);
@@ -69,7 +73,7 @@ await checkAsync('gzip opens what zlib wrote', async () => {
   const out = await decompress(1, Uint8Array.from(zlib.gzipSync('records inside a batch')));
   assert.equal(new TextDecoder().decode(out), 'records inside a batch');
 });
-await checkAsync('zstd opens what libzstd wrote, at every strategy', async () => {
+await checkZstd('zstd opens what libzstd wrote, at every strategy', async () => {
   const P = zlib.constants;
   let seed = 1;
   const rnd = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
@@ -119,6 +123,18 @@ check('two clients may both have connection 7 to one broker', () => {
   assert.equal(c.exchanges.length, 2);
   assert.ok(c.exchanges.every((x) => x.resp && x.resp.dst.node === x.client.node), 'each response went to its own client');
   assert.notEqual(connKey(c.exchanges[0].req), connKey(c.exchanges[1].req));
+});
+check('a peer on another clock leaves its side of the timing unknown', () => {
+  const [ex] = capture.exchanges;
+  const frame = (f, ingress) => ({ at: f.at, deliver_at: f.deliverAt, src: f.src, dst: f.dst, conn: f.conn, kind: 'data', size: f.size, label: f.label, bytes: Buffer.from(f.bytes).toString('base64'), ingress });
+  const remoteServer = new Capture();
+  remoteServer.add([frame(ex.req, false), frame(ex.resp, true)]);
+  assert.deepEqual([remoteServer.exchanges[0].rtt, remoteServer.exchanges[0].serverMs], [ex.rtt, null]);
+  const remoteClient = new Capture();
+  remoteClient.add([frame(ex.req, true), frame(ex.resp, false)]);
+  assert.deepEqual([remoteClient.exchanges[0].rtt, remoteClient.exchanges[0].serverMs], [null, ex.serverMs]);
+  const { byApi } = remoteServer.stats(remoteServer.exchanges, remoteServer.frames, String);
+  assert.deepEqual([byApi[0].rtts, byApi[0].servers], [[ex.rtt], []]);
 });
 
 // ---- the decoder, on every fixture exchange ----
@@ -239,7 +255,7 @@ await checkAsync('the KRaft metadata log decodes into metadata records', async (
   for (const k of ['RegisterBrokerRecord', 'TopicRecord', 'PartitionRecord']) assert.ok(kinds.has(k), `${k} in ${[...kinds].join(', ')}`);
   assert.ok(summaries.some((b) => b.control), 'a control batch');
 });
-await checkAsync('a zstd batch decodes to the same records as its uncompressed twin', async () => {
+await checkZstd('a zstd batch decodes to the same records as its uncompressed twin', async () => {
   const path = Object.keys(files).find((p) => /orders-\d+\/\d+\.log$/.test(p) && files[p].length > 200);
   const plain = files[path];
   const { summaries: [batch] } = await decodeBatches(plain, 0, plain.length, 'main', await loadSchemas());
@@ -261,6 +277,56 @@ await checkAsync('a partition agrees with its leader-epoch checkpoint', async ()
   const r = await analyzePartition(part, async (p) => files[p]);
   assert.ok(r.checks.every((c) => c.ok), JSON.stringify(r.checks));
   assert.ok(r.epochs.length >= 1);
+});
+await checkAsync('a partition decodes only its newest segments within the budget', async () => {
+  const parts = partitionsOf(Object.entries(files).map(([path, b]) => ({ path, size: b.length })));
+  // The fixture keeps one segment per partition: put an older one in front of it.
+  const real = parts.find((p) => p.topic === 'orders' && p.segments.some((s) => s.size));
+  const newest = real.segments.find((s) => s.size);
+  const part = { ...real, segments: [{ ...newest, path: 'older/00000000000000000000.log' }, newest] };
+  const r = await analyzePartition(part, async (p) => files[p], { budget: newest.size });
+  assert.deepEqual(r.segments.map((s) => s.path), [newest.path]);
+  assert.equal(r.skipped.length, part.segments.length - 1);
+  assert.ok(r.checks.some((c) => c.warn && /not decoded/.test(c.text)), JSON.stringify(r.checks));
+  assert.ok(r.checks.every((c) => c.ok), JSON.stringify(r.checks));
+});
+await checkAsync('a partition reports a segment cut mid-batch', async () => {
+  const parts = partitionsOf(Object.entries(files).map(([path, b]) => ({ path, size: b.length })));
+  const part = parts.find((p) => p.topic === 'orders' && p.segments.some((s) => s.size > 200));
+  const cut = part.segments.find((s) => s.size > 200).path;
+  const r = await analyzePartition(part, async (p) => (p === cut ? files[p].slice(0, files[p].length - 7) : files[p]));
+  assert.ok(r.checks.some((c) => !c.ok && /damaged or partial data/.test(c.text) && c.text.includes('Partial batch')), JSON.stringify(r.checks));
+});
+await checkAsync('each __consumer_offsets record is read by its own key', async () => {
+  // An offset commit, then a group metadata record (key v2) in one batch.
+  const zz = (n) => { const o = []; let v = (n << 1) ^ (n >> 31); while (v > 127) { o.push((v & 127) | 128); v >>>= 7; } o.push(v); return o; };
+  const str = (s) => [...Buffer.from([0, s.length]), ...Buffer.from(s)];
+  const i64 = (n) => [0, 0, 0, 0, 0, 0, 0, n];
+  const record = (delta, key, value) => {
+    const body = [0, ...zz(0), ...zz(delta), ...zz(key.length), ...key, ...zz(value.length), ...value, ...zz(0)];
+    return [...zz(body.length), ...body];
+  };
+  const records = [
+    ...record(0, [0, 1, ...str('g1'), ...str('orders'), 0, 0, 0, 0], [0, 3, ...i64(42), 0, 0, 0, 0, ...str(''), ...i64(9)]),
+    ...record(1, [0, 2, ...str('g1')], [0, 3, ...str('consumer'), 0, 0, 0, 1]),
+  ];
+  const batch = Buffer.alloc(61 + records.length);
+  batch.writeBigInt64BE(0n, 0);
+  batch.writeInt32BE(batch.length - 12, 8);
+  batch.writeInt8(2, 16);
+  batch.writeInt32BE(1, 23);
+  batch.writeBigInt64BE(-1n, 43);
+  batch.writeInt16BE(-1, 51);
+  batch.writeInt32BE(-1, 53);
+  batch.writeInt32BE(2, 57);
+  Buffer.from(records).copy(batch, 61);
+  batch.writeUInt32BE(crc32c(batch.subarray(21)), 17);
+  const { nodes, summaries: [b] } = await decodeBatches(Uint8Array.from(batch), 0, batch.length, 'main', await loadSchemas(), { topic: '__consumer_offsets' });
+  assert.equal(b.records.length, 2, JSON.stringify(b.problems));
+  const [first, second] = nodes[0].children.find((n) => n.label.startsWith('Records')).children;
+  const value = second.children.find((n) => n.label === 'Value');
+  assert.equal(value.children, undefined, `the group metadata value is not read as an offset commit: ${JSON.stringify(value.children?.map((n) => n.label))}`);
+  assert.ok(first.children.find((n) => n.label === 'Value').children, 'the offset commit value is decoded');
 });
 
 console.log(`check-lab-analyzer: ${passed} checks passed${process.exitCode ? ', some failed' : ''}`);
