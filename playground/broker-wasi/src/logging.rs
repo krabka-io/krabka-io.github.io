@@ -266,7 +266,7 @@ mod tests {
             levels(&logged(Some("warn"), emit_every_level)),
             ["WARN", "ERROR"]
         );
-        assert!(logged(Some("off"), emit_every_level).is_empty());
+        assert_eq!(levels(&logged(Some("off"), emit_every_level)), [] as [&str; 0]);
     }
 
     #[test]

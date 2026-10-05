@@ -495,6 +495,8 @@ async function decodeRecord(bytes, r, buf, batch, ctx, schemas, index) {
     kids.push(node(which === "key" ? "Key" : "Value", s, s + len, buf, { kind: which === "key" ? "key" : "value", value: meaning.value, note: meaning.note, children: meaning.children?.length ? meaning.children : undefined }));
     return meaning;
   };
+  // Per record: this record's key says whether its value is an offset commit.
+  batch.offsetKey = false;
   const key = await part("key");
   const value = await part("value");
   const hStart = rr.pos;

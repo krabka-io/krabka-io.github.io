@@ -222,18 +222,28 @@ export async function analyzeFile(path, bytes, { sibling = async () => null } = 
   return { kind: "binary", root: node(name, 0, bytes.length, { kind: "bytes", value: `${bytes.length} bytes` }), checks: [], summary: [] };
 }
 
-// A whole partition: every segment decoded, then the checks that span them.
-// `read(path)` returns a file's bytes. Returns { segments, checks, epochs }.
-export async function analyzePartition(part, read) {
+// A whole partition: its segments decoded, then the checks that span them.
+// `read(path)` returns a file's bytes. Returns { segments, skipped, checks, epochs }.
+// ponytail: whole-segment reads; past `budget` bytes only the newest segments
+// are decoded, the older ones are listed in `skipped`.
+export async function analyzePartition(part, read, { budget = 64 * 1024 * 1024 } = {}) {
   const schemas = await loadSchemas();
+  let from = part.segments.length;
+  for (let used = 0; from > 0 && used + part.segments[from - 1].size <= budget; ) used += part.segments[--from].size;
+  const skipped = part.segments.slice(0, from);
   const segments = [];
-  for (const s of part.segments) {
+  for (const s of part.segments.slice(from)) {
     const bytes = await read(s.path);
     if (!bytes) continue;
-    const { summaries } = await decodeBatches(bytes, 0, bytes.length, "main", schemas, { topic: part.topic });
+    const { nodes, summaries } = await decodeBatches(bytes, 0, bytes.length, "main", schemas, { topic: part.topic });
     const crcBad = summaries.filter((b) => !b.crcOk).length;
+    // A partial or unreadable tail, and records that do not decode (a CRC mismatch is counted apart).
+    const problems = [
+      ...nodes.filter((n) => n.kind !== "batch" && n.status && n.status !== "ok").map((n) => `${n.label} at byte ${n.start}`),
+      ...summaries.flatMap((b) => b.problems.filter((p) => p !== "CRC mismatch").map((p) => `offset ${b.baseOffset}: ${p}`)),
+    ];
     segments.push({
-      path: s.path, base: s.base, size: bytes.length, batches: summaries.length, crcBad,
+      path: s.path, base: s.base, size: bytes.length, batches: summaries.length, crcBad, problems,
       records: summaries.reduce((n, b) => n + b.count, 0),
       first: summaries[0]?.baseOffset ?? null, last: summaries[summaries.length - 1]?.lastOffset ?? null,
       epochs: [...new Set(summaries.map((b) => b.epoch))],
@@ -242,8 +252,14 @@ export async function analyzePartition(part, read) {
     });
   }
   const checks = [];
+  if (skipped.length) {
+    const mib = (n) => `${(n / 1048576).toFixed(1)} MiB`;
+    checks.push({ ok: true, warn: true, text: `${skipped.length} older segment${skipped.length === 1 ? "" : "s"} (${mib(skipped.reduce((n, s) => n + s.size, 0))}) not decoded: this view decodes the newest ${mib(budget)}; open a segment to inspect it` });
+  }
   const bad = segments.reduce((n, s) => n + s.crcBad, 0);
   checks.push({ ok: !bad, text: bad ? `${bad} batches fail their CRC-32C` : `every batch CRC-32C verifies across ${segments.length} segments` });
+  const damaged = segments.filter((s) => s.problems.length);
+  checks.push({ ok: !damaged.length, text: damaged.length ? `damaged or partial data: ${damaged.map((s) => `${baseName(s.path)} (${s.problems[0]}${s.problems.length > 1 ? ` and ${s.problems.length - 1} more` : ""})`).join("; ")}` : "every segment decodes to whole batches and records" });
   const names = segments.filter((s) => s.first != null && s.first !== s.base);
   checks.push({ ok: !names.length, text: names.length ? `segments whose first offset is not their name: ${names.map((s) => baseName(s.path)).join(", ")}` : "every segment starts at the offset its name says" });
   const joins = [];
@@ -266,10 +282,12 @@ export async function analyzePartition(part, read) {
       const firstSeen = segments.map((s) => s.firstByEpoch.get(Number(epoch))).find((o) => o != null);
       epochs.push({ epoch: Number(epoch), start, firstSeen });
     }
-    const off = epochs.filter((e) => e.firstSeen != null && e.firstSeen !== e.start);
+    // An epoch that starts in a segment not decoded is first seen later than it starts.
+    const decodedFrom = skipped.length ? segments[0]?.first : null;
+    const off = epochs.filter((e) => e.firstSeen != null && e.firstSeen !== e.start && !(decodedFrom != null && e.start < decodedFrom));
     checks.push({ ok: !off.length, text: !epochs.length ? "leader-epoch-checkpoint is empty" : off.length ? `leader epochs whose first batch is not where the checkpoint says: ${off.map((e) => `${e.epoch} at ${e.firstSeen}, not ${e.start}`).join("; ")}` : `leader-epoch-checkpoint agrees with the log for ${epochs.length} epoch${epochs.length === 1 ? "" : "s"}` });
   }
-  return { segments, checks, epochs };
+  return { segments, skipped, checks, epochs };
 }
 
 // A partition directory at a glance, from its file list: segment bases and sizes.
