@@ -33,6 +33,10 @@ const COMPONENTS = [
   },
 ];
 
+// Which commit each component's guides came from, shown in the footer of every
+// synced page. The guides follow the default branch, not the latest release.
+const sources = {};
+
 for (const comp of COMPONENTS) {
   console.log(`\n📦 Processing component: ${comp.name} (${comp.repo})`);
 
@@ -62,6 +66,13 @@ for (const comp of COMPONENTS) {
   }
 
   if (sourceDocsDir && fs.existsSync(sourceDocsDir)) {
+    try {
+      const [commit, date] = execSync(`git -C "${sourceDocsDir}" log -1 --format=%H%x09%cI`, { encoding: 'utf8' }).trim().split('\t');
+      const branch = execSync(`git -C "${sourceDocsDir}" rev-parse --abbrev-ref HEAD`, { encoding: 'utf8' }).trim();
+      sources[comp.docsSubdir] = { repo: comp.repo, branch, commit, date };
+    } catch {
+      // Not a git checkout; the footer then names the repository alone.
+    }
     const files = fs.readdirSync(sourceDocsDir);
     let copiedCount = 0;
     for (const file of files) {
@@ -83,6 +94,8 @@ for (const comp of COMPONENTS) {
     console.log(`  ℹ️ No markdown guides found for ${comp.name}.`);
   }
 }
+
+fs.writeFileSync(path.join(CONTENT_DOCS_DIR, 'sources.json'), JSON.stringify(sources, null, 2) + '\n');
 
 // --- Step C: Automatically Sync Versions from Source Repos ---
 console.log('\n🔍 [sync-docs] Extracting component versions from source repositories...');

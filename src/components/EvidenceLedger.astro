@@ -260,7 +260,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                 .map((row) => {
                   const anchor = kernelRowAnchor(row.id);
                   return (
-                    <details class="el-row el-row-kernel" id={anchor} data-area={row.area} data-search={row.search}>
+                    <details class="el-row el-row-kernel" id={anchor} data-area={row.area} data-ids={[...row.files, ...row.kernels.map((k) => k.label)].join(' ')}>
                       <summary class="el-summary">
                         <span class="el-names">
                           {row.kernels.map((k) => <code class="el-fn">{k.label}</code>)}
@@ -325,7 +325,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                 .map((model) => {
                   const anchor = modelRowAnchor(model.id);
                   return (
-                    <details class="el-row el-row-model" id={anchor} data-area={model.area} data-search={model.search}>
+                    <details class="el-row el-row-model" id={anchor} data-area={model.area} data-ids={[model.id, model.repo, model.path].join(' ')}>
                       <summary class="el-summary">
                         <span class="el-names">
                           <strong class="el-name">{model.name}</strong>
@@ -427,7 +427,7 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
                   const anchor = `evidence-${item.id}`;
                   const links = item.links ?? [];
                   return (
-                    <details class="el-row el-row-evidence" id={anchor} data-area={item.area} data-search={item.search}>
+                    <details class="el-row el-row-evidence" id={anchor} data-area={item.area}>
                       <summary class="el-summary">
                         <span class="el-names">
                           <span class="el-badge el-badge-kind">{item.kind}</span>
@@ -482,12 +482,24 @@ const modelCatalog = catalogPath ? `${catalogPath}#stateright-model-check-tier` 
     const empty = panel.querySelector<HTMLElement>('.el-empty');
     const selected = new Set<string>();
     let query = '';
+    // Each row's text, with its area and the identifiers it shows only in part
+    // (model ids, full source paths), read once on the first filter rather than
+    // shipping the row's prose a second time as an attribute.
+    const haystacks = new Map<HTMLDetailsElement, string>();
+    const haystackOf = (row: HTMLDetailsElement) => {
+      let text = haystacks.get(row);
+      if (text === undefined) {
+        text = `${row.textContent ?? ''} ${row.dataset.area ?? ''} ${row.dataset.ids ?? ''}`.toLowerCase();
+        haystacks.set(row, text);
+      }
+      return text;
+    };
 
     function apply() {
       const tokens = query.toLowerCase().split(/\s+/).filter((t) => t !== '');
       let visible = 0;
       for (const row of rows) {
-        const haystack = row.getAttribute('data-search') ?? '';
+        const haystack = tokens.length ? haystackOf(row) : '';
         const area = row.getAttribute('data-area') ?? '';
         const show = (selected.size === 0 || selected.has(area)) && tokens.every((t) => haystack.includes(t));
         row.hidden = !show;

@@ -2,7 +2,10 @@
 import Navbar from '../components/Navbar.astro';
 import Footer from '../components/Footer.astro';
 import { getPath } from '../utils/paths';
+import versions from '../data/versions.json';
+import '../styles/fonts.css';
 import '../styles/custom.css';
+import '../styles/theme-light.css';
 
 interface Props {
   title?: string;
@@ -21,7 +24,12 @@ const {
 const siteUrl = Astro.site || 'https://krabka.io';
 const canonicalURL = new URL(Astro.url.pathname, siteUrl);
 const socialImageURL = new URL(getPath(image), siteUrl);
+// The site-wide card shows the tagline; a section's card shows the page's title.
+const imageAlt = image === '/og-image.png' ? 'krabka: Kafka-compatible broker in safe Rust' : title;
 
+// The project-level card goes on the home page only; every other page describes
+// itself, not the software.
+const isHome = Astro.url.pathname === getPath('/');
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -30,6 +38,9 @@ const structuredData = {
   "applicationCategory": "DeveloperApplication",
   "description": description,
   "url": siteUrl.toString(),
+  "softwareVersion": versions.broker.version,
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "sameAs": ["https://github.com/krabka-io/krabka-broker"],
   "offers": {
     "@type": "Offer",
     "price": "0",
@@ -48,6 +59,17 @@ const structuredData = {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Theme before first paint: the saved choice, else the system's. -->
+    <script is:inline>
+      (function () {
+        var theme;
+        try { theme = localStorage.getItem('theme'); } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     
     <!-- Favicon Suite (SVG, PNG, Apple Touch, ICO) -->
     <link rel="icon" type="image/svg+xml" href={getPath("/favicon.svg")} />
@@ -57,15 +79,12 @@ const structuredData = {
     <link rel="shortcut icon" href={getPath("/favicon.ico")} />
 
     <link rel="canonical" href={canonicalURL.href} />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="preload" href={getPath('/fonts/inter-latin-wght-normal.woff2')} as="font" type="font/woff2" crossorigin />
+    <link rel="alternate" type="application/rss+xml" title="krabka releases" href={getPath('/releases.xml')} />
 
     <!-- Primary Meta Tags -->
     <title>{title}</title>
-    <meta name="title" content={title} />
     <meta name="description" content={description} />
-    <meta name="keywords" content="kafka, apache kafka, rust kafka, kraft consensus, streaming broker, event streaming, memory safety, formal verification, creusot, stateright, model checking, apache arrow, kubernetes operator, cdc, tiered storage" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="theme-color" content="#080d1a" />
 
@@ -78,7 +97,7 @@ const structuredData = {
     <meta property="og:image" content={socialImageURL.href} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="krabka - Native-Rust Apache Kafka Engine" />
+    <meta property="og:image:alt" content={imageAlt} />
     <meta property="og:locale" content="en_US" />
 
     <!-- Twitter Card -->
@@ -87,16 +106,21 @@ const structuredData = {
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={socialImageURL.href} />
-    <meta name="twitter:image:alt" content="krabka - Native-Rust Apache Kafka Engine" />
+    <meta name="twitter:image:alt" content={imageAlt} />
 
     <!-- Schema.org JSON-LD -->
-    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
+    {isHome && <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />}
     <slot name="head" />
+    <!-- Cloudflare Web Analytics: cookieless. Only in builds given a site token
+         (the CF_BEACON_TOKEN repository variable in the deploy workflow). -->
+    {import.meta.env.PUBLIC_CF_BEACON_TOKEN && (
+      <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={JSON.stringify({ token: import.meta.env.PUBLIC_CF_BEACON_TOKEN })}></script>
+    )}
   </head>
   <body class="min-h-screen flex flex-col bg-ocean-950 text-gray-100 selection:bg-krab-500/30 selection:text-krab-200">
     <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-krab-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">Skip to main content</a>
     <Navbar />
-    <main id="main" tabindex="-1" class="flex-grow focus:outline-none">
+    <main id="main" tabindex="-1" data-pagefind-body class="flex-grow focus:outline-none">
       <slot />
     </main>
     <Footer />
@@ -120,6 +144,10 @@ const structuredData = {
 </html>
 
 <script>
+  import { enhanceHeadings } from '../utils/headings';
+
+  enhanceHeadings();
+
   // Copy buttons. Any `.copy-btn[data-copy]` works, and each code fence in a
   // Markdown guide gets one injected, so hand-written and synced pages behave alike.
   const status = document.getElementById('copy-status');

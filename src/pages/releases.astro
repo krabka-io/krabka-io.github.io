@@ -1,0 +1,58 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { getReleases } from '../utils/versions';
+import { getPath } from '../utils/paths';
+
+const releases = await getReleases();
+
+// The first real paragraph of a release's Markdown notes (not a heading or a
+// one-line title), as plain text.
+const excerpt = (notes: string) =>
+  (notes.split(/\n\s*\n/).find((p) => p.trim().length > 60 && !p.trim().startsWith('#')) ?? '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_>#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(.{280}).+$/, '$1…');
+const day = (date: string | null) => date?.slice(0, 10) ?? '';
+---
+
+<BaseLayout
+  title="Release Notes | krabka"
+  description="Recent releases of the krabka broker, protocol, clients, stream processing libraries, connectors, operator and CLI, newest first, with an RSS feed."
+>
+  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+    <div class="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-6">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">Release notes</h1>
+        <p class="mt-2 max-w-2xl text-sm leading-relaxed text-gray-400">
+          Recent releases across the krabka repositories, newest first. Each links to its full notes on GitHub.
+          <a href={getPath('/versions')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Release status</a> shows what each repository's main branch holds beyond its last release.
+        </p>
+      </div>
+      <a href={getPath('/releases.xml')} class="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-white">
+        <svg class="h-4 w-4 text-krab-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.18 15.64a2.18 2.18 0 110 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66A9.9 9.9 0 0113.9 20h-2.83A7.07 7.07 0 004 12.93V10.1z" /></svg>
+        RSS feed
+      </a>
+    </div>
+
+    {releases.length === 0 ? (
+      <p class="py-10 text-sm text-gray-400">No releases could be read when this page was built.</p>
+    ) : (
+      <ol class="divide-y divide-white/10">
+        {releases.map((r) => (
+          <li class="py-5">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h2 class="text-base font-semibold text-white">
+                <a href={r.url} target="_blank" rel="noopener noreferrer" class="hover:text-krab-400">{r.name}</a>
+              </h2>
+              {r.date && <time datetime={r.date} class="font-mono text-xs text-gray-400">{day(r.date)}</time>}
+            </div>
+            <p class="mt-1 font-mono text-xs text-krab-300">{r.repo} · {r.tag}</p>
+            {excerpt(r.notes) && <p class="mt-2 text-sm leading-relaxed text-gray-300">{excerpt(r.notes)}</p>}
+          </li>
+        ))}
+      </ol>
+    )}
+  </div>
+</BaseLayout>

@@ -4,6 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
 import krabkaTheme from './src/utils/krabka-shiki-theme.mjs';
+import headingIds from './src/utils/heading-ids.mjs';
 
 export default defineConfig({
   site: 'https://krabka.io',
@@ -12,6 +13,8 @@ export default defineConfig({
   // glued words together (`<strong>WebAssembly</strong>` + newline + `and`
   // rendered as "WebAssemblyand").
   compressHTML: false,
+  // Fetch a page when its link is hovered or focused, so moving between docs is quick.
+  prefetch: true,
   // Legacy routes; observability and gres moved to their own repositories.
   redirects: {
     '/docs/benchmarks': '/benchmarks',
@@ -27,7 +30,7 @@ export default defineConfig({
     '/api/streams-go/latest': 'https://krabka.io/krabka-streams-go/',
     '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
-  integrations: [sitemap()],
+  integrations: [sitemap(), headingIds()],
   markdown: {
     // Astro's default Sätteri pipeline, with one plugin and the site's code
     // theme: synced guides carry wide tables, and each gets its own scroll

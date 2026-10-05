@@ -1,4 +1,5 @@
 ---
+import fs from 'node:fs';
 import { getCollection, render } from 'astro:content';
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
@@ -44,8 +45,13 @@ const repoMap: Record<string, string> = {
 };
 
 const repoName = repoMap[component] || `krabka-${component}`;
-const sourceFilePath = `docs/${subPath}.md`;
-const githubFileUrl = `https://github.com/krabka-io/${repoName}/blob/main/${sourceFilePath}`;
+// The guide's file name keeps its case (KIP_MATRIX.md) where the page id does not.
+const fileName =
+  fs.readdirSync(`src/content/docs/${component}`).find((f) => f.toLowerCase() === `${subPath}.md`.toLowerCase()) ?? `${subPath}.md`;
+// Written by scripts/sync-docs.mjs: the commit each component's guides came from.
+const sourcesFile = 'src/content/docs/sources.json';
+const sources = fs.existsSync(sourcesFile) ? JSON.parse(fs.readFileSync(sourcesFile, 'utf8')) : {};
+const source = { repo: repoName, path: `docs/${fileName}`, ...sources[component] };
 
 // A synced guide that the site also renders in a purpose-built form gets a
 // pointer to that form above the verbatim document.
@@ -64,6 +70,7 @@ const companion = companions[entry.id];
   description={description}
   currentSlug={`/docs/${entry.id}`}
   headings={headings}
+  source={source}
 >
   <article class="markdown-body">
     {companion && (
@@ -75,23 +82,5 @@ const companion = companions[entry.id];
       </aside>
     )}
     <Content />
-
-    <!-- Source Document & Build Provenance Footer -->
-    <footer class="mt-12 pt-6 border-t border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-gray-400">
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <span>Source document:</span>
-        <a
-          href={githubFileUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-gray-300 hover:text-white underline font-mono text-[11px]"
-        >
-          {repoName}/{sourceFilePath}
-        </a>
-      </div>
-      <div class="text-gray-400">
-        Generated during build · krabka Documentation Hub
-      </div>
-    </footer>
   </article>
 </DocsLayout>

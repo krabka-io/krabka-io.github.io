@@ -129,6 +129,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Cloudflare Web Analytics site token. It is public (it ships in every
+          # page), so it is a repository variable; unset, no beacon is added.
+          PUBLIC_CF_BEACON_TOKEN: ${{ vars.CF_BEACON_TOKEN }}
 
       - name: Check browser proof replay with Z3 and cvc5
         run: |
