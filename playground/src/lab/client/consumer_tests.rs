@@ -30,7 +30,7 @@ use krabka_protocol::{
 
 use super::{
     AutoOffsetReset, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig, ConsumerError,
-    ConsumerEvent, CoordinatorType, GroupProtocol, KafkaClient, MemberState,
+    ConsumerEvent, CoordinatorType, GroupProtocol, IsolationLevel, KafkaClient, MemberState,
     assignor::{encode_assignment, encode_subscription},
     batch::BatchRecord,
     conn_base,
@@ -1853,6 +1853,46 @@ fn auto_commits_go_out_in_poll_once_the_interval_passed() {
         assert!(
             h.client.next_auto_commit() == Some(next(polled_at, answered_at)),
             "{protocol:?}"
+        );
+    }
+}
+
+// ---- read_committed ---------------------------------------------------------------
+
+#[test]
+fn read_committed_skips_aborted_transactions_and_moves_past_the_markers() {
+    let state = cluster(&[("orders", 1)]);
+    let mut producer = Harness::new(super::producer_tests::transactional(), Rc::clone(&state));
+    producer.run_until(|h| h.client.producer_id().is_some(), 1_000);
+    super::producer_tests::transaction(&mut producer, &["a", "b"], true);
+    super::producer_tests::transaction(&mut producer, &["c"], false);
+    super::producer_tests::transaction(&mut producer, &["d"], true);
+    // Rows: the isolation level and the values a poll hands out.
+    let rows = [
+        (IsolationLevel::ReadCommitted, vec!["a", "b", "d"]),
+        (IsolationLevel::ReadUncommitted, vec!["a", "b", "c", "d"]),
+    ];
+    for (isolation_level, expected) in rows {
+        let consumer = consumer(ConsumerConfig {
+            group_id: String::new(),
+            auto_offset_reset: AutoOffsetReset::Earliest,
+            isolation_level,
+            ..ConsumerConfig::default()
+        });
+        let mut h = Harness::new(consumer, Rc::clone(&state));
+        assert!(h.with_client(|c, ctx| c.assign(ctx, &[("orders", 0)])) == Ok(()));
+        assert!(h.run_until(|h| h.client.buffered() == expected.len(), 2_000));
+        let polled = h.with_client(|c, ctx| c.poll_at(ctx, 500));
+        let values: Vec<String> = summary(&polled).into_iter().map(|(_, _, v)| v).collect();
+        assert!(values == expected, "{isolation_level:?}");
+        // The cluster's request log holds the rows before too.
+        let fetch: FetchRequest = h.seen(FetchRequest::API_KEY).last().unwrap().decode();
+        assert!(fetch.isolation_level == isolation_level.as_wire());
+        // Past the last record lies only the commit marker: the position
+        // moves to the log end, so the lag is 0.
+        assert!(
+            h.client.position("orders", 0) == Some(7),
+            "{isolation_level:?}"
         );
     }
 }

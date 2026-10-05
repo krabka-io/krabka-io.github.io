@@ -199,6 +199,8 @@ async function main() {
     });
     check('a selected frame expands the details and its bytes light up under the pointer', hovered > 0 && await dock.evaluate((el) => el.classList.contains('lab-expanded')), `${hovered} lit bytes`);
     await dock.locator('.lab-expand').click();
+    // The Network tab gives the dock most of the stage height; Events gives the canvas its room back.
+    await page.locator('#krabka-lab .lab-dtab[data-tab="events"]').click();
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
     if (args.has('--expand-only')) {
       console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);

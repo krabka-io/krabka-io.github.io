@@ -49,9 +49,10 @@ krabka-verified = { git = "https://github.com/krabka-io/krabka-broker", rev = "c
 krabka-ids = "0.5.0"
 krabka-units = "0.5.0"
 # The Kafka wire codec every lab client speaks and the real broker's frames are
-# read with. Only the pure-Rust compression codecs: `lz4` and `zstd` bind C
-# libraries.
-krabka-protocol = { version = "0.5.0", default-features = false, features = ["gzip", "snappy"] }
+# read with, with every codec. Upstream `lz4` and `zstd` bind C libraries, so
+# `krabka-compression` is patched below to the pure-Rust copy in
+# `vendor/krabka-compression`.
+krabka-protocol = { version = "0.5.0", default-features = false, features = ["gzip", "snappy", "lz4", "zstd"] }
 # The streams application node runs its tasks through `EmbeddedTask`, builds
 # its topology with the crate's `Topology`, and joins its group with the
 # byte-exact KIP-1071 wire topology the crate derives. `main` with the
@@ -114,7 +115,7 @@ krabka-client-coordination = { git = "https://github.com/krabka-io/krabka-client
 krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "658b0dab64e0e5e8a9b1b13cde24995cde5af219" }
 krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "658b0dab64e0e5e8a9b1b13cde24995cde5af219" }
 krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "44afe9b6936eddaaef9eff85f22c9f11fa9056b5" }
-krabka-compression = { git = "https://github.com/krabka-io/krabka-protocol", rev = "3b31e8729d7bebd6bf03d161b065209335d4b773" }
+krabka-compression = { path = "vendor/krabka-compression" }
 krabka-connect = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-connect-derive = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-connect-postgres = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
@@ -165,3 +166,10 @@ krabka-traces = { git = "https://github.com/krabka-io/krabka-o11y", rev = "9864c
 krabka-units = { git = "https://github.com/krabka-io/krabka-protocol", rev = "3b31e8729d7bebd6bf03d161b065209335d4b773" }
 krabka-verified = { git = "https://github.com/krabka-io/krabka-broker", rev = "c13710e50f81cc4adafddcf1837683a5700bf5b7" }
 krabka-voters = { git = "https://github.com/krabka-io/krabka-protocol", rev = "3b31e8729d7bebd6bf03d161b065209335d4b773" }
+
+# `krabka-protocol` names `krabka-compression` by path inside its repository,
+# so the git source is patched too: every copy in the graph is the vendored
+# one, with pure-Rust lz4 (`lz4rip`) and zstd (`ruzstd`) that build for
+# wasm32-unknown-unknown.
+[patch."https://github.com/krabka-io/krabka-protocol"]
+krabka-compression = { path = "vendor/krabka-compression" }

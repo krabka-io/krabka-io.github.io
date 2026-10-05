@@ -152,8 +152,13 @@ if (mode === 'rust') {
     assert(line, `Missing pinned ${name} dependency`);
     return line[0];
   };
+  // The playground's patches, with its local paths (the vendored crate) made
+  // absolute, since the snippets crate lives elsewhere.
+  const patches = manifest
+    .slice(manifest.indexOf('[patch.crates-io]'))
+    .replace(/path = "(?![/\\]|[A-Za-z]:)([^"]+)"/g, (_, rel) => `path = ${JSON.stringify(`${root}/playground/${rel}`)}`);
   const names = ['krabka-client-producer', 'krabka-client-consumer', 'krabka-client-streams', 'krabka-units'];
-  write('rust/Cargo.toml', `[package]\nname = "website-snippets"\nversion = "0.0.0"\nedition = "2024"\n[workspace]\n[dependencies]\nbytes = "1"\ntokio = { version = "1", features = ["macros", "rt-multi-thread"] }\n${names.map(dependency).join('\n')}\n${manifest.slice(manifest.indexOf('[patch.crates-io]'))}`);
+  write('rust/Cargo.toml', `[package]\nname = "website-snippets"\nversion = "0.0.0"\nedition = "2024"\n[workspace]\n[dependencies]\nbytes = "1"\ntokio = { version = "1", features = ["macros", "rt-multi-thread"] }\n${names.map(dependency).join('\n')}\n${patches}`);
   for (const [name, id] of Object.entries({ producer: 'get-started/clientSnippets.rust', compressed: 'docs/streams-rs/producerCode', consumer: 'docs/streams-rs/consumerCode', share: 'docs/streams-rs/shareConsumerCode', streams: 'docs/streams-rs/streamsCode' })) {
     write(`rust/src/bin/${name}.rs`, get(id));
   }

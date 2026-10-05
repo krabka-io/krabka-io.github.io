@@ -151,6 +151,16 @@ jobs:
       - name: Check the Cluster Lab's network and storage analyzers
         run: npm run check-lab-analyzer
 
+      # The invariant checker, the chart sampler and the record tracer, on
+      # synthetic snapshots and the same recorded frames.
+      - name: Check the Cluster Lab's invariants, charts and record trace
+        run: npm run check-lab-observe
+
+      # The presets' scripted experiments (timed faults and checks) on real
+      # brokers in headless Chromium: the build above staged the broker module.
+      - name: Check the Cluster Lab's preset experiments on real brokers
+        run: npm run check-lab-experiments
+
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.
       - name: Upload GitHub Pages artifact

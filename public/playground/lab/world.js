@@ -164,6 +164,8 @@ export class LabWorld {
     // keeps them and merges them into the document it saves and shares.
     this.topics = [];
     this.name = "";
+    this.experiment = null; // J3: the scenario's experiment, kept page-side like the name
+    this.forkedFrom = null; // J3: the scenario a fork copied its broker disks from (their cluster id)
     this.hostedIds = null; // null: every node runs here
     this.id = "";
     // The real brokers this tab runs (`ExternalHost`), the lockstep run in
@@ -208,6 +210,8 @@ export class LabWorld {
     this.lab = this.guard("create world", () => new this.Lab(u64(seed)));
     this.topics = [];
     this.name = "";
+    this.experiment = null; // J3
+    this.forkedFrom = null; // J3
     this.id = "";
     this.hostedIds = null;
     this.external?.reset();
@@ -226,7 +230,9 @@ export class LabWorld {
     const doc = normalizeScenario(up.doc);
     // A simulated broker's durable image means nothing to the real broker.
     if (images && up.ids.length) images = Object.fromEntries(Object.entries(images).filter(([id]) => !up.ids.includes(Number(id))));
-    const json = JSON.stringify(doc);
+    // J3: the experiment and the fork origin stay page-side (`scenario()` merges them back in), so a module without the fields still loads.
+    const { experiment: _experiment, forked_from: _forkedFrom, ...forCrate } = doc;
+    const json = JSON.stringify(forCrate);
     if (!this.lab) this.lab = this.guard("create world", () => new this.Lab(u64(doc.seed)));
     if (!this.lab) return false;
     const ids = hostedIds == null ? [] : hostedIds.length ? hostedIds : NONE_HOSTED;
@@ -242,6 +248,8 @@ export class LabWorld {
     this.hostedIds = hostedIds;
     this.topics = (doc.topics || []).map((t) => ({ ...t }));
     this.name = doc.name || "";
+    this.experiment = doc.experiment ?? null; // J3
+    this.forkedFrom = doc.forked_from ?? null; // J3
     this.id = doc.id || "";
     // Frames held for the old world's peers went with it, and so did the
     // processes of its real brokers; their volumes stay.
@@ -301,6 +309,8 @@ export class LabWorld {
       }
     }
     this.name = next.name || "";
+    this.experiment = next.experiment ?? null; // J3
+    this.forkedFrom = next.forked_from ?? null; // J3
     this.scenarioCache = null;
     if (hostedIds !== undefined) this.setHosted(hostedIds);
     else this.external?.sync();
@@ -350,6 +360,8 @@ export class LabWorld {
     doc.topics = this.topics.map((t) => ({ ...t }));
     doc.name = this.name;
     doc.id = this.id;
+    doc.experiment = this.experiment ?? undefined; // J3
+    doc.forked_from = this.forkedFrom ?? undefined; // J3
     this.scenarioCache = normalizeScenario(doc);
     return this.scenarioCache;
   }
@@ -411,6 +423,13 @@ export class LabWorld {
 
   setName(name) {
     this.name = name;
+    this.scenarioCache = null;
+    this.hooks.onChange();
+  }
+
+  // J3: replace the scenario's experiment (null removes it); the world keeps running.
+  setExperiment(experiment) {
+    this.experiment = experiment ?? null;
     this.scenarioCache = null;
     this.hooks.onChange();
   }
@@ -637,10 +656,9 @@ export class LabWorld {
     if (!force && wallNow - this.lastSnapshotWall < SNAPSHOT_INTERVAL_MS) return;
     this.lastSnapshotWall = wallNow;
     const snap = this.guard("snapshot", () => JSON.parse(this.lab.snapshot()));
-    if (snap) {
-      this.snapshotCache = snap;
-      this.hooks.onSnapshot(snap);
-    }
+    if (snap) this.snapshotCache = snap;
+    // Events first: the experiment and the invariant checks the snapshot
+    // drives must see what happened up to it (a fault step, a reset).
     const count = this.guard("count events", () => this.lab.eventCount());
     if (count != null && Number(count) > this.eventIndex) {
       const events = this.guard("read events", () => JSON.parse(this.lab.eventsSince(this.eventIndex)));
@@ -651,6 +669,7 @@ export class LabWorld {
         this.eventIndex = Number(count);
       }
     }
+    if (snap) this.hooks.onSnapshot(snap);
   }
 
   snapshot() {
@@ -779,5 +798,9 @@ export function normalizeScenario(input) {
     }),
   };
   if (typeof s.id === "string" && s.id) out.id = s.id;
+  // J3: a scripted experiment (experiment.js) travels with the document, opaque here.
+  if (s.experiment && typeof s.experiment === "object" && !Array.isArray(s.experiment)) out.experiment = s.experiment;
+  // J3: a fork boots its brokers from copies of another scenario's disks, so they keep that scenario's cluster id.
+  if (typeof s.forked_from === "string" && s.forked_from) out.forked_from = s.forked_from;
   return out;
 }

@@ -93,7 +93,13 @@ mkdir -p "${out_dir}"
 # Size optimisation when wasm-opt (binaryen) is on PATH. It is optional.
 if command -v wasm-opt >/dev/null 2>&1; then
   echo "==> Optimising with wasm-opt -Oz"
+  # The features the module uses (rustc's wasm32-unknown-unknown defaults,
+  # and SIMD that a dependency enables per function): wasm-bindgen drops the
+  # section that would let wasm-opt detect them.
   wasm-opt -Oz \
+    --enable-bulk-memory --enable-bulk-memory-opt --enable-sign-ext \
+    --enable-mutable-globals --enable-nontrapping-float-to-int \
+    --enable-reference-types --enable-multivalue --enable-simd \
     "${out_dir}/krabka_playground_bg.wasm" \
     -o "${out_dir}/krabka_playground_bg.wasm"
 fi

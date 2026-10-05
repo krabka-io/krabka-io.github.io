@@ -1,11 +1,11 @@
 // The Storage panel: what this browser keeps for the current scenario.
 //
-// Per node the bytes and entries stored, the total, a "forget" button per
-// node and for the whole scenario, and the "Persist to this browser" toggle.
-// The numbers come from a cursor walk over IndexedDB every few seconds while
-// the panel is open. Below them, the volumes of the scenario's real brokers:
-// each is the disk of one process, kept by the WASI runtime in its own
-// database whatever the toggle says.
+// First the volumes of the scenario's real brokers: each is the disk of one
+// process, kept by the WASI runtime in its own database whatever the toggle
+// says. Below them the lab's own store: per node that keeps anything the
+// bytes and entries stored, the total, a "forget" button per node and for the
+// whole scenario, and the "Persist to this browser" toggle. The numbers come
+// from a cursor walk over IndexedDB every few seconds while the panel is open.
 //
 // Browse opens a broker's disk explorer: its partitions with their segments,
 // and every other file. A partition shows its segments and the checks that
@@ -44,6 +44,14 @@ export class StoragePanel {
     const body = el("div", "lab-side-body");
     this.root.appendChild(body);
 
+    // The brokers' disks lead: they are what a reader comes here for.
+    this.volumeBox = el("div", "lab-storage-volumes");
+    body.appendChild(this.volumeBox);
+    this.volumeExplorer = el("div", "lab-volume-explorer");
+    body.appendChild(this.volumeExplorer);
+
+    const store = el("div", "lab-storage-store");
+    store.appendChild(el("p", "lab-rail-heading", "The lab's own nodes"));
     const toggleRow = el("label", "lab-field-inline");
     this.toggle = el("input");
     this.toggle.type = "checkbox";
@@ -54,24 +62,21 @@ export class StoragePanel {
       this.refresh();
     });
     toggleRow.append(this.toggle, el("span", null, "Persist to this browser"));
-    body.appendChild(toggleRow);
-    body.appendChild(
+    store.appendChild(toggleRow);
+    store.appendChild(
       el(
         "p",
         "lab-muted lab-small",
         hooks.storage.available
-          ? "What the lab's own nodes keep (an echo node's counter) lives only in this browser's IndexedDB. A broker's disk is listed below and is kept whatever this setting says. Nothing leaves this machine."
+          ? "What the lab's own nodes keep (an echo node's counter) lives only in this browser's IndexedDB; the table lists the nodes that keep something. Brokers keep their disk in the volumes above, whatever this setting says. Nothing leaves this machine."
           : "This browser has no IndexedDB, so nothing is kept across reloads.",
       ),
     );
     this.summaryLine = el("p", "lab-storage-total");
-    body.appendChild(this.summaryLine);
+    store.appendChild(this.summaryLine);
     this.table = el("table", "lab-table lab-storage-table");
-    body.appendChild(this.table);
-    this.volumeBox = el("div", "lab-storage-volumes");
-    body.appendChild(this.volumeBox);
-    this.volumeExplorer = el("div", "lab-volume-explorer");
-    body.appendChild(this.volumeExplorer);
+    store.appendChild(this.table);
+    body.appendChild(store);
     this.actions = el("div", "lab-form-actions");
     this.actions.appendChild(
       button("Forget stored data", "lab-btn-sm lab-danger", () => hooks.onForgetScenario(), { title: "Drop every stored log and key of this scenario" }),
@@ -120,7 +125,12 @@ export class StoragePanel {
     for (const h of ["node", "bytes", "log entries", "keys", ""]) hr.appendChild(h ? el("th", null, h) : actionsHeader());
     thead.appendChild(hr);
     const tbody = el("tbody");
-    const ids = new Set([...nodes.map((n) => String(n.id)), ...Object.keys(usage.nodes)]);
+    // Only the nodes that keep something, or were told to forget: a broker's or
+    // a client's row would be all zeros.
+    const keeps = (u) => u && (u.bytes || u.logEntries || u.kvEntries);
+    const forgotten = nodes.filter((n) => this.hooks.storage.forgotten.has(n.id)).map((n) => String(n.id));
+    const ids = new Set([...Object.keys(usage.nodes).filter((key) => keeps(usage.nodes[key])), ...forgotten]);
+    this.table.hidden = !ids.size;
     for (const key of [...ids].sort((a, b) => Number(a) - Number(b))) {
       const u = usage.nodes[key] || { bytes: 0, logEntries: 0, kvEntries: 0 };
       const node = nodes.find((n) => String(n.id) === key);
@@ -138,14 +148,7 @@ export class StoragePanel {
       tr.appendChild(el("td", null, fmtNum(u.logEntries)));
       tr.appendChild(el("td", null, fmtNum(u.kvEntries)));
       const td = el("td");
-      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data; the running node is not stored again until it restarts from nothing", disabled: u.bytes === 0 && u.logEntries === 0 && u.kvEntries === 0 }));
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    }
-    if (!ids.size) {
-      const tr = el("tr");
-      const td = el("td", "lab-muted", "no nodes");
-      td.colSpan = 5;
+      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data; the running node is not stored again until it restarts from nothing", disabled: !keeps(u) }));
       tr.appendChild(td);
       tbody.appendChild(tr);
     }

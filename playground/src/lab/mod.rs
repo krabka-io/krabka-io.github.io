@@ -85,6 +85,7 @@ pub fn build_node(spec: &NodeSpec) -> Result<Box<dyn Node>, LabError> {
         "consumer" => Box::new(apps::ConsumerNode::from_spec(spec)?),
         "streams" => Box::new(apps::StreamsNode::from_spec(spec)?),
         "admin" => Box::new(apps::AdminNode::from_spec(spec)?),
+        "rebalancer" => Box::new(apps::RebalancerNode::from_spec(spec)?),
         "echo" => Box::new(testing::EchoNode::from_spec(spec)?),
         "pinger" => Box::new(testing::PingerNode::from_spec(spec)?),
         external::REAL_BROKER_KIND | external::LOCAL_CLIENT_KIND => {

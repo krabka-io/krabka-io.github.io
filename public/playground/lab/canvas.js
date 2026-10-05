@@ -4,6 +4,10 @@
 // dots that slide along the wire, and the overlays of cut, slow and lossy
 // links.
 //
+// Two or more brokers sit in a cluster frame, and a client's connections to
+// them are one edge to the frame. A line between two brokers shows only while
+// frames flow on it. "All connections" draws every client-to-broker edge.
+//
 // Coordinates: every node has a scenario position `(x, y)` in canvas units;
 // the viewport transform (pan `x`, `y` and zoom `k`) maps them to pixels.
 // Drag on a card moves it and reports the new position once, on release;
@@ -33,6 +37,13 @@ const MIN_FIT_ZOOM = 0.8;
 // Edges drawn faint: connections and a streams app's internal topics, not
 // the data flow of the scenario's own topics.
 const FAINT_EDGES = new Set(["bootstrap", "ping", "registry", "changelog", "repartition"]);
+const BROKER_KIND = "krabka-broker";
+// Room around the brokers inside the cluster frame; the top holds its label
+// above the cards' badges.
+const FRAME_PAD = 18;
+const FRAME_PAD_TOP = 38;
+// A broker-to-broker line stays this many lab milliseconds after its last frame.
+const ACTIVE_MS = 1200;
 
 export class Canvas {
   // hooks: onSelect(id, { additive }), onDeselect(), onMove(id, x, y),
@@ -47,6 +58,13 @@ export class Canvas {
     this.topicEls = new Map();
     this.edgeEls = new Map();
     this.linkEls = new Map();
+    // Broker pairs → lab time of their last frame, and the frames delivered per
+    // direction at the last snapshot.
+    this.activity = new Map();
+    this.delivered = null;
+    this.activeEls = new Map();
+    this.allEdges = false;
+    this.frame = null;
     this.dotPool = [];
     this.inFlight = [];
     this.latencies = new Map();
@@ -65,12 +83,16 @@ export class Canvas {
     this.svg = svg("svg", { class: "lab-canvas", tabindex: "0", role: "application", "aria-label": "Cluster canvas" });
     this.svg.appendChild(this.defs());
     this.viewport = svg("g", { class: "lab-viewport" });
+    this.layerCluster = svg("g", { class: "lab-cluster", "aria-hidden": "true" });
+    this.clusterRect = svg("rect", { class: "lab-cluster-frame", rx: 16 });
+    this.clusterLabel = svg("text", { class: "lab-cluster-label" });
+    this.layerCluster.append(this.clusterRect, this.clusterLabel);
     this.layerEdges = svg("g", { class: "lab-layer-edges" });
     this.layerLinks = svg("g", { class: "lab-layer-links" });
     this.layerTopics = svg("g", { class: "lab-layer-topics" });
     this.layerFrames = svg("g", { class: "lab-layer-frames" });
     this.layerNodes = svg("g", { class: "lab-layer-nodes" });
-    this.viewport.append(this.layerEdges, this.layerLinks, this.layerTopics, this.layerFrames, this.layerNodes);
+    this.viewport.append(this.layerCluster, this.layerEdges, this.layerLinks, this.layerTopics, this.layerFrames, this.layerNodes);
     this.svg.appendChild(this.viewport);
     this.wrap.appendChild(this.svg);
 
@@ -81,6 +103,11 @@ export class Canvas {
       button("+", "lab-btn-sm", () => this.zoomBy(1.25), { ariaLabel: "Zoom in" }),
       button("?", "lab-btn-sm lab-help-btn", () => hooks.onHelp?.(), { title: "Shortcuts and tips (?)", ariaLabel: "Shortcuts and tips" }),
     );
+    this.allBtn = button("All connections", "lab-btn-sm lab-all-edges", () => this.setAllEdges(!this.allEdges), {
+      title: "Draw every client-to-broker connection instead of one edge to the cluster",
+    });
+    this.allBtn.setAttribute("aria-pressed", "false");
+    this.tools.prepend(this.allBtn);
     this.wrap.appendChild(this.tools);
 
     this.empty = el("div", "lab-empty");
@@ -199,6 +226,7 @@ export class Canvas {
       if (!cur || cur.x !== n.x || cur.y !== n.y) this.positions.set(n.id, { x: n.x, y: n.y });
     }
     for (const id of [...this.positions.keys()]) if (!nodes.some((n) => n.id === id)) this.positions.delete(id);
+    this.trackActivity(snap, nodes);
     this.autoPlace(nodes);
     this.syncNodes(nodes);
     this.syncTopics();
@@ -206,6 +234,7 @@ export class Canvas {
     this.syncLinks();
     this.inFlight = (snap?.in_flight || []).slice(0, MAX_DOTS);
     this.layout();
+    this.hooks.decorate?.(this); // J2: cluster badges and partition chips (cluster-panel.js)
     const visible = nodes.filter((n) => !kindOf(n.kind).hidden).length;
     this.empty.hidden = visible > 0;
     this.hint.hidden = visible === 0;
@@ -309,7 +338,7 @@ export class Canvas {
     const peerLabel = remote ? this.hooks.peerName(hostedBy) : "";
     const offline = remote && hostedBy != null && this.offline.has(hostedBy);
     const sel = this.selection.indexOf(n.id);
-    const key = [n.name, st, n.alive, n.isolated, n.hosted, peerLabel, offline, sel].join("|");
+    const key = [n.name, st, n.alive, n.isolated, n.hosted, peerLabel, offline, sel, n.paused, n.skew_ms, n.disk].join("|"); // J3: paused, skew, disk
     if (key === entry.lastKey) return;
     entry.lastKey = key;
     // Text is cut to the card's measured room; the status drops whole fields
@@ -338,6 +367,10 @@ export class Canvas {
     else if (!offline) bits.push("up");
     if (k.real) bits.push("runs the real code");
     if (n.isolated) bits.push("isolated");
+    // J3: the process faults (pause, clock skew, disk mode).
+    if (n.paused) bits.push("paused");
+    if (n.skew_ms) bits.push(`clock skewed ${n.skew_ms > 0 ? "+" : ""}${n.skew_ms} ms`);
+    if (n.disk && n.disk !== "ok") bits.push(`disk ${n.disk}`);
     if (remote && hostedBy != null) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
     if (st) bits.push(st);
     g.setAttribute("aria-label", bits.join(", "));
@@ -354,6 +387,10 @@ export class Canvas {
     if (k.real) badges.push(["real", "lab-badge-real"]);
     if (!n.alive) badges.push(["down", "lab-badge-down"]);
     if (n.isolated) badges.push(["isolated", "lab-badge-isolated"]);
+    // J3: the process faults.
+    if (n.paused && n.alive) badges.push(["paused", "lab-badge-isolated"]);
+    if (n.skew_ms) badges.push([`skew ${n.skew_ms > 0 ? "+" : ""}${Math.abs(n.skew_ms) >= 1000 ? `${n.skew_ms / 1000}s` : `${n.skew_ms}ms`}`, "lab-badge-offline"]);
+    if (n.disk && n.disk !== "ok") badges.push([`disk ${n.disk}`, "lab-badge-down"]);
     if (offline) badges.push(["host offline", "lab-badge-offline"]);
     // A node with no known host (the admin before hosting is settled) has no one to name.
     else if (remote && hostedBy != null) badges.push([`@${peerLabel}`, "lab-badge-remote"]);
@@ -458,8 +495,81 @@ export class Canvas {
 
   // ---- edges and link overlays -------------------------------------------------------------------
 
+  setAllEdges(on) {
+    this.allEdges = on;
+    this.allBtn.setAttribute("aria-pressed", String(on));
+    this.syncEdges();
+    this.layout();
+  }
+
+  // The brokers, and their frame: two or more brokers with no other card inside
+  // their box (one edge per client would then point at the wrong card).
+  clusterMode() {
+    const ids = (this.snapshot?.nodes || []).filter((n) => n.kind === BROKER_KIND).map((n) => n.id);
+    if (this.allEdges || ids.length < 2) return { ids, box: null };
+    const box = this.boxOf(ids, FRAME_PAD, FRAME_PAD_TOP);
+    if (!box) return { ids, box: null };
+    for (const [id, p] of this.positions) {
+      if (ids.includes(id)) continue;
+      if (p.x > box.x && p.x < box.x + box.w && p.y > box.y && p.y < box.y + box.h) return { ids, box: null };
+    }
+    return { ids, box };
+  }
+
+  // The box around the cards of `ids`, padded.
+  boxOf(ids, pad, padTop) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const id of ids) {
+      const p = this.positions.get(id);
+      if (!p) continue;
+      const e = this.nodeEls.get(id);
+      const w = e ? e.w : CARD_W;
+      const h = e ? e.h : CARD_H;
+      minX = Math.min(minX, p.x - w / 2);
+      maxX = Math.max(maxX, p.x + w / 2);
+      minY = Math.min(minY, p.y - h / 2);
+      maxY = Math.max(maxY, p.y + h / 2);
+    }
+    if (minX === Infinity) return null;
+    return { x: minX - pad, y: minY - padTop, w: maxX - minX + 2 * pad, h: maxY - minY + pad + padTop };
+  }
+
+  // Lab time of the last frame on each broker pair: from the frames in flight
+  // and from the per-direction delivery counts that grew since the last snapshot.
+  trackActivity(snap, nodes) {
+    if (!snap) return;
+    const brokers = new Set(nodes.filter((n) => n.kind === BROKER_KIND).map((n) => n.id));
+    const mark = (a, b) => {
+      if (a !== b && brokers.has(a) && brokers.has(b)) this.activity.set(pairKey(a, b), snap.now);
+    };
+    const counts = new Map();
+    for (const [a, b, n] of snap.delivered || []) {
+      const key = `${a}>${b}`;
+      counts.set(key, n);
+      if (this.delivered && n > (this.delivered.get(key) ?? 0)) mark(a, b);
+    }
+    this.delivered = counts;
+    for (const f of snap.in_flight || []) mark(f.src, f.dst);
+    // A reset world starts its clock again: what flowed in the old one is gone.
+    for (const [key, at] of this.activity) if (at > snap.now || snap.now - at > ACTIVE_MS) this.activity.delete(key);
+  }
+
   syncEdges() {
-    const edges = this.scenario ? derivedEdges(this.scenario) : [];
+    const mode = this.clusterMode();
+    this.frame = mode.box;
+    // With a frame, an edge to any broker becomes one edge to the frame.
+    const brokers = new Set(mode.box ? mode.ids : []);
+    const toFrame = (end) => (end.node != null && brokers.has(end.node) ? { cluster: true } : end);
+    const unique = new Map();
+    for (const e of this.scenario ? derivedEdges(this.scenario) : []) {
+      const d = { ...e, from: toFrame(e.from), to: toFrame(e.to) };
+      if (d.from.cluster && d.to.cluster) continue;
+      unique.set(`${endKey(d.from)}>${endKey(d.to)}:${d.type}`, d);
+    }
+    const edges = [...unique.values()];
     this.edges = edges;
     const seen = new Set();
     for (const e of edges) {
@@ -520,6 +630,18 @@ export class Canvas {
       const p = this.positions.get(id);
       if (p) entry.g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
     }
+    // A dragged card can enter or leave the brokers' box: the edges follow.
+    const mode = this.clusterMode();
+    if (Boolean(mode.box) !== Boolean(this.frame)) this.syncEdges();
+    this.frame = mode.box;
+    this.layerCluster.style.display = this.frame ? "" : "none";
+    if (this.frame) {
+      const f = this.frame;
+      setAttrs(this.clusterRect, { x: f.x, y: f.y, width: f.w, height: f.h });
+      setAttrs(this.clusterLabel, { x: f.x + 14, y: f.y + 17 });
+      this.clusterLabel.textContent = `cluster · ${plural(mode.ids.length, "broker")}`;
+    }
+    this.layoutActive();
     this.placeTopics(this.edges || []);
     for (const [name, g] of this.topicEls) {
       const p = this.topicPositions.get(name);
@@ -552,13 +674,46 @@ export class Canvas {
     }
   }
 
+  // Broker-to-broker lines, while frames flow on them.
+  layoutActive() {
+    const now = this.snapshot?.now ?? 0;
+    for (const [key, line] of this.activeEls) {
+      if (this.activity.has(key)) continue;
+      line.remove();
+      this.activeEls.delete(key);
+    }
+    for (const [key, at] of this.activity) {
+      const [a, b] = key.split("-").map(Number);
+      const pa = this.positions.get(a);
+      const pb = this.positions.get(b);
+      let line = this.activeEls.get(key);
+      if (!pa || !pb) {
+        line?.remove();
+        this.activeEls.delete(key);
+        continue;
+      }
+      if (!line) {
+        line = svg("line", { class: "lab-edge lab-edge-active" });
+        this.layerEdges.appendChild(line);
+        this.activeEls.set(key, line);
+      }
+      const start = trim(pa, pb, this.endSize({ node: a }));
+      const end = trim(pb, pa, this.endSize({ node: b }));
+      setAttrs(line, { x1: start.x, y1: start.y, x2: end.x, y2: end.y });
+      // Full strength while frames flow, fading after the last one.
+      line.style.opacity = String(clamp(1 - (now - at) / ACTIVE_MS, 0.15, 1));
+    }
+  }
+
   endPoint(end) {
+    if (end.cluster) return this.frame ? { x: this.frame.x + this.frame.w / 2, y: this.frame.y + this.frame.h / 2 } : null;
     if (end.node != null) return this.positions.get(end.node) || null;
     if (end.topic != null) return this.topicPositions.get(end.topic) || null;
     return null;
   }
 
   endSize(end) {
+    if (end.cluster) return this.frame ? { w: this.frame.w, h: this.frame.h } : { w: CARD_W, h: CARD_H };
     if (end.topic != null) return { w: TOPIC_W, h: TOPIC_H };
     const entry = end.node != null ? this.nodeEls.get(end.node) : null;
     return entry ? { w: entry.w, h: entry.h } : { w: CARD_W, h: CARD_H };
@@ -656,6 +811,7 @@ export class Canvas {
       pts.push({ x: p.x - w / 2, y: p.y - h / 2 }, { x: p.x + w / 2, y: p.y + h / 2 });
     }
     for (const p of this.topicPositions.values()) pts.push({ x: p.x - TOPIC_W / 2, y: p.y - TOPIC_H / 2 }, { x: p.x + TOPIC_W / 2, y: p.y + TOPIC_H / 2 });
+    if (this.frame) pts.push({ x: this.frame.x, y: this.frame.y }, { x: this.frame.x + this.frame.w, y: this.frame.y + this.frame.h });
     if (!pts.length) {
       this.view = { x: 40, y: 40, k: 1 };
       this.note.hidden = true;
@@ -996,6 +1152,7 @@ function pairKey(a, b) {
 }
 
 function endKey(end) {
+  if (end.cluster) return "c";
   return end.node != null ? `n${end.node}` : `t${end.topic}`;
 }
 

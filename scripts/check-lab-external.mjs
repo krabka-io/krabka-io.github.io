@@ -134,7 +134,7 @@ function serveSite(dir, guest) {
 // Page errors and console errors from the site's own origin. Chromium logs
 // every 404 as a console error, and the missing broker build is one on
 // purpose: that one is left out, like a font from another origin.
-const watchErrors = (page, name, base) => watchPageErrors(page, name, base, { ignore: (m, url) => url === `${base}${BROKER_BUILD}` && /404/.test(m.text()) });
+const watchErrors = (page, name, base) => watchPageErrors(page, name, base, { ignore: (m, url) => url.split('?')[0] === `${base}${BROKER_BUILD}` && /404/.test(m.text()) });
 
 // JSON with every object's keys sorted: snapshots pass through the crate's
 // `serde_json::Value`, whose maps sort their keys.

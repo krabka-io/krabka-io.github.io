@@ -9,7 +9,7 @@
 //!   "max_poll_records": 500, "enable_auto_commit": true,
 //!   "auto_commit_interval_ms": 5000, "session_timeout_ms": 45000,
 //!   "heartbeat_interval_ms": 3000, "instance_id": "billing-1",
-//!   "deserialize": { "registry": 4 } }
+//!   "isolation_level": "read_committed", "deserialize": { "registry": 4 } }
 //! ```
 //!
 //! - `bootstrap`, `group`, `topics` (required).
@@ -32,6 +32,10 @@
 //!   `UNRELEASED_INSTANCE_ID`. Checked as Kafka checks it: not empty, at
 //!   most 249 characters of ASCII letters, digits, `.`, `_` and `-`.
 //!   Default: `null`.
+//! - `isolation_level`: `"read_uncommitted"` or `"read_committed"`, Kafka's
+//!   `isolation.level`: with `read_committed` the fetches stop at the last
+//!   stable offset and the records of aborted transactions are dropped.
+//!   Default: `"read_uncommitted"`.
 //! - `deserialize`: `null`, or `{"registry": <node id>}` to decode values in
 //!   the Confluent wire format through that registry for the inspector.
 //!
@@ -81,7 +85,13 @@
 //! `paused`, `closed`, `max_poll_records`, `rebalances`, `records`, `polled`,
 //! `fetches`, `commits`, `last_records: [{"topic", "partition", "offset",
 //! "key", "value_preview", "schema_id"}]` (the last ten processed),
-//! `deserialize` and `client`.
+//! `isolation_level`, `positions: {"<topic>-<partition>": offset}`,
+//! `offset_regressions: [{"tp", "from", "to", "at"}]` (the last 20 times a
+//! poll handed out a record below the offset the node had already reached
+//! on that partition: a rebalance, a seek or a restart going back to an
+//! older committed offset; kept across restarts), `aborted_seen` (records
+//! polled whose `lab-txn` header says their transaction aborts: always 0
+//! under `read_committed`), `deserialize` and `client`.
 //!
 //! # Events
 //!
@@ -95,6 +105,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
+    producer::TXN_HEADER,
     registry_client::{SchemaCache, SchemaLookup},
     serde::{preview, unframe},
 };
@@ -102,7 +113,7 @@ use crate::lab::{
     LabError,
     client::{
         AutoOffsetReset, CONN_ID_LANES, ClientOptions, ConsumedRecord, Consumer, ConsumerConfig,
-        ConsumerEvent, GroupProtocol, KafkaClient, conn_base,
+        ConsumerEvent, GroupProtocol, IsolationLevel, KafkaClient, conn_base,
     },
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
     scenario::NodeSpec,
@@ -113,6 +124,9 @@ const LAST_RECORDS: usize = 10;
 
 /// How long a repeated consumer error stays out of the timeline.
 const ERROR_EVENT_QUIET_MS: Millis = 5_000;
+
+/// How many offset regressions the snapshot lists.
+const REGRESSIONS: usize = 20;
 
 /// A topic partition.
 type Partition = (String, i32);
@@ -313,6 +327,8 @@ struct Config {
     #[serde(default)]
     instance_id: Option<String>,
     #[serde(default)]
+    isolation_level: IsolationLevel,
+    #[serde(default)]
     deserialize: Option<DeserializeConfig>,
 }
 
@@ -370,6 +386,12 @@ pub struct ConsumerNode {
     schemas: Option<SchemaCache>,
     /// The last error event: api, code and time.
     last_error: Option<(&'static str, i16, Millis)>,
+    /// The offset after the last record polled, per partition.
+    reached: BTreeMap<Partition, i64>,
+    /// The last [`REGRESSIONS`] polls that went back: partition, the offset
+    /// reached before, the record's offset, and when.
+    regressions: VecDeque<(Partition, i64, i64, Millis)>,
+    aborted_seen: u64,
 }
 
 impl ConsumerNode {
@@ -403,6 +425,7 @@ impl ConsumerNode {
             max_poll_records: config.max_poll_records.max(1),
             enable_auto_commit: config.enable_auto_commit,
             auto_commit_interval_ms: config.auto_commit_interval_ms,
+            isolation_level: config.isolation_level,
             ..ConsumerConfig::default()
         };
         let bootstrap: Vec<Endpoint> = config
@@ -424,7 +447,37 @@ impl ConsumerNode {
             last_records: VecDeque::new(),
             schemas: config.deserialize.map(|d| SchemaCache::new(d.registry)),
             last_error: None,
+            reached: BTreeMap::new(),
+            regressions: VecDeque::new(),
+            aborted_seen: 0,
         })
+    }
+
+    /// Note what a poll handed out: records that went back below what the
+    /// partition reached, and records of transactions that abort.
+    fn observe(&mut self, now: Millis, records: &[ConsumedRecord]) {
+        for record in records {
+            let key = (record.topic.clone(), record.partition);
+            if let Some(&reached) = self.reached.get(&key)
+                && record.offset < reached
+            {
+                if self.regressions.len() == REGRESSIONS {
+                    self.regressions.pop_front();
+                }
+                self.regressions
+                    .push_back((key.clone(), reached, record.offset, now));
+            }
+            self.reached.insert(key, record.offset + 1);
+            let aborts = record
+                .headers
+                .iter()
+                .find(|h| h.key == TXN_HEADER)
+                .and_then(|h| h.value.as_deref())
+                .is_some_and(|v| v.ends_with(b":abort"));
+            if aborts {
+                self.aborted_seen += 1;
+            }
+        }
     }
 
     /// A consumer subscribed to `topics` whose client numbers its
@@ -567,6 +620,7 @@ impl ConsumerNode {
             if polled.is_empty() {
                 break;
             }
+            self.observe(ctx.now(), &polled);
             self.processing.accept(polled);
         }
         let now = ctx.now();
@@ -734,6 +788,20 @@ impl Node for ConsumerNode {
                 })
             })
             .collect();
+        let positions: serde_json::Map<String, Value> = rows
+            .iter()
+            .filter_map(|r| {
+                r.position
+                    .map(|p| (format!("{}-{}", r.topic, r.partition), json!(p)))
+            })
+            .collect();
+        let regressions: Vec<Value> = self
+            .regressions
+            .iter()
+            .map(|((topic, partition), from, to, at)| {
+                json!({ "tp": format!("{topic}-{partition}"), "from": from, "to": to, "at": at })
+            })
+            .collect();
         json!({
             "group": base["group"],
             "protocol": base["protocol"],
@@ -756,6 +824,10 @@ impl Node for ConsumerNode {
             "fetches": base["fetches"],
             "commits": base["commits"],
             "last_records": last,
+            "isolation_level": self.config.isolation_level,
+            "positions": positions,
+            "offset_regressions": regressions,
+            "aborted_seen": self.aborted_seen,
             "deserialize": self.schemas.as_ref().map_or(Value::Null, SchemaCache::snapshot),
             "client": base["client"],
         })

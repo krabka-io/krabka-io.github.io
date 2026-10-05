@@ -190,12 +190,15 @@ pub fn frame_request(
         unknown_tagged_fields: krabka_protocol::UnknownTaggedFields::default(),
     };
     let len = header.encoded_len(header_version) + body.body_len(version);
-    let length =
-        i32::try_from(len).map_err(|_| ProtocolError::InvalidValue("request longer than 2 GiB"))?;
     let mut buf = BytesMut::with_capacity(4 + len);
-    buf.put_i32(length);
+    buf.put_i32(0);
     header.encode(&mut buf, header_version)?;
     body.encode_body(&mut buf, version)?;
+    // The length prefix counts the bytes written: `body_len` predicts a
+    // compressed record batch at its uncompressed size.
+    let length = i32::try_from(buf.len() - 4)
+        .map_err(|_| ProtocolError::InvalidValue("request longer than 2 GiB"))?;
+    buf[..4].copy_from_slice(&length.to_be_bytes());
     Ok(buf.freeze())
 }
 

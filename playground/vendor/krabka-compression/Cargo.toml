@@ -1,0 +1,35 @@
+# A copy of `krabka-compression` from krabka-protocol rev
+# 3b31e8729d7bebd6bf03d161b065209335d4b773 (the rev `Cargo.toml` pins), with
+# pure-Rust lz4 and zstd backends so the Cluster Lab's wasm32-unknown-unknown
+# build can produce and read lz4 and zstd batches. Upstream binds `lzzzz` (the
+# liblz4 C library, for the LZ4 HC levels) and `zstd` (libzstd), which need a C
+# toolchain for the target. `lib.rs`, `codec_type.rs`, `error.rs`, `gzip.rs`
+# and `snappy.rs` are unchanged; `lz4.rs` and `zstd.rs` are rewritten. The
+# playground patches every `krabka-compression` in its graph to this crate.
+[package]
+name = "krabka-compression"
+version = "0.5.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "Apache-2.0"
+authors = ["The Krabka Authors"]
+publish = false
+description = "Kafka wire-protocol compression codecs for Rust, with pure-Rust lz4 and zstd for the Cluster Lab"
+
+[features]
+default = ["gzip", "snappy", "lz4", "zstd"]
+gzip = ["dep:flate2"]
+snappy = ["dep:snap"]
+lz4 = ["dep:lz4rip"]
+zstd = ["dep:ruzstd"]
+
+[dependencies]
+assert2 = "0.4"
+bytes = "1"
+krabka-units = "0.5.0"
+refined_type = "0.6"
+thiserror = "2"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
+snap = { version = "1", optional = true }
+lz4rip = { version = "0.11.5", default-features = false, features = ["frame"], optional = true }
+ruzstd = { version = "0.9", default-features = false, features = ["std"], optional = true }

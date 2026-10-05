@@ -50,12 +50,13 @@ for (const file of htmlFiles) {
       continue;
     }
 
-    // Resolve internal relative or absolute link
+    // Resolve internal relative or absolute link; a query string names no file.
+    const hrefPath = rawHref.split('?')[0];
     let targetPath;
-    if (rawHref.startsWith('/')) {
-      targetPath = path.join(DIST_DIR, rawHref.slice(1));
+    if (hrefPath.startsWith('/')) {
+      targetPath = path.join(DIST_DIR, hrefPath.slice(1));
     } else {
-      targetPath = path.resolve(path.dirname(file), rawHref);
+      targetPath = path.resolve(path.dirname(file), hrefPath);
     }
 
     // Check existence

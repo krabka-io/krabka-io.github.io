@@ -11,7 +11,7 @@
 // first time a scenario with one runs here.
 
 import init, { Lab } from "../krabka_playground.js";
-import { el, button, select, labelled, fmtMs, fmtNum, plural, copyToClipboard, debounce, Toasts } from "./dom.js";
+import { el, button, select, labelled, fmtMs, fmtNum, plural, copyToClipboard, debounce, clamp, Toasts } from "./dom.js";
 import { LabWorld, SPEEDS } from "./world.js";
 import { Canvas } from "./canvas.js";
 import { Inspector } from "./inspector.js";
@@ -33,6 +33,20 @@ import { ExternalHost, REAL_BROKER_KIND, hasRealBroker, volumeName } from "./ext
 import { LogStore, LogLevels } from "./logstore.js";
 import { LogsPanel } from "./logs.js";
 import { KafkactlBridge, LOCAL_CLIENT_KIND, NO_CLIENT_NODE } from "./kafkactl.js";
+// ---- J2: cluster state, charts, invariants, record trace ----
+import { ClusterPanel, clusterHealth, decorateCanvas } from "./cluster-panel.js";
+import { ChartsPanel, Sampler, clusterOf, faultMarkers } from "./charts.js";
+import { InvariantChecker } from "./invariants.js";
+import { TracePanel } from "./trace.js";
+// ---- /J2 ----
+// ---- J3: experiments, fork here, focus mode, process faults ----
+import { ExperimentRunner, ExperimentPanel, validateExperiment } from "./experiment.js";
+import { oneWayCut } from "./faults.js";
+// Set before a run's isolation reload, so the reloaded page starts the experiment.
+const RUN_EXPERIMENT_KEY = "krabka-lab.run-experiment";
+// The scenario ids fresh runs created, so the next fresh run can drop them.
+const FRESH_RUNS_KEY = "krabka-lab.fresh-runs";
+// ---- /J3 ----
 
 const ROOT_ID = "krabka-lab";
 const AUTOSAVE_MS = 800;
@@ -43,6 +57,11 @@ const COI_URL = new URL("../../docs/lab/coi.js", import.meta.url).href;
 const RELOADED_KEY = "krabka-lab.isolation-reload";
 // Why an invite or share link failed to open, kept across that reload.
 const SHARE_ERROR_KEY = "krabka-lab.share-error";
+// The work area's layout in this browser: folded columns and the dock's share
+// of the stage height per tab.
+const LAYOUT_KEY = "krabka-lab.layout";
+const SPLIT_DEFAULTS = { events: 0.3, logs: 0.5, network: 0.62, storage: 0.6, cluster: 0.55, charts: 0.55, trace: 0.5 };
+const MIN_CANVAS_PX = 120;
 
 function newScenarioId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -103,7 +122,11 @@ class LabApp {
     this.world = new LabWorld(Lab, {
       onError: (err, ctx) => this.toasts.error(err, ctx),
       onSnapshot: (snap) => this.onSnapshot(snap),
-      onEvents: (events) => this.timeline.append(events),
+      onEvents: (events) => {
+        this.timeline.append(events);
+        this.j2Events?.(events); // J2
+        this.experiment?.onEvents(events); // J3
+      },
       onEgress: (frames) => this.session.sendEgress(frames),
       onDurable: (ops) => this.storage.queueOps(this.world.id, ops),
       onWire: (frames, dropped) => this.capture.add(frames, dropped),
@@ -111,6 +134,8 @@ class LabApp {
         this.storage.resetMirror(images);
         // A capture belongs to one run of one scenario: its clock starts again.
         this.capture.clear();
+        this.j2Reset?.(); // J2: the charts and the invariants start again with the run
+        this.experiment?.stop("the scenario was replaced"); // J3
       },
       onChange: (opts) => this.onChange(opts),
       onReset: () => this.onReset(),
@@ -210,6 +235,10 @@ class LabApp {
         { id: "logs", label: "Logs", title: "What the real brokers log, with filters and a setting for how much they log" },
         { id: "network", label: "Network", title: "Every frame on the virtual network: Kafka exchanges decoded field by field, timings and statistics" },
         { id: "storage", label: "Storage", title: "What each node keeps in this browser" },
+        // J2
+        { id: "cluster", label: "Cluster", title: "The KRaft quorum, the brokers and every partition's leader, ISR and high watermark, as the admin last saw them" },
+        { id: "charts", label: "Charts", title: "Throughput, lag, round trips and replication over lab time, the faults on the same axis, and the live invariant checks" },
+        { id: "trace", label: "Trace", title: "Follow one produced record through the network capture" },
       ],
       hooks: {
         onShow: (id) => {
@@ -217,6 +246,8 @@ class LabApp {
           if (id === "logs") this.logsPanel.shown();
           if (id === "network") this.networkPanel.refresh();
           if (id === "storage") this.storagePanel.refresh();
+          this.j2Shown?.(id); // J2
+          this.applySplit();
         },
       },
     });
@@ -306,11 +337,14 @@ class LabApp {
     });
 
     this.addExpandControls();
+    this.j2Init(); // J2
+    this.j3Init(); // J3
 
     // Stacked on a narrow screen, the details start folded so the inspector
     // and the rail sit one short scroll below the canvas.
     this.stacked = window.matchMedia("(max-width: 1024px)");
     if (this.stacked.matches) this.setDockCollapsed(true);
+    this.buildWorkArea(rail, stage, side);
 
     // The shortcuts answer while focus is in the lab or the pointer is over it:
     // a click on a button that re-renders drops focus to the page.
@@ -352,6 +386,146 @@ class LabApp {
     this.dock.root.classList.toggle("lab-dock-collapsed", collapsed);
     // The label says what a press does, so it carries no expanded state too.
     this.dockToggle.textContent = collapsed ? "Show" : "Hide";
+    this.applySplit?.();
+  }
+
+  // ---- work area: folding side columns and the canvas/dock splitter -----------------------------------
+
+  buildWorkArea(rail, stage, side) {
+    const root = this.root;
+    this.layoutPrefs = readLayoutPrefs();
+    // A phone gets the cluster to watch; building and breaking it need the room.
+    const phone = el("p", "lab-phone-note", "View only on a phone: watch the cluster, play or pause it, and tap a card to inspect a node. Adding nodes and breaking links need a wider screen.");
+    phone.setAttribute("role", "note");
+    this.toolbar.after(phone);
+
+    // Each side column folds to a strip that names it and opens it again.
+    this.foldBtns = {};
+    for (const [key, col, name, label] of [
+      ["rail", rail, "the build and scenarios panel", "Build · Scenarios · Connect"],
+      ["side", side, "the inspector", "Inspector"],
+    ]) {
+      col.id = `lab-col-${key}`;
+      col.prepend(button(label, "lab-fold-strip", () => this.setFolded(key, false), { title: `Show ${name}` }));
+      const toggle = button("", "lab-btn-sm lab-fold-btn", () => this.setFolded(key, !root.classList.contains(`lab-${key}-folded`)), {
+        ariaLabel: `Show ${name}`,
+        title: `Fold or unfold ${name}`,
+      });
+      toggle.setAttribute("aria-controls", col.id);
+      this.foldBtns[key] = toggle;
+    }
+    this.toolbar.prepend(this.foldBtns.rail);
+    this.toolbar.querySelector(".lab-tb-tools").append(this.foldBtns.side);
+    this.setFolded("rail", Boolean(this.layoutPrefs.rail), false);
+    this.setFolded("side", Boolean(this.layoutPrefs.side), false);
+    // A button that opens a rail tab (Load a preset, Add a node) opens the rail too.
+    const showTab = this.palette.show.bind(this.palette);
+    this.palette.show = (tab) => {
+      if (this.root.classList.contains("lab-rail-folded")) this.setFolded("rail", false);
+      return showTab(tab);
+    };
+
+    // The splitter shares the stage's height between the canvas and the dock,
+    // per dock tab: a log or the Network tab wants rows, Events wants canvas.
+    const s = el("div", "lab-splitter");
+    this.splitter = s;
+    s.tabIndex = 0;
+    s.setAttribute("role", "separator");
+    s.setAttribute("aria-orientation", "horizontal");
+    s.setAttribute("aria-label", "Canvas and details height");
+    s.setAttribute("aria-valuemin", "0");
+    s.setAttribute("aria-valuemax", "100");
+    s.title = "Drag or use the arrow keys to share the height between the canvas and the details. Double-click resets it.";
+    stage.insertBefore(s, this.dock.root);
+    s.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      s.setPointerCapture(e.pointerId);
+      s.classList.add("lab-dragging");
+      const bottom = this.dock.root.getBoundingClientRect().bottom;
+      const move = (ev) => this.setDockHeight(bottom - ev.clientY - s.offsetHeight / 2, false);
+      const end = () => {
+        s.classList.remove("lab-dragging");
+        s.removeEventListener("pointermove", move);
+        writeLayoutPrefs(this.layoutPrefs);
+      };
+      s.addEventListener("pointermove", move);
+      s.addEventListener("lostpointercapture", end, { once: true });
+    });
+    s.addEventListener("dblclick", () => {
+      delete this.layoutPrefs.split?.[this.dock.active];
+      writeLayoutPrefs(this.layoutPrefs);
+      this.setDockCollapsed(false);
+    });
+    s.addEventListener("keydown", (e) => {
+      const now = this.dock.root.offsetHeight;
+      const step = e.shiftKey ? 96 : 24;
+      const to = { ArrowUp: now + step, ArrowDown: now - step, Home: 0, End: Infinity }[e.key];
+      if (to !== undefined) {
+        e.preventDefault();
+        this.setDockHeight(to);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        this.setDockCollapsed(!this.dock.root.classList.contains("lab-dock-collapsed"));
+      }
+    });
+    let pending = 0;
+    new ResizeObserver(() => {
+      if (!pending) pending = requestAnimationFrame(() => ((pending = 0), this.applySplit()));
+    }).observe(stage);
+    this.stacked.addEventListener("change", () => this.applySplit());
+    this.applySplit();
+
+    // Toasts rise above the tour card while it is open.
+    new ResizeObserver(() => root.style.setProperty("--lab-tour-h", `${this.tour.root.offsetHeight}px`)).observe(this.tour.root);
+  }
+
+  setFolded(key, folded, save = true) {
+    this.root.classList.toggle(`lab-${key}-folded`, folded);
+    const toggle = this.foldBtns[key];
+    toggle.textContent = (key === "rail") === folded ? "›" : "‹";
+    toggle.setAttribute("aria-expanded", String(!folded));
+    toggle.setAttribute("aria-label", `${folded ? "Show" : "Hide"} ${key === "rail" ? "the build and scenarios panel" : "the inspector"}`);
+    if (!save) return;
+    this.layoutPrefs[key] = folded;
+    writeLayoutPrefs(this.layoutPrefs);
+  }
+
+  // The height the canvas and the dock share, or 0 where the splitter is off:
+  // stacked, or with either of them expanded over the window.
+  splitRoom() {
+    if (this.stacked.matches || this.expandedPanel === this.dock.root || this.expandedPanel === this.canvas.wrap) return 0;
+    return this.canvas.wrap.offsetHeight + this.dock.root.offsetHeight;
+  }
+
+  // Drags and keys set the dock's share for the tab it shows.
+  setDockHeight(px, save = true) {
+    const room = this.splitRoom();
+    if (!room) return;
+    if (this.dock.root.classList.contains("lab-dock-collapsed")) this.setDockCollapsed(false);
+    this.layoutPrefs.split ??= {};
+    this.layoutPrefs.split[this.dock.active] = Math.round(clamp(px / room, 0, 1) * 1000) / 1000;
+    if (save) writeLayoutPrefs(this.layoutPrefs);
+    this.applySplit();
+  }
+
+  applySplit() {
+    if (!this.splitter) return;
+    const dock = this.dock.root;
+    const room = this.splitRoom();
+    this.splitter.hidden = this.stacked.matches;
+    if (!room || dock.classList.contains("lab-dock-collapsed")) {
+      dock.style.height = "";
+      this.splitter.setAttribute("aria-valuenow", "0");
+      return;
+    }
+    const tab = this.dock.active;
+    const share = this.layoutPrefs.split?.[tab] ?? SPLIT_DEFAULTS[tab] ?? 0.5;
+    // The dock keeps its tab strip and a few rows; the canvas keeps a band of cards.
+    const px = Math.round(clamp(share * room, (this.dock.head?.offsetHeight || 40) + 64, room - MIN_CANVAS_PX));
+    dock.style.height = `${px}px`;
+    this.splitter.setAttribute("aria-valuenow", String(Math.round((px / room) * 100)));
+    this.splitter.setAttribute("aria-valuetext", `details ${Math.round((px / room) * 100)}% of the height`);
   }
 
   // Drill-downs open the details full-window: the analyzers need the room.
@@ -434,7 +608,7 @@ class LabApp {
       el(
         "p",
         "lab-small lab-muted",
-        "A card that says down was killed; dashed means its links are cut. Orange arrows are records moving between a client and a topic; faint dashed lines are connections. A dot sliding along a line is a Kafka frame in flight.",
+        "A card that says down was killed; dashed means its links are cut. Orange arrows are records moving between a client and a topic; faint dashed lines are connections. The brokers share a cluster frame: a client's connections to them are one line to the frame, and a line between two brokers shows while frames flow on it (All connections draws every connection). A dot sliding along a line is a Kafka frame in flight.",
       ),
     );
     body.appendChild(el("p", "lab-small lab-muted", "New here? The tour walks through the controls in about a minute."));
@@ -536,6 +710,7 @@ class LabApp {
         panel.setAttribute("aria-modal", "true");
         if (panel._expandLabelled) panel.setAttribute("aria-label", name);
         this.inertAround(panel);
+        this.applySplit();
         // Folding the details away would leave the window empty.
         this.dockToggle.hidden = panel === this.dock.root;
         // Short, so the dock's tab strip keeps room on a phone.
@@ -574,6 +749,7 @@ class LabApp {
     control.textContent = "Expand";
     control.setAttribute("aria-label", `Expand ${panel._expandName}`);
     this.expandedPanel = null;
+    this.applySplit();
     control.focus();
   }
 
@@ -867,6 +1043,7 @@ class LabApp {
   // ---- state flow ------------------------------------------------------------------------------------------
 
   onSnapshot(snap) {
+    this.experiment?.tick(snap); // J3
     this.pushPanels(snap);
   }
 
@@ -904,6 +1081,8 @@ class LabApp {
     this.nameEl.textContent = scenario?.name || "Untitled scenario";
     this.dock.setBadge("events", this.timeline.events.length ? fmtNum(this.timeline.events.length) : "");
     this.renderClock(snap);
+    this.j2Update(snap); // J2
+    this.experimentPanel?.update(scenario); // J3
   }
 
   renderClock(snap = this.world.snapshot()) {
@@ -1015,6 +1194,7 @@ class LabApp {
       { label: snap?.alive ? "Kill" : "Restart", command: snap?.alive ? "kill" : "restart" },
       { label: "Wipe (restart from nothing)", command: "wipe" },
       cutOff(this.world.snapshot(), id) ? { label: "Reconnect", command: "reconnect" } : { label: "Isolate", command: "isolate" },
+      ...this.j3MenuItems(id, snap), // J3
       { separator: true },
       { label: "Remove", command: "remove", danger: true, disabled: !editable },
     ];
@@ -1045,6 +1225,7 @@ class LabApp {
         this.fault(FAULT[command](id));
         break;
       default:
+        this.j3Command(id, command); // J3
     }
   }
 
@@ -1100,8 +1281,268 @@ class LabApp {
     if (this.world.fault(f)) {
       this.session.broadcastFault(f);
       if (!quiet) this.toasts.info(describeFault(f, (id) => this.nodeName(id)));
+      return true; // J3: the experiment runner records refusals
+    }
+    return false;
+  }
+
+  // ---- J2: cluster state, charts, invariants, record trace ---------------------------------------------------
+
+  j2Init() {
+    this.sampler = new Sampler();
+    this.checker = new InvariantChecker();
+    this.j2Markers = [];
+    this.j2Pending = [];
+    this.clusterPanel = new ClusterPanel(this.dock.panel("cluster"), { nodeLabelForBroker: (id) => this.nodeLabelForBroker(id) });
+    this.chartsPanel = new ChartsPanel(this.dock.panel("charts"), {
+      sampler: this.sampler,
+      hooks: { onRerun: () => this.rerun(), onSelectNode: (id) => this.select(id), scenarioName: () => this.world.scenario()?.name },
+    });
+    this.tracePanel = new TracePanel(this.dock.panel("trace"), {
+      capture: this.capture,
+      nodeName: (id) => this.nodeName(id),
+      context: () => this.traceContext(),
+      showExchange: (ex) => this.showExchange(ex),
+    });
+    this.inspector.hooks.onTrace = (id, rec) => this.traceRecord(id, rec);
+    this.inspector.hooks.clusterHealth = () => clusterHealth(clusterOf(this.world.snapshot()));
+    this.canvas.hooks.decorate = (canvas) => decorateCanvas(canvas, clusterOf(canvas.snapshot));
+    this.invPill = button("Invariants hold", "lab-btn-sm lab-inv-pill", () => {
+      this.setDockCollapsed(false);
+      this.dock.show("charts");
+    }, { title: "The live invariant checks: no acked record lost, offsets forward, one leader per epoch. Opens the Charts tab." });
+    this.invPill.dataset.field = "invariants";
+    this.toolbar.querySelector(".lab-tb-tools")?.prepend(this.invPill);
+  }
+
+  // A new run of a scenario: its series and its checks start from nothing.
+  j2Reset() {
+    if (!this.sampler) return;
+    this.sampler.reset();
+    this.checker.reset();
+    this.j2Markers = [];
+    this.j2Pending = [];
+    this.chartsPanel.setMarkers([]);
+    this.chartsPanel.setViolations([]);
+    this.chartsPanel.render();
+    this.renderInvPill();
+  }
+
+  j2Events(events) {
+    if (!this.sampler) return;
+    this.j2Pending.push(...events);
+    this.j2Markers.push(...faultMarkers(events, (id) => this.nodeName(id)));
+  }
+
+  j2Update(snap) {
+    if (!snap || !this.sampler) return;
+    const fresh = this.checker.observe(snap, this.j2Pending.splice(0), this.world.scenario());
+    if (fresh.length) {
+      this.chartsPanel.setViolations(this.checker.violations);
+      this.renderInvPill();
+      for (const v of fresh) this.toasts.warn(`Invariant violated at ${fmtMs(v.at)}: ${v.text}`);
+    }
+    const row = this.sampler.sample(snap, this.capture);
+    if (row || fresh.length) {
+      this.chartsPanel.setMarkers(this.j2Markers);
+      if (this.chartsPanel.shown()) this.chartsPanel.render();
+    }
+    this.clusterPanel.update(snap);
+  }
+
+  j2Shown(id) {
+    if (id === "cluster") this.clusterPanel.render(true);
+    if (id === "charts") this.chartsPanel.render();
+  }
+
+  renderInvPill() {
+    const n = this.checker.violations.length;
+    this.invPill.textContent = n ? `${plural(n, "invariant violation")}` : "Invariants hold";
+    this.invPill.classList.toggle("lab-inv-bad", n > 0);
+  }
+
+  // The Charts tab's Rerun: the scenario as it is configured now, from
+  // nothing (a new identity, so every broker gets a new empty disk).
+  rerun() {
+    this.openFresh(this.world.scenario()).then((ok) => ok && this.toasts.info("Rerunning from nothing with the current configuration"));
+  }
+
+  traceContext() {
+    const c = clusterOf(this.world.snapshot());
+    const brokers = new Set(this.world.scenario().nodes.filter((n) => n.kind === REAL_BROKER_KIND).map((n) => n.id));
+    const topicIds = new Map((c?.topics || []).filter((t) => t.id).map((t) => [t.id, t.name]));
+    const replicas = (topic, partition) => c?.topics?.find((t) => t.name === topic)?.partitions?.find((p) => p.partition === partition)?.replicas || null;
+    return { brokers, topicIds, replicas };
+  }
+
+  // A producer's Last records row, from its Trace button.
+  traceRecord(id, rec) {
+    const topic = this.world.snapshot()?.nodes?.find((n) => n.id === id)?.state?.topic;
+    this.setDockCollapsed(false);
+    this.dock.show("trace");
+    this.tracePanel.trace({ ...rec, producer: id, topic });
+  }
+
+  showExchange(ex) {
+    this.setDockCollapsed(false);
+    this.dock.show("network");
+    const net = this.networkPanel;
+    net.setView("exchanges");
+    net.select(ex);
+    const i = net.rows?.indexOf(ex) ?? -1;
+    // 24: the Network list's row height.
+    if (i >= 0) net.list.scrollTop = Math.max(0, i * 24 - net.list.clientHeight / 2);
+  }
+
+  // ---- /J2 -----------------------------------------------------------------------------------------------------
+
+  // ---- J3: experiments, fork here, focus mode, process faults ----------------------------------------------------
+
+  j3Init() {
+    this.experiment = new ExperimentRunner({
+      fault: (f) => this.fault(f, { quiet: true }),
+      control: (id, cmd) => this.control(id, cmd),
+      pause: () => {
+        if (!this.world.paused) this.togglePlay();
+      },
+      scenario: () => this.world.scenario(),
+      capture: this.capture,
+      nodeName: (id) => this.nodeName(id),
+      describeFault: (f) => describeFault(f, (id) => this.nodeName(id)),
+      onChange: () => this.experimentPanel?.renderResults(),
+      onEnd: (r) => {
+        const j = r.toJSON();
+        this.toasts.show(`Experiment ${j.state}: ${j.passed} of ${j.checks.length} checks passed. The clock is paused.`, { level: j.state === "passed" ? "info" : "warn", ttl: 10_000 });
+      },
+    });
+    this.experimentPanel = new ExperimentPanel(this.palette.tabs.panel("scenarios"), {
+      scenario: () => this.world.scenario(),
+      apply: (exp) => {
+        if (this.session.role === "spoke") return false;
+        this.world.setExperiment(exp);
+        return true;
+      },
+      run: () => this.runExperiment(),
+      stop: () => this.experiment.stop(),
+      fork: () => this.forkHere(),
+      runner: this.experiment,
+      nodeName: (id) => this.nodeName(id),
+      role: () => this.session.role,
+    });
+  }
+
+  // `?focus=1` (an embed's "Open in the lab") folds both side columns; `?run=1`
+  // runs the scenario's experiment; a run that reloaded for isolation goes on.
+  j3Boot() {
+    const params = new URLSearchParams(window.location.search);
+    if (!this.reloading) {
+      const run = sessionFlag(RUN_EXPERIMENT_KEY, false) || params.get("run") === "1";
+      if (params.has("run")) {
+        params.delete("run");
+        const query = params.toString();
+        history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+      }
+      if (run && this.world.scenario().experiment) this.j3Start();
+    }
+    // After the run started: showing the Scenarios tab unfolds the rail.
+    if (params.get("focus") === "1") {
+      this.setFolded("rail", true, false);
+      this.setFolded("side", true, false);
     }
   }
+
+  j3Start() {
+    if (this.world.paused) this.togglePlay();
+    this.palette.show("scenarios");
+    const exp = this.world.scenario().experiment;
+    this.experiment.start(exp, this.world.now());
+    this.toasts.info(`Running the experiment "${exp.name || "Experiment"}": steps and checks are in the Scenarios tab`);
+  }
+
+  // Restart the scenario fresh (a new identity: new broker disks, fresh
+  // clients) and run its experiment from lab time 0.
+  async runExperiment() {
+    const doc = this.world.scenario();
+    const errors = doc.experiment ? validateExperiment(doc.experiment, doc) : ["this scenario has no experiment"];
+    if (errors.length) {
+      this.toasts.warn(`Cannot run the experiment: ${errors[0]}`);
+      return;
+    }
+    sessionFlag(RUN_EXPERIMENT_KEY, true);
+    const ok = await this.openFresh(doc);
+    if (!ok || this.reloading) return; // the reloaded page starts it
+    sessionFlag(RUN_EXPERIMENT_KEY, false);
+    this.j3Start();
+  }
+
+  // Snapshot and fork: the brokers' disks as they are now, under a new
+  // scenario that boots from them. Clients and the admin start fresh.
+  async forkHere() {
+    if (this.session.role === "spoke") return;
+    const doc = this.world.scenario();
+    if (!doc.id) {
+      this.toasts.warn("The scenario has no identity yet: save it first");
+      return;
+    }
+    if (!this.world.paused) this.togglePlay();
+    this.experiment.stop("forked");
+    const at = this.world.now();
+    const id = newScenarioId();
+    try {
+      const wasi = await import("../wasi/host.js");
+      const brokers = doc.nodes.filter((n) => n.kind === REAL_BROKER_KIND);
+      // Whatever the processes wrote reaches IndexedDB first.
+      await Promise.all(brokers.map((n) => this.external.process(n.id)?.flush().catch(() => {})));
+      const stored = new Set((await wasi.listVolumes()).map((v) => v.id));
+      let copied = 0;
+      for (const n of brokers) {
+        const from = volumeName(doc.id, n.id);
+        if (!stored.has(from)) continue;
+        await wasi.importVolume(volumeName(id, n.id), await wasi.exportVolume(from));
+        copied += 1;
+      }
+      // The copied disks carry the original cluster id (`clusterIdFor`), which the fork keeps.
+      const fork = { ...doc, id, forked_from: doc.forked_from || doc.id, name: `${doc.name || "Scenario"} (fork at ${fmtMs(at)})` };
+      await this.storage.saveScenario(fork);
+      if (await this.openScenario(fork, { keepId: true })) {
+        if (this.world.paused) this.togglePlay();
+        this.toasts.info(`Forked at ${fmtMs(at)}: ${plural(copied, "broker disk")} copied. The brokers boot from them; clients start fresh.`);
+      }
+    } catch (err) {
+      this.toasts.error(err, "fork");
+    }
+  }
+
+  // The canvas menu's process faults, and a one-way cut toward the selected node.
+  j3MenuItems(id, snap) {
+    const items = [{ separator: true }];
+    items.push(snap?.paused ? { label: "Resume", command: "pause-toggle" } : { label: "Pause (like SIGSTOP)", command: "pause-toggle", disabled: !snap?.alive });
+    items.push({ label: "Clock skew and disk…", command: "process-faults", disabled: snap?.kind !== REAL_BROKER_KIND });
+    const other = this.selection[0];
+    if (other != null && other !== id) {
+      const world = this.world.snapshot();
+      for (const [from, to] of [[other, id], [id, other]]) {
+        items.push({ label: `${oneWayCut(world, from, to) ? "Heal" : "Cut"} ${this.nodeName(from)} → ${this.nodeName(to)}`, command: `one-way:${from}:${to}` });
+      }
+    }
+    return items;
+  }
+
+  j3Command(id, command) {
+    if (command === "pause-toggle") {
+      const paused = this.world.snapshot()?.nodes.find((n) => n.id === id)?.paused;
+      this.fault(paused ? FAULT.resume(id) : FAULT.pause(id));
+    } else if (command === "process-faults") {
+      this.select(id);
+      this.faultBar.openMore();
+    } else {
+      const m = /^one-way:(\d+):(\d+)$/.exec(command);
+      if (!m) return;
+      const [from, to] = [Number(m[1]), Number(m[2])];
+      this.fault(oneWayCut(this.world.snapshot(), from, to) ? FAULT.heal_one_way(from, to) : FAULT.cut_one_way(from, to));
+    }
+  }
+  // ---- /J3 -----------------------------------------------------------------------------------------------------
 
   // ---- real brokers ------------------------------------------------------------------------------------------
 
@@ -1188,7 +1629,8 @@ class LabApp {
     }
     if (globalThis.crossOriginIsolated) {
       this.external.setIsolation(await ensureCrossOriginIsolation());
-      if (sessionFlag(RELOADED_KEY, false)) this.toasts.show("Reloaded once so the real broker can run in this tab.", { ttl: 3000 });
+      // Kept, so the tour's notice can say both in one toast.
+      if (sessionFlag(RELOADED_KEY, false)) this.reloadedToast = this.toasts.show("Reloaded once so the real broker can run in this tab.", { ttl: 3000 });
       return false;
     }
     if (!(await this.external.moduleAvailable())) return false;
@@ -1466,6 +1908,29 @@ class LabApp {
     }
   }
 
+  // A fresh run opens the scenario under a new identity, the only way to
+  // give every broker an empty disk. The copy an earlier fresh run made is
+  // dropped, disks and all, so reruns do not pile up in Saved; a scenario the
+  // reader saved or opened themselves is never dropped.
+  async openFresh(doc) {
+    const previous = this.world.id;
+    const ok = await this.openScenario(doc);
+    if (!ok || this.reloading) return ok;
+    const runs = new Set(readJson(FRESH_RUNS_KEY, []));
+    if (previous && previous !== this.world.id && runs.delete(previous)) {
+      try {
+        await this.storage.deleteScenario(previous);
+        await this.external.forgetScenarioVolumes(previous);
+        this.palette.refreshSaved();
+      } catch {
+        // A copy left behind costs a row in Saved, nothing more.
+      }
+    }
+    if (this.world.id) runs.add(this.world.id);
+    writeJson(FRESH_RUNS_KEY, [...runs].slice(-20));
+    return ok;
+  }
+
   async deleteSaved(id) {
     if (!(await this.confirm("Delete saved scenario", "Delete this scenario and everything stored for it in this browser? This cannot be undone.", "Delete"))) return;
     try {
@@ -1641,14 +2106,52 @@ class LabApp {
     }
     this.world.start();
     this.pushPanels();
+    this.j3Boot(); // J3
     // It opens without taking focus, so say so for those who cannot see it.
-    if (this.tour.maybeStart()) this.toasts.info("A short tour of the lab is open. Press Escape to close it.");
+    if (this.tour.maybeStart()) {
+      const reloaded = Boolean(this.reloadedToast?.isConnected);
+      this.reloadedToast?.remove();
+      this.toasts.info(`${reloaded ? "Reloaded once so the real broker can run in this tab. " : ""}A short tour of the lab is open. Press Escape to close it.`);
+    }
   }
 }
 
 // Sets (`value` true) or takes and clears (`value` false) a flag in
 // sessionStorage; returns whether it was set. Without sessionStorage there is
 // no flag.
+function readLayoutPrefs() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+    return prefs && typeof prefs === "object" ? prefs : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLayoutPrefs(prefs) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(prefs));
+  } catch {
+    // Not remembered: the next visit starts from the defaults.
+  }
+}
+
+function readJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // No storage: reruns keep their copies.
+  }
+}
+
 function sessionFlag(key, value) {
   try {
     const was = sessionStorage.getItem(key) === "1";
@@ -1717,7 +2220,11 @@ async function boot() {
   const root = document.getElementById(ROOT_ID);
   if (!root) return;
   try {
-    await init();
+    // The build's content hash rides on the URL: the isolation service worker
+    // keeps each version once (`/docs/lab/coi-sw.js`), and a new build misses.
+    const wasm = new URL("../krabka_playground_bg.wasm", import.meta.url);
+    if (root.dataset.labWasm) wasm.searchParams.set("v", root.dataset.labWasm);
+    await init({ module_or_path: wasm });
     const app = new LabApp(root);
     window.krabkaLab = app; // for the end-to-end check and the curious
     await app.start();

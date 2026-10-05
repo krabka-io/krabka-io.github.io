@@ -121,11 +121,16 @@ export class WasiClock {
   }
 }
 
-/** The worker's read-only view of a `WasiClock` buffer. */
+/**
+ * The worker's read-only view of a `WasiClock` buffer. `faults`, the
+ * process's own fault buffer (protocol.js), adds its clock skew to REALTIME:
+ * the clock is shared, the skew is per process, MONOTONIC never moves.
+ */
 export class ClockView {
-  constructor(buffer) {
+  constructor(buffer, faults = null) {
     this.i32 = new Int32Array(buffer, 0, 2);
     this.i64 = new BigInt64Array(buffer, 8, 3);
+    this.skew = faults ? new BigInt64Array(faults, 16, 1) : null;
     this.seq = -1;
     this.refresh();
   }
@@ -162,7 +167,13 @@ export class ClockView {
 
   realtimeNs() {
     const host = this.hostNs();
-    return this.baseNs + host;
+    return this.realtimeBaseNs() + host;
+  }
+
+  /** REALTIME minus host time, the process's skew included. */
+  realtimeBaseNs() {
+    this.refresh();
+    return this.skew ? this.baseNs + Atomics.load(this.skew, 0) : this.baseNs;
   }
 
   /** Real milliseconds until host time reaches `targetNs`: 0 when it has, Infinity while the host drives it. */

@@ -77,6 +77,50 @@ pub enum Fault {
         b: NodeId,
         permille: u32,
     },
+    /// Drop every frame from `from` to `to`, while `to` to `from` still
+    /// flows. Connections stay open, half dead, until a peer times out.
+    CutOneWay {
+        from: NodeId,
+        to: NodeId,
+    },
+    HealOneWay {
+        from: NodeId,
+        to: NodeId,
+    },
+    /// The node stops: no timers fire and frames for it wait, as under
+    /// SIGSTOP or a long GC pause. A real broker is paused by the page.
+    Pause {
+        node: NodeId,
+    },
+    Resume {
+        node: NodeId,
+    },
+    /// Offset a real broker's wall clock (REALTIME) by `ms`; its monotonic
+    /// clock is untouched. The world records it, the page applies it.
+    ClockSkew {
+        node: NodeId,
+        ms: i64,
+    },
+    /// Make a real broker's volume slow (syncs take `ms`), full (growing
+    /// writes fail with ENOSPC) or failing (writes and syncs fail with EIO).
+    /// The world records it, the page applies it.
+    Disk {
+        node: NodeId,
+        mode: DiskMode,
+        #[serde(default)]
+        ms: Millis,
+    },
+}
+
+/// The state of a real broker's volume, as [`Fault::Disk`] sets it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskMode {
+    #[default]
+    Ok,
+    Slow,
+    Full,
+    Eio,
 }
 
 /// The link parameters of one pair of nodes.
@@ -101,6 +145,18 @@ struct Slot {
     remote_snapshot: Option<serde_json::Value>,
     /// The node runs outside the world, in a process the page hosts.
     external: bool,
+    /// Set while [`Fault::Pause`] holds the node.
+    paused: Option<Paused>,
+    skew_ms: i64,
+    disk: DiskMode,
+}
+
+/// What waits for a paused node: the frames that reached it, in arrival
+/// order, and whether its timer came due.
+#[derive(Default)]
+struct Paused {
+    held: Vec<Frame>,
+    timer_due: bool,
 }
 
 enum Item {
@@ -187,7 +243,27 @@ pub struct NodeSnapshot {
     pub hosted: bool,
     pub alive: bool,
     pub isolated: bool,
+    #[serde(flatten)]
+    pub faults: NodeFaults,
     pub state: serde_json::Value,
+}
+
+/// The node faults a snapshot reports, flat beside the node's other fields.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct NodeFaults {
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub skew_ms: i64,
+    #[serde(default)]
+    pub disk: DiskMode,
+}
+
+/// A link cut in one direction only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct OneWayCut {
+    pub from: NodeId,
+    pub to: NodeId,
 }
 
 /// One link with a non-default parameter.
@@ -209,6 +285,8 @@ pub struct WorldSnapshot {
     pub default_latency_ms: Millis,
     pub nodes: Vec<NodeSnapshot>,
     pub links: Vec<LinkSnapshot>,
+    #[serde(default)]
+    pub one_way_cuts: Vec<OneWayCut>,
     pub in_flight: Vec<InFlight>,
     pub event_count: usize,
     /// Frames delivered per `(src, dst)` pair since the world started.
@@ -248,6 +326,10 @@ pub struct World {
     wire_dropped: u64,
     topics: Vec<TopicSpec>,
     rng: Rng,
+    /// Links cut in one direction: `(from, to)`.
+    one_way: BTreeSet<(NodeId, NodeId)>,
+    /// The scenario's experiment, kept as it came for [`World::scenario`].
+    experiment: Option<serde_json::Value>,
 }
 
 impl World {
@@ -277,6 +359,8 @@ impl World {
             wire_dropped: 0,
             topics: Vec::new(),
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
+            one_way: BTreeSet::new(),
+            experiment: None,
         }
     }
 
@@ -323,6 +407,7 @@ impl World {
         world.name.clone_from(&scenario.name);
         world.default_latency = scenario.links.default_latency_ms;
         world.topics.clone_from(&scenario.topics);
+        world.experiment.clone_from(&scenario.experiment);
         if !hosted.is_empty() {
             world.hosted = Some(hosted.iter().copied().collect());
         }
@@ -340,42 +425,55 @@ impl World {
             let image = images.remove(&spec.id).filter(|image| !image.is_empty());
             world.add_node_with_state(spec.clone(), image)?;
         }
-        if !scenario.topics.is_empty() {
-            world.add_admin_for_topics()?;
-        }
+        world.sync_admin()?;
         Ok(world)
     }
 
-    /// The admin client that creates the scenario's topics. It is a real node
-    /// of kind `admin`, hidden from the builder, bootstrapped at the brokers
-    /// of the scenario, which are real brokers.
-    fn add_admin_for_topics(&mut self) -> Result<(), LabError> {
+    /// Keep the hidden admin node in step with the brokers: a world with a
+    /// real broker has one, bootstrapped at every broker; it creates the
+    /// scenario's topics and observes the cluster. Added with the first
+    /// broker, rebuilt when the brokers change, removed with the last.
+    fn sync_admin(&mut self) -> Result<(), LabError> {
         let bootstrap: Vec<NodeId> = self
             .nodes
             .values()
             .filter(|s| s.spec.kind == REAL_BROKER_KIND)
             .map(|s| s.spec.id)
             .collect();
-        if bootstrap.is_empty() {
-            return Err(LabError::InvalidScenario(
-                "topics need at least one broker".to_string(),
-            ));
-        }
-        let id = self.next_free_id();
-        let broker = bootstrap[0];
-        self.admin = Some((id, broker));
-        if let Some(set) = &mut self.hosted
-            && set.contains(&broker)
+        let Some(&broker) = bootstrap.first() else {
+            if let Some((admin, _)) = self.admin.take() {
+                self.remove_node(admin);
+            }
+            if !self.topics.is_empty() {
+                return Err(LabError::InvalidScenario(
+                    "topics need at least one broker".to_string(),
+                ));
+            }
+            return Ok(());
+        };
+        let config = serde_json::json!({ "bootstrap": bootstrap, "topics": self.topics });
+        let existing = self.admin.map(|(admin, _)| admin);
+        if let Some(admin) = existing
+            && self.nodes.get(&admin).is_some_and(|s| s.spec.config == config)
         {
-            set.insert(id);
+            return Ok(());
         }
-        let spec = NodeSpec::new(
-            id.0,
-            "admin",
-            "scenario-admin",
-            serde_json::json!({ "bootstrap": bootstrap, "topics": self.topics }),
-        );
-        self.add_node(spec).map(|_| ())
+        let id = existing.unwrap_or_else(|| self.next_free_id());
+        self.admin = Some((id, broker));
+        // The admin runs wherever its first bootstrap broker runs.
+        if let Some(set) = &mut self.hosted {
+            if set.contains(&broker) {
+                set.insert(id);
+            } else {
+                set.remove(&id);
+            }
+        }
+        let spec = NodeSpec::new(id.0, "admin", "scenario-admin", config);
+        if existing.is_some() {
+            self.update_node(id, spec)
+        } else {
+            self.add_node_with_state(spec, None).map(|_| ())
+        }
     }
 
     fn next_free_id(&self) -> NodeId {
@@ -389,7 +487,12 @@ impl World {
     /// Returns an error when the id is taken, the kind is unknown, or the node
     /// rejects its configuration.
     pub fn add_node(&mut self, spec: NodeSpec) -> Result<NodeId, LabError> {
-        self.add_node_with_state(spec, None)
+        let broker = spec.kind == REAL_BROKER_KIND;
+        let id = self.add_node_with_state(spec, None)?;
+        if broker {
+            self.sync_admin()?;
+        }
+        Ok(id)
     }
 
     /// Add a node, hand it `image` when there is one, and start it.
@@ -433,6 +536,9 @@ impl World {
                 rng,
                 remote_snapshot: None,
                 external,
+                paused: None,
+                skew_ms: 0,
+                disk: DiskMode::Ok,
             },
         );
         self.record(Some(id), "node_added", serde_json::json!({}));
@@ -444,15 +550,25 @@ impl World {
 
     /// Remove a node. Its connections close and its queued frames are dropped.
     pub fn remove_node(&mut self, id: NodeId) {
-        if !self.nodes.contains_key(&id) {
+        let Some(slot) = self.nodes.get(&id) else {
             return;
-        }
+        };
+        let broker = slot.spec.kind == REAL_BROKER_KIND;
         self.purge_frames(|f| f.src.node == id || f.dst.node == id);
         self.close_connections_of(id, false);
         self.nodes.remove(&id);
         self.links.retain(|(a, b), _| *a != id && *b != id);
+        self.one_way.retain(|(a, b)| *a != id && *b != id);
         self.durable.push((id, DurableOp::ClearAll));
         self.record(Some(id), "node_removed", serde_json::json!({}));
+        if self.admin.is_some_and(|(admin, _)| admin == id) {
+            self.admin = None;
+        }
+        if broker {
+            // The admin's bootstrap follows the brokers. Topics without a
+            // broker left cannot be created; the next load reports that.
+            let _ = self.sync_admin();
+        }
     }
 
     /// Replace a node's spec. The node is rebuilt from the new configuration
@@ -476,6 +592,7 @@ impl World {
         slot.node = node;
         slot.alive = true;
         slot.timer = None;
+        slot.paused = None;
         self.purge_frames(|f| f.src.node == id || f.dst.node == id);
         self.close_connections_of(id, false);
         self.durable.push((id, DurableOp::ClearAll));
@@ -508,6 +625,7 @@ impl World {
             .map(|slot| slot.spec.clone())
             .collect();
         s.topics.clone_from(&self.topics);
+        s.experiment.clone_from(&self.experiment);
         s.link_overrides = self
             .links
             .iter()
@@ -629,6 +747,12 @@ impl World {
             });
             return;
         }
+        if let Some(slot) = self.nodes.get_mut(&dst)
+            && let Some(paused) = &mut slot.paused
+        {
+            paused.held.push(frame);
+            return;
+        }
         self.call(dst, |node, ctx| node.on_frame(ctx, frame));
     }
 
@@ -639,8 +763,33 @@ impl World {
         if !slot.alive || slot.timer_gen != generation || slot.timer.is_none() {
             return;
         }
+        if let Some(paused) = &mut slot.paused
+            && !slot.external
+        {
+            paused.timer_due = true;
+            return;
+        }
         slot.timer = None;
         self.call(id, |node, ctx| node.on_timer(ctx));
+    }
+
+    /// Wake a paused node: the frames that waited go in first, in arrival
+    /// order, then the timer that came due.
+    fn resume_node(&mut self, id: NodeId) {
+        let Some(slot) = self.nodes.get_mut(&id) else {
+            return;
+        };
+        let Some(Paused { held, timer_due }) = slot.paused.take() else {
+            return;
+        };
+        let generation = slot.timer_gen;
+        let now = self.now;
+        for frame in held {
+            self.schedule(now, Item::Deliver(frame));
+        }
+        if timer_due {
+            self.schedule(now, Item::Timer { node: id, generation });
+        }
     }
 
     /// Hand the node to `f` behind a fresh [`Ctx`], then apply what it queued:
@@ -709,7 +858,9 @@ impl World {
         let (a, b) = (frame.src.node, frame.dst.node);
         let link = self.link(a, b);
         let isolated = |w: &Self, n: NodeId| w.nodes.get(&n).is_some_and(|s| s.isolated);
-        if a != b && (link.cut || isolated(self, a) || isolated(self, b)) {
+        if a != b
+            && (link.cut || isolated(self, a) || isolated(self, b) || self.one_way.contains(&(a, b)))
+        {
             if closing {
                 self.forget_conn(key);
             }
@@ -900,6 +1051,7 @@ impl World {
                 {
                     slot.alive = false;
                     slot.timer = None;
+                    slot.paused = None;
                     slot.node.stop();
                 }
                 // A halted node's unsent frames are lost, like the bytes still
@@ -910,6 +1062,7 @@ impl World {
             Fault::Restart { node } => {
                 if let Some(slot) = self.nodes.get_mut(&node) {
                     slot.alive = true;
+                    slot.paused = None;
                     if self.is_hosted(node) {
                         self.call(node, |n, ctx| n.start(ctx));
                     }
@@ -948,6 +1101,33 @@ impl World {
             Fault::Loss { a, b, permille } => {
                 self.link_mut(a, b).loss_permille = permille.min(1000);
             }
+            Fault::CutOneWay { from, to } => {
+                if from != to {
+                    self.one_way.insert((from, to));
+                    self.purge_frames(|f| f.src.node == from && f.dst.node == to);
+                }
+            }
+            Fault::HealOneWay { from, to } => {
+                self.one_way.remove(&(from, to));
+            }
+            Fault::Pause { node } => {
+                if let Some(slot) = self.nodes.get_mut(&node)
+                    && slot.alive
+                {
+                    slot.paused.get_or_insert_with(Paused::default);
+                }
+            }
+            Fault::Resume { node } => self.resume_node(node),
+            Fault::ClockSkew { node, ms } => {
+                if let Some(slot) = self.nodes.get_mut(&node) {
+                    slot.skew_ms = ms;
+                }
+            }
+            Fault::Disk { node, mode, .. } => {
+                if let Some(slot) = self.nodes.get_mut(&node) {
+                    slot.disk = mode;
+                }
+            }
         }
         self.record(None, "fault", detail);
     }
@@ -965,6 +1145,9 @@ impl World {
         let slot = self.nodes.get(&id).ok_or_else(|| format!("no node {id}"))?;
         if !slot.alive {
             return Err(format!("node {id} is down"));
+        }
+        if slot.paused.is_some() && !slot.external {
+            return Err(format!("node {id} is paused"));
         }
         if !self.is_hosted(id) {
             return Err(format!("node {id} is hosted by another peer"));
@@ -1035,6 +1218,11 @@ impl World {
                 hosted: self.is_hosted(slot.spec.id),
                 alive: slot.alive,
                 isolated: slot.isolated,
+                faults: NodeFaults {
+                    paused: slot.paused.is_some(),
+                    skew_ms: slot.skew_ms,
+                    disk: slot.disk,
+                },
                 state: self
                     .node_snapshot(slot.spec.id)
                     .unwrap_or(serde_json::Value::Null),
@@ -1072,6 +1260,11 @@ impl World {
             default_latency_ms: self.default_latency,
             nodes,
             links,
+            one_way_cuts: self
+                .one_way
+                .iter()
+                .map(|&(from, to)| OneWayCut { from, to })
+                .collect(),
             in_flight,
             event_count: self.events.len(),
             delivered: self
@@ -1366,6 +1559,113 @@ mod tests {
     }
 
     #[test]
+    fn a_one_way_cut_drops_one_direction_and_keeps_the_connection() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(150);
+        assert!(w.snapshot(NodeId(3))["echoes"] == 1);
+        // Echoes from node 1 back to the pinger are lost; pings still arrive.
+        w.world_mut().fault(Fault::CutOneWay {
+            from: NodeId(1),
+            to: NodeId(3),
+        });
+        let frames = w.snapshot(NodeId(1))["frames"].as_u64().unwrap();
+        w.run_for(300);
+        assert!(w.snapshot(NodeId(1))["frames"].as_u64().unwrap() >= frames + 3);
+        assert!(w.snapshot(NodeId(3))["echoes"] == 1);
+        // No close on either side: the connection is half dead, not reset.
+        assert!(w.snapshot(NodeId(3))["closes"] == 0);
+        assert!(w.snapshot(NodeId(1))["closes"] == 0);
+        assert!(
+            w.world().snapshot().one_way_cuts
+                == vec![OneWayCut {
+                    from: NodeId(1),
+                    to: NodeId(3),
+                }]
+        );
+        w.world_mut().fault(Fault::HealOneWay {
+            from: NodeId(1),
+            to: NodeId(3),
+        });
+        w.run_for(200);
+        assert!(w.snapshot(NodeId(3))["echoes"].as_u64().unwrap() >= 2);
+        assert!(w.world().snapshot().one_way_cuts.is_empty());
+    }
+
+    #[test]
+    fn a_paused_node_holds_its_frames_and_timers_until_resumed() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.run_for(150);
+        let echoes = w.snapshot(NodeId(3))["echoes"].as_u64().unwrap();
+        // The paused echo node handles nothing: pings wait for it.
+        w.world_mut().fault(Fault::Pause { node: NodeId(1) });
+        let frames = w.snapshot(NodeId(1))["frames"].as_u64().unwrap();
+        w.run_for(400);
+        assert!(w.snapshot(NodeId(1))["frames"].as_u64().unwrap() == frames);
+        assert!(w.snapshot(NodeId(3))["echoes"].as_u64().unwrap() == echoes);
+        assert!(w.world().snapshot().nodes[0].faults.paused);
+        assert!(
+            w.world_mut()
+                .control(NodeId(1), serde_json::json!({}))
+                .unwrap_err()
+                == "node 1 is paused"
+        );
+        // A paused pinger fires no timers either.
+        w.world_mut().fault(Fault::Pause { node: NodeId(3) });
+        let sent = w.snapshot(NodeId(3))["sent"].clone();
+        w.run_for(300);
+        assert!(w.snapshot(NodeId(3))["sent"] == sent);
+        // On resume the held pings are handled in order and answered.
+        w.world_mut().fault(Fault::Resume { node: NodeId(1) });
+        w.world_mut().fault(Fault::Resume { node: NodeId(3) });
+        w.run_for(50);
+        assert!(w.snapshot(NodeId(1))["frames"].as_u64().unwrap() >= frames + 4);
+        assert!(w.snapshot(NodeId(3))["echoes"].as_u64().unwrap() >= echoes + 4);
+        w.run_for(300);
+        assert!(w.snapshot(NodeId(3))["sent"] != sent);
+        assert!(!w.world().snapshot().nodes[0].faults.paused);
+    }
+
+    #[test]
+    fn skew_and_disk_faults_are_recorded_for_the_page() {
+        let mut w = TestWorld::from_scenario(&scenario());
+        w.world_mut().fault(Fault::ClockSkew {
+            node: NodeId(2),
+            ms: -5_000,
+        });
+        let fault: Fault =
+            serde_json::from_value(serde_json::json!({ "kind": "disk", "node": 2, "mode": "slow", "ms": 200 }))
+                .unwrap();
+        w.world_mut().fault(fault);
+        let node = w.world().snapshot().nodes[1].clone();
+        assert!((node.faults.skew_ms, node.faults.disk) == (-5_000, DiskMode::Slow));
+        let kinds: Vec<String> = w
+            .world()
+            .events()
+            .filter(|e| e.kind == "fault")
+            .map(|e| e.detail["kind"].as_str().unwrap().to_string())
+            .collect();
+        assert!(kinds == ["clock_skew", "disk"]);
+    }
+
+    #[test]
+    fn the_experiment_travels_with_the_scenario() {
+        let mut scenario = scenario();
+        let experiment = serde_json::json!({
+            "steps": [{ "at": 100, "fault": { "kind": "pause", "node": 1 } }],
+            "expect": [{ "by": 500, "check": "invariants_hold" }],
+        });
+        scenario.experiment = Some(experiment.clone());
+        let w = TestWorld::from_scenario(&scenario);
+        assert!(w.world().scenario().experiment == Some(experiment));
+        let text = serde_json::to_string(&w.world().scenario()).unwrap();
+        let back: Scenario = serde_json::from_str(&text).unwrap();
+        assert!(back.experiment == scenario.experiment);
+        // A scenario without one serializes without the field.
+        let plain = serde_json::to_value(TestWorld::from_scenario(&super::tests::scenario()).world().scenario()).unwrap();
+        assert!(plain.get("experiment").is_none());
+    }
+
+    #[test]
     fn kill_stops_delivery_and_restart_keeps_durable_state() {
         let mut w = TestWorld::from_scenario(&scenario());
         w.run_for(250);
@@ -1470,9 +1770,11 @@ mod tests {
 
     /// Play the page's part for external node 1: take what is due for it and
     /// echo every data frame back through the link model, as the real process
-    /// behind it would answer on the same connection.
+    /// behind it would answer on the same connection. Only the pinger's
+    /// frames count: the hidden admin's go unanswered.
     fn echo_externally(world: &mut World) -> Vec<TimedFrame> {
-        let due = world.drain_external();
+        let mut due = world.drain_external();
+        due.retain(|t| t.frame.src.node == NodeId(3));
         let replies = due
             .iter()
             .filter_map(|t| {
@@ -1552,12 +1854,53 @@ mod tests {
             .filter(|timed| timed.frame.payload == Payload::Open)
             .map(|timed| (timed.frame.src, timed.frame.dst))
             .collect();
+        // The admin's two clients, the topic creator and the cluster
+        // observer, each open one connection to a broker.
         let admin = Endpoint::client(NodeId(3));
+        assert!(opened.len() == 2, "{opened:?}");
         assert!(
-            opened == [(admin, Endpoint::kafka(NodeId(1)))]
-                || opened == [(admin, Endpoint::kafka(NodeId(2)))],
+            opened.iter().all(|(src, dst)| *src == admin
+                && [Endpoint::kafka(NodeId(1)), Endpoint::kafka(NodeId(2))].contains(dst)),
             "{opened:?}"
         );
+    }
+
+    #[test]
+    fn every_world_with_a_broker_keeps_an_admin_bootstrapped_at_all_brokers() {
+        let admin_config = |world: &World| -> Vec<serde_json::Value> {
+            world
+                .nodes
+                .values()
+                .filter(|s| s.spec.kind == "admin")
+                .map(|s| s.spec.config["bootstrap"].clone())
+                .collect()
+        };
+        // No topics, one broker: the admin still comes, to observe.
+        let one_broker: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 1, "seed": 7,
+            "nodes": [{ "id": 1, "kind": "krabka-broker" }]
+        }))
+        .unwrap();
+        let mut world = World::from_scenario(&one_broker).unwrap();
+        assert!(admin_config(&world) == [serde_json::json!([1])]);
+        assert!(world.admin == Some((NodeId(2), NodeId(1))));
+        // A broker added from the palette joins the bootstrap; the admin
+        // keeps its id.
+        let id = world
+            .add_node(NodeSpec::new(0, "krabka-broker", "", serde_json::json!({})))
+            .unwrap();
+        assert!(id == NodeId(3));
+        assert!(admin_config(&world) == [serde_json::json!([1, 3])]);
+        world.remove_node(NodeId(1));
+        assert!(admin_config(&world) == [serde_json::json!([3])]);
+        assert!(world.admin == Some((NodeId(2), NodeId(3))));
+        // The last broker takes the admin with it.
+        world.remove_node(NodeId(3));
+        assert!(admin_config(&world).is_empty());
+        assert!(world.admin.is_none());
+        // A world without brokers has none.
+        let world = World::from_scenario(&scenario()).unwrap();
+        assert!(admin_config(&world).is_empty());
     }
 
     #[test]

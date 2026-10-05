@@ -1,8 +1,13 @@
 //! Record batches on the client side: a v2 batch for a produce request, and
 //! the records of the batches a fetch returned.
 
+use std::collections::BTreeSet;
+
 use bytes::Bytes;
-use krabka_protocol::records::{Attributes, Record, RecordBatch, RecordHeader};
+use krabka_protocol::{
+    owned::fetch_response::AbortedTransaction,
+    records::{Attributes, Record, RecordBatch, RecordHeader},
+};
 
 /// One record to put in a batch.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -22,7 +27,8 @@ pub struct ProducerStamp {
 }
 
 /// A v2 batch of `records` with `CreateTime` timestamps and the compression
-/// bits `compression` (0 none, 1 gzip, 2 snappy) in its attributes. The
+/// bits `compression` (0 none, 1 gzip, 2 snappy, 3 lz4, 4 zstd) in its
+/// attributes; the codec compresses the records when the batch is encoded. The
 /// broker assigns the base offset and the leader epoch.
 #[must_use]
 pub fn build_batch(
@@ -80,18 +86,45 @@ pub struct ConsumedRecord {
 /// fetch next. A control batch (a transaction marker) is skipped, as Kafka's
 /// consumer skips it, and so is a record before `from_offset` in a batch that
 /// straddles it.
+///
+/// `aborted` is the `aborted_transactions` list of a `read_committed` fetch,
+/// `None` for `read_uncommitted`. With it the batches of aborted
+/// transactions are skipped as Kafka's `CompletedFetch` skips them: a
+/// producer's aborted transaction counts from its first offset on, until the
+/// producer's abort marker.
 #[must_use]
 pub fn records_of(
     topic: &str,
     partition: i32,
     batches: &[RecordBatch],
     from_offset: i64,
+    aborted: Option<&[AbortedTransaction]>,
 ) -> (Vec<ConsumedRecord>, Option<i64>) {
     let mut records = Vec::new();
     let mut next = None;
+    let mut pending: Vec<(i64, i64)> = aborted
+        .unwrap_or_default()
+        .iter()
+        .map(|t| (t.first_offset, t.producer_id))
+        .collect();
+    pending.sort_unstable();
+    let mut pending = pending.into_iter().peekable();
+    let mut aborting: BTreeSet<i64> = BTreeSet::new();
     for batch in batches {
         let last = batch.base_offset + i64::from(batch.last_offset_delta);
         next = Some(next.map_or(last + 1, |n: i64| n.max(last + 1)));
+        if aborted.is_some() && batch.producer_id >= 0 {
+            while let Some((_, producer_id)) = pending.next_if(|(first, _)| *first <= last) {
+                aborting.insert(producer_id);
+            }
+            if batch.attributes.is_control_batch() {
+                if is_abort_marker(batch) {
+                    aborting.remove(&batch.producer_id);
+                }
+            } else if batch.attributes.is_transactional() && aborting.contains(&batch.producer_id) {
+                continue;
+            }
+        }
         if batch.attributes.is_control_batch() || last < from_offset {
             continue;
         }
@@ -113,6 +146,16 @@ pub fn records_of(
         }
     }
     (records, next)
+}
+
+/// Whether a control batch is an abort marker: its record's key is the
+/// control record version and type 0, `ABORT` (type 1 is `COMMIT`).
+fn is_abort_marker(batch: &RecordBatch) -> bool {
+    batch
+        .records
+        .first()
+        .and_then(|r| r.key.as_deref())
+        .is_some_and(|key| key.len() >= 4 && key[2..4] == [0, 0])
 }
 
 #[cfg(test)]
@@ -166,7 +209,7 @@ mod tests {
         marker.attributes = marker.attributes.with_control(true);
         let mut second = build_batch(&[record(5, "d")], None, 0);
         second.base_offset = 14;
-        let (records, next) = records_of("t", 0, &[first, marker, second], 12);
+        let (records, next) = records_of("t", 0, &[first, marker, second], 12, None);
         let values: Vec<(i64, i64, i32, &[u8])> = records
             .iter()
             .map(|r| {
@@ -180,6 +223,57 @@ mod tests {
             .collect();
         assert!(values == vec![(12, 3, 4, b"c".as_slice()), (14, 5, -1, b"d".as_slice())]);
         assert!(next == Some(15));
-        assert!(records_of("t", 0, &[], 0) == (Vec::new(), None));
+        assert!(records_of("t", 0, &[], 0, None) == (Vec::new(), None));
+    }
+
+    /// A transactional batch of `producer_id` at `base_offset`, or its
+    /// marker: an abort with `Some(false)`, a commit with `Some(true)`.
+    fn txn_batch(producer_id: i64, base_offset: i64, marker: Option<bool>) -> RecordBatch {
+        let stamp = ProducerStamp {
+            producer_id,
+            producer_epoch: 0,
+            base_sequence: 0,
+        };
+        let mut batch = match marker {
+            None => build_batch(&[record(1, "x")], Some(stamp), 0),
+            Some(commit) => {
+                let mut r = record(1, "");
+                r.key = Some(Bytes::from(vec![0, 0, 0, u8::from(commit)]));
+                let mut b = build_batch(&[r], Some(stamp), 0);
+                b.attributes = b.attributes.with_control(true);
+                b
+            }
+        };
+        batch.attributes = batch.attributes.with_transactional(true);
+        batch.base_offset = base_offset;
+        batch
+    }
+
+    #[test]
+    fn read_committed_drops_aborted_transactions_up_to_their_markers() {
+        // Producer 7 aborts at 0..=1 and commits at 3..=4; producer 8's
+        // transaction at 2 commits; a plain batch at 6.
+        let batches = vec![
+            txn_batch(7, 0, None),
+            txn_batch(8, 2, None),
+            txn_batch(7, 1, Some(false)),
+            txn_batch(7, 3, None),
+            txn_batch(7, 4, Some(true)),
+            txn_batch(8, 5, Some(true)),
+            build_batch(&[record(1, "p")], None, 0),
+        ];
+        let mut batches = batches;
+        batches[6].base_offset = 6;
+        let aborted = [AbortedTransaction {
+            producer_id: 7,
+            first_offset: 0,
+            ..Default::default()
+        }];
+        let offsets = |aborted| {
+            let (records, next) = records_of("t", 0, &batches, 0, aborted);
+            (records.iter().map(|r| r.offset).collect::<Vec<_>>(), next)
+        };
+        assert!(offsets(Some(&aborted[..])) == (vec![2, 3, 6], Some(7)));
+        assert!(offsets(None) == (vec![0, 2, 3, 6], Some(7)));
     }
 }

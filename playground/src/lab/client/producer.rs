@@ -33,17 +33,54 @@
 //! record with Kafka's `TimeoutException` text once `max.block.ms` passed.
 //! A record that waited takes its timestamp and joins a batch when the
 //! metadata arrives, as `send` does after the wait.
+//!
+//! # Transactions
+//!
+//! With a `transactional_id` the producer is Kafka's transactional producer
+//! with transaction version 1, as Kafka's `TransactionManager` runs it when
+//! the cluster does not enable KIP-890's version 2: `InitProducerId` with the
+//! transactional id goes to the transaction coordinator (`FindCoordinator`
+//! with key type 1); the first record after a transaction ended opens the
+//! next one (Kafka's `beginTransaction`); each partition joins the
+//! transaction with `AddPartitionsToTxn` (v3 at most, Kafka's
+//! `forClient` range) before its first batch drains; batches carry the
+//! transactional attribute and go out in `Produce` at v11 at most;
+//! [`Producer::send_offsets_to_transaction`] sends `AddOffsetsToTxn` and then
+//! `TxnOffsetCommit` to the group coordinator (KIP-447); and
+//! [`Producer::commit_transaction`] waits until every record of the
+//! transaction is acknowledged, then sends `EndTxn`, as
+//! [`Producer::abort_transaction`] does after failing the records not sent
+//! yet. One transaction request is in flight at a time. A coordinator that
+//! moved, loads, or still completes the last transaction is asked again
+//! after `retry.backoff.ms`; a batch or a request that fails for good makes
+//! the transaction abortable only (Kafka's `ABORTABLE_ERROR`: the records
+//! not sent yet fail, and the next transaction starts under a new epoch
+//! when a sequence was lost); `PRODUCER_FENCED`, `INVALID_PRODUCER_EPOCH`
+//! and the other fatal codes stop the producer for good (`FATAL_ERROR`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use derive_more::{Display, From, Into};
 use krabka_protocol::{
+    Encode, ProtocolError, ProtocolRequest,
     owned::{
+        add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+        add_offsets_to_txn_response::AddOffsetsToTxnResponse,
+        add_partitions_to_txn_request::{self, AddPartitionsToTxnRequest},
+        add_partitions_to_txn_response::AddPartitionsToTxnResponse,
+        common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+        end_txn_request::{self, EndTxnRequest},
+        end_txn_response::EndTxnResponse,
         init_producer_id_request::InitProducerIdRequest,
         init_producer_id_response::InitProducerIdResponse,
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        produce_request::{self, PartitionProduceData, ProduceRequest, TopicProduceData},
         produce_response::ProduceResponse,
+        txn_offset_commit_request::{
+            self, TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition,
+            TxnOffsetCommitRequestTopic,
+        },
+        txn_offset_commit_response::TxnOffsetCommitResponse,
     },
     primitives::uuid::Uuid,
     records::{RecordHeader, RecordsPayload, increment_sequence},
@@ -52,7 +89,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{
-    ClientError, ClientEvent, KafkaClient, RequestId, Target,
+    ClientError, ClientEvent, CoordinatorType, KafkaClient, RequestId, Target,
     batch::{BatchRecord, ProducerStamp, build_batch},
     partitioner::{StickyPartitioner, partition_for_key},
     retry::{self, ErrorClass},
@@ -75,6 +112,63 @@ const RETRY_BACKOFF_MAX_MS: Millis = 1_000;
 const MAX_IDEMPOTENT_IN_FLIGHT: usize = 5;
 /// The bytes a v2 record batch spends before its first record.
 const RECORD_BATCH_OVERHEAD: usize = 61;
+/// `OPERATION_NOT_ATTEMPTED`: another partition of the same
+/// `AddPartitionsToTxn` failed.
+const OPERATION_NOT_ATTEMPTED: i16 = 55;
+/// The text a record not sent yet fails with when its transaction aborts:
+/// Kafka's `TransactionAbortedException`.
+const TRANSACTION_ABORTED: &str = "Failing batch since transaction was aborted";
+
+/// A request type sent at most at version `$max`: the last version before
+/// KIP-890's transaction version 2, which Kafka's transactional producer
+/// caps at while the cluster runs version 1.
+macro_rules! capped_request {
+    ($(#[$doc:meta])* $name:ident($inner:ty), $module:ident, $response:ty, $max:expr) => {
+        $(#[$doc])*
+        pub struct $name(pub $inner);
+
+        impl Encode for $name {
+            fn encode<B: BufMut>(&self, buf: &mut B, version: i16) -> Result<(), ProtocolError> {
+                self.0.encode(buf, version)
+            }
+
+            fn encoded_len(&self, version: i16) -> usize {
+                self.0.encoded_len(version)
+            }
+        }
+
+        impl ProtocolRequest for $name {
+            const API_KEY: i16 = $module::API_KEY;
+            const MIN_VERSION: i16 = $module::MIN_VERSION;
+            const MAX_VERSION: i16 = $max;
+            const LATEST_STABLE_VERSION: i16 = $max;
+            const FLEXIBLE_MIN: i16 = $module::FLEXIBLE_MIN;
+            type Response = $response;
+        }
+    };
+}
+
+capped_request!(
+    /// A transactional `Produce`: v11 at most (Kafka's
+    /// `LAST_BEFORE_TRANSACTION_V2_VERSION`), so the leader expects the
+    /// partition added by `AddPartitionsToTxn`.
+    TxnProduce(ProduceRequest), produce_request, ProduceResponse, 11
+);
+capped_request!(
+    /// `AddPartitionsToTxn` in the client form: v3 at most, as Kafka's
+    /// `AddPartitionsToTxnRequest.Builder.forClient` sends it.
+    ClientAddPartitionsToTxn(AddPartitionsToTxnRequest), add_partitions_to_txn_request,
+    AddPartitionsToTxnResponse, 3
+);
+capped_request!(
+    /// `EndTxn` v4 at most: v5 bumps the epoch at every end (KIP-890).
+    TxnEnd(EndTxnRequest), end_txn_request, EndTxnResponse, 4
+);
+capped_request!(
+    /// `TxnOffsetCommit` v4 at most: v5 is transaction version 2.
+    TxnCommitOffsets(TxnOffsetCommitRequest), txn_offset_commit_request,
+    TxnOffsetCommitResponse, 4
+);
 
 /// The `acks` of a produce request.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -120,6 +214,8 @@ pub enum Compression {
     None,
     Gzip,
     Snappy,
+    Lz4,
+    Zstd,
 }
 
 impl Compression {
@@ -130,6 +226,8 @@ impl Compression {
             Self::None => 0,
             Self::Gzip => 1,
             Self::Snappy => 2,
+            Self::Lz4 => 3,
+            Self::Zstd => 4,
         }
     }
 
@@ -140,6 +238,8 @@ impl Compression {
             Self::None => "none",
             Self::Gzip => "gzip",
             Self::Snappy => "snappy",
+            Self::Lz4 => "lz4",
+            Self::Zstd => "zstd",
         }
     }
 
@@ -150,6 +250,8 @@ impl Compression {
             "none" => Some(Self::None),
             "gzip" => Some(Self::Gzip),
             "snappy" => Some(Self::Snappy),
+            "lz4" => Some(Self::Lz4),
+            "zstd" => Some(Self::Zstd),
             _ => None,
         }
     }
@@ -186,16 +288,24 @@ pub struct ProducerConfig {
     /// `max.block.ms`: how long a record waits for the metadata of its
     /// topic before it fails. Default: 60 000.
     pub max_block_ms: Millis,
+    /// `transactional.id`: the producer is transactional (see the module
+    /// documentation). Default: none.
+    pub transactional_id: Option<String>,
+    /// `transaction.timeout.ms`, sent with `InitProducerId`. Default: 60 000.
+    pub transaction_timeout_ms: Millis,
 }
 
 impl ProducerConfig {
     /// Whether the producer is idempotent. Kafka enables idempotence only
     /// with `acks=all`, `retries > 0` and at most 5 requests in flight; with
     /// a conflicting setting the default turns it off, and the lab does the
-    /// same whatever `enable_idempotence` says.
+    /// same whatever `enable_idempotence` says. A transactional producer is
+    /// idempotent under the same conditions; the nodes refuse a
+    /// `transactional_id` with a setting that conflicts, as Kafka's config
+    /// check does.
     #[must_use]
     pub fn idempotent(&self) -> bool {
-        self.enable_idempotence
+        (self.enable_idempotence || self.transactional_id.is_some())
             && self.acks == Acks::All
             && self.retries > 0
             && self.max_in_flight <= MAX_IDEMPOTENT_IN_FLIGHT
@@ -217,6 +327,8 @@ impl Default for ProducerConfig {
             compression: Compression::None,
             sticky_batch_records: 32,
             max_block_ms: 60_000,
+            transactional_id: None,
+            transaction_timeout_ms: 60_000,
         }
     }
 }
@@ -279,6 +391,12 @@ pub enum ProducerEvent {
         /// was sent. `None` for an error the broker answered.
         message: Option<String>,
     },
+    /// The transaction ended: committed, or aborted.
+    TransactionEnded { committed: bool },
+    /// A request or a batch of the transaction failed with `code`: a fatal
+    /// error stops the producer for good, any other leaves the transaction
+    /// able only to abort.
+    TransactionError { code: i16, fatal: bool },
 }
 
 /// A histogram of acknowledgement latencies with fixed buckets.
@@ -474,6 +592,129 @@ struct DeferredRecord {
     sent_at: Millis,
 }
 
+/// Where a transactional producer stands once it has a producer id: Kafka's
+/// `TransactionManager.State`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TxnState {
+    Ready,
+    InTransaction,
+    Committing,
+    Aborting,
+    /// A request or a batch of the open transaction failed: it can only
+    /// abort.
+    AbortableError,
+    /// Fenced or refused for good: the producer sends nothing more.
+    FatalError,
+}
+
+impl TxnState {
+    /// Kafka's name of the state, lower case.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::InTransaction => "in_transaction",
+            Self::Committing => "committing_transaction",
+            Self::Aborting => "aborting_transaction",
+            Self::AbortableError => "abortable_error",
+            Self::FatalError => "fatal_error",
+        }
+    }
+}
+
+/// The transaction request in flight.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TxnCall {
+    AddPartitions,
+    AddOffsets,
+    CommitOffsets,
+    End,
+}
+
+/// The group position a transaction commits with its records (KIP-447):
+/// Kafka's `ConsumerGroupMetadata`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GroupMetadata {
+    pub group_id: String,
+    pub member_id: String,
+    /// The classic generation, or the member epoch of a KIP-848 or KIP-1071
+    /// group.
+    pub generation: i32,
+}
+
+/// Offsets [`Producer::send_offsets_to_transaction`] took.
+struct TxnOffsets {
+    group: GroupMetadata,
+    offsets: Vec<(String, i32, i64)>,
+    /// `AddOffsetsToTxn` answered; `TxnOffsetCommit` is next.
+    added: bool,
+}
+
+/// The transaction manager of a transactional producer.
+struct Transactions {
+    id: String,
+    state: TxnState,
+    /// The partitions the coordinator added to the open transaction.
+    added: BTreeSet<(String, i32)>,
+    /// The partitions the `AddPartitionsToTxn` in flight asks for.
+    adding: Vec<(String, i32)>,
+    offsets: Option<TxnOffsets>,
+    in_flight: Option<(RequestId, TxnCall)>,
+    /// A request asked again waits until then.
+    retry_at: Millis,
+    /// The open transaction reached the coordinator, so it ends with
+    /// `EndTxn`; one that added nothing ends on the client.
+    started: bool,
+    /// A batch with a sequence failed, so the next transaction needs a new
+    /// epoch (KIP-360).
+    bump: bool,
+    committed: u64,
+    aborted: u64,
+    last_error: Option<i16>,
+}
+
+/// How a transaction request's error code is handled, as Kafka's
+/// `TransactionManager` handlers sort them.
+enum TxnFailure {
+    /// Ask again after the backoff, looking the coordinator up again when
+    /// the flag says it moved.
+    Retry(bool),
+    Abortable,
+    Fatal,
+}
+
+fn txn_failure(code: i16) -> TxnFailure {
+    match code {
+        codes::NOT_COORDINATOR | codes::COORDINATOR_NOT_AVAILABLE | codes::NETWORK_EXCEPTION => {
+            TxnFailure::Retry(true)
+        }
+        codes::COORDINATOR_LOAD_IN_PROGRESS
+        | codes::CONCURRENT_TRANSACTIONS
+        | codes::UNKNOWN_TOPIC_OR_PARTITION
+        | codes::REQUEST_TIMED_OUT
+        | OPERATION_NOT_ATTEMPTED => TxnFailure::Retry(false),
+        codes::PRODUCER_FENCED
+        | codes::INVALID_PRODUCER_EPOCH
+        | codes::INVALID_PRODUCER_ID_MAPPING
+        | codes::INVALID_TXN_STATE
+        | codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED
+        | codes::TRANSACTION_COORDINATOR_FENCED
+        | codes::UNSUPPORTED_VERSION => TxnFailure::Fatal,
+        _ => TxnFailure::Abortable,
+    }
+}
+
+/// The error code a request that got no answer stands for.
+fn client_error_code(error: &ClientError) -> i16 {
+    match error {
+        ClientError::Timeout { .. } | ClientError::Disconnected { .. } => codes::NETWORK_EXCEPTION,
+        ClientError::UnsupportedVersion { .. } => codes::UNSUPPORTED_VERSION,
+        ClientError::Closed => codes::UNKNOWN_SERVER_ERROR,
+        ClientError::Protocol(_)
+        | ClientError::CorrelationMismatch { .. }
+        | ClientError::Broker { .. } => codes::CORRUPT_MESSAGE,
+    }
+}
+
 /// The producer. See the module documentation.
 pub struct Producer {
     client: KafkaClient,
@@ -493,6 +734,8 @@ pub struct Producer {
     stashed: Vec<ProducerEvent>,
     metrics: ProducerMetrics,
     closed: bool,
+    /// The transaction manager, with a `transactional_id`.
+    txn: Option<Transactions>,
 }
 
 impl Producer {
@@ -500,6 +743,20 @@ impl Producer {
     /// random choice.
     #[must_use]
     pub fn new(client: KafkaClient, config: ProducerConfig, seed: u64) -> Self {
+        let txn = config.transactional_id.clone().map(|id| Transactions {
+            id,
+            state: TxnState::Ready,
+            added: BTreeSet::new(),
+            adding: Vec::new(),
+            offsets: None,
+            in_flight: None,
+            retry_at: 0,
+            started: false,
+            bump: false,
+            committed: 0,
+            aborted: 0,
+            last_error: None,
+        });
         Self {
             sticky: StickyPartitioner::new(config.sticky_batch_records),
             client,
@@ -515,6 +772,7 @@ impl Producer {
             stashed: Vec::new(),
             metrics: ProducerMetrics::default(),
             closed: false,
+            txn,
         }
     }
 
@@ -606,6 +864,29 @@ impl Producer {
                 )),
             });
             return seq;
+        }
+        // A transactional record opens the next transaction (Kafka's
+        // `beginTransaction`), and is refused while one ends or after an
+        // error, as `TransactionManager.maybeAddPartition` refuses it.
+        if let Some(txn) = &mut self.txn {
+            match txn.state {
+                TxnState::Ready => txn.state = TxnState::InTransaction,
+                TxnState::InTransaction => {}
+                state => {
+                    self.metrics.failed += 1;
+                    self.stashed.push(ProducerEvent::Failed {
+                        seq,
+                        topic,
+                        partition: partition.unwrap_or(-1),
+                        code: codes::INVALID_TXN_STATE,
+                        message: Some(format!(
+                            "Cannot call send in state {}",
+                            state.name().to_uppercase()
+                        )),
+                    });
+                    return seq;
+                }
+            }
         }
         self.client.add_topics([topic.as_str()]);
         let record = DeferredRecord {
@@ -756,6 +1037,7 @@ impl Producer {
         let mut events = std::mem::take(&mut self.stashed);
         let client_events = self.client.on_frame(ctx, frame);
         self.handle_client_events(ctx, client_events, &mut events);
+        self.step_transaction(ctx);
         self.drain(ctx);
         events.append(&mut self.stashed);
         (events, self.next_deadline(ctx.now()))
@@ -769,6 +1051,7 @@ impl Producer {
         self.handle_client_events(ctx, client_events, &mut events);
         self.ensure_producer_id(ctx);
         self.expire(ctx.now(), &mut events);
+        self.step_transaction(ctx);
         self.drain(ctx);
         events.append(&mut self.stashed);
         (events, self.next_deadline(ctx.now()))
@@ -827,8 +1110,14 @@ impl Producer {
         // arrives as a frame.
         let can_drain = self.may_send();
         let epoch = self.current_epoch();
-        let batches = self.partitions.iter().filter(|_| can_drain).filter_map(
-            |((topic, partition), queue)| {
+        // A batch of a transactional producer waits for its partition to
+        // join the transaction, whose answer arrives as a frame.
+        let in_txn = |key: &(String, i32)| self.txn.as_ref().is_none_or(|t| t.added.contains(key));
+        let batches = self
+            .partitions
+            .iter()
+            .filter(|(key, _)| can_drain && in_txn(key))
+            .filter_map(|((topic, partition), queue)| {
                 let head = queue.batches.front()?;
                 let is_retry = head.attempts > 0;
                 let blocked = queue.in_flight >= self.config.max_in_flight
@@ -846,8 +1135,7 @@ impl Producer {
                     head.created_at + self.config.linger_ms
                 };
                 Some(ready_at.max(head.retry_at))
-            },
-        );
+            });
         let expiries = self
             .partitions
             .values()
@@ -864,12 +1152,14 @@ impl Producer {
             _ => None,
         };
         let stashed = (!self.stashed.is_empty()).then_some(now);
+        let txn = self.txn_due().and(self.txn.as_ref()).map(|t| t.retry_at);
         client
             .into_iter()
             .chain(batches)
             .chain(expiries)
             .chain(producer_id)
             .chain(stashed)
+            .chain(txn)
             .min()
             .map(|at| at.max(now))
     }
@@ -884,10 +1174,17 @@ impl Producer {
             match event {
                 ClientEvent::MetadataUpdated => self.assign_deferred(ctx.now()),
                 ClientEvent::Response { id, result } => {
+                    let txn_call = self
+                        .txn
+                        .as_ref()
+                        .and_then(|t| t.in_flight)
+                        .filter(|(sent, _)| *sent == id);
                     if let Some(in_flight) = self.in_flight.remove(&id) {
                         self.on_produce_response(ctx, in_flight, result, events);
                     } else if self.identity == ProducerId::Requested(id) {
                         self.on_init_producer_id(ctx.now(), result, events);
+                    } else if let Some((_, call)) = txn_call {
+                        self.on_txn_response(ctx, call, result);
                     }
                 }
             }
@@ -901,18 +1198,41 @@ impl Producer {
             || self.identity != ProducerId::Absent
             || ctx.now() < self.identity_retry_at
             || self.closed
+            || self.txn_state() == Some(TxnState::FatalError)
         {
             return;
         }
+        // A transactional producer asks its transaction coordinator, which
+        // fences the earlier epochs of the transactional id and aborts the
+        // transaction they left open (Kafka's `initTransactions`).
+        let (target, timeout) = match self.txn_target() {
+            Some(target) => (
+                target,
+                i32::try_from(self.config.transaction_timeout_ms).unwrap_or(i32::MAX),
+            ),
+            None => (Target::Any, IDEMPOTENT_TRANSACTION_TIMEOUT),
+        };
         let request = InitProducerIdRequest {
-            transactional_id: None,
-            transaction_timeout_ms: IDEMPOTENT_TRANSACTION_TIMEOUT,
+            transactional_id: self.config.transactional_id.clone(),
+            transaction_timeout_ms: timeout,
             producer_id: -1,
             producer_epoch: -1,
             ..Default::default()
         };
-        let id = self.client.send(ctx, Target::Any, request);
+        let id = self.client.send(ctx, target, request);
         self.identity = ProducerId::Requested(id);
+    }
+
+    /// The transaction coordinator of a transactional producer.
+    fn txn_target(&self) -> Option<Target> {
+        self.txn.as_ref().map(|t| Target::Coordinator {
+            key_type: CoordinatorType::Transaction,
+            key: t.id.clone(),
+        })
+    }
+
+    fn txn_state(&self) -> Option<TxnState> {
+        self.txn.as_ref().map(|t| t.state)
     }
 
     /// Raise the epoch on the client, so every partition starts again at
@@ -942,6 +1262,22 @@ impl Producer {
         let response = result
             .ok()
             .and_then(super::Response::downcast::<InitProducerIdResponse>);
+        if let Some(target) = self.txn_target() {
+            let code = response
+                .as_ref()
+                .map_or(codes::NETWORK_EXCEPTION, |r| r.error_code);
+            match txn_failure(code) {
+                _ if code == codes::NONE => {}
+                TxnFailure::Fatal => {
+                    self.identity = ProducerId::Absent;
+                    self.txn_fatal(code, events);
+                    return;
+                }
+                TxnFailure::Retry(_) | TxnFailure::Abortable => {
+                    self.forget_coordinator(code, &target);
+                }
+            }
+        }
         match response {
             Some(response) if response.error_code == codes::NONE => {
                 self.identity = ProducerId::Ready {
@@ -992,6 +1328,457 @@ impl Producer {
             queue.next_sequence = 0;
             queue.next_expected = 0;
         }
+    }
+
+    // ---- transactions -----------------------------------------------------------
+
+    /// Whether a transactional producer can take records into a transaction
+    /// now: it has its producer id and no transaction is ending or failed.
+    /// Always true without a `transactional_id`.
+    #[must_use]
+    pub fn transaction_ready(&self) -> bool {
+        match self.txn_state() {
+            None => true,
+            Some(state) => {
+                self.producer_id().is_some()
+                    && matches!(state, TxnState::Ready | TxnState::InTransaction)
+            }
+        }
+    }
+
+    /// Whether a transaction is open: records or offsets joined it and it
+    /// has not ended.
+    #[must_use]
+    pub fn transaction_open(&self) -> bool {
+        !matches!(
+            self.txn_state(),
+            None | Some(TxnState::Ready | TxnState::FatalError)
+        )
+    }
+
+    /// Whether the producer stopped for good on a fatal transaction error.
+    #[must_use]
+    pub fn transaction_fatal(&self) -> bool {
+        self.txn_state() == Some(TxnState::FatalError)
+    }
+
+    /// Kafka's name of the transaction state, lower case (`ready`,
+    /// `in_transaction`, `abortable_error`, ...), or `None` without a
+    /// `transactional_id`.
+    #[must_use]
+    pub fn transaction_state(&self) -> Option<&'static str> {
+        self.txn_state().map(TxnState::name)
+    }
+
+    /// Commit the open transaction: once every record of it is acknowledged
+    /// and its offsets are committed, `EndTxn` commits it, and
+    /// [`ProducerEvent::TransactionEnded`] reports it.
+    ///
+    /// # Errors
+    /// Kafka's text for a producer that is not transactional, has no open
+    /// transaction, or must abort.
+    pub fn commit_transaction(&mut self) -> Result<(), String> {
+        let txn = self.txn.as_mut().ok_or_else(not_transactional)?;
+        match txn.state {
+            TxnState::InTransaction => {
+                txn.state = TxnState::Committing;
+                Ok(())
+            }
+            state => Err(invalid_transition(state, TxnState::Committing)),
+        }
+    }
+
+    /// Abort the open transaction: the records not sent yet fail with
+    /// Kafka's `TransactionAbortedException` text, and once the batches in
+    /// flight returned `EndTxn` aborts it.
+    ///
+    /// # Errors
+    /// Kafka's text for a producer that is not transactional, has no open
+    /// transaction, or was fenced.
+    pub fn abort_transaction(&mut self) -> Result<(), String> {
+        let txn = self.txn.as_mut().ok_or_else(not_transactional)?;
+        match txn.state {
+            TxnState::InTransaction | TxnState::AbortableError => {
+                txn.state = TxnState::Aborting;
+                txn.offsets = None;
+                self.fail_unsent(codes::UNKNOWN_SERVER_ERROR, Some(TRANSACTION_ABORTED));
+                Ok(())
+            }
+            state => Err(invalid_transition(state, TxnState::Aborting)),
+        }
+    }
+
+    /// Commit `offsets`, as `(topic, partition, offset)`, for `group` with
+    /// the open transaction (KIP-447): `AddOffsetsToTxn`, then
+    /// `TxnOffsetCommit` to the group coordinator, before the commit.
+    ///
+    /// # Errors
+    /// Kafka's text for a producer that is not transactional or cannot take
+    /// part in a transaction now.
+    pub fn send_offsets_to_transaction(
+        &mut self,
+        group: GroupMetadata,
+        offsets: Vec<(String, i32, i64)>,
+    ) -> Result<(), String> {
+        let txn = self.txn.as_mut().ok_or_else(not_transactional)?;
+        match txn.state {
+            TxnState::Ready | TxnState::InTransaction => {
+                txn.state = TxnState::InTransaction;
+                txn.offsets = Some(TxnOffsets {
+                    group,
+                    offsets,
+                    added: false,
+                });
+                Ok(())
+            }
+            state => Err(format!(
+                "Cannot send offsets in state {}",
+                state.name().to_uppercase()
+            )),
+        }
+    }
+
+    /// The partitions with records queued that the open transaction does not
+    /// hold yet.
+    fn partitions_to_add(&self) -> Vec<(String, i32)> {
+        let Some(txn) = &self.txn else {
+            return Vec::new();
+        };
+        self.partitions
+            .iter()
+            .filter(|(key, queue)| !queue.batches.is_empty() && !txn.added.contains(*key))
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// The transaction request due next, if one is and none is in flight:
+    /// partitions to add, offsets to add and commit, then the end once the
+    /// records of the transaction returned.
+    fn txn_due(&self) -> Option<TxnCall> {
+        let txn = self.txn.as_ref()?;
+        self.producer_id()?;
+        if txn.in_flight.is_some() {
+            return None;
+        }
+        let ending = match txn.state {
+            TxnState::InTransaction => false,
+            TxnState::Committing => self.pending_records() == 0,
+            TxnState::Aborting => self.in_flight.is_empty(),
+            TxnState::Ready | TxnState::AbortableError | TxnState::FatalError => return None,
+        };
+        if txn.state != TxnState::Aborting && !self.partitions_to_add().is_empty() {
+            return Some(TxnCall::AddPartitions);
+        }
+        match &txn.offsets {
+            Some(offsets) if !offsets.added => Some(TxnCall::AddOffsets),
+            Some(_) => Some(TxnCall::CommitOffsets),
+            None => ending.then_some(TxnCall::End),
+        }
+    }
+
+    /// Send the transaction request due, or end a transaction that never
+    /// reached the coordinator on the client, as Kafka's
+    /// `TransactionManager.beginCompletingTransaction` does when no
+    /// partition was added.
+    fn step_transaction(&mut self, ctx: &mut Ctx<'_>) {
+        let now = ctx.now();
+        let Some(call) = self.txn_due() else {
+            return;
+        };
+        let (Some((producer_id, epoch)), Some(target)) = (self.producer_id(), self.txn_target())
+        else {
+            return;
+        };
+        let to_add = self.partitions_to_add();
+        let Some(txn) = self.txn.as_mut() else {
+            return;
+        };
+        if now < txn.retry_at {
+            return;
+        }
+        let transactional_id = txn.id.clone();
+        let id = match call {
+            TxnCall::AddPartitions => {
+                let mut topics: BTreeMap<String, Vec<i32>> = BTreeMap::new();
+                for (topic, partition) in &to_add {
+                    topics.entry(topic.clone()).or_default().push(*partition);
+                }
+                txn.adding = to_add;
+                let request = ClientAddPartitionsToTxn(AddPartitionsToTxnRequest {
+                    v3_and_below_transactional_id: transactional_id,
+                    v3_and_below_producer_id: producer_id,
+                    v3_and_below_producer_epoch: epoch,
+                    v3_and_below_topics: topics
+                        .into_iter()
+                        .map(|(name, partitions)| AddPartitionsToTxnTopic {
+                            name,
+                            partitions,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                });
+                self.client.send(ctx, target, request)
+            }
+            TxnCall::CommitOffsets => {
+                let Some(offsets) = &txn.offsets else {
+                    return;
+                };
+                let group_target = Target::Coordinator {
+                    key_type: CoordinatorType::Group,
+                    key: offsets.group.group_id.clone(),
+                };
+                let request = txn_offset_commit(transactional_id, (producer_id, epoch), offsets);
+                self.client.send(ctx, group_target, request)
+            }
+            TxnCall::AddOffsets => {
+                let group_id = txn
+                    .offsets
+                    .as_ref()
+                    .map(|o| o.group.group_id.clone())
+                    .unwrap_or_default();
+                let request = AddOffsetsToTxnRequest {
+                    transactional_id,
+                    producer_id,
+                    producer_epoch: epoch,
+                    group_id,
+                    ..Default::default()
+                };
+                self.client.send(ctx, target, request)
+            }
+            TxnCall::End if !txn.started => {
+                self.end_transaction(now);
+                return;
+            }
+            TxnCall::End => {
+                let request = TxnEnd(EndTxnRequest {
+                    transactional_id,
+                    producer_id,
+                    producer_epoch: epoch,
+                    committed: txn.state == TxnState::Committing,
+                    ..Default::default()
+                });
+                self.client.send(ctx, target, request)
+            }
+        };
+        if let Some(txn) = self.txn.as_mut() {
+            txn.in_flight = Some((id, call));
+        }
+    }
+
+    /// The transaction ended: count it, report it, and take a new epoch
+    /// first when a sequence was lost.
+    fn end_transaction(&mut self, now: Millis) {
+        let Some(txn) = self.txn.as_mut() else {
+            return;
+        };
+        let committed = txn.state == TxnState::Committing;
+        if committed {
+            txn.committed += 1;
+        } else {
+            txn.aborted += 1;
+        }
+        txn.state = TxnState::Ready;
+        txn.added.clear();
+        txn.offsets = None;
+        txn.started = false;
+        if std::mem::take(&mut txn.bump) {
+            // KIP-360: a new `InitProducerId` gives the next transaction a
+            // new epoch, so every partition starts again at sequence 0.
+            self.identity = ProducerId::Absent;
+            self.identity_retry_at = now;
+        }
+        self.stashed
+            .push(ProducerEvent::TransactionEnded { committed });
+    }
+
+    fn on_txn_response(
+        &mut self,
+        ctx: &mut Ctx<'_>,
+        call: TxnCall,
+        result: Result<super::Response, ClientError>,
+    ) {
+        let now = ctx.now();
+        let Some(txn) = self.txn.as_mut() else {
+            return;
+        };
+        txn.in_flight = None;
+        let mut target = Target::Coordinator {
+            key_type: CoordinatorType::Transaction,
+            key: txn.id.clone(),
+        };
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                if call == TxnCall::AddPartitions {
+                    txn.adding.clear();
+                }
+                let code = client_error_code(&error);
+                self.on_txn_error(now, code, &target);
+                return;
+            }
+        };
+        let code = match call {
+            TxnCall::AddPartitions => {
+                let adding = std::mem::take(&mut txn.adding);
+                let r = response.downcast::<AddPartitionsToTxnResponse>();
+                let mut worst = r.as_ref().map_or(codes::CORRUPT_MESSAGE, |r| r.error_code);
+                for topic in r.iter().flat_map(|r| &r.results_by_topic_v3_and_below) {
+                    for p in &topic.results_by_partition {
+                        let key = (topic.name.clone(), p.partition_index);
+                        let code = p.partition_error_code;
+                        if code == codes::NONE && adding.contains(&key) {
+                            txn.added.insert(key);
+                            txn.started = true;
+                        } else if worst == codes::NONE || worst == OPERATION_NOT_ATTEMPTED {
+                            // `OPERATION_NOT_ATTEMPTED` marks the partitions
+                            // another one's error held back.
+                            worst = code;
+                        }
+                    }
+                }
+                worst
+            }
+            TxnCall::AddOffsets => {
+                let code = response
+                    .downcast::<AddOffsetsToTxnResponse>()
+                    .map_or(codes::CORRUPT_MESSAGE, |r| r.error_code);
+                if code == codes::NONE
+                    && let Some(offsets) = txn.offsets.as_mut()
+                {
+                    offsets.added = true;
+                    txn.started = true;
+                }
+                code
+            }
+            TxnCall::CommitOffsets => {
+                if let Some(offsets) = &txn.offsets {
+                    target = Target::Coordinator {
+                        key_type: CoordinatorType::Group,
+                        key: offsets.group.group_id.clone(),
+                    };
+                }
+                let code = response.downcast::<TxnOffsetCommitResponse>().map_or(
+                    codes::CORRUPT_MESSAGE,
+                    |r| {
+                        r.topics
+                            .iter()
+                            .flat_map(|t| &t.partitions)
+                            .map(|p| p.error_code)
+                            .find(|code| *code != codes::NONE)
+                            .unwrap_or(codes::NONE)
+                    },
+                );
+                if code == codes::NONE {
+                    txn.offsets = None;
+                }
+                code
+            }
+            TxnCall::End => response
+                .downcast::<EndTxnResponse>()
+                .map_or(codes::CORRUPT_MESSAGE, |r| r.error_code),
+        };
+        match code {
+            codes::NONE if call == TxnCall::End => self.end_transaction(now),
+            codes::NONE => {}
+            code => self.on_txn_error(now, code, &target),
+        }
+    }
+
+    /// A transaction request failed with `code`: ask again after the
+    /// backoff, or make the transaction abortable, or stop for good.
+    fn on_txn_error(&mut self, now: Millis, code: i16, target: &Target) {
+        let mut events = Vec::new();
+        match txn_failure(code) {
+            TxnFailure::Retry(lookup) => {
+                if let Some(txn) = self.txn.as_mut() {
+                    txn.last_error = Some(code);
+                    txn.retry_at = now + self.config.retry_backoff_ms;
+                }
+                if lookup {
+                    self.forget_coordinator(code, target);
+                }
+            }
+            TxnFailure::Abortable => self.txn_abortable(code, &mut events),
+            TxnFailure::Fatal => self.txn_fatal(code, &mut events),
+        }
+        self.stashed.extend(events);
+    }
+
+    /// Forget a coordinator that moved or whose connection failed, so the
+    /// next request looks it up again.
+    fn forget_coordinator(&mut self, code: i16, target: &Target) {
+        if code == codes::NETWORK_EXCEPTION {
+            if let Target::Coordinator { key_type, key } = target {
+                self.client.invalidate_coordinator(*key_type, key);
+            }
+        } else {
+            self.client.note_error(code, target);
+        }
+    }
+
+    /// The open transaction can only abort now: Kafka's
+    /// `transitionToAbortableError`. The records not sent yet fail with
+    /// `code`, as Kafka's `Sender` aborts the undrained batches.
+    fn txn_abortable(&mut self, code: i16, events: &mut Vec<ProducerEvent>) {
+        let Some(txn) = self.txn.as_mut() else {
+            return;
+        };
+        txn.last_error = Some(code);
+        if !matches!(txn.state, TxnState::InTransaction | TxnState::Committing) {
+            return;
+        }
+        txn.state = TxnState::AbortableError;
+        events.push(ProducerEvent::TransactionError { code, fatal: false });
+        self.fail_unsent(code, None);
+    }
+
+    /// The producer stops for good: Kafka's `transitionToFatalError`. The
+    /// records not sent yet fail with `code`.
+    fn txn_fatal(&mut self, code: i16, events: &mut Vec<ProducerEvent>) {
+        let Some(txn) = self.txn.as_mut() else {
+            return;
+        };
+        txn.last_error = Some(code);
+        if txn.state == TxnState::FatalError {
+            return;
+        }
+        txn.state = TxnState::FatalError;
+        events.push(ProducerEvent::TransactionError { code, fatal: true });
+        self.fail_unsent(code, None);
+    }
+
+    /// Fail every record not sent yet: those waiting for metadata and the
+    /// queued batches. The events go out with the next tick or frame.
+    fn fail_unsent(&mut self, code: i16, message: Option<&str>) {
+        let mut events = Vec::new();
+        for (topic, records) in std::mem::take(&mut self.deferred) {
+            for deferred in records {
+                self.metrics.failed += 1;
+                events.push(ProducerEvent::Failed {
+                    seq: deferred.seq,
+                    topic: topic.clone(),
+                    partition: deferred.partition.unwrap_or(-1),
+                    code,
+                    message: message.map(str::to_string),
+                });
+            }
+        }
+        let queued: Vec<(String, i32, ProducerBatch)> = self
+            .partitions
+            .iter_mut()
+            .flat_map(|((topic, partition), queue)| {
+                queue
+                    .batches
+                    .drain(..)
+                    .map(|b| (topic.clone(), *partition, b))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (topic, partition, batch) in queued {
+            self.fail_batch(&topic, partition, batch, (code, message), &mut events);
+        }
+        self.stashed.extend(events);
     }
 
     // ---- draining ---------------------------------------------------------------
@@ -1141,10 +1928,14 @@ impl Producer {
                 continue;
             }
             // A partition without a leader waits for the lookup `drain`
-            // asked for.
+            // asked for; a transactional one for `AddPartitionsToTxn`.
             let Some(leader) = self.client.metadata().leader(topic, *partition) else {
                 continue;
             };
+            let key = (topic.clone(), *partition);
+            if self.txn.as_ref().is_some_and(|t| !t.added.contains(&key)) {
+                continue;
+            }
             let Some(mut batch) = queue.batches.pop_front() else {
                 continue;
             };
@@ -1186,11 +1977,14 @@ impl Producer {
                     base_sequence,
                 },
             );
-            let record_batch = build_batch(
+            let mut record_batch = build_batch(
                 &records,
                 producer_stamp,
                 self.config.compression.attribute_bits(),
             );
+            if self.txn.is_some() {
+                record_batch.attributes = record_batch.attributes.with_transactional(true);
+            }
             self.metrics.bytes += u64::try_from(record_batch.encoded_len()).unwrap_or(u64::MAX);
             self.metrics.batches_sent += 1;
             topic_data
@@ -1203,7 +1997,7 @@ impl Producer {
                 });
         }
         let request = ProduceRequest {
-            transactional_id: None,
+            transactional_id: self.txn.as_ref().map(|t| t.id.clone()),
             acks: self.config.acks.as_wire(),
             timeout_ms: i32::try_from(self.config.request_timeout_ms).unwrap_or(i32::MAX),
             topic_data: topic_data
@@ -1230,7 +2024,12 @@ impl Producer {
             self.stashed.extend(events);
             return;
         }
-        let id = self.client.send(ctx, Target::Broker(leader), request);
+        let id = if self.txn.is_some() {
+            self.client
+                .send(ctx, Target::Broker(leader), TxnProduce(request))
+        } else {
+            self.client.send(ctx, Target::Broker(leader), request)
+        };
         self.in_flight.insert(id, InFlightProduce { batches });
     }
 
@@ -1246,16 +2045,7 @@ impl Producer {
         let response = match result {
             Ok(response) => response.downcast::<ProduceResponse>(),
             Err(error) => {
-                let code = match error {
-                    ClientError::Timeout { .. } | ClientError::Disconnected { .. } => {
-                        codes::NETWORK_EXCEPTION
-                    }
-                    ClientError::UnsupportedVersion { .. } => codes::UNSUPPORTED_VERSION,
-                    ClientError::Closed => codes::UNKNOWN_SERVER_ERROR,
-                    ClientError::Protocol(_)
-                    | ClientError::CorrelationMismatch { .. }
-                    | ClientError::Broker { .. } => codes::CORRUPT_MESSAGE,
-                };
+                let code = client_error_code(&error);
                 for (topic, partition, batch) in in_flight.batches {
                     self.settle(ctx, &(topic, partition), batch, Answer::error(code), events);
                 }
@@ -1316,6 +2106,16 @@ impl Producer {
             // retrying, and this one goes again behind it. The next sequence:
             // there is a real gap, so a new epoch starts the sequences again
             // (KIP-360).
+            // A transactional producer cannot raise its own epoch: the
+            // batch fails, and the transaction aborts under a new one.
+            codes::OUT_OF_ORDER_SEQUENCE_NUMBER
+                if current && self.txn.is_some() && batch.base_sequence == Some(expected) =>
+            {
+                self.fail_batch(topic, partition, batch, (code, None), events);
+            }
+            UNKNOWN_PRODUCER_ID if idempotent && self.txn.is_some() => {
+                self.fail_batch(topic, partition, batch, (code, None), events);
+            }
             codes::OUT_OF_ORDER_SEQUENCE_NUMBER if idempotent => {
                 if current && batch.base_sequence == Some(expected) {
                     self.bump_epoch(now);
@@ -1334,6 +2134,10 @@ impl Producer {
             | codes::PRODUCER_FENCED
             | codes::INVALID_PRODUCER_ID_MAPPING => {
                 self.fail_batch(topic, partition, batch, (code, None), events);
+                if self.txn.is_some() {
+                    self.txn_fatal(code, events);
+                    return;
+                }
                 self.identity = ProducerId::Absent;
                 self.identity_retry_at = now + self.config.retry_backoff_ms;
                 self.reset_sequences();
@@ -1357,8 +2161,8 @@ impl Producer {
                     self.fail_batch(topic, partition, batch, (code, None), events);
                     // Kafka's `handleFailedBatch` bumps the epoch of an
                     // idempotent producer, so the sequences after the failed
-                    // batch stay valid.
-                    if current {
+                    // batch stay valid; a transactional one aborts first.
+                    if current && self.txn.is_none() {
                         self.bump_epoch(now);
                     }
                 }
@@ -1436,7 +2240,9 @@ impl Producer {
             let last = base_offset + i64::try_from(count.saturating_sub(1)).unwrap_or(0);
             self.metrics
                 .last_offsets
-                .insert((topic.to_string(), partition), last);
+                .entry((topic.to_string(), partition))
+                .and_modify(|at| *at = (*at).max(last))
+                .or_insert(last);
         }
     }
 
@@ -1451,6 +2257,12 @@ impl Producer {
         events: &mut Vec<ProducerEvent>,
     ) {
         let (code, message) = failure;
+        // A failed batch of a transaction makes it abortable; one that held
+        // a sequence leaves a gap only a new epoch closes (KIP-360).
+        if let Some(txn) = self.txn.as_mut() {
+            txn.bump |= batch.base_sequence.is_some();
+            self.txn_abortable(code, events);
+        }
         self.metrics.failed += u64::try_from(batch.records.len()).unwrap_or(u64::MAX);
         for record in batch.records {
             events.push(ProducerEvent::Failed {
@@ -1483,6 +2295,28 @@ impl Producer {
             })
             .collect();
         let in_flight_batches: usize = self.in_flight.values().map(|r| r.batches.len()).sum();
+        let acked_upto: serde_json::Map<String, Value> = self
+            .metrics
+            .last_offsets
+            .iter()
+            .map(|((topic, partition), offset)| (format!("{topic}-{partition}"), json!(offset)))
+            .collect();
+        let transactions = self.txn.as_ref().map_or(Value::Null, |t| {
+            let state = if self.producer_id().is_some() || t.state == TxnState::FatalError {
+                t.state.name()
+            } else {
+                "initializing"
+            };
+            json!({
+                "transactional_id": t.id,
+                "state": state,
+                "open": self.transaction_open(),
+                "committed": t.committed,
+                "aborted": t.aborted,
+                "partitions": t.added.iter().map(|(topic, p)| format!("{topic}-{p}")).collect::<Vec<_>>(),
+                "last_error": t.last_error,
+            })
+        });
         json!({
             "acks": self.config.acks.as_wire(),
             "idempotent": self.config.idempotent(),
@@ -1500,6 +2334,8 @@ impl Producer {
             "pending_records": self.pending_records(),
             "deferred_topics": self.deferred.keys().collect::<Vec<_>>(),
             "partitions": queues,
+            "acked_upto": acked_upto,
+            "transactions": transactions,
             "rtt": self.metrics.rtt.snapshot(),
             "client": self.client.snapshot(),
         })
@@ -1517,4 +2353,60 @@ fn record_size(record: &BatchRecord) -> usize {
         headers: record.headers.clone(),
     }
     .encoded_len()
+}
+
+/// The `TxnOffsetCommit` of `offsets` for the transaction of
+/// `transactional_id` under `(producer id, epoch)`.
+fn txn_offset_commit(
+    transactional_id: String,
+    (producer_id, producer_epoch): (i64, i16),
+    offsets: &TxnOffsets,
+) -> TxnCommitOffsets {
+    let mut topics: BTreeMap<String, Vec<TxnOffsetCommitRequestPartition>> = BTreeMap::new();
+    for (topic, partition, offset) in &offsets.offsets {
+        topics
+            .entry(topic.clone())
+            .or_default()
+            .push(TxnOffsetCommitRequestPartition {
+                partition_index: *partition,
+                committed_offset: *offset,
+                committed_leader_epoch: -1,
+                committed_metadata: Some(String::new()),
+                ..Default::default()
+            });
+    }
+    TxnCommitOffsets(TxnOffsetCommitRequest {
+        transactional_id,
+        group_id: offsets.group.group_id.clone(),
+        producer_id,
+        producer_epoch,
+        generation_id_or_member_epoch: offsets.group.generation,
+        member_id: offsets.group.member_id.clone(),
+        group_instance_id: None,
+        topics: topics
+            .into_iter()
+            .map(|(name, partitions)| TxnOffsetCommitRequestTopic {
+                name,
+                partitions,
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    })
+}
+
+/// Kafka's text for a transaction call on a producer without a
+/// `transactional_id`.
+fn not_transactional() -> String {
+    "Transactional method invoked on a non-transactional producer.".to_string()
+}
+
+/// Kafka's `TransactionManager.transitionTo` text for a call the state does
+/// not allow.
+fn invalid_transition(from: TxnState, to: TxnState) -> String {
+    format!(
+        "Invalid transition attempted from state {} to state {}",
+        from.name().to_uppercase(),
+        to.name().to_uppercase()
+    )
 }

@@ -11,6 +11,7 @@
 //!                          { "op": "count_by_key" } ],
 //!                 "sink": "order-counts" },
 //!   "commit_interval_ms": 100, "num_standby_replicas": 0,
+//!   "processing_guarantee": "exactly_once_v2",
 //!   "deserialize": { "registry": 4 },
 //!   "serialize": { "registry": 4, "format": "avro", "schema": "{...}", "subject": "order-counts-value" } }
 //! ```
@@ -19,6 +20,8 @@
 //!   internal topics) and `topology` (see [`topology`](super::topology)) are
 //!   required.
 //! - `commit_interval_ms`: Kafka Streams' `commit.interval.ms`. Default: 100.
+//! - `processing_guarantee`: Kafka Streams' `processing.guarantee`,
+//!   `"at_least_once"` or `"exactly_once_v2"`. Default: `"at_least_once"`.
 //! - `num_standby_replicas`: accepted and not used. With KIP-1071 the group
 //!   decides the standbys (the broker's `group.streams.num.standby.replicas`),
 //!   as a Kafka Streams client with `group.protocol=streams` ignores its own
@@ -62,6 +65,21 @@
 //! member drops its tasks without a commit and joins again. A restart starts
 //! with empty stores, a new member id, and restores from the changelogs.
 //!
+//! With `exactly_once_v2` (KIP-447) the producer is transactional, with the
+//! transactional id `<application_id>-<process id>-1`, so a restart fences
+//! the producer of the run before; every fetch, the restores included, is
+//! `read_committed`, and a changelog's end is its last stable offset. Each
+//! commit flushes the producer, sends the consumed offsets with
+//! `AddOffsetsToTxn` and `TxnOffsetCommit` (member id and epoch as the group
+//! generation) and commits the transaction with `EndTxn`, so the outputs, the
+//! changelog records and the offsets land together or not at all. A
+//! transaction that fails aborts: nothing is piped until the abort is done,
+//! then every active task drops its stores and restores them from the
+//! changelogs and reads its sources from the committed offsets again, as
+//! Kafka Streams wipes a corrupted task's state under EOS. A fenced
+//! producer is closed and replaced; a fenced member aborts the open
+//! transaction.
+//!
 //! A record whose value does not decode, or that the topology refuses, is
 //! skipped with a `record_skipped` warning, as with Kafka Streams'
 //! `LogAndContinueExceptionHandler`. Sink records wait while the `serialize`
@@ -94,7 +112,8 @@
 //! "restored", "lag", "buffered"}]`, `stores: [{"name", "task", "changelog",
 //! "entries": [[key, value]]}]` (the first 20 entries per task; a window
 //! store's value is `{"window_start", "window_end", "count"}`), `records_in`,
-//! `records_out`, `commits`, `commit_interval_ms`, `paused`, `last_outputs`
+//! `records_out`, `commits`, `commit_interval_ms`, `processing_guarantee`,
+//! `aborted_transactions`, `paused`, `last_outputs`
 //! (the last ten sink records), `producer` (the client [`Producer`]'s
 //! snapshot), `deserialize`, `serialize` and `client`.
 //!
@@ -103,7 +122,9 @@
 //! `streams_joined`, `streams_status`, `tasks_assigned`, `task_restored`,
 //! `tasks_revoked`, `streams_fenced` (warn), `streams_error` (error),
 //! `commit_failed` (warn), `schema_registered`, `registry_error` (warn),
-//! `streams_config` (warn, at start when `num_standby_replicas` is set), and
+//! `streams_config` (warn, at start when `num_standby_replicas` is set),
+//! `transaction_aborted` (warn, with the tasks that restore again),
+//! `producer_restarted` (warn, after a fatal transaction error), and
 //! at most one per five seconds of each of `produce_failed` (with Kafka's
 //! text when the producer itself failed the record), `record_skipped` and
 //! `serialization_failed` (warn).
@@ -149,8 +170,8 @@ use crate::lab::{
     LabError,
     client::{
         CONN_ID_LANES, ClientError, ClientEvent, ClientOptions, ConsumedRecord, CoordinatorType,
-        KafkaClient, Producer, ProducerConfig, ProducerEvent, ProducerRecord, RequestId, Response,
-        Target, conn_base, records_of,
+        GroupMetadata, KafkaClient, Producer, ProducerConfig, ProducerEvent, ProducerRecord,
+        RequestId, Response, Target, conn_base, records_of,
     },
     codes,
     net::{Ctx, Endpoint, Frame, Millis, Node, NodeId},
@@ -313,6 +334,15 @@ fn default_commit_interval_ms() -> Millis {
     100
 }
 
+/// Kafka Streams' `processing.guarantee`.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+enum ProcessingGuarantee {
+    #[default]
+    AtLeastOnce,
+    ExactlyOnceV2,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -323,6 +353,8 @@ struct Config {
     commit_interval_ms: Millis,
     #[serde(default)]
     num_standby_replicas: u32,
+    #[serde(default)]
+    processing_guarantee: ProcessingGuarantee,
     #[serde(default)]
     deserialize: Option<DeserializeConfig>,
     #[serde(default)]
@@ -337,6 +369,12 @@ pub struct StreamsNode {
     compiled: CompiledTopology,
     commit_interval_ms: Millis,
     num_standby_replicas: u32,
+    /// `exactly_once_v2`: transactional output and offsets, `read_committed`
+    /// fetches.
+    eos: bool,
+    /// The offsets the transaction being committed carries.
+    txn_offsets: Option<Vec<(TaskId, String, i64)>>,
+    aborted_transactions: u64,
     client: KafkaClient,
     membership: Membership,
     /// Kafka Streams keeps its process id in the state directory, so it
@@ -410,7 +448,7 @@ impl StreamsNode {
             .map(|n| Endpoint::kafka(*n))
             .collect();
         let client = KafkaClient::new(bootstrap.clone(), "streams", ClientOptions::default());
-        let producer = build_producer(&bootstrap, "streams-producer", 1);
+        let producer = build_producer(&bootstrap, "streams-producer", 1, None);
         let membership = Membership::new(
             &config.application_id,
             "",
@@ -426,6 +464,9 @@ impl StreamsNode {
             compiled,
             commit_interval_ms: config.commit_interval_ms.max(1),
             num_standby_replicas: config.num_standby_replicas,
+            eos: config.processing_guarantee == ProcessingGuarantee::ExactlyOnceV2,
+            txn_offsets: None,
+            aborted_transactions: 0,
             client,
             membership,
             process_id: None,
@@ -546,6 +587,12 @@ impl StreamsNode {
                     self.reconcile(ctx);
                 }
                 MembershipEvent::Fenced { code } => {
+                    // The open transaction cannot commit for a member that
+                    // is gone; its outputs abort.
+                    if self.producer.transaction_open() && self.producer.abort_transaction().is_ok()
+                    {
+                        self.txn_offsets = None;
+                    }
                     // The tasks are lost: closed without a commit.
                     let lost: Vec<String> = self.tasks.keys().map(ToString::to_string).collect();
                     self.tasks.clear();
@@ -715,7 +762,11 @@ impl StreamsNode {
                         .as_ref()
                         .and_then(RecordsPayload::as_v2)
                         .unwrap_or(&[]);
-                    let (records, next) = records_of(&part.topic, partition, batches, part.offset);
+                    let aborted = self
+                        .eos
+                        .then(|| row.aborted_transactions.as_deref().unwrap_or_default());
+                    let (records, next) =
+                        records_of(&part.topic, partition, batches, part.offset, aborted);
                     (codes::NONE, records, next, Some(row.high_watermark), None)
                 }
                 Some(row) => (
@@ -939,15 +990,14 @@ impl StreamsNode {
 
     fn on_producer_events(&mut self, ctx: &mut Ctx<'_>, events: Vec<ProducerEvent>) {
         for event in events {
-            if let ProducerEvent::Failed {
-                topic,
-                partition,
-                code,
-                message,
-                ..
-            } = event
-            {
-                self.warn(
+            match event {
+                ProducerEvent::Failed {
+                    topic,
+                    partition,
+                    code,
+                    message,
+                    ..
+                } => self.warn(
                     ctx,
                     "produce_failed",
                     json!({
@@ -957,9 +1007,96 @@ impl StreamsNode {
                         "message": message,
                         "level": "warn",
                     }),
-                );
+                ),
+                ProducerEvent::Acked { .. } => {}
+                ProducerEvent::TransactionEnded { committed: true } => {
+                    if let Some(offsets) = self.txn_offsets.take() {
+                        self.mark_committed(&offsets);
+                        self.commits += 1;
+                    }
+                    if self.commit == Commit::Sent {
+                        self.finish_commit(ctx);
+                    }
+                }
+                ProducerEvent::TransactionEnded { committed: false } => {
+                    self.restore_after_abort(ctx);
+                }
+                ProducerEvent::TransactionError { fatal: false, .. } => {
+                    // Abort, and pipe nothing until the abort is done.
+                    self.txn_offsets = None;
+                    self.commit = Commit::Sent;
+                    if self.producer.abort_transaction().is_err() {
+                        self.restore_after_abort(ctx);
+                    }
+                }
+                ProducerEvent::TransactionError { fatal: true, .. } => {
+                    ctx.event("producer_restarted", json!({ "level": "warn" }));
+                    self.producer.close(ctx);
+                    let lane = 2 * (self.starts % (CONN_ID_LANES / 2)) + 1;
+                    self.starts = self.starts.wrapping_add(1);
+                    let client_id = self.producer.client().client_id().to_string();
+                    self.producer =
+                        build_producer(&self.bootstrap, &client_id, lane, self.transactional_id());
+                    self.restore_after_abort(ctx);
+                }
             }
         }
+    }
+
+    /// Kafka Streams' EOS v2 transactional id: `<application id>-<process
+    /// id>-<thread>`, stable across restarts so a new run fences the old.
+    fn transactional_id(&self) -> Option<String> {
+        self.eos.then(|| {
+            format!(
+                "{}-{}-1",
+                self.application_id,
+                self.process_id.as_deref().unwrap_or_default()
+            )
+        })
+    }
+
+    /// The committed offsets of the active tasks' sources.
+    fn mark_committed(&mut self, offsets: &[(TaskId, String, i64)]) {
+        for (id, topic, offset) in offsets {
+            if let Some(source) = self
+                .tasks
+                .get_mut(id)
+                .and_then(|t| t.sources.get_mut(topic))
+            {
+                source.committed = Some(*offset);
+            }
+        }
+    }
+
+    /// The transaction aborted: what the tasks did since the last commit is
+    /// gone, so each active task drops its stores and restores them from the
+    /// changelogs, and reads its sources from the committed offsets again.
+    fn restore_after_abort(&mut self, ctx: &mut Ctx<'_>) {
+        self.aborted_transactions += 1;
+        self.txn_offsets = None;
+        self.held.clear();
+        let mut reset = Vec::new();
+        let ids: Vec<TaskId> = self
+            .tasks
+            .iter()
+            .filter(|(_, t)| t.role == Role::Active)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let closing = self.tasks.get(&id).is_some_and(|t| t.closing);
+            if let Ok(mut task) = StreamTask::new(&self.compiled, id.clone(), Role::Active) {
+                task.closing = closing;
+                if let Some(old) = self.tasks.insert(id.clone(), task) {
+                    old.embedded.close();
+                }
+                reset.push(id.to_string());
+            }
+        }
+        ctx.event(
+            "transaction_aborted",
+            json!({ "tasks": reset, "level": "warn" }),
+        );
+        self.finish_commit(ctx);
     }
 
     // ---- driving --------------------------------------------------------------
@@ -1050,7 +1187,7 @@ impl StreamsNode {
                 topic: topic.clone(),
                 partition: task.partition,
             };
-            let request = list_offsets(&topic, task.partition, lookup);
+            let request = list_offsets(&topic, task.partition, lookup, self.eos);
             let id = self.client.send(ctx, target, request);
             self.pending.insert(
                 id,
@@ -1198,6 +1335,10 @@ impl StreamsNode {
                     })
             })
             .collect();
+        if self.eos {
+            self.commit_transaction(ctx, offsets);
+            return;
+        }
         if offsets.is_empty() || self.membership.epoch() <= 0 {
             self.finish_commit(ctx);
             return;
@@ -1235,6 +1376,41 @@ impl StreamsNode {
         let id = self.client.send(ctx, target, request);
         self.pending.insert(id, Pending::Commit { offsets });
         self.commit = Commit::Sent;
+    }
+
+    /// Commit the open transaction with `offsets`: the producer sends them
+    /// with `AddOffsetsToTxn` and `TxnOffsetCommit`, then `EndTxn`, and the
+    /// commit ends when [`ProducerEvent::TransactionEnded`] arrives.
+    fn commit_transaction(&mut self, ctx: &mut Ctx<'_>, offsets: Vec<(TaskId, String, i64)>) {
+        let open = self.producer.transaction_open();
+        let epoch = self.membership.epoch();
+        if (offsets.is_empty() && !open) || epoch <= 0 {
+            self.finish_commit(ctx);
+            return;
+        }
+        if !offsets.is_empty() {
+            let group = GroupMetadata {
+                group_id: self.application_id.clone(),
+                member_id: self.membership.member_id().to_string(),
+                generation: epoch,
+            };
+            let rows = offsets
+                .iter()
+                .map(|(id, topic, offset)| (topic.clone(), id.partition, *offset))
+                .collect();
+            if self
+                .producer
+                .send_offsets_to_transaction(group, rows)
+                .is_err()
+            {
+                // The transaction already failed; its abort is under way.
+                return;
+            }
+        }
+        if self.producer.commit_transaction().is_ok() {
+            self.txn_offsets = Some(offsets);
+            self.commit = Commit::Sent;
+        }
     }
 
     /// End a commit: fire the wall-clock punctuators, close the revoked
@@ -1368,7 +1544,7 @@ impl StreamsNode {
             max_wait_ms: FETCH_MAX_WAIT_MS,
             min_bytes: 1,
             max_bytes: 52_428_800,
-            isolation_level: 0,
+            isolation_level: i8::from(self.eos),
             session_id: 0,
             session_epoch: -1,
             topics: topics
@@ -1549,15 +1725,20 @@ fn decode(
 }
 
 /// A `ListOffsets` of one partition: the earliest offset for a start, the
-/// latest for an end.
-fn list_offsets(topic: &str, partition: i32, lookup: Lookup) -> ListOffsetsRequest {
+/// latest for an end, which is the last stable offset when `read_committed`.
+fn list_offsets(
+    topic: &str,
+    partition: i32,
+    lookup: Lookup,
+    read_committed: bool,
+) -> ListOffsetsRequest {
     let timestamp = match lookup {
         Lookup::SourceStart | Lookup::ChangelogStart => EARLIEST_TIMESTAMP,
         Lookup::ChangelogEnd => LATEST_TIMESTAMP,
     };
     ListOffsetsRequest {
         replica_id: -1,
-        isolation_level: 0,
+        isolation_level: i8::from(read_committed),
         topics: vec![ListOffsetsTopic {
             name: topic.to_string(),
             partitions: vec![ListOffsetsPartition {
@@ -1573,8 +1754,14 @@ fn list_offsets(topic: &str, partition: i32, lookup: Lookup) -> ListOffsetsReque
 }
 
 /// The stream thread's producer: idempotent with `acks=all`, Kafka's
-/// defaults, whose client numbers its connections in `lane`.
-fn build_producer(bootstrap: &[Endpoint], client_id: &str, lane: u32) -> Producer {
+/// defaults, transactional under EOS, whose client numbers its connections
+/// in `lane`.
+fn build_producer(
+    bootstrap: &[Endpoint],
+    client_id: &str,
+    lane: u32,
+    transactional_id: Option<String>,
+) -> Producer {
     let client = KafkaClient::new(
         bootstrap.to_vec(),
         client_id,
@@ -1583,7 +1770,11 @@ fn build_producer(bootstrap: &[Endpoint], client_id: &str, lane: u32) -> Produce
             ..ClientOptions::default()
         },
     );
-    Producer::new(client, ProducerConfig::default(), u64::from(lane))
+    let config = ProducerConfig {
+        transactional_id,
+        ..ProducerConfig::default()
+    };
+    Producer::new(client, config, u64::from(lane))
 }
 
 /// A random id drawn from the node's generator: 16 bytes as Kafka's
@@ -1622,7 +1813,12 @@ impl Node for StreamsNode {
                 ..ClientOptions::default()
             },
         );
-        self.producer = build_producer(&self.bootstrap, &format!("{thread}-producer"), lane + 1);
+        self.producer = build_producer(
+            &self.bootstrap,
+            &format!("{thread}-producer"),
+            lane + 1,
+            self.transactional_id(),
+        );
         let topics = self.topics();
         self.client.add_topics(topics.iter().map(String::as_str));
         self.membership = Membership::new(
@@ -1640,6 +1836,8 @@ impl Node for StreamsNode {
         self.fetching.clear();
         self.commit = Commit::Idle;
         self.next_commit_at = now + self.commit_interval_ms;
+        self.txn_offsets = None;
+        self.aborted_transactions = 0;
         self.failed = None;
         self.records_in = 0;
         self.records_out = 0;
@@ -1755,6 +1953,8 @@ impl Node for StreamsNode {
             "records_out": self.records_out,
             "commits": self.commits,
             "commit_interval_ms": self.commit_interval_ms,
+            "processing_guarantee": if self.eos { "exactly_once_v2" } else { "at_least_once" },
+            "aborted_transactions": self.aborted_transactions,
             "paused": self.paused,
             "last_outputs": self.last_outputs,
             "producer": self.producer.snapshot(),

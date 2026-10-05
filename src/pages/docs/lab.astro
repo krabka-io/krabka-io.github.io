@@ -1,7 +1,22 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import LabLink from '../../components/LabLink.astro'; // J3
 import { getPath } from '../../utils/paths';
 import '../../styles/lab.css';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+// A module's content hash, for its URL: the lab's service worker keeps each
+// version of a module once, so a deploy with a new build misses its cache.
+// Empty when the module is not staged (the page then loads it uncached).
+function wasmVersion(file: string) {
+  try {
+    return createHash('sha256').update(readFileSync(path.join(process.cwd(), 'public', 'playground', file))).digest('hex').slice(0, 16);
+  } catch {
+    return undefined;
+  }
+}
 
 const real = [
   { piece: 'The broker: request handlers, partition logs and replication, group coordinators, the KRaft quorum and metadata', crate: 'krabka-broker, krabka-raft, krabka-metadata', runs: 'a Web Worker', use: 'every broker node' },
@@ -29,20 +44,20 @@ const controls = [
   description="Run real krabka brokers in your browser with a schema registry, producers, consumers and streams apps. Break their network and read their logs."
 >
   <!-- The lab is an app, so it takes the window: a one-line header above it, the guide below. -->
-  <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pb-3 pt-5 font-sans sm:px-6 lg:px-8">
+  <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5 font-sans sm:px-6 lg:px-8">
     <!-- A flex row, like the docs layout's: the links pad out to a 28px hit area without growing the row. -->
-    <nav aria-label="Breadcrumb" class="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400">
+    <nav aria-label="Breadcrumb" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400">
       <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white">Home</a>
       <span aria-hidden="true">/</span>
       <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white">Docs</a>
       <span aria-hidden="true">/</span>
       <span class="text-gray-200" aria-current="page">Cluster Lab</span>
     </nav>
-    <h1 class="text-2xl font-extrabold text-white">Cluster Lab</h1>
+    <h1 class="text-xl font-extrabold text-white">Cluster Lab</h1>
     <p class="text-sm text-gray-400">Run krabka brokers, clients, and apps in your browser. Inject network faults and inspect the resulting traffic and node state.</p>
   </header>
 
-  <div id="krabka-lab" class="not-prose">
+  <div id="krabka-lab" class="not-prose" data-lab-wasm={wasmVersion('krabka_playground_bg.wasm')} data-broker-wasm={wasmVersion('broker/krabka-broker.wasm')}>
     <p class="lab-fallback">
       Loading the Cluster Lab. This panel needs JavaScript and WebAssembly. If it does not appear, your browser may have them disabled.
     </p>
@@ -119,8 +134,10 @@ const controls = [
         <strong class="text-white">krabka broker</strong> in the Build tab adds the real <code class="font-mono text-krab-300">krabka-broker</code>, compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
         WASI runtime: its listeners, its dials to other nodes and its clock are the lab's, so links, faults, pause and speed
         apply to it like to any node, and its disk is a volume in this browser's IndexedDB. Every preset has
-        brokers, so the first visit downloads the broker module, about 14 MB, and the page shows the progress on each broker node.
-        The runtime also needs a cross-origin isolated page, so the page reloads once, then reopens the scenario. A real
+        brokers, so the first visit downloads the broker module, about 14 MB, and the page shows the progress on each broker node;
+        later visits take it, and the lab module, from this browser's cache until the site ships a new build.
+        The runtime also needs a cross-origin isolated page. Any page of this site sets that up in the background, so a visit
+        that starts elsewhere on the site opens the lab isolated; landing on the lab first, the page reloads once, then reopens the scenario. A real
         broker stays in the tab that runs it: its process cannot move to another tab of a session. If the broker module is
         missing from the site, or the browser cannot isolate the page, the node says so and refuses connections.
       </p>
@@ -168,6 +185,72 @@ const controls = [
         The status line says how many frames the capture lost: dropped before the page read them, evicted to stay within its
         64 MiB, or skipped while capture was paused.
       </p>
+
+      <!-- J2 -->
+      <h2 class="text-xl font-bold text-white pt-2">Cluster state, charts and invariants</h2>
+      <p>
+        The scenario's admin node polls the brokers once a lab second. The <strong class="text-white">Cluster</strong> tab shows what it
+        last saw: the KRaft quorum with its leader, epoch and each voter's lag, the brokers with their rack, whether they are
+        fenced and how many partitions each leads and hosts, and every partition with its leader, leader epoch, replicas, ISR,
+        high watermark, log start and each consumer group's lag. Replicas that fell out of the ISR are struck through.
+        Offline and under-replicated partitions sort first; internal topics such as <code class="font-mono text-krab-300">__consumer_offsets</code>
+        hide behind a toggle. The canvas marks the quorum leader's card <em>controller</em>, counts the partitions each broker
+        leads and hosts, and puts one chip per partition under a topic, coloured by health, with its leader's id.
+      </p>
+      <p>
+        The <strong class="text-white">Charts</strong> tab samples the run once a lab second: records acknowledged and consumed per
+        second, total consumer lag, Produce and Fetch round trips (p50 and p99, from the network capture), the smallest ISR
+        and the number of under-replicated partitions. Every fault, kills and restarts included, is a labelled line on every
+        chart, on the same lab-time axis, and hovering reads all the charts at one instant. <strong class="text-white">Pin as baseline</strong>
+        keeps the series in this browser; <strong class="text-white">Rerun</strong> opens the scenario again from nothing with its current
+        configuration, so you can change one setting, rerun and see the new run over the old one, dashed.
+      </p>
+      <p>
+        The same tab checks invariants on every snapshot, and the toolbar says whether they hold: no record a producer with
+        <code class="font-mono text-krab-300">acks=all</code> saw acknowledged is lost (the partition's high watermark must stay above it;
+        a new leader's may stand lower while its ISR catches up or shrinks, so it counts as a loss after 60 s of lab time, or at once when the partition is gone), consumer positions only move forward
+        unless an admin reset them, one broker leads a partition per leader epoch, the KRaft quorum has one leader per epoch,
+        and a <code class="font-mono text-krab-300">read_committed</code> consumer never receives a record of an aborted transaction. A
+        violation is listed with its lab time and drawn as a red line on the charts.
+      </p>
+      <p>
+        <strong class="text-white">Trace</strong>, on a row of a producer's Last records, follows that record through the capture: the
+        Produce request that carried it, each follower's Fetch that copied it, the first Fetch response whose high watermark
+        passed it, the consumer's Fetch that delivered it and the OffsetCommit past it, each with its lab time, its two nodes
+        and a button that selects the exchange in the Network tab. A step that is missing says why: it has not happened yet,
+        or it fell outside what the capture kept.
+      </p>
+      <!-- /J2 -->
+
+      <!-- J3 -->
+      <h2 class="text-xl font-bold text-white pt-2">Process faults, experiments and forks</h2>
+      <p>
+        With one node selected, the <strong class="text-white">Break things</strong> bar adds <strong class="text-white">Pause</strong>: the
+        node stops as under SIGSTOP or a long GC pause. A real broker's worker gets no input, socket readiness or timers;
+        what is sent to it waits in its socket buffers, and <strong class="text-white">Resume</strong> lets it catch up at the time it
+        is. Paused for longer than the clients' 30 s request timeout, its clients drop their connections and reconnect.
+        <strong class="text-white">More…</strong> skews a real broker's wall clock (REALTIME; its monotonic clock is untouched, so
+        the files it writes carry the skewed time) and sets its disk to slow (each fsync takes that many lab milliseconds),
+        full (writes that grow a file fail with ENOSPC) or failing (writes and syncs fail with EIO). The krabka broker does
+        not fsync on produce, so a slow disk shows when it starts and recovers its log; a full or failing disk makes it log
+        the error and stop. With two nodes selected, <strong class="text-white">Cut →</strong> and <strong class="text-white">Cut ←</strong> drop the
+        frames one way only: connections stay open until a peer times out. The canvas menu has the same faults.
+      </p>
+      <p>
+        A scenario can carry an <strong class="text-white">experiment</strong>: timed faults and commands, and checks decided at a lab
+        time or required by one, such as an ISR size, a consumer's lag, an event, a Kafka error code in a response, a dotted
+        path into a node's state, or that the invariants above hold. The Scenarios tab edits it as JSON and validates it;
+        <strong class="text-white">Run experiment</strong> restarts the scenario on fresh disks, runs the script and lists each step and
+        check with its time and result. The experiment travels with Copy link and Export. <strong class="text-white">Fork here</strong>
+        pauses the clock, copies the brokers' disks into a new saved scenario and opens it: the brokers boot from the
+        copies, the clients start fresh. Three presets carry an experiment; each link opens it in the lab and runs it.
+      </p>
+      <div class="grid sm:grid-cols-3 gap-4 not-prose">
+        <LabLink preset="min-isr" description="Kill one replica, raise the topic's min.insync.replicas to 3, and watch acks=all writes fail with NOT_ENOUGH_REPLICAS until the replica is back in the ISR." />
+        <LabLink preset="five-brokers-partition" description="Brokers 4 and 5 start cut off: the majority registers, elects a controller and serves; after the heal both brokers register and catch up." />
+        <LabLink preset="slow-replica" description="Broker 3's links slow to 15 s: it falls out of the ISR and the group's lag jumps. Back at 200 ms it rejoins and the lag comes down." />
+      </div>
+      <!-- /J3 -->
 
       <h2 class="text-xl font-bold text-white pt-2">A broker's disk</h2>
       <p>

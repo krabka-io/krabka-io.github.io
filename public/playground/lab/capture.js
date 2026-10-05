@@ -320,14 +320,16 @@ export class Capture {
       v.setUint8(33, flags);
       v.setUint16(34, 0xffff);
       if (payload) head.set(payload, 40);
-      // TCP checksum over the pseudo-header, the header and the payload; a cut payload keeps 0.
+      // The TCP checksum over the pseudo-header, header and payload. A
+      // payload the capture cut short cannot be summed; it keeps 0, and the
+      // packet's captured length tells tools it is truncated.
       if (captured === payloadLen) {
-        let tsum = 6 + 20 + payloadLen;
-        for (let i = 12; i < 20; i += 2) tsum += v.getUint16(i);
-        for (let i = 20; i + 1 < head.length; i += 2) tsum += v.getUint16(i);
-        if (head.length % 2) tsum += head[head.length - 1] << 8;
-        while (tsum > 0xffff) tsum = (tsum & 0xffff) + (tsum >>> 16);
-        v.setUint16(36, ~tsum & 0xffff);
+        let t = 6 + 20 + payloadLen;
+        for (let i = 12; i < 20; i += 2) t += v.getUint16(i);
+        for (let i = 20; i < head.length - 1; i += 2) t += v.getUint16(i);
+        if (head.length % 2) t += head[head.length - 1] << 8;
+        while (t > 0xffff) t = (t & 0xffff) + (t >>> 16);
+        v.setUint16(36, ~t & 0xffff || 0xffff);
       }
       seqs.set(key, (seq + payloadLen + (flags & 0x03 ? 1 : 0)) >>> 0);
       const epb = new Uint8Array(20);

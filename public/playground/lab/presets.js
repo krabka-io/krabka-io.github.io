@@ -202,6 +202,39 @@ export const PRESETS = [
     },
   },
   {
+    id: "transactions",
+    name: "Transactions and read_committed",
+    description:
+      "A transactional producer writes ten records per transaction and aborts every third one. Two groups read the topic: the read_committed consumer never gets an aborted record, the read_uncommitted one counts them as aborted records seen.",
+    scenario: {
+      version: 1, seed: 37, name: "Transactions and read_committed",
+      links: { default_latency_ms: 5 },
+      nodes: [
+        broker(1, 120, 80, "a"), broker(2, 400, 80, "b"), broker(3, 680, 80, "c"),
+        {
+          id: 4,
+          kind: "producer",
+          name: "orders-tx",
+          x: 120,
+          y: 330,
+          config: {
+            bootstrap: [1, 2, 3],
+            topic: "orders",
+            rate_per_sec: 10,
+            key: { pattern: "customer-{seq % 10}" },
+            value: ORDERS,
+            transactional_id: "orders-tx",
+            transaction_records: 10,
+            abort_every: 3,
+          },
+        },
+        consumer(5, "committed", 420, 330, [1, 2, 3], "committed", ["orders"], { isolation_level: "read_committed" }),
+        consumer(6, "uncommitted", 700, 330, [1, 2, 3], "uncommitted", ["orders"]),
+      ],
+      topics: [{ name: "orders", partitions: 3, replication_factor: 3 }],
+    },
+  },
+  {
     id: "observer-broker",
     name: "Two voters and a broker observer",
     description: "Brokers 1 and 2 vote in the controller quorum. Broker 3 serves data without a controller vote. Compare their process state and topic replicas.",
@@ -310,6 +343,69 @@ export const PRESETS = [
     },
   },
 ];
+
+// ---- J3: scripted experiments (experiment.js) ----
+// Each was run on the real brokers (scripts/check-lab-experiments.mjs runs
+// them in CI). Times are lab ms from the start of the run.
+const healMinority = [4, 5].flatMap((a) => [1, 2, 3].map((b) => ({ at: 60000, fault: { kind: "heal", a, b } })));
+const EXPERIMENTS = {
+  // A second kill would take the three-voter KRaft quorum with it (produce
+  // requests then time out rather than fail), so the ISR is pushed under the
+  // minimum the other way: one replica down, then the topic's minimum raised.
+  "min-isr": {
+    name: "Raise min.insync.replicas above a shrunken ISR",
+    steps: [
+      { at: 15000, fault: { kind: "kill", node: 3 } },
+      { at: 45000, command: { node: "admin", cmd: "alter_config", resource: "topic", name: "orders", set: { "min.insync.replicas": "3" } } },
+      { at: 75000, fault: { kind: "restart", node: 3 } },
+    ],
+    expect: [
+      { by: 45000, after: 15000, check: "isr_size", topic: "orders", partition: 0, op: "==", value: 2 },
+      { by: 45000, check: "producer_acked", node: 4, since: 30000, op: ">", value: 0 },
+      { by: 75000, after: 45000, check: "kafka_error", error: "NOT_ENOUGH_REPLICAS" },
+      { at: 75000, check: "producer_acked", node: 4, since: 60000, op: "==", value: 0 },
+      { by: 120000, after: 75000, check: "isr_size", topic: "orders", partition: 0, op: "==", value: 3 },
+      { by: 120000, check: "producer_acked", node: 4, since: 75000, op: ">", value: 0 },
+      { by: 120000, check: "invariants_hold" },
+    ],
+    end: 120000,
+  },
+  "five-brokers-partition": {
+    name: "The majority serves through a partition; the minority rejoins on heal",
+    steps: healMinority,
+    expect: [
+      { at: 55000, check: "snapshot_path", node: "admin", path: "cluster.brokers.length", op: "==", value: 3 },
+      { by: 55000, check: "producer_acked", node: 6, since: 20000, op: ">", value: 20 },
+      { by: 100000, after: 60000, check: "snapshot_path", node: "admin", path: "cluster.brokers.length", op: "==", value: 5 },
+      { by: 120000, check: "producer_acked", node: 6, since: 60000, op: ">", value: 20 },
+      { by: 120000, check: "invariants_hold" },
+    ],
+    end: 120000,
+  },
+  // Broker 3's links slow to 15 s each way: its fetches miss the replica lag
+  // limit, it leaves the ISR and the group's lag jumps; back at 200 ms it
+  // rejoins and the lag comes down.
+  "slow-replica": {
+    name: "Slow broker 3 until it leaves the ISR, then let it catch up",
+    steps: [
+      { at: 20000, fault: { kind: "latency", a: 1, b: 3, ms: 15000 } },
+      { at: 20000, fault: { kind: "latency", a: 2, b: 3, ms: 15000 } },
+      { at: 80000, fault: { kind: "latency", a: 1, b: 3, ms: 200 } },
+      { at: 80000, fault: { kind: "latency", a: 2, b: 3, ms: 200 } },
+    ],
+    expect: [
+      { by: 60000, after: 20000, check: "isr_size", topic: "orders", partition: 0, op: "==", value: 2 },
+      { by: 75000, after: 20000, check: "snapshot_path", node: "admin", path: "cluster.groups.0.lag", op: ">=", value: 20 },
+      { by: 130000, after: 95000, check: "isr_size", topic: "orders", partition: 0, op: "==", value: 3 },
+      { by: 140000, after: 100000, check: "snapshot_path", node: "admin", path: "cluster.groups.0.lag", op: "<=", value: 5 },
+      { by: 140000, check: "producer_acked", node: 4, since: 85000, op: ">", value: 30 },
+      { by: 140000, check: "invariants_hold" },
+    ],
+    end: 140000,
+  },
+};
+for (const p of PRESETS) if (EXPERIMENTS[p.id]) p.scenario.experiment = EXPERIMENTS[p.id];
+// ---- /J3 ----
 
 export function presetById(id) {
   return PRESETS.find((p) => p.id === id) || null;
