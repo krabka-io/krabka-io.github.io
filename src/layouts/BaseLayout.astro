@@ -111,6 +111,11 @@ const structuredData = {
     <!-- Schema.org JSON-LD -->
     {isHome && <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />}
     <slot name="head" />
+    <!-- Cloudflare Web Analytics: cookieless. Only in builds given a site token
+         (the CF_BEACON_TOKEN repository variable in the deploy workflow). -->
+    {import.meta.env.PUBLIC_CF_BEACON_TOKEN && (
+      <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={JSON.stringify({ token: import.meta.env.PUBLIC_CF_BEACON_TOKEN })}></script>
+    )}
   </head>
   <body class="min-h-screen flex flex-col bg-ocean-950 text-gray-100 selection:bg-krab-500/30 selection:text-krab-200">
     <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-krab-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">Skip to main content</a>
