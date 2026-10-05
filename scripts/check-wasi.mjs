@@ -94,7 +94,7 @@ function ensureTools() {
   const wanted = [];
   if (!resolvable("playwright")) wanted.push("playwright-core");
   if (!wasmOptOnPath()) wanted.push("binaryen");
-  const present = (name) => (name === "binaryen" ? fs.existsSync(path.join(root, "node_modules", ".bin", "wasm-opt")) : resolvable(name));
+  const present = (name) => (name === "binaryen" ? fs.existsSync(path.join(root, "node_modules", "binaryen", "bin", "wasm-opt")) : resolvable(name));
   if (wanted.every(present)) return;
   console.log(`  installing ${wanted.join(" and ")} (npm install --no-save) ...`);
   try {
@@ -104,11 +104,13 @@ function ensureTools() {
   }
 }
 
+// `[command, ...leading args]`: binaryen's npm wasm-opt is a Node script, run
+// through Node itself because Windows cannot spawn the `.bin` shim directly.
 function findWasmOpt() {
   if (process.argv.includes('--no-opt')) return null;
-  const local = path.join(root, "node_modules", ".bin", "wasm-opt");
-  if (fs.existsSync(local)) return local;
-  if (wasmOptOnPath()) return "wasm-opt";
+  const local = path.join(root, "node_modules", "binaryen", "bin", "wasm-opt");
+  if (fs.existsSync(local)) return [process.execPath, local];
+  if (wasmOptOnPath()) return ["wasm-opt"];
   console.log("  no wasm-opt: the guest runs unoptimised");
   return null;
 }
@@ -133,7 +135,8 @@ function buildGuest() {
   let out = raw;
   if (wasmOpt) {
     const t = Date.now();
-    run(wasmOpt, [
+    run(wasmOpt[0], [
+      ...wasmOpt.slice(1),
       "-Oz",
       "--enable-bulk-memory",
       "--enable-sign-ext",

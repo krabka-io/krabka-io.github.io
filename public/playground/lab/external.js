@@ -38,8 +38,13 @@ import { base64ToBytes, bytesToBase64 } from "./storage.js";
 
 /** The node kind of a real broker. */
 export const REAL_BROKER_KIND = "krabka-broker";
-/** Where the site serves the broker's `wasm32-wasip1` module. */
-export const BROKER_MODULE_URL = new URL("../broker/krabka-broker.wasm", import.meta.url).href;
+/** Where the site serves the broker's `wasm32-wasip1` module, with its content hash when the page knows it (J1: the service worker caches by it). */
+export const BROKER_MODULE_URL = (() => {
+  const url = new URL("../broker/krabka-broker.wasm", import.meta.url);
+  const version = globalThis.document?.getElementById("krabka-lab")?.dataset.brokerWasm;
+  if (version) url.searchParams.set("v", version);
+  return url.href;
+})();
 /** What a node shows when that module is missing. */
 export const MISSING_BUILD = "the real broker build is not on this site yet";
 export const KAFKA_PORT = 9092;
@@ -285,6 +290,23 @@ export function votersOf(scenario) {
   return ids.sort((a, b) => a - b);
 }
 
+// The broker's internal topics default to three replicas (and two in-sync
+// for transactions), like Kafka's. A cluster with fewer brokers could never
+// create them: a consumer group would wait forever for `__consumer_offsets`.
+// Below three brokers they take what the cluster has, as a Kafka quickstart's
+// `server.properties` does.
+const INTERNAL_TOPIC_FACTORS = ["offsets_topic_replication_factor", "transaction_state_replication_factor", "share_state_replication_factor", "barrier_state_replication_factor"];
+
+/** `fileConfig` with its internal topics' replication capped to `brokers`. */
+export function fitInternalTopics(fileConfig, brokers) {
+  if (brokers >= 3) return fileConfig;
+  const n = Math.max(1, brokers);
+  const runtime = { ...fileConfig.runtime };
+  for (const key of INTERNAL_TOPIC_FACTORS) runtime[key] ??= n;
+  runtime.transaction_state_min_isr ??= Math.min(2, n);
+  return { ...fileConfig, runtime };
+}
+
 /**
  * The environment of the process behind node `nodeId`, on top of what the
  * runtime sets (`KRABKA_LISTEN_FDS`, `KRABKA_LISTEN_PORTS`, `KRABKA_DIAL_FD`).
@@ -388,14 +410,20 @@ const openFrame = (src, dst, conn) => ({ src: endpoint(src), dst: endpoint(dst),
 const closeFrame = (src, dst, conn) => ({ src: endpoint(src), dst: endpoint(dst), conn, payload: { kind: "close" } });
 const dataFrame = (src, dst, conn, bytes) => ({ src: endpoint(src), dst: endpoint(dst), conn, payload: { kind: "data", data: bytesToBase64(bytes) } });
 
-// Whether the link between two nodes drops frames: cut, or either node isolated.
+// Whether the link between two nodes drops frames: cut, or either node
+// isolated. A dial needs both directions (SYN, SYN-ACK), so a one-way cut
+// either way holds it too.
 function linkDown(world, a, b) {
   if (a === b) return false;
   const na = world.nodes.find((n) => n.id === a);
   const nb = world.nodes.find((n) => n.id === b);
   if (na?.isolated || nb?.isolated) return true;
+  if ((world.one_way_cuts || []).some((c) => (c.from === a && c.to === b) || (c.from === b && c.to === a))) return true;
   return (world.links || []).some((l) => l.cut && ((l.a === a && l.b === b) || (l.a === b && l.b === a)));
 }
+
+// The slow-disk sync time when a `disk` fault names none.
+export const DEFAULT_SLOW_SYNC_MS = 200;
 
 function summarizeStats(stats) {
   const g = stats?.guest;
@@ -418,6 +446,20 @@ function summarizeStats(stats) {
     journal_flushes: g.journal?.flushes ?? null,
     journal_bytes: g.journal?.bytes ?? null,
   };
+}
+
+/** "slow (200 ms per sync)", "full (ENOSPC)", "failing (EIO)" or "ok". */
+export function describeDisk(disk) {
+  switch (disk?.mode) {
+    case "slow":
+      return `slow (${disk.ms} ms per sync)`;
+    case "full":
+      return "full (ENOSPC)";
+    case "eio":
+      return "failing (EIO)";
+    default:
+      return "ok";
+  }
 }
 
 function describeExit(info) {
@@ -456,6 +498,12 @@ class RealNode {
     this.stats = null;
     this.notes = [];
     this.publishTimer = 0;
+    // Faults the page applies to the process (the world only records them):
+    // SIGSTOP, a REALTIME offset, the volume's health. Skew and disk outlive
+    // a restart, as they belong to the machine; a pause does not.
+    this.paused = false;
+    this.skewMs = 0;
+    this.disk = { mode: "ok", ms: 0 };
   }
 
   get running() {
@@ -585,6 +633,8 @@ export class ExternalHost {
         continue;
       }
       const node = new RealNode(id);
+      node.skewMs = Number(n.skew_ms) || 0;
+      if (n.disk && n.disk !== "ok") node.disk = { mode: n.disk, ms: n.disk === "slow" ? DEFAULT_SLOW_SYNC_MS : 0 };
       this.nodes.set(id, node);
       if (n.alive) this.launch(node);
       else this.setState(node, "killed", "");
@@ -603,6 +653,28 @@ export class ExternalHost {
         break;
       case "wipe":
         if (node) this.relaunch(node, true);
+        break;
+      case "pause":
+      case "resume":
+        if (node) this.setPaused(node, fault.kind === "pause");
+        break;
+      case "clock_skew":
+        if (node) {
+          node.skewMs = Math.round(Number(fault.ms) || 0);
+          if (node.proc) node.proc.setClockSkew(node.skewMs);
+          this.mark(node, "skew", node.skewMs ? `wall clock (REALTIME) skewed by ${node.skewMs} ms` : "wall clock skew removed", "WARN", { skew_ms: node.skewMs });
+          this.publish(node);
+        }
+        break;
+      case "disk":
+        if (node) {
+          const mode = ["ok", "slow", "full", "eio"].includes(fault.mode) ? fault.mode : "ok";
+          node.disk = { mode, ms: mode === "slow" ? Math.max(0, Math.round(Number(fault.ms) || DEFAULT_SLOW_SYNC_MS)) : 0 };
+          if (node.proc) node.proc.setDisk(node.disk.mode, node.disk.ms);
+          node.dirty = true; // a sync in progress may be released now
+          this.mark(node, "disk", `disk ${describeDisk(node.disk)}`, mode === "ok" ? "INFO" : "WARN", { ...node.disk });
+          this.publish(node);
+        }
         break;
       default:
         break;
@@ -624,7 +696,23 @@ export class ExternalHost {
     this.sync();
   }
 
+  // SIGSTOP / SIGCONT. A paused process answers the lockstep at once with no
+  // timer, so the lab's clock runs on without it; frames for it still go in
+  // and wait in its socket buffers. Resumed, it catches up at the time it is.
+  setPaused(node, paused) {
+    if (node.paused === paused) return;
+    node.paused = paused;
+    if (node.proc && node.proc.state === "running") {
+      if (paused) node.proc.pause();
+      else node.proc.resume();
+    }
+    node.dirty = true;
+    this.mark(node, paused ? "paused" : "resumed", paused ? "process paused (SIGSTOP): no timers, no input" : "process resumed (SIGCONT)", paused ? "WARN" : "INFO");
+    this.publish(node);
+  }
+
   halt(node) {
+    node.paused = false;
     const ended = node.state === "exited" || node.state === "trapped";
     const wasKilled = node.state === "killed";
     this.stopProcess(node);
@@ -636,6 +724,7 @@ export class ExternalHost {
   }
 
   relaunch(node, wipe) {
+    node.paused = false;
     node.origin = wipe ? "wiped" : "restarted";
     this.stopProcess(node, { forget: wipe });
     this.launch(node);
@@ -721,7 +810,7 @@ export class ExternalHost {
       this.unavailable(node, reason);
       return;
     }
-    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.id), fileConfig: config.fileConfig, logLevel: this.hooks.logLevel?.(node.id) });
+    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.forked_from || doc.id), fileConfig: fitInternalTopics(config.fileConfig, (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length), logLevel: this.hooks.logLevel?.(node.id) });
     await this.volumeBusy.get(node.volume);
     if (gen !== node.gen) return;
     this.clock ??= new wasi.WasiClock({ mode: "host", timeMs: this.clockMs });
@@ -740,6 +829,8 @@ export class ExternalHost {
     );
     node.proc = proc;
     node.env = env;
+    if (node.skewMs) proc.setClockSkew(node.skewMs);
+    if (node.disk.mode !== "ok") proc.setDisk(node.disk.mode, node.disk.ms);
     node.incarnation += 1;
     node.startedAt = this.clockMs;
     proc.on("exit", (info) => this.exited(node, gen, info));
@@ -771,6 +862,7 @@ export class ExternalHost {
       proc.kill().catch(() => {});
       return;
     }
+    if (node.paused) proc.pause(); // paused while it booted
     this.event(node, "process_start", { incarnation: node.incarnation, volume: node.volume, address: nodeIp(node.id) });
     for (const frame of node.pending.splice(0)) this.input(node, frame);
     this.flushOut();
@@ -1230,6 +1322,10 @@ export class ExternalHost {
         state: node.state,
         reason: node.reason || null,
         lagging: node.lagging,
+        paused: node.paused,
+        skew_ms: node.skewMs,
+        disk: node.disk.mode,
+        disk_ms: node.disk.ms,
         incarnation: node.incarnation,
         address: nodeIp(node.id),
         volume: node.volume,
@@ -1304,8 +1400,9 @@ export class ExternalHost {
     return (await runtime()).listVolumeFiles(volume);
   }
 
-  async volumeFileRange(volume, path, offset, length) {
-    return (await runtime()).readVolumeFileRange(volume, path, offset, length);
+  /** A whole stored file, as last committed, or null when it is gone. */
+  async volumeFile(volume, path) {
+    return (await runtime()).readVolumeFile(volume, path);
   }
 
   /** Forgets one volume; a process that runs on it keeps it. */

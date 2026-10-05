@@ -1,0 +1,38 @@
+---
+// A card that opens a Cluster Lab preset in the lab, with its experiment.
+// The link carries the whole scenario in `#s=`, encoded at build time by the
+// lab's own share-link encoder (`public/playground/lab/codec.js`, plain ES
+// that runs in node too). `?focus=1` folds the lab's side columns and
+// `?run=1` runs the experiment once the scenario is open.
+//
+//   <LabLink preset="min-isr" />
+//   <LabLink preset="slow-replica" title="…" description="…" />
+import { getPath } from '../utils/paths';
+import { presetById } from '../../public/playground/lab/presets.js';
+import { encodeShare } from '../../public/playground/lab/codec.js';
+
+interface Props {
+  preset: string;
+  title?: string;
+  description?: string;
+}
+
+const { preset, title, description } = Astro.props;
+const p = presetById(preset);
+if (!p) throw new Error(`LabLink: there is no lab preset "${preset}"`);
+const experiment = p.scenario.experiment;
+const href = `${getPath('/docs/lab/')}?focus=1${experiment ? '&run=1' : ''}#s=${await encodeShare(p.scenario)}`;
+const seconds = (ms: number) => `${Math.round(ms / 1000)} s`;
+---
+
+<div class="frosted-card rounded-xl border border-white/10 p-4 not-prose flex flex-col gap-2" data-lab-link={preset}>
+  <div class="text-sm font-bold text-white">{title ?? p.name}</div>
+  <p class="text-xs text-gray-400 leading-relaxed">{description ?? p.description}</p>
+  {experiment && (
+    <p class="text-xs text-gray-300 leading-relaxed">
+      <span class="text-gray-400">Experiment:</span> {experiment.name}. {experiment.steps.length} timed {experiment.steps.length === 1 ? 'step' : 'steps'},
+      {' '}{experiment.expect.length} {experiment.expect.length === 1 ? 'check' : 'checks'}, {seconds(experiment.end)} of lab time.
+    </p>
+  )}
+  <a href={href} class="mt-auto text-sm font-semibold text-krab-400 underline underline-offset-2 hover:text-krab-300">Open in the lab →</a>
+</div>

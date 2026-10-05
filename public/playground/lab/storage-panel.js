@@ -1,13 +1,22 @@
 // The Storage panel: what this browser keeps for the current scenario.
 //
-// Per node the bytes and entries stored, the total, a "forget" button per
-// node and for the whole scenario, and the "Persist to this browser" toggle.
-// The numbers come from a cursor walk over IndexedDB every few seconds while
-// the panel is open. Below them, the volumes of the scenario's real brokers:
-// each is the disk of one process, kept by the WASI runtime in its own
-// database whatever the toggle says.
+// First the volumes of the scenario's real brokers: each is the disk of one
+// process, kept by the WASI runtime in its own database whatever the toggle
+// says. Below them the lab's own store: per node that keeps anything the
+// bytes and entries stored, the total, a "forget" button per node and for the
+// whole scenario, and the "Persist to this browser" toggle. The numbers come
+// from a cursor walk over IndexedDB every few seconds while the panel is open.
+//
+// Browse opens a broker's disk explorer: its partitions with their segments,
+// and every other file. A partition shows its segments and the checks that
+// span them (CRCs, offsets, leader epochs); a file is decoded by its format
+// (disk.js) with its own checks, a batch table and byte map for a segment,
+// and the linked field tree and hex view (bytes-view.js).
 
-import { el, button, select, fmtBytes, fmtNum } from "./dom.js";
+import { el, button, fmtBytes, fmtNum } from "./dom.js";
+import { BytesView } from "./bytes-view.js";
+import { analyzeFile, analyzePartition, partitionsOf, baseName } from "./disk.js";
+import { CODECS } from "./codecs.js";
 
 // The header of a column of buttons: empty to the eye, named for a screen reader.
 function actionsHeader() {
@@ -17,102 +26,14 @@ function actionsHeader() {
 }
 
 const REFRESH_MS = 2500;
-const HEX_PAGE_BYTES = 256;
-const MAX_ANNOTATED_BYTES = 65536;
-
-export function hexDump(bytes, offset) {
-  const lines = [];
-  for (let i = 0; i < bytes.length; i += 16) {
-    const row = bytes.subarray(i, i + 16);
-    const hex = Array.from(row, (b) => b.toString(16).padStart(2, "0")).join(" ").padEnd(47);
-    const ascii = Array.from(row, (b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : ".")).join("");
-    lines.push(`${(offset + i).toString(16).padStart(8, "0")}  ${hex}  |${ascii}|`);
-  }
-  return lines.join("\n");
-}
-
-export function recordBatchHeader(bytes, fileSize) {
-  if (bytes.length < 61 || bytes[16] !== 2) return null;
-  const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const length = data.getInt32(8);
-  if (length < 49 || length + 12 > fileSize) return null;
-  const baseOffset = data.getBigInt64(0);
-  return {
-    baseOffset: String(baseOffset),
-    lastOffset: String(baseOffset + BigInt(data.getInt32(23))),
-    bytes: length + 12,
-    leaderEpoch: data.getInt32(12),
-    records: data.getInt32(57),
-    crc: data.getUint32(17).toString(16).padStart(8, "0"),
-    firstTimestamp: String(data.getBigInt64(27)),
-    maxTimestamp: String(data.getBigInt64(35)),
-  };
-}
-
-export function recordBatchFields(bytes, fileSize) {
-  const fields = [];
-  const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let start = 0; start + 61 <= bytes.length;) {
-    const length = data.getInt32(start + 8);
-    const end = start + 12 + length;
-    if (bytes[start + 16] !== 2 || length < 49 || end > fileSize) break;
-    const base = data.getBigInt64(start);
-    const crc = data.getUint32(start + 17).toString(16).padStart(8, "0");
-    const header = [
-      [0, 8, "Base offset", String(base)], [8, 12, "Batch length", String(length)],
-      [12, 16, "Leader epoch", String(data.getInt32(start + 12))], [16, 17, "Format version", "2"],
-      [17, 21, "CRC-32C", `0x${crc}`], [21, 23, "Attributes", `0x${data.getUint16(start + 21).toString(16)}`],
-      [23, 27, "Last offset delta", String(data.getInt32(start + 23))],
-      [27, 35, "Base timestamp (ms)", String(data.getBigInt64(start + 27))],
-      [35, 43, "Max timestamp (ms)", String(data.getBigInt64(start + 35))],
-      [43, 51, "Producer ID", String(data.getBigInt64(start + 43))],
-      [51, 53, "Producer epoch", String(data.getInt16(start + 51))],
-      [53, 57, "Base sequence", String(data.getInt32(start + 53))],
-      [57, 61, "Record count", String(data.getInt32(start + 57))],
-    ];
-    for (const [from, to, name, value] of header) fields.push({ start: start + from, end: start + to, label: `${name}: ${value}` });
-    if (end > start + 61) fields.push({ start: start + 61, end, label: `Encoded records in batch at offset ${base}` });
-    start = end;
-  }
-  return fields;
-}
-
-function annotatedHexDump(pre, bytes, offset, fields) {
-  pre.replaceChildren();
-  const appendBytes = (row, rowOffset, ascii) => {
-    for (let i = 0; i < row.length;) {
-      const field = fields.find((f) => rowOffset + i >= f.start && rowOffset + i < f.end);
-      let j = i + 1;
-      while (j < row.length && fields.find((f) => rowOffset + j >= f.start && rowOffset + j < f.end) === field) j++;
-      const value = Array.from(row.subarray(i, j), (b, k) =>
-        ascii ? (b >= 32 && b <= 126 ? String.fromCharCode(b) : ".") : `${b.toString(16).padStart(2, "0")}${i + k < row.length - 1 ? " " : ""}`,
-      ).join("");
-      if (field) {
-        const span = el("span", "lab-hex-field", value);
-        span.title = field.label;
-        if (!ascii) { span.tabIndex = 0; span.setAttribute("aria-label", field.label); }
-        pre.appendChild(span);
-      } else pre.append(value);
-      i = j;
-    }
-  };
-  for (let i = 0; i < bytes.length; i += 16) {
-    const row = bytes.subarray(i, i + 16);
-    const rowOffset = offset + i;
-    pre.append(`${(offset + i).toString(16).padStart(8, "0")}  `);
-    appendBytes(row, rowOffset, false);
-    pre.append(`${" ".repeat(47 - (row.length * 3 - 1))}  |`);
-    appendBytes(row, rowOffset, true);
-    pre.append(i + 16 < bytes.length ? "|\n" : "|");
-  }
-}
+// ponytail: whole-file reads; a segment larger than this needs range reads and a batch index.
+const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 export class StoragePanel {
   // hooks: storage (LabStorage), scenarioId() → string, nodes() → [{ id, name }],
   // volumes() → Promise<[{ node, volume, bytes, files, inUse }]>,
-  // volumeFiles(volume), volumeFileRange(volume, path, offset, length),
-  // onForgetVolume(volume), onForgetNode(id), onForgetScenario(),
-  // onPersistChange(on), onToast(msg)
+  // volumeFiles(volume), volumeFile(volume, path), onForgetVolume(volume),
+  // onForgetNode(id), onForgetScenario(), onPersistChange(on), expand()
   constructor(container, hooks) {
     this.hooks = hooks;
     this.browseVersion = 0;
@@ -123,6 +44,14 @@ export class StoragePanel {
     const body = el("div", "lab-side-body");
     this.root.appendChild(body);
 
+    // The brokers' disks lead: they are what a reader comes here for.
+    this.volumeBox = el("div", "lab-storage-volumes");
+    body.appendChild(this.volumeBox);
+    this.volumeExplorer = el("div", "lab-volume-explorer");
+    body.appendChild(this.volumeExplorer);
+
+    const store = el("div", "lab-storage-store");
+    store.appendChild(el("p", "lab-rail-heading", "The lab's own nodes"));
     const toggleRow = el("label", "lab-field-inline");
     this.toggle = el("input");
     this.toggle.type = "checkbox";
@@ -133,24 +62,21 @@ export class StoragePanel {
       this.refresh();
     });
     toggleRow.append(this.toggle, el("span", null, "Persist to this browser"));
-    body.appendChild(toggleRow);
-    body.appendChild(
+    store.appendChild(toggleRow);
+    store.appendChild(
       el(
         "p",
         "lab-muted lab-small",
         hooks.storage.available
-          ? "What the lab's own nodes keep (an echo node's counter) lives only in this browser's IndexedDB. A broker's disk is listed below and is kept whatever this setting says. Nothing leaves this machine."
+          ? "What the lab's own nodes keep (an echo node's counter) lives only in this browser's IndexedDB; the table lists the nodes that keep something. Brokers keep their disk in the volumes above, whatever this setting says. Nothing leaves this machine."
           : "This browser has no IndexedDB, so nothing is kept across reloads.",
       ),
     );
     this.summaryLine = el("p", "lab-storage-total");
-    body.appendChild(this.summaryLine);
+    store.appendChild(this.summaryLine);
     this.table = el("table", "lab-table lab-storage-table");
-    body.appendChild(this.table);
-    this.volumeBox = el("div", "lab-storage-volumes");
-    body.appendChild(this.volumeBox);
-    this.volumeExplorer = el("div", "lab-volume-explorer");
-    body.appendChild(this.volumeExplorer);
+    store.appendChild(this.table);
+    body.appendChild(store);
     this.actions = el("div", "lab-form-actions");
     this.actions.appendChild(
       button("Forget stored data", "lab-btn-sm lab-danger", () => hooks.onForgetScenario(), { title: "Drop every stored log and key of this scenario" }),
@@ -199,7 +125,12 @@ export class StoragePanel {
     for (const h of ["node", "bytes", "log entries", "keys", ""]) hr.appendChild(h ? el("th", null, h) : actionsHeader());
     thead.appendChild(hr);
     const tbody = el("tbody");
-    const ids = new Set([...nodes.map((n) => String(n.id)), ...Object.keys(usage.nodes)]);
+    // Only the nodes that keep something, or were told to forget: a broker's or
+    // a client's row would be all zeros.
+    const keeps = (u) => u && (u.bytes || u.logEntries || u.kvEntries);
+    const forgotten = nodes.filter((n) => this.hooks.storage.forgotten.has(n.id)).map((n) => String(n.id));
+    const ids = new Set([...Object.keys(usage.nodes).filter((key) => keeps(usage.nodes[key])), ...forgotten]);
+    this.table.hidden = !ids.size;
     for (const key of [...ids].sort((a, b) => Number(a) - Number(b))) {
       const u = usage.nodes[key] || { bytes: 0, logEntries: 0, kvEntries: 0 };
       const node = nodes.find((n) => String(n.id) === key);
@@ -217,14 +148,7 @@ export class StoragePanel {
       tr.appendChild(el("td", null, fmtNum(u.logEntries)));
       tr.appendChild(el("td", null, fmtNum(u.kvEntries)));
       const td = el("td");
-      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data; the running node is not stored again until it restarts from nothing", disabled: u.bytes === 0 && u.logEntries === 0 && u.kvEntries === 0 }));
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    }
-    if (!ids.size) {
-      const tr = el("tr");
-      const td = el("td", "lab-muted", "no nodes");
-      td.colSpan = 5;
+      td.appendChild(button("Forget", "lab-btn-sm", () => this.hooks.onForgetNode(Number(key)), { title: "Drop this node's stored data; the running node is not stored again until it restarts from nothing", disabled: !keeps(u) }));
       tr.appendChild(td);
       tbody.appendChild(tr);
     }
@@ -266,7 +190,7 @@ export class StoragePanel {
       tr.appendChild(bytes);
       tr.appendChild(el("td", null, fmtNum(v.files)));
       const td = el("td");
-      td.appendChild(button("Browse", "lab-btn-sm", () => this.browseVolume(v.volume), { title: "List the broker's stored files" }));
+      td.appendChild(button("Browse", "lab-btn-sm", () => this.browseVolume(v.volume), { title: "Open the broker's disk: partitions, segments and every stored file, decoded" }));
       td.appendChild(
         button("Forget", "lab-btn-sm", () => this.hooks.onForgetVolume(v.volume), {
           title: v.inUse ? "Its process runs on it: kill or wipe the node first" : "Delete this volume",
@@ -286,160 +210,262 @@ export class StoragePanel {
     this.volumeExplorer.innerHTML = "";
   }
 
+  // ---- the disk explorer ----
+
   async browseVolume(volume) {
     const version = ++this.browseVersion;
+    const reopening = this.activeVolume === volume;
     this.activeVolume = volume;
+    this.hooks.expand?.();
+    const nodeId = Number(volume.split("/").pop());
+    const nodeName = this.hooks.nodes().find((n) => n.id === nodeId)?.name ?? `#${nodeId}`;
     this.volumeExplorer.innerHTML = "";
     const head = el("div", "lab-file-head");
-    head.append(el("strong", null, `Broker disk · ${volume}`));
-    head.appendChild(button("Refresh files", "lab-btn-sm", () => this.browseVolume(volume)));
+    head.append(el("strong", null, `Disk of ${nodeName}`), el("span", "lab-muted lab-small", volume));
+    head.appendChild(button("Refresh", "lab-btn-sm", () => this.browseVolume(volume), { title: "Read the files again: newer writes appear" }));
     head.appendChild(button("Close", "lab-btn-sm", () => this.closeVolumeExplorer()));
-    this.volumeExplorer.appendChild(head);
-    this.volumeExplorer.appendChild(el("p", "lab-muted lab-small", "Files and bytes are the last committed IndexedDB state. Refresh to see newer writes."));
+    const note = el("p", "lab-muted lab-small", "The last committed IndexedDB state of the volume. Decoders and checks run here, on the bytes as stored.");
+    const grid = el("div", "lab-vx");
+    const side = el("div", "lab-vx-files");
     const filter = el("input", "lab-input lab-file-filter");
     filter.type = "search";
-    filter.placeholder = "Filter file paths";
+    filter.placeholder = "Filter paths";
     filter.setAttribute("aria-label", "Filter broker files");
-    this.volumeExplorer.appendChild(filter);
-    const sort = select([
-      { value: "name-asc", label: "Name A–Z" }, { value: "name-desc", label: "Name Z–A" },
-      { value: "size-desc", label: "Largest first" }, { value: "size-asc", label: "Smallest first" },
-    ], "name-asc");
-    sort.setAttribute("aria-label", "Sort broker files");
-    sort.classList.add("lab-file-sort");
-    this.volumeExplorer.appendChild(sort);
-    const count = el("span", "lab-muted lab-small");
-    this.volumeExplorer.appendChild(count);
-    const list = el("div", "lab-file-list", "Loading files…");
-    this.volumeExplorer.appendChild(list);
+    const emptyRow = el("label", "lab-field-inline lab-small");
+    const hideEmpty = el("input");
+    hideEmpty.type = "checkbox";
+    hideEmpty.checked = this.hideEmpty ?? true;
+    emptyRow.append(hideEmpty, el("span", null, "Hide empty partitions"));
+    const list = el("div", "lab-vx-list", "Loading files…");
+    list.setAttribute("role", "tree");
+    list.setAttribute("aria-label", "Broker files");
+    side.append(filter, emptyRow, list);
+    this.view = el("div", "lab-vx-view");
+    this.view.appendChild(el("p", "lab-muted", "Pick a partition or a file."));
+    grid.append(side, this.view);
+    this.volumeExplorer.append(head, note, grid);
+
+    let files;
     try {
-      const files = await this.hooks.volumeFiles(volume);
-      if (version !== this.browseVersion) return;
-      list.innerHTML = "";
-      if (!files.length) {
-        list.textContent = "No files stored yet.";
-        return;
-      }
-      const entries = [];
-      for (const file of files) {
-        const detail = el("details", "lab-file");
-        detail.appendChild(el("summary", null, `${file.path} · ${fmtBytes(file.size)}`));
-        const contents = el("div", "lab-file-contents");
-        detail.appendChild(contents);
-        detail.addEventListener("toggle", () => {
-          if (detail.open) this.showFile(volume, file.path, detail, contents);
-        });
-        list.appendChild(detail);
-        entries.push({ path: file.path.toLowerCase(), size: file.size, detail });
-      }
-      const applyFilter = () => {
-        const query = filter.value.trim().toLowerCase();
-        let shown = 0;
-        const direction = sort.value.endsWith("desc") ? -1 : 1;
-        entries.sort((a, b) => direction * (sort.value.startsWith("size") ? a.size - b.size || a.path.localeCompare(b.path) : a.path.localeCompare(b.path)));
-        for (const entry of entries) {
-          entry.detail.hidden = !entry.path.includes(query);
-          if (!entry.detail.hidden) shown++;
-          list.appendChild(entry.detail);
-        }
-        count.textContent = `${shown} of ${entries.length} files`;
-      };
-      filter.addEventListener("input", applyFilter);
-      sort.addEventListener("change", applyFilter);
-      applyFilter();
+      files = await this.hooks.volumeFiles(volume);
     } catch (err) {
       if (version === this.browseVersion) list.textContent = `Files unavailable: ${err.message}`;
+      return;
+    }
+    if (version !== this.browseVersion) return;
+    const parts = partitionsOf(files);
+    const inParts = new Set(parts.flatMap((p) => p.files.map((f) => f.path)));
+    const others = files.filter((f) => !inParts.has(f.path)).sort((a, b) => a.path.localeCompare(b.path));
+    const read = (path) => this.hooks.volumeFile(volume, path);
+    const render = () => {
+      this.hideEmpty = hideEmpty.checked;
+      const q = filter.value.trim().toLowerCase();
+      list.replaceChildren();
+      const fileRow = (f, depth) => {
+        const b = el("button", "lab-vx-item", "");
+        b.type = "button";
+        b.style.paddingLeft = `${0.4 + depth * 0.9}rem`;
+        b.append(el("span", "lab-vx-name", depth ? baseName(f.path) : f.path.replace(/^log\//, "")), el("span", "lab-vx-size", fmtBytes(f.size)));
+        b.dataset.path = f.path;
+        b.setAttribute("aria-current", String(this.current === f.path));
+        b.addEventListener("click", () => this.openFile(volume, f, read));
+        return b;
+      };
+      let shown = 0;
+      for (const p of parts) {
+        const logBytes = p.segments.reduce((n, s) => n + s.size, 0);
+        if (hideEmpty.checked && logBytes === 0) continue;
+        if (q && !p.dir.toLowerCase().includes(q) && !p.files.some((f) => f.path.toLowerCase().includes(q))) continue;
+        shown++;
+        const box = el("details", "lab-vx-part");
+        box.open = this.openParts?.has(p.dir) || Boolean(q);
+        box.addEventListener("toggle", () => {
+          this.openParts ??= new Set();
+          if (box.open) this.openParts.add(p.dir);
+          else this.openParts.delete(p.dir);
+        });
+        const sum = el("summary", "lab-vx-item lab-vx-partrow");
+        sum.append(el("span", "lab-vx-name", p.dir.replace(/^log\//, "")), el("span", "lab-vx-size", `${p.segments.length} seg · ${fmtBytes(logBytes)}`));
+        sum.setAttribute("aria-current", String(this.current === p.dir));
+        sum.addEventListener("click", (e) => {
+          if (e.target.closest(".lab-vx-name")) {
+            e.preventDefault();
+            // Recorded before the list re-renders, so the partition stays open.
+            this.openParts ??= new Set();
+            this.openParts.add(p.dir);
+            this.openPartition(p, read);
+          }
+        });
+        box.appendChild(sum);
+        for (const f of p.files.slice().sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))) {
+          if (!q || f.path.toLowerCase().includes(q) || p.dir.toLowerCase().includes(q)) box.appendChild(fileRow(f, 1));
+        }
+        list.appendChild(box);
+      }
+      const rest = others.filter((f) => !q || f.path.toLowerCase().includes(q));
+      if (rest.length) {
+        list.appendChild(el("p", "lab-rail-heading", "Other files"));
+        for (const f of rest) list.appendChild(fileRow(f, 0));
+      }
+      const hidden = parts.length - shown;
+      if (hidden && hideEmpty.checked && !q) list.appendChild(el("p", "lab-muted lab-small", `${hidden} empty partition${hidden === 1 ? "" : "s"} hidden`));
+    };
+    this.renderList = render;
+    filter.addEventListener("input", render);
+    hideEmpty.addEventListener("change", render);
+    render();
+    // A refresh reopens what was open; a first look opens the busiest partition.
+    if (reopening && this.current) {
+      const p = parts.find((x) => x.dir === this.current);
+      const f = files.find((x) => x.path === this.current);
+      if (p) this.openPartition(p, read);
+      else if (f) this.openFile(volume, f, read);
+    } else {
+      const busiest = parts.filter((p) => !p.topic.startsWith("__")).sort((a, b) => b.bytes - a.bytes)[0] || parts[0];
+      if (busiest) this.openPartition(busiest, read);
     }
   }
 
-  showFile(volume, path, detail, contents) {
-    contents.innerHTML = "";
-    const nav = el("div", "lab-file-nav");
-    const info = el("span", "lab-muted lab-small");
-    const input = el("input", "lab-input lab-input-sm");
-    input.type = "number";
-    input.min = "0";
-    input.step = String(HEX_PAGE_BYTES);
-    input.value = "0";
-    input.setAttribute("aria-label", `Byte offset in ${path}`);
-    const pre = el("pre", "lab-hex-view", "Loading bytes…");
-    const header = el("div", "lab-file-header");
-    const hint = el("p", "lab-muted lab-small lab-byte-hint", "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded.");
-    pre.addEventListener("pointerover", (event) => {
-      hint.textContent = event.target.closest(".lab-hex-field")?.title || "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded.";
-    });
-    pre.addEventListener("pointerleave", () => { hint.textContent = "Hover or focus highlighted bytes for RecordBatch fields. Record contents remain encoded."; });
-    pre.addEventListener("focusin", (event) => { hint.textContent = event.target.title || hint.textContent; });
-    let offset = 0;
-    let request = 0;
-    let annotationBytes = new Uint8Array(0);
-    const fieldsThrough = async (end, fileSize) => {
-      // ponytail: cap header scanning at 64 KiB; index batches on disk if deep-file inspection becomes useful.
-      const target = Math.min(fileSize, MAX_ANNOTATED_BYTES, end + 61);
-      while (annotationBytes.length < target) {
-        const chunk = await this.hooks.volumeFileRange(volume, path, annotationBytes.length, Math.min(4096, target - annotationBytes.length));
-        if (!chunk?.bytes.length) break;
-        const joined = new Uint8Array(annotationBytes.length + chunk.bytes.length);
-        joined.set(annotationBytes);
-        joined.set(chunk.bytes, annotationBytes.length);
-        annotationBytes = joined;
-      }
-      return recordBatchFields(annotationBytes, fileSize);
-    };
-    const read = async (at) => {
-      const mine = ++request;
-      pre.textContent = "Loading bytes…";
-      try {
-        const file = await this.hooks.volumeFileRange(volume, path, at, HEX_PAGE_BYTES);
-        if (mine !== request || !detail.open || this.activeVolume !== volume) return;
-        if (!file) {
-          pre.textContent = "File no longer exists. Refresh files.";
-          return;
-        }
-        offset = at;
-        input.value = String(offset);
-        input.max = String(Math.max(0, file.size - 1));
-        info.textContent = `${fmtNum(offset)}–${fmtNum(offset + file.bytes.length)} of ${fmtNum(file.size)} bytes`;
-        previous.disabled = offset === 0;
-        next.disabled = offset + file.bytes.length >= file.size;
-        pre.textContent = file.bytes.length ? hexDump(file.bytes, offset) : "End of file";
-        if (path.endsWith(".log") && file.bytes.length && at < MAX_ANNOTATED_BYTES) {
-          try {
-            const fields = await fieldsThrough(at + file.bytes.length, file.size);
-            if (mine !== request || !detail.open || this.activeVolume !== volume) return;
-            if (fields.length) annotatedHexDump(pre, file.bytes, offset, fields);
-          } catch { /* Keep the plain hex dump when labels cannot be loaded. */ }
-        }
-        if (at === 0 && path.endsWith(".log")) {
-          header.innerHTML = "";
-          const batch = recordBatchHeader(file.bytes, file.size);
-          if (batch) {
-            header.appendChild(el("strong", null, "First Kafka RecordBatch v2"));
-            const fields = el("dl", "lab-kv");
-            for (const [label, value] of [
-              ["base offset", batch.baseOffset], ["last offset", batch.lastOffset],
-              ["batch bytes", batch.bytes], ["records", batch.records],
-              ["leader epoch", batch.leaderEpoch], ["CRC-32C", batch.crc],
-              ["first time (ms)", batch.firstTimestamp], ["max time (ms)", batch.maxTimestamp],
-            ]) fields.append(el("dt", null, label), el("dd", null, String(value)));
-            header.appendChild(fields);
-          }
-        }
-      } catch (err) {
-        if (mine === request) pre.textContent = `Bytes unavailable: ${err.message}`;
-      }
-    };
-    const previous = button("Previous", "lab-btn-sm", () => read(Math.max(0, offset - HEX_PAGE_BYTES)));
-    const next = button("Next", "lab-btn-sm", () => read(offset + HEX_PAGE_BYTES));
-    const go = button("Go", "lab-btn-sm", () => {
-      const at = Number(input.value);
-      if (Number.isSafeInteger(at) && at >= 0) read(Math.floor(at / HEX_PAGE_BYTES) * HEX_PAGE_BYTES);
-    });
-    const offsetLabel = el("label", "lab-muted lab-small", "Byte offset");
-    offsetLabel.appendChild(input);
-    nav.append(previous, next, offsetLabel, go, info);
-    contents.append(nav, header, pre);
-    if (path.endsWith(".log")) contents.appendChild(hint);
-    read(0);
+  setCurrent(key) {
+    this.current = key;
+    this.renderList?.();
   }
+
+  async openPartition(p, read) {
+    this.setCurrent(p.dir);
+    const view = this.view;
+    view.replaceChildren(el("p", "lab-muted", `Reading ${p.segments.length} segments…`));
+    const result = await analyzePartition(p, read);
+    if (this.current !== p.dir) return;
+    view.replaceChildren();
+    view.appendChild(el("h4", "lab-vx-title", `${p.dir.replace(/^log\//, "")} · topic ${p.topic}`));
+    view.appendChild(checkList(result.checks));
+    const table = el("table", "lab-table lab-vx-table");
+    const head = el("tr");
+    for (const h of ["segment", "bytes", "batches", "records", "offsets", "leader epochs", "control", "CRC"]) head.appendChild(el("th", null, h));
+    table.appendChild(head);
+    for (const s of result.segments) {
+      const tr = el("tr", "lab-vx-rowlink");
+      tr.tabIndex = 0;
+      const open = () => this.openFile(this.activeVolume, p.files.find((f) => f.path === s.path), read);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (e) => e.key === "Enter" && open());
+      tr.append(
+        el("td", null, baseName(s.path)), el("td", null, fmtBytes(s.size)), el("td", null, fmtNum(s.batches)), el("td", null, fmtNum(s.records)),
+        el("td", null, s.first == null ? "–" : `${s.first}–${s.last}`), el("td", null, s.epochs.join(", ") || "–"), el("td", null, String(s.control)),
+        el("td", s.crcBad ? "lab-bv-bad" : "lab-bv-ok", s.crcBad ? `${s.crcBad} bad` : s.batches ? "✓" : "–"),
+      );
+      table.appendChild(tr);
+    }
+    const wrap = el("div", "lab-table-wrap");
+    wrap.appendChild(table);
+    view.appendChild(wrap);
+    if (result.epochs.length) {
+      const dl = el("dl", "lab-kv");
+      for (const e of result.epochs) dl.append(el("dt", null, `epoch ${e.epoch}`), el("dd", null, `starts at offset ${e.start}${e.firstSeen != null ? ` · first batch at ${e.firstSeen}` : " · no batch of it left"}`));
+      view.append(el("p", "lab-rail-heading", "leader-epoch-checkpoint"), dl);
+    }
+    view.appendChild(el("p", "lab-muted lab-small", "Select a segment to decode its batches and records."));
+  }
+
+  async openFile(volume, f, read) {
+    if (!f) return;
+    this.setCurrent(f.path);
+    const view = this.view;
+    view.replaceChildren(el("p", "lab-muted", `Reading ${f.path}…`));
+    if (f.size > MAX_FILE_BYTES) {
+      view.replaceChildren(el("p", "lab-muted", `${f.path} is ${fmtBytes(f.size)}; this explorer decodes files up to ${fmtBytes(MAX_FILE_BYTES)}.`));
+      return;
+    }
+    let bytes;
+    try {
+      bytes = await read(f.path);
+    } catch (err) {
+      view.replaceChildren(el("p", "lab-error", `Bytes unavailable: ${err.message}`));
+      return;
+    }
+    if (this.current !== f.path || this.activeVolume !== volume) return;
+    if (!bytes) {
+      view.replaceChildren(el("p", "lab-muted", "The file is gone. Refresh the file list."));
+      return;
+    }
+    const dir = f.path.slice(0, f.path.lastIndexOf("/") + 1);
+    const a = await analyzeFile(f.path, bytes, { sibling: (name) => read(dir + name) });
+    if (this.current !== f.path) return;
+    view.replaceChildren();
+    view.appendChild(el("h4", "lab-vx-title", `${f.path} · ${fmtBytes(bytes.length)} · ${a.kind}`));
+    if (a.checks.length) view.appendChild(checkList(a.checks));
+    if (a.summary.length) {
+      const dl = el("dl", "lab-kv lab-vx-summary");
+      for (const [k, v] of a.summary) dl.append(el("dt", null, k), el("dd", null, String(v)));
+      view.appendChild(dl);
+    }
+    const host = el("div", "lab-vx-bytes");
+    const bv = new BytesView(host, { label: f.path });
+    if (a.batches?.length) view.append(byteMap(a.batches, bytes.length, a.root, bv), batchTable(a.batches, a.root, bv));
+    if (a.text != null) {
+      const pre = el("pre", "lab-vx-text", a.text);
+      view.appendChild(pre);
+    }
+    view.appendChild(host);
+    const buffers = { main: bytes };
+    for (const [k, v] of a.buffers || []) buffers[k] = v;
+    bv.show({ buffers, root: a.root, expandDepth: a.kind === "segment" ? 1 : 2 });
+  }
+}
+
+function checkList(checks) {
+  const ul = el("ul", "lab-vx-checks");
+  for (const c of checks) {
+    const state = !c.ok ? "bad" : c.warn ? "warn" : "ok";
+    const li = el("li", `lab-vx-check lab-bv-${state}`);
+    li.append(el("span", "lab-vx-mark", state === "ok" ? "✓" : state === "bad" ? "✗" : "!"), el("span", null, c.text));
+    ul.appendChild(li);
+  }
+  return ul;
+}
+
+// The segment as a strip: one block per batch, as wide as its bytes.
+function byteMap(batches, size, root, bv) {
+  const strip = el("div", "lab-vx-map");
+  strip.setAttribute("role", "group");
+  strip.setAttribute("aria-label", "Batches by position in the file");
+  batches.forEach((b, i) => {
+    const seg = el("button", `lab-vx-mapseg${b.control ? " lab-vx-ctl" : ""}${b.codec ? " lab-vx-zip" : ""}${b.crcOk ? "" : " lab-vx-crcbad"}`);
+    seg.type = "button";
+    seg.style.flexGrow = String(b.size);
+    seg.title = `offsets ${b.baseOffset}–${b.lastOffset} · ${b.size} B at byte ${b.pos} · ${CODECS[b.codec]}${b.control ? " · control" : ""}${b.crcOk ? "" : " · CRC mismatch"}`;
+    seg.setAttribute("aria-label", seg.title);
+    seg.addEventListener("click", () => bv.select(root.children[i]));
+    strip.appendChild(seg);
+  });
+  const legend = el("p", "lab-muted lab-small lab-vx-legend", `${batches.length} batches in ${size} bytes · blue data · purple control · orange compressed · red CRC mismatch`);
+  const box = el("div");
+  box.append(strip, legend);
+  return box;
+}
+
+function batchTable(batches, root, bv) {
+  const table = el("table", "lab-table lab-vx-table");
+  const head = el("tr");
+  for (const h of ["byte", "offsets", "records", "bytes", "codec", "epoch", "producer", "timestamps", "CRC"]) head.appendChild(el("th", null, h));
+  table.appendChild(head);
+  batches.slice(0, 2000).forEach((b, i) => {
+    const tr = el("tr", "lab-vx-rowlink");
+    tr.tabIndex = 0;
+    const pick = () => bv.select(root.children[i]);
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", (e) => e.key === "Enter" && pick());
+    tr.append(
+      el("td", null, String(b.pos)), el("td", null, `${b.baseOffset}–${b.lastOffset}`), el("td", null, String(b.count)), el("td", null, String(b.size)),
+      el("td", null, `${CODECS[b.codec]}${b.control ? " · control" : ""}${b.transactional ? " · txn" : ""}`), el("td", null, String(b.epoch)),
+      el("td", null, b.producerId < 0n ? "–" : `${b.producerId}/${b.producerEpoch} seq ${b.baseSequence}`),
+      el("td", null, b.baseTimestamp === b.maxTimestamp ? String(b.baseTimestamp) : `${b.baseTimestamp}–${b.maxTimestamp}`),
+      el("td", b.crcOk ? "lab-bv-ok" : "lab-bv-bad", b.crcOk ? "✓" : `✗ ${b.crcComputed.toString(16)}`),
+    );
+    table.appendChild(tr);
+  });
+  const wrap = el("div", "lab-table-wrap lab-vx-batches");
+  wrap.appendChild(table);
+  return wrap;
 }

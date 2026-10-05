@@ -68,7 +68,8 @@ fn bootstrap_negotiates_versions_then_fetches_metadata() {
     assert!(h.run_until(|h| h.client.metadata().updated_at.is_some(), 1_000));
     let seen = h.seen(ApiVersionsRequest::API_KEY);
     assert!(seen.len() == 1);
-    assert!(seen[0].version == ApiVersionsRequest::LATEST_STABLE_VERSION);
+    // Version 4, what Apache Kafka 4.x clients open with.
+    assert!(seen[0].version == 4);
     assert!(seen[0].client_id.as_deref() == Some("test"));
     let request: ApiVersionsRequest = seen[0].decode();
     assert!(request.client_software_name == "krabka-lab");
@@ -261,8 +262,8 @@ fn unsupported_api_versions_is_retried_at_the_version_the_broker_lists() {
     // Rows: the ApiVersions maximum the broker advertises in its error, and
     // the versions of the requests the broker then sees.
     let cases = [
-        ("the broker lists its real range", None, vec![5, 4]),
-        ("the broker lists only v0", Some(0), vec![5, 0]),
+        ("the broker lists v3 as its newest", Some(3), vec![4, 3]),
+        ("the broker lists only v0", Some(0), vec![4, 0]),
     ];
     for (name, max, expected) in cases {
         let state = cluster(&[]);

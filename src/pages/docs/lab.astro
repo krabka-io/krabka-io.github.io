@@ -1,7 +1,22 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import LabLink from '../../components/LabLink.astro'; // J3
 import { getPath } from '../../utils/paths';
 import '../../styles/lab.css';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+// A module's content hash, for its URL: the lab's service worker keeps each
+// version of a module once, so a deploy with a new build misses its cache.
+// Empty when the module is not staged (the page then loads it uncached).
+function wasmVersion(file: string) {
+  try {
+    return createHash('sha256').update(readFileSync(path.join(process.cwd(), 'public', 'playground', file))).digest('hex').slice(0, 16);
+  } catch {
+    return undefined;
+  }
+}
 
 const real = [
   { piece: 'The broker: request handlers, partition logs and replication, group coordinators, the KRaft quorum and metadata', crate: 'krabka-broker, krabka-raft, krabka-metadata', runs: 'a Web Worker', use: 'every broker node' },
@@ -14,11 +29,12 @@ const real = [
 const controls = [
   { control: 'Play / Pause, Step, Settle, Speed', effect: 'The page owns the clock. Nothing moves until it advances simulated time; Settle runs until nothing is due. The speed control runs slow events, like a broker session timeout, faster.' },
   { control: 'Drag a card', effect: 'Moves the node. Positions are saved with the scenario and shared with the link.' },
-  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables link controls and Network bytes for that pair. Open a frame for its hex and ASCII bytes; hover a decoded field for its byte key.' },
+  { control: 'Click, Shift+click', effect: 'Selects a node; a second node selected with Shift enables the link controls, and Network bytes opens the Network tab on that link.' },
   { control: 'Break things bar', effect: 'Always above the canvas. With one node selected: Kill halts it with its state kept, Restart boots it from that state, Wipe boots it from nothing, Isolate and Reconnect cut and restore every link of the node. With two selected: Partition and Heal cut and restore one link, and Latency and Loss set its delay and drop rate.' },
   { control: 'Right-click or long-press a card', effect: 'The context menu: edit, send a control command as JSON, faults, remove.' },
   { control: 'Inspector', effect: 'With nothing selected it lists every node and its health. For a selected node it shows State (a real broker’s process, log and network activity; a client’s assignment, positions, commits and lag; or a streams app’s tasks, stores and topology), Config (edits the node and restarts it), and Raw JSON. Its command bar sends a producer’s Send, Set rate, Pause and Resume; a consumer’s Pause, Resume, processing time and Commit now; a streams app’s Pause, Resume and store Query.' },
-  { control: 'Events, Logs, Network bytes, Storage', effect: 'The tabs under the canvas: everything the cluster recorded, the brokers’ own log lines, the frames on a selected link, and what each node keeps in this browser.' },
+  { control: 'Events, Logs, Network, Storage', effect: 'The tabs under the canvas: everything the cluster recorded, the brokers’ own log lines, every frame on the virtual network, and what each node keeps in this browser, down to the broker’s files.' },
+  { control: 'Field tree and hex', effect: 'A selected frame or file decodes into its fields beside its bytes. Pointing at a byte lights its whole field in hex and ASCII and names it; clicking selects it in the tree; selecting a field lights its bytes. Each kind of field has its colour, and neighbouring fields alternate shade. With the hex focused, ← and → step through the fields and ↑ goes to the enclosing one. Below the hex, the bytes at the pointer read as every integer width, a varint, a float and text.' },
   { control: 'Tour, ?', effect: 'The tour walks through the controls in a minute and can kill and restart a broker for you. The ? button lists the shortcuts: Space plays and pauses, K and R kill and restart the selected node, F fits the canvas.' },
 ];
 ---
@@ -28,20 +44,20 @@ const controls = [
   description="Run real krabka brokers in your browser with a schema registry, producers, consumers and streams apps. Break their network and read their logs."
 >
   <!-- The lab is an app, so it takes the window: a one-line header above it, the guide below. -->
-  <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pb-3 pt-5 font-sans sm:px-6 lg:px-8">
+  <header class="mx-auto flex max-w-[120rem] flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5 font-sans sm:px-6 lg:px-8">
     <!-- A flex row, like the docs layout's: the links pad out to a 28px hit area without growing the row. -->
-    <nav aria-label="Breadcrumb" class="flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400">
+    <nav aria-label="Breadcrumb" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-gray-400">
       <a href={getPath('/')} class="-my-1.5 py-1.5 hover:text-white">Home</a>
       <span aria-hidden="true">/</span>
       <a href={getPath('/docs')} class="-my-1.5 py-1.5 hover:text-white">Docs</a>
       <span aria-hidden="true">/</span>
       <span class="text-gray-200" aria-current="page">Cluster Lab</span>
     </nav>
-    <h1 class="text-2xl font-extrabold text-white">Cluster Lab</h1>
+    <h1 class="text-xl font-extrabold text-white">Cluster Lab</h1>
     <p class="text-sm text-gray-400">Run krabka brokers, clients, and apps in your browser. Inject network faults and inspect the resulting traffic and node state.</p>
   </header>
 
-  <div id="krabka-lab" class="not-prose">
+  <div id="krabka-lab" class="not-prose" data-lab-wasm={wasmVersion('krabka_playground_bg.wasm')} data-broker-wasm={wasmVersion('broker/krabka-broker.wasm')}>
     <p class="lab-fallback">
       Loading the Cluster Lab. This panel needs JavaScript and WebAssembly. If it does not appear, your browser may have them disabled.
     </p>
@@ -104,8 +120,7 @@ const controls = [
       <h2 class="text-xl font-bold text-white pt-2">Saving, sharing, hosting</h2>
       <p>
         The scenario autosaves to this browser; the <strong class="text-white">Saved in this browser</strong> list on the Scenarios tab reopens it with its durable
-        state. In the <strong class="text-white">Storage</strong> tab under the canvas, open a real broker volume, then a file, to inspect its
-        committed IndexedDB bytes as hex and ASCII. The panel also shows what is kept per node and can forget it on request. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
+        state. The <strong class="text-white">Storage</strong> tab under the canvas shows what is kept per node and can forget it on request. <strong class="text-white">Browse</strong> opens a real broker's disk, read from its committed IndexedDB bytes. <strong class="text-white">Export</strong> writes the scenario as a JSON file, <strong class="text-white">Copy link</strong> puts the whole document into the URL. Neither carries node state: a shared link starts the cluster fresh.
       </p>
       <p>
         <strong class="text-white">Invite a tab</strong> in the Session section of the Connect tab makes a link that another tab or another machine
@@ -119,8 +134,10 @@ const controls = [
         <strong class="text-white">krabka broker</strong> in the Build tab adds the real <code class="font-mono text-krab-300">krabka-broker</code>, compiled for <code class="font-mono text-krab-300">wasm32-wasip1</code>, as a node of the lab. It runs in a Web Worker on a browser
         WASI runtime: its listeners, its dials to other nodes and its clock are the lab's, so links, faults, pause and speed
         apply to it like to any node, and its disk is a volume in this browser's IndexedDB. Every preset has
-        brokers, so the first visit downloads the broker module, about 14 MB, and the page shows the progress on each broker node.
-        The runtime also needs a cross-origin isolated page, so the page reloads once, then reopens the scenario. A real
+        brokers, so the first visit downloads the broker module, about 14 MB, and the page shows the progress on each broker node;
+        later visits take it, and the lab module, from this browser's cache until the site ships a new build.
+        The runtime also needs a cross-origin isolated page. Any page of this site sets that up in the background, so a visit
+        that starts elsewhere on the site opens the lab isolated; landing on the lab first, the page reloads once, then reopens the scenario. A real
         broker stays in the tab that runs it: its process cannot move to another tab of a session. If the broker module is
         missing from the site, or the browser cannot isolate the page, the node says so and refuses connections.
       </p>
@@ -142,6 +159,108 @@ const controls = [
         <code class="font-mono text-krab-300">KRABKA_LOG</code> environment variable, read when its process starts, so applying a new level restarts the broker on
         the disk it has, after asking. It is a setting of this browser, not part of the node's configuration, which is why it
         does not wipe the disk.
+      </p>
+
+      <h2 class="text-xl font-bold text-white pt-2">Network</h2>
+      <p>
+        The <strong class="text-white">Network</strong> tab records every frame the virtual network carries, from the moment the scenario
+        starts: opens, closes and up to 64 KiB of each payload. It pairs each Kafka request with its response by connection and
+        correlation id. <strong class="text-white">Exchanges</strong> lists the pairs, <strong class="text-white">Frames</strong> lists everything,
+        and <strong class="text-white">Statistics</strong> gives per-API counts, failures, bytes and round-trip percentiles with a histogram,
+        and per-link bytes and throughput. Times are lab milliseconds. <em>RTT</em> runs from the request leaving the client to the
+        response reaching it; <em>server</em> runs from the request reaching the broker to the response leaving it; the rest is the
+        link, both ways.
+      </p>
+      <p>
+        A selected exchange decodes field by field from the Kafka message schemas krabka-protocol generates its codecs from:
+        the headers, every request and response version, record batches with their CRC-32C recomputed and their records
+        (gzip, snappy, lz4 and zstd opened in the page), and
+        krabka's own controller RPCs by name. The filter takes words and terms such as <code class="font-mono text-krab-300">api:fetch</code>,
+        <code class="font-mono text-krab-300">node:broker-1</code>, <code class="font-mono text-krab-300">port:9093</code>,
+        <code class="font-mono text-krab-300">err</code>, <code class="font-mono text-krab-300">slow:50</code> and
+        <code class="font-mono text-krab-300">pending</code>. <strong class="text-white">pcapng</strong> exports what the filter shows as raw IPv4 and TCP
+        between the nodes' 10.0.x.y addresses, timestamped in lab milliseconds. Wireshark opens it and its Kafka dissector
+        decodes port 9092 (Decode As maps 9093 too), up to the API versions that Wireshark release knows;
+        <strong class="text-white">JSON</strong> keeps every frame's bytes and <strong class="text-white">CSV</strong> one row per exchange.
+        The status line says how many frames the capture lost: dropped before the page read them, evicted to stay within its
+        64 MiB, or skipped while capture was paused.
+      </p>
+
+      <!-- J2 -->
+      <h2 class="text-xl font-bold text-white pt-2">Cluster state, charts and invariants</h2>
+      <p>
+        The scenario's admin node polls the brokers once a lab second. The <strong class="text-white">Cluster</strong> tab shows what it
+        last saw: the KRaft quorum with its leader, epoch and each voter's lag, the brokers with their rack, whether they are
+        fenced and how many partitions each leads and hosts, and every partition with its leader, leader epoch, replicas, ISR,
+        high watermark, log start and each consumer group's lag. Replicas that fell out of the ISR are struck through.
+        Offline and under-replicated partitions sort first; internal topics such as <code class="font-mono text-krab-300">__consumer_offsets</code>
+        hide behind a toggle. The canvas marks the quorum leader's card <em>controller</em>, counts the partitions each broker
+        leads and hosts, and puts one chip per partition under a topic, coloured by health, with its leader's id.
+      </p>
+      <p>
+        The <strong class="text-white">Charts</strong> tab samples the run once a lab second: records acknowledged and consumed per
+        second, total consumer lag, Produce and Fetch round trips (p50 and p99, from the network capture), the smallest ISR
+        and the number of under-replicated partitions. Every fault, kills and restarts included, is a labelled line on every
+        chart, on the same lab-time axis, and hovering reads all the charts at one instant. <strong class="text-white">Pin as baseline</strong>
+        keeps the series in this browser; <strong class="text-white">Rerun</strong> opens the scenario again from nothing with its current
+        configuration, so you can change one setting, rerun and see the new run over the old one, dashed.
+      </p>
+      <p>
+        The same tab checks invariants on every snapshot, and the toolbar says whether they hold: no record a producer with
+        <code class="font-mono text-krab-300">acks=all</code> saw acknowledged is lost (the partition's high watermark must stay above it;
+        a new leader's may stand lower while its ISR catches up or shrinks, so it counts as a loss after 60 s of lab time, or at once when the partition is gone), consumer positions only move forward
+        unless an admin reset them, one broker leads a partition per leader epoch, the KRaft quorum has one leader per epoch,
+        and a <code class="font-mono text-krab-300">read_committed</code> consumer never receives a record of an aborted transaction. A
+        violation is listed with its lab time and drawn as a red line on the charts.
+      </p>
+      <p>
+        <strong class="text-white">Trace</strong>, on a row of a producer's Last records, follows that record through the capture: the
+        Produce request that carried it, each follower's Fetch that copied it, the first Fetch response whose high watermark
+        passed it, the consumer's Fetch that delivered it and the OffsetCommit past it, each with its lab time, its two nodes
+        and a button that selects the exchange in the Network tab. A step that is missing says why: it has not happened yet,
+        or it fell outside what the capture kept.
+      </p>
+      <!-- /J2 -->
+
+      <!-- J3 -->
+      <h2 class="text-xl font-bold text-white pt-2">Process faults, experiments and forks</h2>
+      <p>
+        With one node selected, the <strong class="text-white">Break things</strong> bar adds <strong class="text-white">Pause</strong>: the
+        node stops as under SIGSTOP or a long GC pause. A real broker's worker gets no input, socket readiness or timers;
+        what is sent to it waits in its socket buffers, and <strong class="text-white">Resume</strong> lets it catch up at the time it
+        is. Paused for longer than the clients' 30 s request timeout, its clients drop their connections and reconnect.
+        <strong class="text-white">More…</strong> skews a real broker's wall clock (REALTIME; its monotonic clock is untouched, so
+        the files it writes carry the skewed time) and sets its disk to slow (each fsync takes that many lab milliseconds),
+        full (writes that grow a file fail with ENOSPC) or failing (writes and syncs fail with EIO). The krabka broker does
+        not fsync on produce, so a slow disk shows when it starts and recovers its log; a full or failing disk makes it log
+        the error and stop. With two nodes selected, <strong class="text-white">Cut →</strong> and <strong class="text-white">Cut ←</strong> drop the
+        frames one way only: connections stay open until a peer times out. The canvas menu has the same faults.
+      </p>
+      <p>
+        A scenario can carry an <strong class="text-white">experiment</strong>: timed faults and commands, and checks decided at a lab
+        time or required by one, such as an ISR size, a consumer's lag, an event, a Kafka error code in a response, a dotted
+        path into a node's state, or that the invariants above hold. The Scenarios tab edits it as JSON and validates it;
+        <strong class="text-white">Run experiment</strong> restarts the scenario on fresh disks, runs the script and lists each step and
+        check with its time and result. The experiment travels with Copy link and Export. <strong class="text-white">Fork here</strong>
+        pauses the clock, copies the brokers' disks into a new saved scenario and opens it: the brokers boot from the
+        copies, the clients start fresh. Three presets carry an experiment; each link opens it in the lab and runs it.
+      </p>
+      <div class="grid sm:grid-cols-3 gap-4 not-prose">
+        <LabLink preset="min-isr" description="Kill one replica, raise the topic's min.insync.replicas to 3, and watch acks=all writes fail with NOT_ENOUGH_REPLICAS until the replica is back in the ISR." />
+        <LabLink preset="five-brokers-partition" description="Brokers 4 and 5 start cut off: the majority registers, elects a controller and serves; after the heal both brokers register and catch up." />
+        <LabLink preset="slow-replica" description="Broker 3's links slow to 15 s: it falls out of the ISR and the group's lag jumps. Back at 200 ms it rejoins and the lag comes down." />
+      </div>
+      <!-- /J3 -->
+
+      <h2 class="text-xl font-bold text-white pt-2">A broker's disk</h2>
+      <p>
+        <strong class="text-white">Browse</strong> in the Storage tab, or <strong class="text-white">Browse disk</strong> in a broker's inspector,
+        opens its log directory by partition. A partition lists its segments and checks them together: every batch CRC, segment
+        names against their first offsets, offsets across segment boundaries, and the leader-epoch checkpoint against the
+        batches. A segment shows its batches as a byte map and a table, then the decoded batches and records; the KRaft
+        metadata log decodes into its metadata records, and <code class="font-mono text-krab-300">__consumer_offsets</code> into offset commits.
+        An offset or time index is checked entry by entry against the batch it points at. Producer-state snapshots, checkpoints
+        and the quorum state decode too.
       </p>
 
       <h2 class="text-xl font-bold text-white pt-2">Connect kafkactl from your computer</h2>

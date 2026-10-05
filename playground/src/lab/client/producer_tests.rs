@@ -9,6 +9,8 @@ use bytes::Bytes;
 use krabka_protocol::{
     ProtocolRequest,
     owned::{
+        add_partitions_to_txn_request::AddPartitionsToTxnRequest,
+        end_txn_request::EndTxnRequest,
         init_producer_id_request::InitProducerIdRequest,
         metadata_request::{MetadataRequest, MetadataRequestTopic},
         produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
@@ -90,7 +92,7 @@ fn acked(events: &[ProducerEvent]) -> Vec<(SeqNo, i32, i64, Millis)> {
                 latency_ms,
                 ..
             } => Some((*seq, *partition, *offset, *latency_ms)),
-            ProducerEvent::Failed { .. } => None,
+            _ => None,
         })
         .collect();
     acked.sort_unstable();
@@ -108,7 +110,7 @@ fn failed(events: &[ProducerEvent]) -> Vec<(SeqNo, i32, i16)> {
                 code,
                 ..
             } => Some((*seq, *partition, *code)),
-            ProducerEvent::Acked { .. } => None,
+            _ => None,
         })
         .collect()
 }
@@ -592,7 +594,13 @@ fn a_resend_after_a_lost_answer_is_deduplicated_by_its_sequence() {
 
 #[test]
 fn compressed_batches_reach_the_log_readable() {
-    for compression in [Compression::None, Compression::Gzip, Compression::Snappy] {
+    for compression in [
+        Compression::None,
+        Compression::Gzip,
+        Compression::Snappy,
+        Compression::Lz4,
+        Compression::Zstd,
+    ] {
         let config = ProducerConfig {
             compression,
             ..Default::default()
@@ -941,4 +949,135 @@ fn a_batch_without_a_leader_expires_with_kafkas_message() {
             }]
     );
     assert!(produces(&h).is_empty());
+}
+
+// ---- transactions -----------------------------------------------------------------
+
+/// A transactional producer with the transactional id `tx`.
+pub fn transactional() -> Producer {
+    producer(ProducerConfig {
+        transactional_id: Some("tx".to_string()),
+        ..Default::default()
+    })
+}
+
+/// Send `values` keyed `k`, commit or abort once they are acknowledged, and
+/// run until the transaction ended.
+pub fn transaction(h: &mut Harness<Producer>, values: &[&str], commit: bool) {
+    for value in values {
+        send(h, record("orders", Some("k"), value));
+    }
+    assert!(h.run_until(|h| h.client.pending_records() == 0, 2_000));
+    let ended = h.with_client(|p, _| {
+        if commit {
+            p.commit_transaction()
+        } else {
+            p.abort_transaction()
+        }
+    });
+    assert!(ended == Ok(()));
+    assert!(h.run_until(
+        |h| {
+            h.events
+                .contains(&ProducerEvent::TransactionEnded { committed: commit })
+        },
+        2_000
+    ));
+    h.take_events();
+}
+
+#[test]
+fn a_transaction_adds_its_partitions_then_commits_or_aborts_with_markers() {
+    let state = cluster(&[("orders", 1)]);
+    let mut h = Harness::new(transactional(), Rc::clone(&state));
+    ready(&mut h);
+    let init: InitProducerIdRequest = h.seen(InitProducerIdRequest::API_KEY)[0].decode();
+    assert!(init.transactional_id.as_deref() == Some("tx"));
+    assert!(init.transaction_timeout_ms == 60_000);
+    // Nothing is open: Kafka refuses a commit from READY.
+    assert!(
+        h.client.commit_transaction()
+            == Err(
+                "Invalid transition attempted from state READY to state COMMITTING_TRANSACTION"
+                    .to_string()
+            )
+    );
+    transaction(&mut h, &["a", "b"], true);
+    transaction(&mut h, &["c"], false);
+    // The partition joined each transaction with the client's v3 form before
+    // its batch, which went out at v11 with the transactional id.
+    let adds = h.seen(AddPartitionsToTxnRequest::API_KEY);
+    assert!(adds.len() == 2);
+    assert!(adds.iter().all(|s| s.version <= 3));
+    let add: AddPartitionsToTxnRequest = adds[0].decode();
+    assert!(add.v3_and_below_transactional_id == "tx");
+    assert!(add.v3_and_below_topics[0].partitions == vec![0]);
+    let produced = h.seen(ProduceRequest::API_KEY);
+    assert!(
+        produced
+            .iter()
+            .all(|s| s.version <= 11 && s.at > adds[0].at)
+    );
+    let request: ProduceRequest = produced[0].decode();
+    assert!(request.transactional_id.as_deref() == Some("tx"));
+    let ends: Vec<EndTxnRequest> = h
+        .seen(EndTxnRequest::API_KEY)
+        .iter()
+        .map(super::fake_broker::Seen::decode)
+        .collect();
+    assert!(ends.iter().map(|e| e.committed).collect::<Vec<_>>() == vec![true, false]);
+    // The log: each transaction's batch, then its marker; the abort is
+    // listed for read_committed fetches.
+    let batches = state.borrow().batches("orders", 0);
+    let shape: Vec<(i64, bool, bool)> = batches
+        .iter()
+        .map(|b| {
+            (
+                b.base_offset,
+                b.attributes.is_transactional(),
+                b.attributes.is_control_batch(),
+            )
+        })
+        .collect();
+    assert!(
+        shape
+            == vec![
+                (0, true, false),
+                (2, true, true),
+                (3, true, false),
+                (4, true, true)
+            ]
+    );
+    assert!(state.borrow().txn.aborted[&("orders".to_string(), 0)] == vec![(1_000, 3, 4)]);
+    let snapshot = h.client.snapshot();
+    assert!(snapshot["transactions"]["committed"] == 1);
+    assert!(snapshot["transactions"]["aborted"] == 1);
+    assert!(snapshot["transactions"]["state"] == "ready");
+    assert!(snapshot["acked_upto"]["orders-0"] == 3);
+}
+
+#[test]
+fn a_busy_coordinator_is_asked_again_and_a_fenced_producer_stops() {
+    let state = cluster(&[("orders", 1)]);
+    let mut h = Harness::new(transactional(), Rc::clone(&state));
+    ready(&mut h);
+    state
+        .borrow_mut()
+        .txn
+        .end_txn_errors
+        .push_back(codes::CONCURRENT_TRANSACTIONS);
+    transaction(&mut h, &["a"], true);
+    assert!(h.seen(EndTxnRequest::API_KEY).len() == 2);
+    // A second producer with the same transactional id fences the first,
+    // whose next request fails for good.
+    state.borrow_mut().txn.ids.get_mut("tx").unwrap().epoch += 1;
+    send(&mut h, record("orders", Some("k"), "b"));
+    assert!(h.run_until(|h| h.client.transaction_fatal(), 2_000));
+    assert!(h.events.contains(&ProducerEvent::TransactionError {
+        code: codes::PRODUCER_FENCED,
+        fatal: true
+    }));
+    let seq = send(&mut h, record("orders", Some("k"), "c"));
+    h.run_for(10);
+    assert!(failed(&h.take_events()).contains(&(seq, -1, codes::INVALID_TXN_STATE)));
 }

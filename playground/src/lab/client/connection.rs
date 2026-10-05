@@ -10,7 +10,7 @@
 use std::{any::Any, collections::VecDeque};
 
 use bytes::Bytes;
-use krabka_protocol::{ProtocolRequest, owned::api_versions_request::ApiVersionsRequest};
+use krabka_protocol::owned::api_versions_request::ApiVersionsRequest;
 use serde_json::{Value, json};
 
 use super::{
@@ -22,6 +22,14 @@ use crate::lab::{
     codes,
     net::{ConnId, Ctx, Endpoint, Frame, Millis},
 };
+
+/// The `ApiVersions` version a new connection opens with: 4, what Apache
+/// Kafka 4.x clients send. Version 5 (KIP-1242) only adds the cluster and
+/// node ids a client means to reach, which this client leaves empty, and a
+/// broker that stops at 4 would answer every connection with
+/// `UNSUPPORTED_VERSION` (and log it) before the retry at 4. A broker that
+/// stops lower still gets the same retry.
+const API_VERSIONS_VERSION: i16 = 4;
 
 /// Where a connection is in its life.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -228,13 +236,7 @@ impl Connection {
         );
         let deadline = ctx.now() + setup_timeout;
         ctx.send(Frame::open(self.client, self.endpoint, conn));
-        self.send_api_versions(
-            ctx,
-            ApiVersionsRequest::LATEST_STABLE_VERSION,
-            deadline,
-            opts,
-            client_id,
-        );
+        self.send_api_versions(ctx, API_VERSIONS_VERSION, deadline, opts, client_id);
     }
 
     fn send_api_versions(

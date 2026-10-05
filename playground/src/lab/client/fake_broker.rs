@@ -60,6 +60,54 @@ use krabka_protocol::{
     primitives::uuid::Uuid,
     records::{RecordBatch, RecordsPayload, patch_base_offset_and_leader_epoch},
 };
+use krabka_protocol::owned::{
+    alter_partition_reassignments_request::AlterPartitionReassignmentsRequest,
+    alter_partition_reassignments_response::{
+        AlterPartitionReassignmentsResponse, ReassignablePartitionResponse,
+        ReassignableTopicResponse,
+    },
+    common::describe_quorum_response::replica_state::ReplicaState,
+    describe_cluster_request::DescribeClusterRequest,
+    describe_cluster_response::{DescribeClusterBroker, DescribeClusterResponse},
+    describe_configs_request::DescribeConfigsRequest,
+    describe_configs_response::{
+        DescribeConfigsResourceResult, DescribeConfigsResponse, DescribeConfigsResult,
+    },
+    describe_groups_request::DescribeGroupsRequest,
+    describe_groups_response::{DescribeGroupsResponse, DescribedGroup, DescribedGroupMember},
+    describe_quorum_request::DescribeQuorumRequest,
+    describe_quorum_response::{self, DescribeQuorumResponse},
+    elect_leaders_request::ElectLeadersRequest,
+    elect_leaders_response::{ElectLeadersResponse, PartitionResult, ReplicaElectionResult},
+    incremental_alter_configs_request::IncrementalAlterConfigsRequest,
+    incremental_alter_configs_response::{
+        AlterConfigsResourceResponse, IncrementalAlterConfigsResponse,
+    },
+    list_groups_request::ListGroupsRequest,
+    list_groups_response::{ListGroupsResponse, ListedGroup},
+    list_partition_reassignments_request::ListPartitionReassignmentsRequest,
+    list_partition_reassignments_response::{
+        ListPartitionReassignmentsResponse, OngoingPartitionReassignment, OngoingTopicReassignment,
+    },
+};
+// ---- the transaction apis (see `TxnLog`)
+use krabka_protocol::owned::{
+    add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+    add_offsets_to_txn_response::AddOffsetsToTxnResponse,
+    add_partitions_to_txn_request::AddPartitionsToTxnRequest,
+    add_partitions_to_txn_response::AddPartitionsToTxnResponse,
+    common::add_partitions_to_txn_response::{
+        add_partitions_to_txn_partition_result::AddPartitionsToTxnPartitionResult,
+        add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+    },
+    end_txn_request::EndTxnRequest,
+    end_txn_response::EndTxnResponse,
+    fetch_response::AbortedTransaction,
+    txn_offset_commit_request::TxnOffsetCommitRequest,
+    txn_offset_commit_response::{
+        TxnOffsetCommitResponse, TxnOffsetCommitResponsePartition, TxnOffsetCommitResponseTopic,
+    },
+};
 use serde_json::{Value, json};
 
 use super::request;
@@ -317,6 +365,11 @@ pub struct ClusterState {
     producer_epochs: BTreeMap<i64, i16>,
     producers: BTreeMap<(i64, String, i32), ProducerState>,
     pub knobs: Knobs,
+    /// What the admin apis keep (the cluster observer and the operator
+    /// commands of the admin node, the rebalancer).
+    pub admin: AdminState,
+    /// What the transaction apis keep.
+    pub txn: TxnLog,
     pub requests: Vec<Seen>,
     next_topic_id: u8,
 }
@@ -345,6 +398,8 @@ impl ClusterState {
                 leaderless_error: codes::LEADER_NOT_AVAILABLE,
                 ..Knobs::default()
             },
+            admin: AdminState::default(),
+            txn: TxnLog::default(),
             requests: Vec::new(),
             next_topic_id: 1,
         }))
@@ -547,6 +602,21 @@ fn supported() -> Vec<(i16, i16, i16)> {
         row::<DeleteTopicsRequest>(),
         row::<InitProducerIdRequest>(),
         row::<ConsumerGroupHeartbeatRequest>(),
+        // ---- the transaction apis (see `TxnLog`)
+        row::<AddPartitionsToTxnRequest>(),
+        row::<AddOffsetsToTxnRequest>(),
+        row::<EndTxnRequest>(),
+        row::<TxnOffsetCommitRequest>(),
+        // ---- the admin apis (see `AdminState`)
+        row::<DescribeClusterRequest>(),
+        row::<DescribeQuorumRequest>(),
+        row::<ListGroupsRequest>(),
+        row::<DescribeGroupsRequest>(),
+        row::<IncrementalAlterConfigsRequest>(),
+        row::<DescribeConfigsRequest>(),
+        row::<AlterPartitionReassignmentsRequest>(),
+        row::<ListPartitionReassignmentsRequest>(),
+        row::<ElectLeadersRequest>(),
     ]
 }
 
@@ -571,6 +641,21 @@ fn flexible_min(api_key: i16) -> i16 {
         20 => of::<DeleteTopicsRequest>(),
         22 => of::<InitProducerIdRequest>(),
         68 => of::<ConsumerGroupHeartbeatRequest>(),
+        // ---- the transaction apis
+        24 => of::<AddPartitionsToTxnRequest>(),
+        25 => of::<AddOffsetsToTxnRequest>(),
+        26 => of::<EndTxnRequest>(),
+        28 => of::<TxnOffsetCommitRequest>(),
+        // ---- the admin apis
+        60 => of::<DescribeClusterRequest>(),
+        55 => of::<DescribeQuorumRequest>(),
+        16 => of::<ListGroupsRequest>(),
+        15 => of::<DescribeGroupsRequest>(),
+        44 => of::<IncrementalAlterConfigsRequest>(),
+        32 => of::<DescribeConfigsRequest>(),
+        45 => of::<AlterPartitionReassignmentsRequest>(),
+        46 => of::<ListPartitionReassignmentsRequest>(),
+        43 => of::<ElectLeadersRequest>(),
         _ => i16::MAX,
     }
 }
@@ -720,7 +805,12 @@ impl FakeBroker {
         if cursor.remaining() < 8 {
             return;
         }
-        let _len = cursor.get_i32();
+        // A frame whose length prefix is not its size would desynchronize a
+        // real broker's stream.
+        let len = cursor.get_i32();
+        if usize::try_from(len).ok() != Some(cursor.remaining()) {
+            return;
+        }
         let api_key = i16::from_be_bytes([cursor[0], cursor[1]]);
         let version = i16::from_be_bytes([cursor[2], cursor[3]]);
         let header_version = request::request_header_version(flexible_min(api_key), version);
@@ -864,6 +954,25 @@ impl FakeBroker {
                 };
                 self.sync_group(ctx, src, conn, correlation, version, &request)
             }
+            // ---- the admin apis
+            60 => answer!(DescribeClusterRequest, |_| self.describe_cluster()),
+            55 => answer!(DescribeQuorumRequest, |_| self.describe_quorum()),
+            16 => answer!(ListGroupsRequest, |_| self.list_groups()),
+            15 => answer!(DescribeGroupsRequest, |r| self.describe_groups(&r)),
+            44 => answer!(IncrementalAlterConfigsRequest, |r| self
+                .incremental_alter_configs(&r)),
+            32 => answer!(DescribeConfigsRequest, |r| self.describe_configs(&r)),
+            45 => answer!(AlterPartitionReassignmentsRequest, |r| self
+                .alter_partition_reassignments(&r)),
+            46 => answer!(ListPartitionReassignmentsRequest, |_| self
+                .list_partition_reassignments()),
+            43 => answer!(ElectLeadersRequest, |r| self.elect_leaders(&r)),
+            // ---- the transaction apis
+            24 => answer!(AddPartitionsToTxnRequest, |r| self
+                .add_partitions_to_txn(&r)),
+            25 => answer!(AddOffsetsToTxnRequest, |r| self.add_offsets_to_txn(&r)),
+            26 => answer!(EndTxnRequest, |r| self.end_txn(&r, now)),
+            28 => answer!(TxnOffsetCommitRequest, |r| self.txn_offset_commit(&r)),
             _ => Reply::Nothing,
         }
     }
@@ -1041,6 +1150,9 @@ impl FakeBroker {
     }
 
     fn init_producer_id(&self, request: &InitProducerIdRequest) -> InitProducerIdResponse {
+        if let Some(id) = &request.transactional_id {
+            return self.init_transactional(id);
+        }
         let mut state = self.state.borrow_mut();
         let (producer_id, epoch) = if request.producer_id >= 0 {
             let epoch = state
@@ -1231,7 +1343,13 @@ impl FakeBroker {
                     SequenceCheck::Reject(code) => return (code, -1, current),
                 }
             }
+            if batch.attributes.is_transactional()
+                && !state.txn.holds(batch.producer_id, topic, partition)
+            {
+                return (codes::INVALID_TXN_STATE, -1, current);
+            }
             let base_offset = state.append_batch(topic, partition, batch);
+            state.txn.note_append(batch, topic, partition, base_offset);
             first_offset.get_or_insert(base_offset);
             if idempotent {
                 state.producers.entry(key).or_default().appended(
@@ -1268,7 +1386,12 @@ impl FakeBroker {
                     .topics
                     .get(&name)
                     .and_then(|t| t.partitions.get(&fp.partition));
-                let row = self.fetch_partition(fp, injected, partition);
+                let mut row = self.fetch_partition(fp, injected, partition);
+                if request.isolation_level == 1 && row.error_code == codes::NONE {
+                    state
+                        .txn
+                        .read_committed(&name, fp.fetch_offset, partition, &mut row);
+                }
                 let has_records = row
                     .records
                     .as_ref()
@@ -2068,5 +2191,727 @@ impl Node for FakeBroker {
 
     fn snapshot(&self) -> Value {
         json!({ "broker_id": self.broker_id, "connections": self.conns.len() })
+    }
+}
+
+// ---- the admin apis -------------------------------------------------------------
+//
+// What the admin node's cluster observer and operator commands, and the
+// rebalancer, ask: `DescribeCluster`, `DescribeQuorum` (the controller leads
+// a quorum of every broker, at a fixed epoch and log end), `ListGroups` and
+// `DescribeGroups` (from the coordinator), `IncrementalAlterConfigs` and
+// `DescribeConfigs` over a plain map, `AlterPartitionReassignments` (done at
+// once unless `hold` keeps it ongoing), `ListPartitionReassignments` and
+// `ElectLeaders`.
+
+/// What the admin apis keep.
+#[derive(Clone, Debug, Default)]
+pub struct AdminState {
+    /// Configs by `(resource_type, resource_name)`.
+    pub configs: BTreeMap<(i8, String), BTreeMap<String, String>>,
+    /// Reassignments in progress: target replicas by partition.
+    pub reassigning: BTreeMap<(String, i32), Vec<i32>>,
+    /// Keep reassignments ongoing instead of finishing them at once.
+    pub hold: bool,
+    /// The quorum's log end offset and leader epoch.
+    pub quorum_end: i64,
+}
+
+impl ClusterState {
+    /// Finish the reassignments in progress: the partition takes its target
+    /// replicas, all in sync, and keeps its leader when it stays a replica.
+    pub fn finish_reassignments(&mut self) {
+        for ((topic, partition), replicas) in std::mem::take(&mut self.admin.reassigning) {
+            if let Some(p) = self
+                .topics
+                .get_mut(&topic)
+                .and_then(|t| t.partitions.get_mut(&partition))
+            {
+                if !replicas.contains(&p.leader) {
+                    p.leader = replicas[0];
+                    p.leader_epoch += 1;
+                }
+                p.isr.clone_from(&replicas);
+                p.replicas = replicas;
+            }
+        }
+    }
+}
+
+fn group_state_name(state: Option<GroupState>) -> &'static str {
+    match state {
+        None | Some(GroupState::Empty) => "Empty",
+        Some(GroupState::PreparingRebalance) => "PreparingRebalance",
+        Some(GroupState::CompletingRebalance) => "CompletingRebalance",
+        Some(GroupState::Stable) => "Stable",
+    }
+}
+
+impl FakeBroker {
+    fn describe_cluster(&self) -> DescribeClusterResponse {
+        let state = self.state.borrow();
+        DescribeClusterResponse {
+            error_code: codes::NONE,
+            cluster_id: state.cluster_id.clone(),
+            controller_id: state.controller,
+            brokers: state
+                .brokers
+                .iter()
+                .map(|(id, node)| DescribeClusterBroker {
+                    broker_id: *id,
+                    host: format!("node-{node}"),
+                    port: i32::from(KAFKA_PORT),
+                    rack: Some(format!("rack-{id}")),
+                    is_fenced: false,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn describe_quorum(&self) -> DescribeQuorumResponse {
+        let state = self.state.borrow();
+        let end = state.admin.quorum_end;
+        DescribeQuorumResponse {
+            error_code: codes::NONE,
+            topics: vec![describe_quorum_response::TopicData {
+                topic_name: "__cluster_metadata".to_string(),
+                partitions: vec![describe_quorum_response::PartitionData {
+                    partition_index: 0,
+                    error_code: codes::NONE,
+                    leader_id: state.controller,
+                    leader_epoch: 1,
+                    high_watermark: end,
+                    current_voters: state
+                        .brokers
+                        .keys()
+                        .map(|id| ReplicaState {
+                            replica_id: *id,
+                            log_end_offset: if *id == state.controller { end } else { end - 1 },
+                            ..Default::default()
+                        })
+                        .collect(),
+                    observers: Vec::new(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn list_groups(&self) -> ListGroupsResponse {
+        let state = self.state.borrow();
+        let groups = if state.coordinator == self.broker_id {
+            state
+                .groups
+                .iter()
+                .map(|(id, g)| ListedGroup {
+                    group_id: id.clone(),
+                    protocol_type: "consumer".to_string(),
+                    group_state: group_state_name(g.state).to_string(),
+                    group_type: "classic".to_string(),
+                    ..Default::default()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        ListGroupsResponse {
+            error_code: codes::NONE,
+            groups,
+            ..Default::default()
+        }
+    }
+
+    fn describe_groups(&self, request: &DescribeGroupsRequest) -> DescribeGroupsResponse {
+        let state = self.state.borrow();
+        DescribeGroupsResponse {
+            groups: request
+                .groups
+                .iter()
+                .map(|id| match state.groups.get(id) {
+                    Some(g) => DescribedGroup {
+                        error_code: codes::NONE,
+                        group_id: id.clone(),
+                        group_state: group_state_name(g.state).to_string(),
+                        protocol_type: "consumer".to_string(),
+                        members: g
+                            .members
+                            .keys()
+                            .map(|m| DescribedGroupMember {
+                                member_id: m.clone(),
+                                ..Default::default()
+                            })
+                            .collect(),
+                        ..Default::default()
+                    },
+                    None => DescribedGroup {
+                        error_code: codes::NONE,
+                        group_id: id.clone(),
+                        group_state: "Dead".to_string(),
+                        ..Default::default()
+                    },
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn incremental_alter_configs(
+        &self,
+        request: &IncrementalAlterConfigsRequest,
+    ) -> IncrementalAlterConfigsResponse {
+        let mut state = self.state.borrow_mut();
+        let responses = request
+            .resources
+            .iter()
+            .map(|r| {
+                let known = r.resource_type != 2 || state.topics.contains_key(&r.resource_name);
+                let code = if known {
+                    let configs = state
+                        .admin
+                        .configs
+                        .entry((r.resource_type, r.resource_name.clone()))
+                        .or_default();
+                    for c in &r.configs {
+                        match (c.config_operation, &c.value) {
+                            (0, Some(v)) => {
+                                configs.insert(c.name.clone(), v.clone());
+                            }
+                            _ => {
+                                configs.remove(&c.name);
+                            }
+                        }
+                    }
+                    codes::NONE
+                } else {
+                    codes::UNKNOWN_TOPIC_OR_PARTITION
+                };
+                AlterConfigsResourceResponse {
+                    error_code: code,
+                    resource_type: r.resource_type,
+                    resource_name: r.resource_name.clone(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        IncrementalAlterConfigsResponse {
+            responses,
+            ..Default::default()
+        }
+    }
+
+    fn describe_configs(&self, request: &DescribeConfigsRequest) -> DescribeConfigsResponse {
+        let state = self.state.borrow();
+        DescribeConfigsResponse {
+            results: request
+                .resources
+                .iter()
+                .map(|r| DescribeConfigsResult {
+                    error_code: codes::NONE,
+                    resource_type: r.resource_type,
+                    resource_name: r.resource_name.clone(),
+                    configs: state
+                        .admin
+                        .configs
+                        .get(&(r.resource_type, r.resource_name.clone()))
+                        .into_iter()
+                        .flatten()
+                        .map(|(k, v)| DescribeConfigsResourceResult {
+                            name: k.clone(),
+                            value: Some(v.clone()),
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn alter_partition_reassignments(
+        &self,
+        request: &AlterPartitionReassignmentsRequest,
+    ) -> AlterPartitionReassignmentsResponse {
+        let mut state = self.state.borrow_mut();
+        let mut responses = Vec::new();
+        for t in &request.topics {
+            let mut partitions = Vec::new();
+            for p in &t.partitions {
+                let key = (t.name.clone(), p.partition_index);
+                let exists = state
+                    .topics
+                    .get(&t.name)
+                    .is_some_and(|topic| topic.partitions.contains_key(&p.partition_index));
+                let code = match &p.replicas {
+                    _ if !exists => codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    Some(replicas) => {
+                        state.admin.reassigning.insert(key, replicas.clone());
+                        codes::NONE
+                    }
+                    None if state.admin.reassigning.remove(&key).is_some() => codes::NONE,
+                    None => codes::NO_REASSIGNMENT_IN_PROGRESS,
+                };
+                partitions.push(ReassignablePartitionResponse {
+                    partition_index: p.partition_index,
+                    error_code: code,
+                    ..Default::default()
+                });
+            }
+            responses.push(ReassignableTopicResponse {
+                name: t.name.clone(),
+                partitions,
+                ..Default::default()
+            });
+        }
+        if !state.admin.hold {
+            state.finish_reassignments();
+        }
+        AlterPartitionReassignmentsResponse {
+            error_code: codes::NONE,
+            responses,
+            ..Default::default()
+        }
+    }
+
+    fn list_partition_reassignments(&self) -> ListPartitionReassignmentsResponse {
+        let state = self.state.borrow();
+        let mut topics: BTreeMap<String, Vec<OngoingPartitionReassignment>> = BTreeMap::new();
+        for ((topic, partition), target) in &state.admin.reassigning {
+            let current = state
+                .topics
+                .get(topic)
+                .and_then(|t| t.partitions.get(partition))
+                .map(|p| p.replicas.clone())
+                .unwrap_or_default();
+            topics
+                .entry(topic.clone())
+                .or_default()
+                .push(OngoingPartitionReassignment {
+                    partition_index: *partition,
+                    replicas: target.clone(),
+                    adding_replicas: target
+                        .iter()
+                        .filter(|r| !current.contains(r))
+                        .copied()
+                        .collect(),
+                    removing_replicas: current
+                        .iter()
+                        .filter(|r| !target.contains(r))
+                        .copied()
+                        .collect(),
+                    ..Default::default()
+                });
+        }
+        ListPartitionReassignmentsResponse {
+            error_code: codes::NONE,
+            topics: topics
+                .into_iter()
+                .map(|(name, partitions)| OngoingTopicReassignment {
+                    name,
+                    partitions,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Preferred (0): the first replica leads, `ELECTION_NOT_NEEDED` when it
+    /// does already. Unclean (1): a leaderless partition takes its first
+    /// replica.
+    fn elect_leaders(&self, request: &ElectLeadersRequest) -> ElectLeadersResponse {
+        let mut state = self.state.borrow_mut();
+        let wanted: Vec<(String, Vec<i32>)> = match &request.topic_partitions {
+            Some(list) => list
+                .iter()
+                .map(|t| (t.topic.clone(), t.partitions.clone()))
+                .collect(),
+            None => state
+                .topics
+                .iter()
+                .map(|(name, t)| (name.clone(), t.partitions.keys().copied().collect()))
+                .collect(),
+        };
+        let results = wanted
+            .into_iter()
+            .map(|(topic, partitions)| {
+                let partition_result = partitions
+                    .into_iter()
+                    .map(|index| {
+                        let p = state
+                            .topics
+                            .get_mut(&topic)
+                            .and_then(|t| t.partitions.get_mut(&index));
+                        let code = match p {
+                            None => codes::UNKNOWN_TOPIC_OR_PARTITION,
+                            Some(p) => {
+                                let first = p.replicas.first().copied().unwrap_or(-1);
+                                let elect = if request.election_type == 0 {
+                                    p.leader != first
+                                } else {
+                                    p.leader < 0
+                                };
+                                if elect {
+                                    p.leader = first;
+                                    p.leader_epoch += 1;
+                                    codes::NONE
+                                } else {
+                                    codes::ELECTION_NOT_NEEDED
+                                }
+                            }
+                        };
+                        PartitionResult {
+                            partition_id: index,
+                            error_code: code,
+                            ..Default::default()
+                        }
+                    })
+                    .collect();
+                ReplicaElectionResult {
+                    topic,
+                    partition_result,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        ElectLeadersResponse {
+            error_code: codes::NONE,
+            replica_election_results: results,
+            ..Default::default()
+        }
+    }
+}
+
+// ---- the transaction apis -------------------------------------------------------
+//
+// A transaction coordinator for the transactional producer and EOS tests:
+// `InitProducerId` with a transactional id (a known id gets the next epoch
+// and its open transaction aborts), `AddPartitionsToTxn` (v3 and below),
+// `AddOffsetsToTxn`, `TxnOffsetCommit` (offsets held until the commit) and
+// `EndTxn`, which writes a control batch to every partition of the
+// transaction. A `read_committed` fetch stops at the last stable offset and
+// lists the aborted transactions it covers.
+
+/// One transactional id.
+#[derive(Clone, Debug, Default)]
+pub struct FakeTxn {
+    pub producer_id: i64,
+    pub epoch: i16,
+    /// The partitions of the open transaction.
+    pub partitions: BTreeSet<(String, i32)>,
+    /// The group of `AddOffsetsToTxn`, and the offsets `TxnOffsetCommit`
+    /// holds for it.
+    pub group: Option<String>,
+    pub offsets: Vec<(String, i32, i64)>,
+}
+
+/// An aborted transaction of a partition: the producer id, the first
+/// offset, and the offset of the abort marker.
+pub type AbortedTxn = (i64, i64, i64);
+
+/// What the transaction apis keep.
+#[derive(Clone, Debug, Default)]
+pub struct TxnLog {
+    pub ids: BTreeMap<String, FakeTxn>,
+    /// The first offset of each producer's open transaction, per partition.
+    pub open: BTreeMap<(String, i32), BTreeMap<i64, i64>>,
+    /// The aborted transactions per partition.
+    pub aborted: BTreeMap<(String, i32), Vec<AbortedTxn>>,
+    /// Codes the next `EndTxn` requests answer with, in order.
+    pub end_txn_errors: VecDeque<i16>,
+    /// Committed and aborted transactions.
+    pub committed: u32,
+    pub aborts: u32,
+}
+
+impl TxnLog {
+    /// Whether producer `producer_id` added the partition to its open
+    /// transaction.
+    fn holds(&self, producer_id: i64, topic: &str, partition: i32) -> bool {
+        self.ids.values().any(|t| {
+            t.producer_id == producer_id && t.partitions.contains(&(topic.to_string(), partition))
+        })
+    }
+
+    /// A transactional batch at `base_offset` opens its producer's
+    /// transaction on the partition.
+    fn note_append(&mut self, batch: &RecordBatch, topic: &str, partition: i32, base_offset: i64) {
+        if batch.attributes.is_transactional() && !batch.attributes.is_control_batch() {
+            self.open
+                .entry((topic.to_string(), partition))
+                .or_default()
+                .entry(batch.producer_id)
+                .or_insert(base_offset);
+        }
+    }
+
+    /// Cut a fetch answer at the last stable offset and list the aborted
+    /// transactions from the fetch offset on.
+    fn read_committed(
+        &self,
+        topic: &str,
+        fetch_offset: i64,
+        partition: Option<&FakePartition>,
+        row: &mut PartitionData,
+    ) {
+        let Some(p) = partition else {
+            return;
+        };
+        let key = (topic.to_string(), row.partition_index);
+        let lso = self
+            .open
+            .get(&key)
+            .and_then(|open| open.values().min().copied())
+            .unwrap_or(p.log_end);
+        let mut bytes = BytesMut::new();
+        for (base, last, batch) in &p.log {
+            if *last >= fetch_offset && *base < lso {
+                bytes.put_slice(batch);
+            }
+        }
+        row.last_stable_offset = lso;
+        row.records = Some(RecordsPayload::Raw(bytes.freeze()));
+        row.aborted_transactions = Some(
+            self.aborted
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .filter(|(_, first, marker)| *marker >= fetch_offset && *first < lso)
+                .map(|(producer_id, first, _)| AbortedTransaction {
+                    producer_id: *producer_id,
+                    first_offset: *first,
+                    ..Default::default()
+                })
+                .collect(),
+        );
+    }
+}
+
+impl ClusterState {
+    /// End the open transaction of `id`: a control batch on each of its
+    /// partitions, its offsets committed with a commit, its records listed
+    /// as aborted with an abort.
+    fn end_transaction(&mut self, id: &str, commit: bool, now: Millis) {
+        let Some(txn) = self.txn.ids.get_mut(id) else {
+            return;
+        };
+        let partitions = std::mem::take(&mut txn.partitions);
+        let offsets = std::mem::take(&mut txn.offsets);
+        let group = txn.group.take();
+        if partitions.is_empty() && group.is_none() {
+            return;
+        }
+        let stamp = super::batch::ProducerStamp {
+            producer_id: txn.producer_id,
+            producer_epoch: txn.epoch,
+            base_sequence: -1,
+        };
+        for (topic, partition) in partitions {
+            let marker = super::batch::BatchRecord {
+                timestamp: i64::try_from(now).unwrap_or(0),
+                key: Some(Bytes::from(vec![0, 0, 0, u8::from(commit)])),
+                value: Some(Bytes::from_static(&[0, 0, 0, 0, 0, 0])),
+                headers: Vec::new(),
+            };
+            let mut batch = super::batch::build_batch(&[marker], Some(stamp), 0);
+            batch.attributes = batch.attributes.with_control(true).with_transactional(true);
+            if !self.topics.contains_key(&topic) {
+                continue;
+            }
+            let at = self.append_batch(&topic, partition, &batch);
+            let key = (topic, partition);
+            let first = self
+                .txn
+                .open
+                .get_mut(&key)
+                .and_then(|open| open.remove(&stamp.producer_id));
+            if let (false, Some(first)) = (commit, first) {
+                self.txn
+                    .aborted
+                    .entry(key)
+                    .or_default()
+                    .push((stamp.producer_id, first, at));
+            }
+        }
+        if commit && let Some(group) = group {
+            let committed = &mut self.groups.entry(group).or_default().committed;
+            for (topic, partition, offset) in offsets {
+                committed.insert((topic, partition), (offset, -1));
+            }
+        }
+        if commit {
+            self.txn.committed += 1;
+        } else {
+            self.txn.aborts += 1;
+        }
+    }
+
+    /// The transaction of `id` when the producer id and epoch are its own:
+    /// Kafka's fencing check.
+    fn txn_check(&self, id: &str, producer_id: i64, epoch: i16) -> i16 {
+        match self.txn.ids.get(id) {
+            None => codes::INVALID_PRODUCER_ID_MAPPING,
+            Some(t) if t.producer_id != producer_id => codes::INVALID_PRODUCER_ID_MAPPING,
+            Some(t) if t.epoch != epoch => codes::PRODUCER_FENCED,
+            Some(_) => codes::NONE,
+        }
+    }
+}
+
+impl FakeBroker {
+    fn init_transactional(&self, id: &str) -> InitProducerIdResponse {
+        let mut state = self.state.borrow_mut();
+        if state.txn.ids.contains_key(id) {
+            state.end_transaction(id, false, 0);
+            if let Some(txn) = state.txn.ids.get_mut(id) {
+                txn.epoch += 1;
+            }
+        } else {
+            let producer_id = state.next_producer_id;
+            state.next_producer_id += 1;
+            state.txn.ids.insert(
+                id.to_string(),
+                FakeTxn {
+                    producer_id,
+                    ..FakeTxn::default()
+                },
+            );
+        }
+        let txn = &state.txn.ids[id];
+        InitProducerIdResponse {
+            error_code: codes::NONE,
+            producer_id: txn.producer_id,
+            producer_epoch: txn.epoch,
+            ..Default::default()
+        }
+    }
+
+    fn add_partitions_to_txn(
+        &self,
+        request: &AddPartitionsToTxnRequest,
+    ) -> AddPartitionsToTxnResponse {
+        let mut state = self.state.borrow_mut();
+        let id = &request.v3_and_below_transactional_id;
+        let check = state.txn_check(
+            id,
+            request.v3_and_below_producer_id,
+            request.v3_and_below_producer_epoch,
+        );
+        let mut results = Vec::new();
+        for topic in &request.v3_and_below_topics {
+            let mut rows = Vec::new();
+            for partition in &topic.partitions {
+                let known = state
+                    .topics
+                    .get(&topic.name)
+                    .is_some_and(|t| t.partitions.contains_key(partition));
+                let code = match (check, known) {
+                    (codes::NONE, true) => codes::NONE,
+                    (codes::NONE, false) => codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    (code, _) => code,
+                };
+                if code == codes::NONE
+                    && let Some(txn) = state.txn.ids.get_mut(id)
+                {
+                    txn.partitions.insert((topic.name.clone(), *partition));
+                }
+                rows.push(AddPartitionsToTxnPartitionResult {
+                    partition_index: *partition,
+                    partition_error_code: code,
+                    ..Default::default()
+                });
+            }
+            results.push(AddPartitionsToTxnTopicResult {
+                name: topic.name.clone(),
+                results_by_partition: rows,
+                ..Default::default()
+            });
+        }
+        AddPartitionsToTxnResponse {
+            results_by_topic_v3_and_below: results,
+            ..Default::default()
+        }
+    }
+
+    fn add_offsets_to_txn(&self, request: &AddOffsetsToTxnRequest) -> AddOffsetsToTxnResponse {
+        let mut state = self.state.borrow_mut();
+        let code = state.txn_check(
+            &request.transactional_id,
+            request.producer_id,
+            request.producer_epoch,
+        );
+        if code == codes::NONE
+            && let Some(txn) = state.txn.ids.get_mut(&request.transactional_id)
+        {
+            txn.group = Some(request.group_id.clone());
+        }
+        AddOffsetsToTxnResponse {
+            error_code: code,
+            ..Default::default()
+        }
+    }
+
+    fn txn_offset_commit(&self, request: &TxnOffsetCommitRequest) -> TxnOffsetCommitResponse {
+        let mut state = self.state.borrow_mut();
+        let id = &request.transactional_id;
+        let mut code = state.txn_check(id, request.producer_id, request.producer_epoch);
+        if code == codes::NONE
+            && state.txn.ids.get(id).and_then(|t| t.group.as_deref()) != Some(&request.group_id)
+        {
+            code = codes::INVALID_TXN_STATE;
+        }
+        if code == codes::NONE
+            && let Some(txn) = state.txn.ids.get_mut(id)
+        {
+            for topic in &request.topics {
+                for p in &topic.partitions {
+                    txn.offsets
+                        .push((topic.name.clone(), p.partition_index, p.committed_offset));
+                }
+            }
+        }
+        TxnOffsetCommitResponse {
+            topics: request
+                .topics
+                .iter()
+                .map(|t| TxnOffsetCommitResponseTopic {
+                    name: t.name.clone(),
+                    partitions: t
+                        .partitions
+                        .iter()
+                        .map(|p| TxnOffsetCommitResponsePartition {
+                            partition_index: p.partition_index,
+                            error_code: code,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn end_txn(&self, request: &EndTxnRequest, now: Millis) -> EndTxnResponse {
+        let mut state = self.state.borrow_mut();
+        let injected = state.txn.end_txn_errors.pop_front();
+        let code = injected.unwrap_or_else(|| {
+            state.txn_check(
+                &request.transactional_id,
+                request.producer_id,
+                request.producer_epoch,
+            )
+        });
+        if code == codes::NONE {
+            state.end_transaction(&request.transactional_id, request.committed, now);
+        }
+        EndTxnResponse {
+            error_code: code,
+            ..Default::default()
+        }
     }
 }

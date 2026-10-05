@@ -52,6 +52,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import { execSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { fitInternalTopics } from '../public/playground/lab/external.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -369,7 +370,7 @@ async function oneBroker(context, base, errors) {
   check(`the process reaches running (${elapsed(since)} after the scenario opened, the module's download and compile included)`, running.alive === true, JSON.stringify(running.state.process));
   check(
     'it runs with the contract environment',
-    canonical(running.state.env) === canonical({ KRABKA_NODE_ID: '1', KRABKA_HOST: '10.0.0.1', KRABKA_VOTERS: '1@10.0.0.1:9093', KRABKA_CLUSTER_ID: expectedClusterId(scenarioId), KRABKA_CONFIG: '{}' }),
+    canonical(running.state.env) === canonical({ KRABKA_NODE_ID: '1', KRABKA_HOST: '10.0.0.1', KRABKA_VOTERS: '1@10.0.0.1:9093', KRABKA_CLUSTER_ID: expectedClusterId(scenarioId), KRABKA_CONFIG: JSON.stringify(fitInternalTopics({}, 1)) }),
     JSON.stringify(running.state.env),
   );
   const boot = await stderrLine(page, 1, 'starting the broker on /data/log', 'the broker to start');

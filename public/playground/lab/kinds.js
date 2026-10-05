@@ -203,7 +203,7 @@ export const KINDS = {
           num("linger_ms", "linger.ms", 5, "How long a batch waits for more records."),
           num("batch_size", "batch.size (bytes)", 16384, "The most bytes a batch holds.", { min: 1 }),
           { key: "enable_idempotence", label: "enable.idempotence", type: "boolean", default: true, emitDefault: false, help: "A producer id and sequence numbers, so a retry never duplicates a record." },
-          { key: "compression", label: "compression.type", type: "select", default: "none", emitDefault: false, options: ["none", "gzip", "snappy"] },
+          { key: "compression", label: "compression.type", type: "select", default: "none", emitDefault: false, options: ["none", "gzip", "snappy", "lz4", "zstd"] },
           {
             key: "headers",
             label: "Headers",
@@ -212,6 +212,15 @@ export const KINDS = {
             validate: (v) => (v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((t) => typeof t === "string") ? null : "an object of header name → text template"),
             help: "Header name → text template.",
           },
+        ],
+      },
+      {
+        type: "advanced",
+        label: "Advanced: transactions",
+        fields: [
+          { key: "transactional_id", label: "transactional.id", type: "text", placeholder: "orders-tx", help: "Set, the records go out in transactions, each record marked with the header lab-txn = \"<n>:commit\" or \"<n>:abort\". Needs acks all and enable.idempotence." },
+          num("transaction_records", "Records per transaction", 10, "The node commits (or aborts) a transaction once it holds this many records, all acknowledged.", { min: 1 }),
+          num("abort_every", "Abort every Nth transaction", 0, "0 never aborts; 3 aborts transactions 3, 6, 9 and so on."),
         ],
       },
     ],
@@ -234,6 +243,7 @@ export const KINDS = {
       if (s.serialization && s.serialization.state !== "ready") parts.push(String(s.serialization.state || "registering"));
       if (s.paused) parts.push("paused");
       parts.push(`${s.acked ?? 0} acked`);
+      if (s.transactions) parts.push(`${s.transactions.committed ?? 0} txn, ${s.transactions.aborted ?? 0} aborted`);
       if (s.failed) parts.push(`${s.failed} failed`);
       else if (s.rate != null && !s.paused) parts.push(`${s.rate}/s`);
       return parts.join(" · ");
@@ -263,6 +273,15 @@ export const KINDS = {
         help: "group.protocol: classic is Kafka's default.",
       },
       { key: "auto_offset_reset", label: "auto.offset.reset", type: "select", default: "latest", emitDefault: false, options: ["latest", "earliest"], help: "Where a partition with no committed offset starts." },
+      {
+        key: "isolation_level",
+        label: "isolation.level",
+        type: "select",
+        default: "read_uncommitted",
+        emitDefault: false,
+        options: ["read_uncommitted", "read_committed"],
+        help: "read_committed reads up to the last stable offset and drops the records of aborted transactions.",
+      },
       num("process_ms", "Processing time per record (ms)", 0, "The logical time one record takes; a slow consumer shows its lag."),
       {
         key: "deserialize",
@@ -323,6 +342,7 @@ export const KINDS = {
       else if (s.paused) parts.push("paused");
       else if (s.state && s.state !== "stable") parts.push(String(s.state).toLowerCase());
       if (s.processed != null) parts.push(`${s.processed} read`);
+      if (s.aborted_seen) parts.push(`${s.aborted_seen} aborted seen`);
       const lag = totalLag(s);
       if (lag != null) parts.push(`lag ${lag}`);
       const n = countOf(s.assignment ?? s.assigned);
@@ -351,6 +371,15 @@ export const KINDS = {
         ],
       },
       num("commit_interval_ms", "commit.interval.ms", 100, "How often the app flushes, waits for its acks and commits.", { min: 1 }),
+      {
+        key: "processing_guarantee",
+        label: "processing.guarantee",
+        type: "select",
+        default: "at_least_once",
+        emitDefault: false,
+        options: ["at_least_once", "exactly_once_v2"],
+        help: "exactly_once_v2 writes the outputs, the changelogs and the consumed offsets in one transaction per commit, and reads read_committed.",
+      },
       {
         key: "deserialize",
         label: "Decode the source through the schema registry",
@@ -453,20 +482,117 @@ export const KINDS = {
     label: "Admin",
     glyph: "⚙",
     color: "#6b7280",
-    description: "The scenario's hidden admin client: it creates the topics through CreateTopics once the cluster has a controller.",
+    description: "The scenario's hidden admin client: it creates the topics through CreateTopics once the cluster has a controller, and polls the cluster's metadata, quorum, offsets and groups.",
     hidden: true,
     fields: [],
     commands: [
       { cmd: "create_topic", label: "Create a topic", bar: false, example: { cmd: "create_topic", name: "payments", partitions: 3, replication_factor: 3 } },
       { cmd: "delete_topic", label: "Delete a topic", bar: false, example: { cmd: "delete_topic", name: "payments" } },
+      // ---- operator commands (the admin's module documentation)
+      {
+        cmd: "alter_config",
+        label: "Set config",
+        title: "IncrementalAlterConfigs: set one topic config",
+        fixed: { resource: "topic" },
+        params: [
+          { key: "name", label: "topic", type: "select", options: (s) => adminTopics(s) },
+          { key: "config", label: "config", type: "text", default: "retention.ms" },
+          { key: "value", label: "value", type: "text", default: "60000" },
+        ],
+        example: { cmd: "alter_config", resource: "topic", name: "orders", set: { "retention.ms": "60000" }, delete: ["cleanup.policy"] },
+      },
+      {
+        cmd: "describe_config",
+        label: "Describe config",
+        title: "DescribeConfigs: the topic's configs land in the state's configs",
+        fixed: { resource: "topic" },
+        params: [{ key: "name", label: "topic", type: "select", options: (s) => adminTopics(s) }],
+      },
+      {
+        cmd: "reassign",
+        label: "Reassign",
+        title: "AlterPartitionReassignments: move a partition to these brokers, the first preferred as leader",
+        params: [
+          { key: "topic", label: "topic", type: "select", options: (s) => adminTopics(s) },
+          { key: "partition", label: "partition", type: "number", default: 0, min: 0, step: 1 },
+          { key: "replicas", label: "replicas", type: "text", placeholder: "3, 1, 2" },
+        ],
+        example: { cmd: "reassign", topic: "orders", partition: 0, replicas: [3, 1, 2] },
+      },
+      {
+        cmd: "cancel_reassign",
+        label: "Cancel reassignment",
+        title: "AlterPartitionReassignments with no replicas: stop a reassignment in progress",
+        enabled: (s) => (s.reassignments || []).length > 0,
+        params: [
+          { key: "topic", label: "topic", type: "select", options: (s) => [...new Set((s.reassignments || []).map((r) => r.topic))] },
+          { key: "partition", label: "partition", type: "number", default: 0, min: 0, step: 1 },
+        ],
+      },
+      {
+        cmd: "elect_leaders",
+        label: "Elect leader",
+        title: "ElectLeaders: preferred moves leadership to the first replica; unclean lets an out-of-sync replica lead a leaderless partition",
+        params: [
+          { key: "type", label: "type", type: "select", options: ["preferred", "unclean"] },
+          { key: "topic", label: "topic", type: "select", options: (s) => adminTopics(s) },
+          { key: "partition", label: "partition", type: "number", default: 0, min: 0, step: 1 },
+        ],
+        example: { cmd: "elect_leaders", type: "preferred", topic: "orders" },
+      },
+      {
+        cmd: "reset_offsets",
+        label: "Reset offsets",
+        title: "OffsetCommit for a group without members, as kafka-consumer-groups --reset-offsets",
+        params: [
+          { key: "group", label: "group", type: "select", options: (s) => (s.cluster?.groups || []).map((g) => g.id) },
+          { key: "topic", label: "topic", type: "select", options: (s) => adminTopics(s) },
+          { key: "to", label: "to", type: "select", options: ["earliest", "latest"] },
+        ],
+        example: { cmd: "reset_offsets", group: "billing", topic: "orders", to: 0 },
+      },
     ],
     edges: (spec) => (spec.config?.bootstrap || []).slice(0, 1).map((b) => edge(spec.id, node(b), "bootstrap")),
     status: (s) => (s && typeof s === "object" && s.state ? String(s.state) : ""),
   },
+  rebalancer: {
+    kind: "rebalancer",
+    label: "Rebalancer",
+    glyph: "⇄",
+    color: "#f59e0b",
+    description: "Reads the partition layout through Metadata and moves replicas and preferred leaders so every broker carries about the same share, with AlterPartitionReassignments and ElectLeaders.",
+    probe: { bootstrap: [1] },
+    fields: [
+      BOOTSTRAP,
+      { key: "goals", label: "Goals", type: "list", default: ["replica_count", "leader_count"], emitDefault: false, placeholder: "replica_count, leader_count", help: "replica_count evens the replicas per broker; leader_count evens the preferred leaders." },
+      num("interval_ms", "Interval (ms)", 10000, "The logical time between two runs.", { min: 1 }),
+      { key: "execute", label: "Execute", type: "boolean", default: true, emitDefault: false, help: "Carry the proposals out. Unchecked, the node only plans." },
+    ],
+    commands: [
+      { cmd: "plan", label: "Plan now", title: "Read the cluster and propose moves without carrying them out" },
+      { cmd: "execute", label: "Execute now", title: "Read the cluster, propose moves and carry them out" },
+      { cmd: "pause", label: "Pause", title: "Stop the periodic runs", enabled: (s) => !s.paused },
+      { cmd: "resume", label: "Resume", title: "Run every interval again", enabled: (s) => Boolean(s.paused) },
+    ],
+    edges: (spec) => (spec.config?.bootstrap || []).map((b) => edge(spec.id, node(b), "bootstrap")),
+    status: (s) => {
+      const parts = [];
+      if (s.paused) parts.push("paused");
+      else if (s.state) parts.push(String(s.state));
+      if (Array.isArray(s.proposals) && s.proposals.length) parts.push(plural(s.proposals.length, "move"));
+      if (s.executed) parts.push(`${s.executed} executed`);
+      return parts.join(" · ");
+    },
+  },
 };
 
+// The topics the admin's cluster observer saw, internal ones left out.
+function adminTopics(s) {
+  return (s?.cluster?.topics || []).filter((t) => !t.internal).map((t) => t.name);
+}
+
 // The kinds the palette offers, in order.
-export const KIND_ORDER = [REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "echo", "pinger"];
+export const KIND_ORDER = [REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "rebalancer", "echo", "pinger"];
 
 const UNKNOWN = {
   kind: "?",
@@ -635,7 +761,7 @@ function realBrokerStatus(s) {
   switch (p.state) {
     case "running": {
       const c = s.connections || {};
-      return `real · ${plural((c.inbound ?? 0) + (c.outbound ?? 0), "conn")}${p.lagging ? " · lagging" : ""}`;
+      return `real · ${plural((c.inbound ?? 0) + (c.outbound ?? 0), "conn")}${p.lagging ? " · lagging" : ""}${p.paused ? " · paused" : ""}${p.disk && p.disk !== "ok" ? ` · disk ${p.disk}` : ""}`; // J3: paused, disk
     }
     case "unavailable":
       return p.reason === MISSING_BUILD ? "no build on this site" : "unavailable";

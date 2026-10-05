@@ -78,7 +78,7 @@ export class Tour {
   }
 
   go(delta) {
-    const steps = this.hooks.steps();
+    const steps = this.steps();
     const next = this.index + delta;
     if (next < 0) return;
     if (next >= steps.length) {
@@ -89,13 +89,22 @@ export class Tour {
     this.render(true);
   }
 
+  // The steps whose target is on screen: a narrow window hides the editing
+  // controls, and a step about one of them would point at nothing.
+  steps() {
+    return this.hooks.steps().filter((step) => {
+      const target = step.target && this.lab ? this.lab.querySelector(step.target) : null;
+      return !step.target || (target && target.getClientRects().length > 0);
+    });
+  }
+
   clearHighlight() {
     if (this.highlighted) this.highlighted.classList.remove("lab-tour-target");
     this.highlighted = null;
   }
 
   render(focus) {
-    const steps = this.hooks.steps();
+    const steps = this.steps();
     const step = steps[this.index];
     if (!step) {
       this.close();
