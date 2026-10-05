@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 
 // Matches, in one pass: fenced code, inline code (both left alone), or a markdown link.
@@ -11,30 +10,35 @@ import path from 'node:path';
 const CODE_OR_LINK = /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))|``[^`]+``|`[^`\n]+`)|\[([^\]]+)\]\(([^)]+)\)|\[(`[^`\n]+`)\](?![(\[:])/gm;
 
 /** Rewrite relative links in a synced guide so they resolve on krabka.io or GitHub. */
-export function rewriteDocLinks(content, { docsSubdir, repo, sourceDocsDir }) {
-  return content.replace(CODE_OR_LINK, (match, code, _fence, label, target, intraDoc) => {
+export function rewriteDocLinks(content, { docsSubdir, repo, sourceFile = '', sourceRef = 'main', publishedFiles }) {
+  return content.replace(CODE_OR_LINK, (match, code, _fence, label, target, intraDoc, offset) => {
     if (code) return match;
     if (intraDoc) return intraDoc;
 
     // Ignore absolute URLs, anchors, and protocols; a real path has no spaces or commas.
-    if (/^(https?:|mailto:|#)/.test(target) || /[\s,]/.test(target)) {
+    if (/^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(target) || /[\s,]/.test(target)) {
       return match;
     }
 
-    const [rawPath, anchor] = target.split('#');
-    const anchorSuffix = anchor ? `#${anchor}` : '';
+    const matchPath = /^([^?#]*)([?#].*)?$/.exec(target);
+    const rawPath = decodeURIComponent(matchPath[1]);
+    const suffix = matchPath[2] ?? '';
+    const repoPath = path.posix.normalize(path.posix.join('docs', path.posix.dirname(sourceFile), rawPath));
+    if (repoPath.startsWith('../')) throw new Error(`Documentation link leaves the repository: ${target}`);
 
     // 1. Link to sibling markdown guide in the same docs collection
-    if (rawPath.endsWith('.md') && !rawPath.includes('/')) {
-      const slug = rawPath.replace(/\.md$/, '');
+    const guide = repoPath.startsWith('docs/') ? repoPath.slice(5).toLowerCase() : null;
+    if (/\.md$/i.test(repoPath) && guide && (!publishedFiles || publishedFiles.has(guide) || !guide.includes('/') || guide.startsWith('operations/'))) {
+      const slug = repoPath.slice(5).replace(/\.md$/i, '').toLowerCase();
       const destUrl = slug === 'index' ? `/docs/${docsSubdir}` : `/docs/${docsSubdir}/${slug}`;
-      return `[${label}](${destUrl}${anchorSuffix})`;
+      return `[${label}](${destUrl}${suffix})`;
     }
 
     // 2. Relative link to repository code/files (crates/, tests/, examples/, root docs, etc.)
-    const cleanPath = rawPath.replace(/^(\.\.\/)+/, '').replace(/^\.\//, '');
-    const isDocsSibling = fs.existsSync(path.join(sourceDocsDir, cleanPath));
-    const repoPath = isDocsSibling ? `docs/${cleanPath}` : cleanPath;
-    return `[${label}](https://github.com/krabka-io/${repo}/blob/main/${repoPath}${anchorSuffix})`;
+    const encodedPath = repoPath.split('/').map(encodeURIComponent).join('/');
+    const url = content[offset - 1] === '!'
+      ? `https://raw.githubusercontent.com/krabka-io/${repo}/${sourceRef}/${encodedPath}`
+      : `https://github.com/krabka-io/${repo}/blob/${sourceRef}/${encodedPath}`;
+    return `[${label}](${url}${suffix})`;
   });
 }

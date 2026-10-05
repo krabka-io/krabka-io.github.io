@@ -47,7 +47,8 @@ const repoMap: Record<string, string> = {
 const repoName = repoMap[component] || `krabka-${component}`;
 // The guide's file name keeps its case (KIP_MATRIX.md) where the page id does not.
 const fileName =
-  fs.readdirSync(`src/content/docs/${component}`).find((f) => f.toLowerCase() === `${subPath}.md`.toLowerCase()) ?? `${subPath}.md`;
+  fs.readdirSync(`src/content/docs/${component}`, { recursive: true }).find((f) =>
+    f.replaceAll('\\', '/').toLowerCase() === `${subPath}.md`.toLowerCase())?.replaceAll('\\', '/') ?? `${subPath}.md`;
 // Written by scripts/sync-docs.mjs: the commit each component's guides came from.
 const sourcesFile = 'src/content/docs/sources.json';
 const sources = fs.existsSync(sourcesFile) ? JSON.parse(fs.readFileSync(sourcesFile, 'utf8')) : {};

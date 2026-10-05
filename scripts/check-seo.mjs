@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.resolve(__dirname, '..', 'dist');
+const DIST_DIR = path.resolve(process.argv[2] ?? path.join(__dirname, '..', 'dist'));
 
 function getAllHtmlFiles(dir) {
   let results = [];
@@ -11,10 +11,8 @@ function getAllHtmlFiles(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      // Exclude generated compiler docs (javadoc, rustdoc, godoc) and raw chart repository index from site SEO checks
+      // The chart repository contains distribution artifacts, not authored pages.
       if (
-        fullPath.includes('/api/') ||
-        fullPath.includes('\\api\\') ||
         fullPath.endsWith('/charts') ||
         fullPath.endsWith('\\charts') ||
         fullPath.includes('/charts/') ||
@@ -29,6 +27,10 @@ function getAllHtmlFiles(dir) {
 }
 
 const htmlFiles = getAllHtmlFiles(DIST_DIR);
+if (!htmlFiles.length) {
+  console.error(`No built HTML pages in ${DIST_DIR}. Build the site before checking SEO.`);
+  process.exit(1);
+}
 console.log(`\n🔍 [seo-check] Running SEO audit across ${htmlFiles.length} site pages in dist/...\n`);
 
 let passedCount = 0;
@@ -164,6 +166,7 @@ if (issues.length > 0) {
     }
     console.log();
   }
-} else {
-  console.log(`🎉 100% PERFECT SEO SCORE! Every page satisfies technical SEO requirements.\n`);
+} else if (robotsExists && sitemapExists) {
+  console.log('PASS: Built pages satisfy the technical SEO checks.');
 }
+process.exitCode = issues.length || !robotsExists || !sitemapExists ? 1 : 0;

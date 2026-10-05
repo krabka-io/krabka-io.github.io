@@ -32,4 +32,14 @@ assert.equal(
   'Maps to `crate::BrokerConfig::extra_log_dirs`. See [`x`](/docs/streams-go/y).\n```rust\n/// [`Kept`]\n```',
 );
 
+const nested = { docsSubdir: 'broker', repo: 'krabka-broker', sourceFile: 'operations/runbooks/restore.md', sourceRef: 'abc123' };
+assert.equal(
+  rewriteDocLinks('[backup](../backup-restore.md#recover) [config](../../config-reference.md) [code](../../../crates/broker.rs) ![diagram](../figures/flow.svg) [guide](../KIP_MATRIX.md)', nested),
+  '[backup](/docs/broker/operations/backup-restore#recover) [config](/docs/broker/config-reference) [code](https://github.com/krabka-io/krabka-broker/blob/abc123/crates/broker.rs) ![diagram](https://raw.githubusercontent.com/krabka-io/krabka-broker/abc123/docs/operations/figures/flow.svg) [guide](/docs/broker/operations/kip_matrix)',
+);
+assert.equal(rewriteDocLinks('[site](/docs/quickstart) [external](//example.com/a) [up](../../index.md)', nested), '[site](/docs/quickstart) [external](//example.com/a) [up](/docs/broker)');
+assert.throws(() => rewriteDocLinks('[escape](../../../../secret)', nested), /leaves the repository/);
+assert.equal(rewriteDocLinks('[design](../kfcs/proposal.md)', { ...nested, sourceFile: 'operations/backup.md', publishedFiles: new Set(['operations/backup.md']) }), '[design](https://github.com/krabka-io/krabka-broker/blob/abc123/docs/kfcs/proposal.md)');
+assert.equal(rewriteDocLinks('[missing](runbooks/missing.md)', { ...nested, sourceFile: 'operations/backup.md', publishedFiles: new Set(['operations/backup.md']) }), '[missing](/docs/broker/operations/runbooks/missing)');
+
 console.log('check-sync-links: ok');

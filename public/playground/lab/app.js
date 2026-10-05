@@ -287,6 +287,10 @@ class LabApp {
 
     // Right column: the inspector.
     this.inspector = new Inspector(side, {
+      onReturnCanvas: () => {
+        this.canvas.wrap.scrollIntoView({ block: "nearest", behavior: "auto" });
+        (this.canvas.nodeEls.get(this.selection[0])?.g || this.canvas.svg).focus();
+      },
       onCommand: (id, command) => this.command(id, command),
       onControl: (id, command) => this.control(id, command),
       onHostChange: (id, peer) => this.session.setHost(id, peer),
@@ -2229,6 +2233,7 @@ async function boot() {
     window.krabkaLab = app; // for the end-to-end check and the curious
     await app.start();
     root.dataset.ready = "true";
+    root.dataset.startupMs = String(Math.round(performance.now()));
   } catch (err) {
     root.innerHTML = "";
     const p = el("p", "lab-error", `The Cluster Lab failed to load. Check your connection and reload. Details: ${err instanceof Error ? err.message : String(err)}`);

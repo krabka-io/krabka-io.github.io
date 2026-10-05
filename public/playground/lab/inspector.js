@@ -39,6 +39,7 @@ export class Inspector {
     this.root.setAttribute("aria-label", "Inspector");
     const titleRow = el("div", "lab-panel-title-row");
     titleRow.appendChild(el("span", "lab-panel-title", "Inspector"));
+    titleRow.appendChild(button("Back to canvas", "lab-btn-sm", () => this.hooks.onReturnCanvas()));
     this.root.appendChild(titleRow);
     this.emptyMsg = el("div", "lab-overview");
     this.root.appendChild(this.emptyMsg);

@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check website validation and sync guards
+        run: npm run test:website
+
       # Two Rust crates compile to WebAssembly here. The consensus playground
       # and the Cluster Lab (/docs/playground, /docs/lab) are `playground/`,
       # built for wasm32-unknown-unknown by `npm run build`, which runs
@@ -133,10 +136,25 @@ jobs:
           # page), so it is a repository variable; unset, no beacon is added.
           PUBLIC_CF_BEACON_TOKEN: ${{ vars.CF_BEACON_TOKEN }}
 
+      - name: Check built links, SEO and page budgets
+        run: |
+          npm run check-links
+          npm run check-seo
+          npm run check-page-budgets
+
       - name: Check browser proof replay with Z3 and cvc5
         run: |
           npx playwright install --with-deps chromium
+          npm run check-site
           npm run check-proof-smt
+
+      - name: Save website browser checks
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: website-checks
+          path: artifacts/site-check
+          retention-days: 14
 
       # The verification pages render the broker's synced docs/verification.md
       # as expandable rows. This fails when the catalog's layout has drifted so
@@ -183,3 +201,22 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  production-smoke:
+    if: github.ref == 'refs/heads/main'
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Check published pages, essential assets and component APIs
+        run: |
+          node scripts/check-production.mjs
+          node scripts/check-api-links.mjs

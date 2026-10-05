@@ -14,9 +14,10 @@
 //
 // Both are build outputs (gitignored). The page degrades when they are absent.
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { parseVerificationCatalog } from '../src/utils/verification-catalog.ts';
@@ -29,34 +30,30 @@ const DATA_OUT = path.join(ROOT, 'src', 'data', 'proof-sessions.json');
 const COMA_OUT = path.join(ROOT, 'public', 'proofs', 'coma');
 const CATALOG = path.join(ROOT, 'src', 'content', 'docs', 'broker', 'verification.md');
 
-console.log('🦀 [sync-proofs] Syncing Creusot proof sessions...');
-
 // ---- locate the broker checkout -------------------------------------------------
 
 function brokerCheckout() {
   if (fs.existsSync(path.join(LOCAL_REPO, VERIF_SUBDIR))) {
     console.log(`  ✓ Using local checkout at ${LOCAL_REPO}`);
-    return LOCAL_REPO;
+    return { dir: LOCAL_REPO };
   }
-  const tmp = path.join('/tmp', 'krabka-sync-proofs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-proofs-'));
+  const dir = path.join(tmp, 'broker');
   try {
     console.log(`  → Sparse-cloning ${REPO} (verif/, .creusot-version, why3find.json)...`);
-    fs.rmSync(tmp, { recursive: true, force: true });
-    execSync(`git clone --depth 1 --filter=blob:none --sparse https://github.com/${REPO}.git ${tmp}`, { stdio: 'pipe' });
-    execSync(`git -C ${tmp} sparse-checkout set --no-cone /verif /.creusot-version /why3find.json`, { stdio: 'pipe' });
-    return tmp;
+    execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse', `https://github.com/${REPO}.git`, dir], { stdio: 'pipe', timeout: 120000 });
+    execFileSync('git', ['-C', dir, 'sparse-checkout', 'set', '--no-cone', '/verif', '/.creusot-version', '/why3find.json'], { stdio: 'pipe', timeout: 120000 });
+    return { dir, temporary: tmp };
   } catch (err) {
-    console.warn(`  ⚠️ Could not fetch ${REPO}: ${err.message}`);
-    return null;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw new Error(`Could not fetch ${REPO}; previous proof outputs were preserved: ${err.message}`, { cause: err });
   }
 }
 
 function gitCommit(dir) {
-  try {
-    return execSync(`git -C ${dir} rev-parse HEAD`, { stdio: 'pipe' }).toString().trim();
-  } catch {
-    return null;
-  }
+  const commit = execFileSync('git', ['-C', dir, 'rev-parse', '--verify', 'HEAD^{commit}'], { stdio: 'pipe', encoding: 'utf8' }).trim();
+  if (!/^[a-f\d]{40,64}$/i.test(commit)) throw new Error('Proof source checkout has no valid commit');
+  return commit;
 }
 
 // ---- proof.json -----------------------------------------------------------------
@@ -180,131 +177,165 @@ function kindOf(name, kernelNames) {
 
 // ---- main ----------------------------------------------------------------------
 
-const checkout = brokerCheckout();
-if (!checkout) {
-  // The proof explorer page imports the sessions file, so a build without it
-  // fails later with a less helpful message, and a reused workspace would
-  // otherwise publish whatever the previous sync wrote.
-  fs.rmSync(COMA_OUT, { recursive: true, force: true });
-  fs.rmSync(DATA_OUT, { force: true });
-  console.error(`  ✗ No proof sessions: ${REPO} is not checked out beside this repository and could not be cloned. The proof explorer cannot be built without them.`);
-  process.exit(1);
-}
+export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, catalogFile = CATALOG } = {}) {
+  const commit = gitCommit(checkout);
+  const verifDir = path.join(checkout, VERIF_SUBDIR);
+  const creusotVersion = fs.existsSync(path.join(checkout, '.creusot-version')) ? fs.readFileSync(path.join(checkout, '.creusot-version'), 'utf8').trim() : null;
+  const why3find = fs.existsSync(path.join(checkout, 'why3find.json')) ? JSON.parse(fs.readFileSync(path.join(checkout, 'why3find.json'), 'utf8')) : null;
 
-const verifDir = path.join(checkout, VERIF_SUBDIR);
-const creusotVersion = fs.existsSync(path.join(checkout, '.creusot-version')) ? fs.readFileSync(path.join(checkout, '.creusot-version'), 'utf8').trim() : null;
-const why3find = fs.existsSync(path.join(checkout, 'why3find.json')) ? JSON.parse(fs.readFileSync(path.join(checkout, 'why3find.json'), 'utf8')) : null;
-
-// Ledger rows citing each proof session, from the synced catalog when present.
-const ledgerByProof = new Map();
-const kernelNames = new Set();
-if (fs.existsSync(CATALOG)) {
-  const catalog = parseVerificationCatalog(fs.readFileSync(CATALOG, 'utf8'));
-  for (const row of catalog.ledger) {
-    for (const k of row.kernels) kernelNames.add(k.label);
-    for (const proof of row.proofs) {
-      const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json/.exec(proof.url);
-      if (m) ledgerByProof.set(m[1], { row: row.id, label: proof.label, kernels: row.kernels.map((k) => k.label) });
-    }
-  }
-}
-
-fs.rmSync(COMA_OUT, { recursive: true, force: true });
-fs.mkdirSync(COMA_OUT, { recursive: true });
-
-// A session is a directory holding `proof.json`, with the Coma file beside the
-// directory: `<module>/<name>/proof.json` and `<module>/<name>.coma`. A module
-// split across files nests one level deeper, `<module>/<file>/<name>/proof.json`,
-// and so does a derived impl, `<module>/impl_Clone_for_X/clone/proof.json`.
-function sessionDirs(dir, rel = '') {
-  const found = [];
-  for (const entry of fs.readdirSync(dir).sort()) {
-    const full = path.join(dir, entry);
-    if (!fs.statSync(full).isDirectory()) continue;
-    const relPath = rel ? `${rel}/${entry}` : entry;
-    if (fs.existsSync(path.join(full, 'proof.json'))) found.push(relPath);
-    else found.push(...sessionDirs(full, relPath));
-  }
-  return found;
-}
-
-const sessions = [];
-for (const id of sessionDirs(verifDir)) {
-  {
-    const parts = id.split('/');
-    const module = parts[0];
-    const name = parts[parts.length - 1];
-    const implAt = parts.findIndex((p) => p.startsWith('impl_'));
-    const impl = implAt > 0 ? parts.slice(implAt, -1).join('/') : null;
-    const proofFile = path.join(verifDir, id, 'proof.json');
-    const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
-    const comaFile = path.join(verifDir, `${id}.coma`);
-    const coma = fs.existsSync(comaFile) ? fs.readFileSync(comaFile, 'utf8') : null;
-
-    const goals = [];
-    const stats = { leaves: 0, time: 0, maxTime: 0, depth: 0, provers: {}, tactics: {}, stuck: 0 };
-    for (const [theory, byGoal] of Object.entries(proof.proofs ?? {})) {
-      for (const [goal, tree] of Object.entries(byGoal)) {
-        goals.push({ theory, name: goal, tree });
-        treeStats(tree, 0, stats);
+  // Ledger rows citing each proof session, from the synced catalog when present.
+  const ledgerByProof = new Map();
+  const kernelNames = new Set();
+  if (fs.existsSync(catalogFile)) {
+    const catalog = parseVerificationCatalog(fs.readFileSync(catalogFile, 'utf8'));
+    for (const row of catalog.ledger) {
+      for (const k of row.kernels) kernelNames.add(k.label);
+      for (const proof of row.proofs) {
+        const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json/.exec(proof.url);
+        if (m) ledgerByProof.set(m[1], { row: row.id, label: proof.label, kernels: row.kernels.map((k) => k.label) });
       }
     }
-    stats.time = round(stats.time);
-    stats.maxTime = round(stats.maxTime);
+  }
 
-    let comaPath = null;
-    let obligations = [];
-    let source = null;
-    if (coma !== null) {
-      const outFile = path.join(COMA_OUT, `${id}.coma`);
-      fs.mkdirSync(path.dirname(outFile), { recursive: true });
-      fs.writeFileSync(outFile, coma);
-      comaPath = `proofs/coma/${id}.coma`;
-      const spans = parseSpans(coma);
-      obligations = parseObligations(coma, spans);
-      source = parseHeaderSpan(coma);
+  fs.mkdirSync(path.dirname(comaOut), { recursive: true });
+  const staged = fs.mkdtempSync(path.join(path.dirname(comaOut), '.proofs-stage-'));
+  const stagedComa = path.join(staged, 'coma');
+  const stagedData = path.join(staged, 'sessions.json');
+  const previousComa = path.join(staged, 'previous-coma');
+  const previousData = path.join(staged, 'previous-sessions.json');
+  fs.mkdirSync(stagedComa);
+  let published = false;
+  try {
+
+    // A session is a directory holding `proof.json`, with the Coma file beside the
+    // directory: `<module>/<name>/proof.json` and `<module>/<name>.coma`. A module
+    // split across files nests one level deeper, `<module>/<file>/<name>/proof.json`,
+    // and so does a derived impl, `<module>/impl_Clone_for_X/clone/proof.json`.
+    function sessionDirs(dir, rel = '') {
+      const found = [];
+      for (const entry of fs.readdirSync(dir).sort()) {
+        const full = path.join(dir, entry);
+        if (!fs.statSync(full).isDirectory()) continue;
+        const relPath = rel ? `${rel}/${entry}` : entry;
+        if (fs.existsSync(path.join(full, 'proof.json'))) found.push(relPath);
+        else found.push(...sessionDirs(full, relPath));
+      }
+      return found;
     }
 
-    sessions.push({
-      id,
-      module,
-      name,
-      impl,
-      kind: impl ? 'derived' : kindOf(name, kernelNames),
-      goals,
-      stats,
-      obligations,
-      coma: comaPath ? { path: comaPath, bytes: Buffer.byteLength(coma) } : null,
-      source,
-      ledger: ledgerByProof.get(id) ?? null,
-    });
+    const sessions = [];
+    for (const id of sessionDirs(verifDir)) {
+      {
+        const parts = id.split('/');
+        const module = parts[0];
+        const name = parts[parts.length - 1];
+        const implAt = parts.findIndex((p) => p.startsWith('impl_'));
+        const impl = implAt > 0 ? parts.slice(implAt, -1).join('/') : null;
+        const proofFile = path.join(verifDir, id, 'proof.json');
+        const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
+        const comaFile = path.join(verifDir, `${id}.coma`);
+        const coma = fs.existsSync(comaFile) ? fs.readFileSync(comaFile, 'utf8') : null;
+
+        const goals = [];
+        const stats = { leaves: 0, time: 0, maxTime: 0, depth: 0, provers: {}, tactics: {}, stuck: 0 };
+        for (const [theory, byGoal] of Object.entries(proof.proofs ?? {})) {
+          for (const [goal, tree] of Object.entries(byGoal)) {
+            goals.push({ theory, name: goal, tree });
+            treeStats(tree, 0, stats);
+          }
+        }
+        stats.time = round(stats.time);
+        stats.maxTime = round(stats.maxTime);
+
+        let comaPath = null;
+        let obligations = [];
+        let source = null;
+        if (coma !== null) {
+          const outFile = path.join(stagedComa, `${id}.coma`);
+          fs.mkdirSync(path.dirname(outFile), { recursive: true });
+          fs.writeFileSync(outFile, coma);
+          comaPath = `proofs/coma/${id}.coma`;
+          const spans = parseSpans(coma);
+          obligations = parseObligations(coma, spans);
+          source = parseHeaderSpan(coma);
+        }
+
+        sessions.push({
+          id,
+          module,
+          name,
+          impl,
+          kind: impl ? 'derived' : kindOf(name, kernelNames),
+          goals,
+          stats,
+          obligations,
+          coma: comaPath ? { path: comaPath, bytes: Buffer.byteLength(coma) } : null,
+          source,
+          ledger: ledgerByProof.get(id) ?? null,
+        });
+      }
+    }
+
+    const totals = { sessions: sessions.length, leaves: 0, time: 0, provers: {}, tactics: {}, kinds: {}, obligations: 0, modules: new Set(sessions.map((s) => s.module)).size };
+    if (!sessions.length) throw new Error('The broker checkout contains no proof sessions; previous outputs were preserved');
+    for (const s of sessions) {
+      totals.leaves += s.stats.leaves;
+      totals.time += s.stats.time;
+      totals.obligations += s.obligations.length;
+      totals.kinds[s.kind] = (totals.kinds[s.kind] ?? 0) + 1;
+      for (const [p, n] of Object.entries(s.stats.provers)) totals.provers[p] = (totals.provers[p] ?? 0) + n;
+      for (const [t, n] of Object.entries(s.stats.tactics)) totals.tactics[t] = (totals.tactics[t] ?? 0) + n;
+    }
+    totals.time = round(totals.time);
+
+    const data = {
+      source: {
+        repo: REPO,
+        commit,
+        creusot: creusotVersion,
+        why3find: why3find ? { provers: why3find.provers, tactics: why3find.tactics, time: why3find.time, fast: why3find.fast, depth: why3find.depth } : null,
+        synced_at: new Date().toISOString(),
+      },
+      totals,
+      sessions,
+    };
+
+    fs.mkdirSync(path.dirname(dataOut), { recursive: true });
+    fs.writeFileSync(stagedData, JSON.stringify(data));
+    if (fs.existsSync(comaOut)) fs.renameSync(comaOut, previousComa);
+    try {
+      if (fs.existsSync(dataOut)) fs.renameSync(dataOut, previousData);
+    } catch (error) {
+      if (fs.existsSync(previousComa)) fs.renameSync(previousComa, comaOut);
+      throw error;
+    }
+    let installedComa = false;
+    try {
+      fs.renameSync(stagedComa, comaOut);
+      installedComa = true;
+      fs.renameSync(stagedData, dataOut);
+    } catch (error) {
+      if (installedComa) fs.rmSync(comaOut, { recursive: true, force: true });
+      if (fs.existsSync(previousComa)) fs.renameSync(previousComa, comaOut);
+      if (fs.existsSync(previousData)) fs.renameSync(previousData, dataOut);
+      throw error;
+    }
+    console.log(`  ✓ ${sessions.length} sessions, ${totals.leaves} prover goals, ${totals.obligations} labelled obligations → ${path.relative(ROOT, dataOut)} (${(fs.statSync(dataOut).size / 1024).toFixed(0)} KB)`);
+    console.log(`  ✓ Coma sources → ${path.relative(ROOT, comaOut)}`);
+    published = true;
+    return data;
+  } finally {
+    // Retain the backup if a filesystem failure also prevented rollback.
+    if (published || (!fs.existsSync(previousComa) && !fs.existsSync(previousData))) fs.rmSync(staged, { recursive: true, force: true });
   }
 }
 
-const totals = { sessions: sessions.length, leaves: 0, time: 0, provers: {}, tactics: {}, kinds: {}, obligations: 0, modules: new Set(sessions.map((s) => s.module)).size };
-for (const s of sessions) {
-  totals.leaves += s.stats.leaves;
-  totals.time += s.stats.time;
-  totals.obligations += s.obligations.length;
-  totals.kinds[s.kind] = (totals.kinds[s.kind] ?? 0) + 1;
-  for (const [p, n] of Object.entries(s.stats.provers)) totals.provers[p] = (totals.provers[p] ?? 0) + n;
-  for (const [t, n] of Object.entries(s.stats.tactics)) totals.tactics[t] = (totals.tactics[t] ?? 0) + n;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  console.log('🦀 [sync-proofs] Syncing Creusot proof sessions...');
+  const checkout = brokerCheckout();
+  try {
+    syncProofs(checkout.dir);
+  } finally {
+    if (checkout.temporary) fs.rmSync(checkout.temporary, { recursive: true, force: true });
+  }
 }
-totals.time = round(totals.time);
-
-const data = {
-  source: {
-    repo: REPO,
-    commit: gitCommit(checkout),
-    creusot: creusotVersion,
-    why3find: why3find ? { provers: why3find.provers, tactics: why3find.tactics, time: why3find.time, fast: why3find.fast, depth: why3find.depth } : null,
-    synced_at: new Date().toISOString(),
-  },
-  totals,
-  sessions,
-};
-
-fs.mkdirSync(path.dirname(DATA_OUT), { recursive: true });
-fs.writeFileSync(DATA_OUT, JSON.stringify(data));
-console.log(`  ✓ ${sessions.length} sessions, ${totals.leaves} prover goals, ${totals.obligations} labelled obligations → ${path.relative(ROOT, DATA_OUT)} (${(fs.statSync(DATA_OUT).size / 1024).toFixed(0)} KB)`);
-console.log(`  ✓ Coma sources → ${path.relative(ROOT, COMA_OUT)}`);

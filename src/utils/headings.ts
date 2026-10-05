@@ -21,6 +21,9 @@ export function enhanceHeadings(): HTMLElement[] {
       used.add(id);
       h.id = id;
     }
+    // Card headings keep their section ids, but their enclosing link already
+    // supplies the action. A nested permalink would make invalid links.
+    if (h.closest('a')) continue;
     const link = document.createElement('a');
     link.className = 'heading-anchor';
     link.href = `#${h.id}`;

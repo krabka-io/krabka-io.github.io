@@ -5,9 +5,13 @@ import krabTheme from '../utils/krabka-shiki-theme.mjs';
 import versions from '../data/versions.json';
 
 const startCommand = 'curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml && docker compose up -d';
-// The Kafka CLI from its own image, inside the broker's network namespace, so
-// localhost:9092 reaches the broker and nothing needs installing.
-const produceCommand = 'docker run --rm -it --network container:krabka-quickstart-broker-1 apache/kafka:4.3.1 /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic events';
+const tasks = [
+  { title: 'Try in your browser', href: '/docs/browser-tools' },
+  { title: 'Run locally', href: '/docs/quickstart' },
+  { title: 'Migrate from Kafka', href: '/docs/migration' },
+  { title: 'Operate a cluster', href: '/docs/operations' },
+  { title: 'Explore verification', href: '/verification' },
+];
 
 // Shiki puts the space before a word inside that word's span. The stylesheet keeps
 // each word whole (`.code-block-wrap`), so the space has to sit outside it, or the
@@ -58,6 +62,8 @@ const spaceOutsideToken = {
             </svg>
           </a>
 
+          <a href={getPath('/docs/browser-tools')} class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-base font-semibold text-white transition-all hover:border-white/40 hover:bg-white/10">Try in your browser</a>
+
           <a
             href="https://github.com/krabka-io"
             target="_blank"
@@ -70,6 +76,7 @@ const spaceOutsideToken = {
             GitHub
           </a>
         </div>
+        <p class="text-sm text-gray-400">No install is needed for the browser tools. Cluster Lab is view-only on phones; use a wider screen to edit and inject faults.</p>
 
       </div>
 
@@ -98,30 +105,18 @@ const spaceOutsideToken = {
           </div>
         </div>
 
-        <!-- Box 2: Produce Records -->
+        <!-- The complete round trip lives in the quickstart. -->
         <div class="dark-island frosted-card rounded-2xl p-4 shadow-xl border border-white/10 bg-slate-900/85">
-          <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2.5 mb-3">
-            <span class="text-xs font-semibold text-gray-300 font-sans">2. Produce records with the stock Kafka CLI (no install)</span>
-            <button
-              type="button"
-              class="copy-btn flex shrink-0 items-center gap-1 rounded bg-white/5 px-2 py-1 text-xs text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans"
-              data-copy={produceCommand}
-            >
-              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <span>Copy</span>
-            </button>
-          </div>
-
-          <div class="font-mono text-xs sm:text-sm text-gray-200 bg-black/40 p-2.5 rounded-lg border border-white/5 overflow-x-auto flex items-start gap-2">
-            <span class="text-gray-500 select-none leading-[1.65]">$</span>
-            <div class="code-block code-block-bare code-block-wrap min-w-0 flex-1 select-all"><Code code={produceCommand} lang="bash" theme={krabTheme} wrap={null} transformers={[spaceOutsideToken]} /></div>
-          </div>
+          <p class="text-xs font-semibold text-gray-300">2. Produce and read a record</p>
+          <p class="mt-3 text-sm text-gray-400">Check readiness, create a topic, and read <code>hello krabka</code> using Kafka tools in a container.</p>
+          <a href={getPath('/docs/quickstart')} class="mt-4 inline-flex text-sm font-semibold text-krab-400 underline underline-offset-4 hover:text-krab-300">Follow the complete quickstart →</a>
         </div>
 
       </div>
 
     </div>
+    <nav aria-label="Choose a task" class="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {tasks.map(task => <a href={getPath(task.href)} class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-gray-200 hover:border-krab-500/50 hover:text-white">{task.title} →</a>)}
+    </nav>
   </div>
 </section>
