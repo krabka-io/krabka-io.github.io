@@ -1,0 +1,64 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const guides = [
+  { title: 'Deploy and configure', href: '/docs/broker/operations/deploy', description: 'Choose an image, format storage, configure listeners, and connect health probes.' },
+  { title: 'Backup and restore', href: '/docs/broker/operations/backup-restore', description: 'Capture recovery inputs, verify their integrity, and set a recovery rehearsal schedule.' },
+  { title: 'Restore from the archive', href: '/docs/broker/operations/runbooks/restore-from-archive', description: 'Rebuild after data loss, restore group positions, and expand the restored single-node cluster.' },
+  { title: 'Rolling upgrade', href: '/docs/broker/operations/deploy#rolling-upgrade', description: 'Check cluster health, replace one broker at a time, and wait for readiness and replication.' },
+  { title: 'Metrics and alerts', href: '/docs/broker/operations/metrics', description: 'Find metric names, labels, health conditions, and the linked alert runbooks.' },
+  { title: 'Scale a cluster', href: '/docs/broker/operations/scaling', description: 'Add capacity, move replicas, and drain a broker with the required replication checks.' },
+];
+---
+
+<DocsLayout title="Operate a cluster" description="Broker deployment, backup and recovery, rolling upgrades, monitoring, and operational limits." currentSlug="/docs/operations">
+  <div class="space-y-6 text-sm leading-relaxed text-gray-300">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Operate a cluster</h1>
+      <p class="mt-2 max-w-2xl text-gray-400">Start with the procedure for your task. Each imported guide names its source branch, commit, and commit date above the instructions.</p>
+      <p class="mt-3 text-xs text-gray-400">Index reviewed: <time datetime="2026-10-04">October 4, 2026</time>. The procedures follow the broker source branch; this index does not certify them for every release.</p>
+    </div>
+
+    <aside class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+      The broker is pre-1.0 and has no persisted-state compatibility guarantee between builds. Review the source guide and changelog for the exact build you deploy. Test recovery and any upgrade or rollback on a disposable cluster before using them on retained data.
+    </aside>
+
+    <h2 class="text-xl font-bold text-white">Choose a task</h2>
+    <div class="grid gap-3 sm:grid-cols-2">
+      {guides.map((guide) => (
+        <a href={getPath(guide.href)} class="rounded-xl border border-white/10 px-4 py-3 hover:border-krab-500/50 transition-colors">
+          <span class="block font-semibold text-white">{guide.title}</span>
+          <span class="mt-1 block text-xs text-gray-400">{guide.description}</span>
+        </a>
+      ))}
+    </div>
+
+    <h2 class="text-xl font-bold text-white">Prepare and rehearse backup recovery</h2>
+    <p>Read <a href={getPath('/docs/broker/operations/backup-restore')} class="text-krab-400 underline underline-offset-2">Backup and restore</a> before the cluster loses data, then follow <a href={getPath('/docs/broker/operations/runbooks/restore-from-archive')} class="text-krab-400 underline underline-offset-2">Restore from the archive</a> for the full recovery sequence.</p>
+    <ul class="list-disc space-y-2 pl-5">
+      <li>Prerequisites: a readable tiered-storage archive, a verified capture with the RLMM snapshot, controller metadata checkpoint, and committed group offsets, archive credentials, and enough space in an empty target directory. Record the cluster id outside the source cluster. For signed captures, retain the verification key and trusted chain head independently of the archive.</li>
+      <li>Run the capture integrity check and the restore dry run first. Capture verification exits <code>0</code> when all artifacts match and <code>5</code> on an integrity mismatch. Confirm that the dry-run plan contains the expected topics, partitions, and record counts before writing data.</li>
+      <li>After restoration, confirm topic settings and record contents. Restore group offsets while the consumer groups are stopped, then start consumers and check lag against the restored end offsets.</li>
+      <li>Recovery limits: a restore produces a single-node cluster with one replica per partition. Expand it through reassignment afterward. In-flight transactions and data beyond the reported capture boundary do not return. Without the metadata checkpoint, topic configuration, ACLs, quotas, credentials, and feature levels do not return.</li>
+    </ul>
+    <p class="text-xs text-gray-400">The upstream guide names the per-change <code>dr_roundtrip.rs</code> test and a digest-pinned qualification drill. Check their evidence for your candidate build. No independent operator rehearsal or tested release pair is recorded by this index.</p>
+
+    <h2 class="text-xl font-bold text-white">Plan an upgrade and a rollback</h2>
+    <p>Follow <a href={getPath('/docs/broker/operations/deploy#rolling-upgrade')} class="text-krab-400 underline underline-offset-2">Rolling upgrade</a> only after reviewing both builds' changelogs and storage format compatibility.</p>
+    <ol class="list-decimal space-y-2 pl-5">
+      <li>Capture and verify recovery inputs. Record the running image digest, configuration, feature levels, and the proposed target digest. Rehearse the change and the recovery path on a disposable cluster.</li>
+      <li>Start with zero under-replicated and offline partitions. Stop one broker with <code>SIGTERM</code>, allow controlled shutdown to finish, and replace its build using the same data directory only when formats are compatible.</li>
+      <li>Wait for <code>/readyz</code> to return <code>200</code> and under-replicated partitions to return to zero before moving to the next broker. Roll the controller leader last, then run the preferred leader election described in the guide.</li>
+      <li>If checks fail, stop the rollout. Return to the previous build only after testing that it can read the changed persisted state and feature levels. If compatibility is unverified or the format changed, use the rehearsed backup restoration path; do not assume an image-tag change reverses the upgrade.</li>
+    </ol>
+    <p>A format-changing build requires a fresh format and restoration of topic data according to the upstream guide. Kubernetes readiness and a PodDisruptionBudget do not check the under-replicated-partition gauge; the operator must check replication health.</p>
+
+    <h2 class="text-xl font-bold text-white">Check the release and deployment scope</h2>
+    <p><a href={getPath('/versions')} class="text-krab-400 underline underline-offset-2">Release status</a> distinguishes version tracks from operational qualification. Use <a href={getPath('/docs/broker/qualification')} class="text-krab-400 underline underline-offset-2">broker qualification gates</a> to find candidate evidence, <a href={getPath('/docs/operator')} class="text-krab-400 underline underline-offset-2">operator guidance</a> for operator-managed clusters, and the <a href={getPath('/docs/broker/config-reference')} class="text-krab-400 underline underline-offset-2">configuration reference</a> for your source branch.</p>
+
+    <h2 class="text-xl font-bold text-white">Guide ownership and review</h2>
+    <p>Broker maintainers own the imported operational procedures. The website maintainer owns this index, navigation, imported source labels, and recurring link checks. Review the index and source links monthly and whenever broker commands, storage formats, recovery contracts, or release requirements change. Review imported guides against the candidate release before adopting them.</p>
+    <p>Record operator rehearsals with exact source and target digests, configuration, capture boundary, expected checks, observed output, and failures in the <a href="https://github.com/krabka-io/krabka-broker/issues" class="text-krab-400 underline underline-offset-2">broker issue tracker</a>. A second engineer's recovery and upgrade rehearsal remains required before this plan's operational acceptance criteria are complete.</p>
+  </div>
+</DocsLayout>

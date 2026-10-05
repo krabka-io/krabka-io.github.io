@@ -1,6 +1,6 @@
 # krabka-io.github.io
 
-The official website and unified documentation hub for the [Krabka](https://github.com/krabka-io) streaming ecosystem, built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com).
+The official website and unified documentation hub for the [krabka](https://github.com/krabka-io) streaming ecosystem, built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com).
 
 Hosted live at [krabka.io](https://krabka.io) and [krabka-io.github.io](https://krabka-io.github.io).
 
@@ -304,6 +304,67 @@ krabka-io.github.io/
 ```
 
 ---
+
+## Website checks and review
+
+Run these checks after syncing guides and proofs and building all browser assets:
+
+```bash
+npm run test:website
+npm run test:snippets
+npm run build:site
+npm run check-links
+npm run check-seo
+npm run check-page-budgets
+npx playwright install chromium
+npm run check-site
+# Network checks against the deployed site, independent of local build results:
+npm run check-production
+npm run check-api-links
+```
+
+The deploy workflow runs the local checks before publishing. It retains the browser screenshots, controlled timings, and payload report as the `website-checks` Actions artifact. Production smoke checks run after a main-branch deployment and on the daily schedule. A successful local build does not establish deployment success.
+
+`check-site` checks the entry pages, operations index, releases, search, lab, and proof explorer at 390 and 1440 pixels in both themes. It checks visible control names, page overflow, keyboard navigation, release filtering, inspector focus return, and ten maintained search queries. It writes `artifacts/site-check/measurements.json` and screenshots. `check-page-budgets` writes `build.json` in that directory and rejects missing pages, missing assets, or payload overruns.
+
+Measurements use a loopback static server with no network throttling, one sample per visit, and a fresh browser context followed by a repeat visit. The server sends `no-store`; the repeat visit can reuse browser compilation and storage, but does not measure a warm HTTP cache. These measurements are separate from field Web Vitals. Keep the profile and sample count with any comparison. Record field LCP, INP, and CLS only when there are enough real visits to report their 75th percentile.
+
+The October 2026 build baseline used upstream guides and proof sessions synced on October 4 and the deployed WASM modules. It was measured before a new Rust build or production deployment:
+
+| Payload | Raw bytes | Gzip bytes |
+| --- | ---: | ---: |
+| Ordinary entry-page HTML | 31–99 KB | 7.6–19.6 KB |
+| Benchmark HTML | 388,472 | 84,648 |
+| Proof explorer HTML | 2,828,662 | 249,113 |
+| Lab JavaScript | 814,225 | 242,038 |
+| Broker WASM | 15,226,339 | 5,666,758 |
+| Playground WASM | 6,569,972 | 2,481,890 |
+| Brand preview images | 26,374 | 26,604 |
+
+The group sizes sum files; gzip sizes estimate per-file compression, not the site's transfer encoding. Review `scripts/page-budgets.json` before changing a ceiling. The brand gallery uses small WebP previews; original download URLs remain public contracts. Run `npm run build:brand` after changing an original image.
+
+### Manual task protocol for issue #91
+
+Use a clean environment and record exact image digests, client versions, device/browser, network profile, theme, date, participant count, completion, elapsed time, and failures. Keep cleanup separate and use disposable clusters for recovery tests.
+
+1. Observe five first-time participants: find the browser trial, run the local quickstart, produce and read `hello krabka`, then find compatibility and migration guidance. Record assistance and where each person stops. The proposed criterion is four independent completions out of five.
+2. Ask five participants to predict and run the minimum-ISR lab experiment, explain the visible result, and find the local-install next step. Record the same measures. Repeat these tasks in March with the same protocol; do not infer traffic or conversion rates from the small sample.
+3. Have a second engineer rehearse backup/restore and upgrade/recovery on a disposable cluster. Record capture boundaries, source/target digests, readiness and replication checks, expected output, observed output, and unsupported cases. A previous image is a recovery option only after persisted-format compatibility has been tested.
+4. Review keyboard order, visible focus, accessible names, announcements, contrast, reduced motion, screen-reader reading, and 200%/400% zoom against WCAG 2.2 AA. Check phone, tablet, and desktop widths in both themes, including app controls. Record remaining gaps. Automated structural checks do not establish accessibility conformance.
+5. Review available analytics and search questions before selecting the next tutorial. Run its published commands from a clean environment. Check the ten queries in `scripts/check-site.mjs` and record missing or misleading results.
+
+The observed user studies, second-engineer rehearsals, full accessibility review, field measurements, and demand-based tutorial selection remain open acceptance work in [#91](https://github.com/krabka-io/krabka-io.github.io/issues/91).
+
+| Review owner | Content or check | Review interval |
+| --- | --- | --- |
+| Website maintainer | Quickstart, Get Started, browser-tools guide, navigation, search and budgets | Monthly and after setup or UI changes |
+| Broker maintainers | Imported operations, configuration, qualification, compatibility and migration procedures | Every candidate release and after recovery-contract changes |
+| Client maintainers | Runnable language example and imported client guides | Every client release |
+| Verification maintainers | Proof and kernel scope, evidence links and guided lab checks | After catalog, broker or scenario changes |
+| Component maintainers | Compiler API publication and release metadata | Every release; daily availability checks |
+| Website maintainer | Production smoke checks and manual task records | Daily automated checks; monthly review of failures |
+
+Assign a named reviewer from each role when scheduling the manual work. The imported guide's source date is the commit date, not a record of a human review.
 
 ## 📜 License
 

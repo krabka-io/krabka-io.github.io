@@ -59,8 +59,8 @@ const controls = [
   </header>
 
   <div id="krabka-lab" class="not-prose" data-lab-wasm={wasmVersion('krabka_playground_bg.wasm')} data-broker-wasm={wasmVersion('broker/krabka-broker.wasm')}>
-    <p class="lab-fallback">
-      Loading the Cluster Lab. This panel needs JavaScript and WebAssembly. If it does not appear, your browser may have them disabled.
+    <p class="lab-fallback" role="status">
+      Loading the Cluster Lab. The first visit downloads WebAssembly modules (about 22 MB in total). Keep this page open while it loads. This panel needs JavaScript and WebAssembly.
     </p>
   </div>
 
@@ -79,6 +79,17 @@ const controls = [
     </div>
 
     <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+      <h2 id="guided-experiment" class="text-xl font-bold text-white pt-2">Try an experiment: when must a write stop?</h2>
+      <p>Can an <code>acks=all</code> producer write when a topic needs three in-sync replicas but only two remain? Predict the result before opening the experiment below.</p>
+      <LabLink preset="min-isr" title="Watch the minimum in-sync replica rule" description="This experiment runs the existing three-broker scenario, kills one replica, raises the required ISR to three, then restarts the replica." />
+      <ol class="list-decimal pl-5 space-y-2">
+          <li>Open <strong>Build · Scenarios · Connect</strong>, then choose <strong>Scenarios</strong> to see the experiment checks. Set Speed to <strong>5×</strong> to advance the two minutes of lab time faster.</li>
+          <li>Watch the checks: the ISR falls to two, and writes still succeed with the original minimum.</li>
+        <li>When the minimum rises to three, expect <code>NOT_ENOUGH_REPLICAS</code> and no acknowledged writes.</li>
+        <li>After the replica restarts and the ISR returns to three, expect acknowledged writes to resume. The experiment lists each check and its result.</li>
+      </ol>
+      <p>The minimum protects the requested replication level by refusing writes until enough replicas are in sync. This is an experiment in simulated time; it does not measure throughput or disk durability. Next, <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">run a broker locally and produce and consume a record</a>, then use <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2">the operations guides</a> before changing a cluster.</p>
+
       <h2 class="text-xl font-bold text-white pt-2">What to try</h2>
       <p>
         Load <strong class="text-white">Three brokers, a producer and a consumer group</strong> from the presets and set the

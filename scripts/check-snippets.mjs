@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { websiteSnippets, markdownSnippets } from './snippets/extract.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '');
+const root = fileURLToPath(new URL('../', import.meta.url)).replaceAll('\\', '/').replace(/\/$/, '');
+const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash';
 const work = `${root}/.snippets`;
 const mode = process.argv[2] ?? 'check';
 const project = `website-snippets-${process.pid}`;
@@ -29,10 +30,12 @@ function get(id) {
   return found.code;
 }
 function shell(code, name, options = {}) {
-  return run('bash', ['-euo', 'pipefail', write(`${name}.sh`, code)], work, options);
+  // Git Bash otherwise rewrites Linux container paths such as /opt/kafka.
+  const env = { ...process.env, ...options.env, ...(process.platform === 'win32' ? { MSYS_NO_PATHCONV: '1' } : {}) };
+  return run(bash, ['-euo', 'pipefail', write(`${name}.sh`, code)], work, { ...options, env });
 }
 function localAssets(code) {
-  const assets = code.replaceAll('https://krabka.io/quickstart/', `${mode === 'helm' ? '' : 'file://'}${root}/public/quickstart/`);
+  const assets = code.replaceAll('https://krabka.io/quickstart/', mode === 'helm' ? `${root}/public/quickstart/` : pathToFileURL(`${root}/public/quickstart/`).href);
   // Test the packaged charts this branch will publish, including their versions.
   return mode === 'helm'
     ? assets.replace(/krabka\/(krabka-[\w-]+) --version ([\d.]+)/g, (_, chart, version) => `${root}/public/charts/${chart}-${version}.tgz --version ${version}`)
@@ -57,17 +60,22 @@ async function guide(language) {
 }
 
 // Use the tools image documented by the quickstart, including its immutable digest.
-const toolsImage = get('docs/quickstart/composeCode').match(/KAFKA_TOOLS=(\S+)/)[1];
+const toolsImage = get('docs/quickstart/composeReadyCode').match(/KAFKA_TOOLS=(\S+)/)[1];
 const compose = ['compose', '--project-name', project, '-f', `${work}/docker-compose.yml`];
-const kafka = (tool, args, options = {}) => run('docker', ['run', '--rm', '--network', 'host', toolsImage, `/opt/kafka/bin/kafka-${tool}.sh`, '--bootstrap-server', 'localhost:9092', ...args], work, { timeout: 60000, ...options });
+function brokerNetwork() {
+  const id = run('docker', [...compose, 'ps', '-q', 'broker'], work, { stdio: ['ignore', 'pipe', 'inherit'] }).toString().trim();
+  assert(id, 'Quickstart broker container is missing');
+  return `container:${id}`;
+}
+const kafka = (tool, args, options = {}) => run('docker', ['run', '--rm', '--network', brokerNetwork(), toolsImage, `/opt/kafka/bin/kafka-${tool}.sh`, '--bootstrap-server', 'localhost:9092', ...args], work, { timeout: 60000, ...options });
 const readiness = `for attempt in {1..60}; do
-  if docker run --rm --network host -v '${work}/admin.properties:/tmp/admin.properties:ro' '${toolsImage}' /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties --list; then exit 0; fi
+  if docker run --rm --network "$BROKER_NETWORK" -v '${work}/admin.properties:/tmp/admin.properties:ro' '${toolsImage}' /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties --list; then exit 0; fi
   sleep 2
 done
 exit 1`;
 write('admin.properties', 'default.api.timeout.ms=5000\nrequest.timeout.ms=5000\n');
 function waitForBroker() {
-  shell(readiness, 'wait-for-broker', { timeout: 10 * 60 * 1000 });
+  shell(readiness, 'wait-for-broker', { env: { BROKER_NETWORK: brokerNetwork() }, timeout: 10 * 60 * 1000 });
 }
 function withBroker(test) {
   write('docker-compose.yml', readFileSync(`${root}/public/quickstart/docker-compose.yml`));
@@ -103,7 +111,7 @@ if (mode === 'go') {
   for (const block of blocks) {
     console.log(`Testing ${block.id} (${block.heading})`);
     if (block.lang === 'shell') {
-      run('bash', ['-n'], work, { input: block.code });
+      run(bash, ['-n'], work, { input: block.code });
       if (block.heading === 'Installation') shell(`cd '${goDir}'\n${block.code}`, 'guide-go-install');
     } else if (block.heading === 'Installation') {
       // Import-only documentation fragment: blank imports check every package exists.
@@ -209,7 +217,7 @@ if (mode === 'java') {
   }
   write('java/maven/pom.xml', `<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>website</groupId><artifactId>snippets</artifactId><version>0</version><dependencies>${blocks[1].code}</dependencies></project>`);
   run('mvn', ['-B', 'dependency:resolve'], `${work}/java/maven`);
-  run('bash', ['-n'], work, { input: blocks.at(-1).code });
+  run(bash, ['-n'], work, { input: blocks.at(-1).code });
 }
 
 if (mode === 'python' || mode === 'javascript') {
@@ -223,10 +231,12 @@ if (mode === 'python' || mode === 'javascript') {
     run(`${dir}/venv/bin/python`, ['-m', 'pip', 'install', dependency]);
     command = `${dir}/venv/bin/python`; args = [file];
   } else {
-    const file = write('javascript/app.cjs', code);
-    write('javascript/package.json', '{"private":true}\n');
-    run('npm', ['install', '--no-audit', '--no-fund', code.match(/npm install (\S+)/)[1]], dir);
-    command = 'node'; args = [file];
+    const file = write('javascript/app.cjs', readFileSync(`${root}/public/quickstart/javascript/app.cjs`, 'utf8'));
+    assert.equal(readFileSync(file, 'utf8').trim(), code.trim(), 'downloadable JavaScript differs from the displayed example');
+    write('javascript/package.json', readFileSync(`${root}/public/quickstart/javascript/package.json`, 'utf8'));
+    if (process.platform === 'win32') run('cmd.exe', ['/d', '/s', '/c', 'npm install --no-audit --no-fund'], dir);
+    else run('npm', ['install', '--no-audit', '--no-fund'], dir);
+    command = process.execPath; args = [file];
   }
   withBroker(() => {
     topic('quickstart-events');
@@ -241,26 +251,16 @@ if (mode === 'compose') {
   const env = { ...process.env, COMPOSE_PROJECT_NAME: project };
   try {
     run('docker', [...compose, 'config', '--quiet']);
-    // The documentation starts the stack before using Kafka. Poll at that boundary.
-    const quickstart = localAssets(get('docs/quickstart/composeCode'))
-      .replace('docker compose up -d', 'docker compose up -d\nbash wait-for-broker.sh');
-    write('wait-for-broker.sh', readiness);
-    const output = shell(quickstart, 'compose-quickstart', { env, stdio: ['ignore', 'pipe', 'inherit'] }).toString();
+    shell(localAssets(get('docs/quickstart/composeCode')), 'compose-start', { env });
+    waitForBroker();
+    shell(get('docs/quickstart/composeReadyCode'), 'compose-ready', { env });
+    const output = shell(get('docs/quickstart/composeVerifyCode'), 'compose-verify', { env, stdio: ['ignore', 'pipe', 'inherit'] }).toString();
     assert(output.split('\n').includes('hello krabka'), 'Compose quickstart did not roundtrip its record');
     shell(localAssets(get('get-started/deploySnippets.docker')), 'get-started-docker', { env });
     waitForBroker();
-    // Supply stdin and a bound for the two interactive CLI examples.
-    for (const tool of ['topics', 'console-producer', 'console-consumer', 'metadata-quorum', 'consumer-groups', 'broker-api-versions']) {
-      const path = write(`bin/kafka-${tool}.sh`, `#!/usr/bin/env bash\nexec docker run --rm -i --network host '${toolsImage}' /opt/kafka/bin/kafka-${tool}.sh \"$@\"\n`);
-      run('chmod', ['+x', path]);
-    }
-    process.env.PATH = `${work}/bin:${process.env.PATH}`;
-    const cli = get('get-started/clientSnippets.cli').split('\n');
-    shell(cli[0], 'cli-create');
-    shell(cli[1], 'cli-produce', { input: 'website CLI roundtrip\n' });
-    const consumed = shell(`${cli[2]} --max-messages 1 --timeout-ms 30000`, 'cli-consume', { stdio: ['ignore', 'pipe', 'inherit'], timeout: 60000 }).toString();
-    assert(consumed.split('\n').includes('website CLI roundtrip'), 'CLI snippet did not roundtrip its record');
-    shell(get('get-started/inspectSnippet'), 'inspect', { timeout: 120000 });
+    const consumed = shell(get('get-started/clientSnippets.cli'), 'cli-roundtrip', { env, stdio: ['ignore', 'pipe', 'inherit'], timeout: 120000 }).toString();
+    assert(consumed.split('\n').includes('hello krabka'), 'CLI snippet did not roundtrip its record');
+    shell(get('get-started/inspectSnippet'), 'inspect', { env, timeout: 120000 });
   } finally {
     run('docker', [...compose, 'logs', '--no-color']);
     run('docker', [...compose, 'down', '--volumes', '--remove-orphans']);
@@ -271,8 +271,10 @@ if (mode === 'helm') {
   const env = { ...process.env, KUBECONFIG: `${work}/kubeconfig` };
   try {
     run('kind', ['create', 'cluster', '--name', project, '--kubeconfig', env.KUBECONFIG, '--wait', '120s'], work, { env });
-    const result = shell(localAssets(get('docs/quickstart/helmCode')), 'helm-quickstart', { env, stdio: ['ignore', 'pipe', 'inherit'], timeout: 25 * 60 * 1000 }).toString();
+    shell(localAssets(get('docs/quickstart/helmCode')), 'helm-start', { env, timeout: 25 * 60 * 1000 });
+    const result = shell(get('docs/quickstart/helmVerifyCode'), 'helm-verify', { env, stdio: ['ignore', 'pipe', 'inherit'], timeout: 5 * 60 * 1000 }).toString();
     assert(result.split('\n').includes('hello krabka'), 'Helm quickstart did not roundtrip its record');
+    shell(localAssets(get('docs/quickstart/helmCleanupCode')), 'helm-cleanup', { env, timeout: 10 * 60 * 1000 });
     shell(localAssets(get('get-started/deploySnippets.helm')), 'get-started-helm', { env, timeout: 20 * 60 * 1000 });
     run('kubectl', ['wait', '--for=condition=Ready', 'kafkatopic/quickstart', '--timeout=5m'], work, { env });
   } finally {
@@ -286,7 +288,7 @@ if (mode === 'check') {
 }
 for (const snippet of snippets) {
   console.log(`${snippet.id} (${snippet.lang})`);
-  if (['bash', 'shell'].includes(snippet.lang)) run('bash', ['-n'], work, { input: snippet.code });
+  if (['bash', 'shell'].includes(snippet.lang)) run(bash, ['-n'], work, { input: snippet.code });
   assert(['bash', 'shell', 'rust', 'go', 'java', 'kotlin', 'xml', 'text', 'python', 'javascript'].includes(snippet.lang), `Uncovered language: ${snippet.id}`);
 }
 write('inventory.json', JSON.stringify(snippets, null, 2));

@@ -10,6 +10,7 @@ import fs from 'node:fs';
 
 const SITE = 'https://krabka.io';
 const entries = JSON.parse(fs.readFileSync(new URL('../src/data/api-reference.json', import.meta.url), 'utf8'));
+if (!Array.isArray(entries) || !entries.length) throw new Error('The API reference directory is empty');
 
 let failures = 0;
 for (const entry of entries) {
@@ -20,6 +21,9 @@ for (const entry of entries) {
     const placeholder = body.includes('is published upon official release tagging');
     if (!response.ok) {
       console.log(`✗ ${entry.id.padEnd(13)} ${url} -> HTTP ${response.status}`);
+      failures += 1;
+    } else if (!response.headers.get('content-type')?.includes('html') || !/<html\b/i.test(body)) {
+      console.log(`✗ ${entry.id.padEnd(13)} ${url} -> expected an HTML reference page`);
       failures += 1;
     } else if (placeholder) {
       console.log(`✗ ${entry.id.padEnd(13)} ${url} -> still the placeholder page`);

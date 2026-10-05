@@ -1,5 +1,13 @@
 import { execSync } from 'node:child_process';
-import fallbackData from '../data/ecosystem-versions.json';
+import fallbackData from '../data/ecosystem-versions.json' with { type: 'json' };
+
+export type ReleaseTrack = '1.0+' | 'Pre-1.0' | 'Prerelease' | 'Unreleased';
+
+export function releaseTrack(tag: string | null): ReleaseTrack {
+  if (!tag) return 'Unreleased';
+  const match = /^v?(\d+)\.\d+\.\d+$/.exec(tag);
+  return match ? (Number(match[1]) === 0 ? 'Pre-1.0' : '1.0+') : 'Prerelease';
+}
 
 export interface EcosystemRepo {
   repo: string;
@@ -10,9 +18,18 @@ export interface EcosystemRepo {
   releaseUrl: string | null;
   mainCommit: string;
   aheadBy: number | null;
-  status: 'Stable' | 'Beta / Pre-1.0' | 'In Development';
+  releaseTrack: ReleaseTrack;
+  dataSource: 'GitHub' | 'Cached';
   changelogUrl: string;
   compareUrl: string | null;
+}
+
+export interface VersionSnapshot {
+  repos: EcosystemRepo[];
+  source: 'GitHub' | 'Mixed' | 'Cached';
+  builtAt: string;
+  checkedAt: string | null;
+  snapshotCommitDate: string | null;
 }
 
 function resolveGitHubToken(): string | null {
@@ -56,19 +73,28 @@ function tagRelease(repo: string, tags: string[]): { tagName: string; url: strin
   return tagName ? { tagName, url: `https://github.com/krabka-io/${repo}/releases/tag/${tagName}` } : null;
 }
 
-export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
+export async function getEcosystemVersions(): Promise<VersionSnapshot> {
+  const builtAt = new Date().toISOString();
+  let snapshotCommitDate: string | null = null;
+  try {
+    snapshotCommitDate = execSync('git log -1 --format=%cI -- src/data/ecosystem-versions.json', {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 2000,
+    }).trim() || null;
+  } catch {
+    // Source archives may not have Git metadata.
+  }
+  const cachedRepos: EcosystemRepo[] = fallbackData.map(({ status: _status, ...item }) => ({
+    ...item,
+    releaseTrack: releaseTrack(item.releaseVersion),
+    dataSource: 'Cached',
+    changelogUrl: item.releaseUrl || `https://github.com/krabka-io/${item.repo}/commits/main`,
+    compareUrl: item.releaseVersion ? `https://github.com/krabka-io/${item.repo}/compare/${item.releaseVersion}...main` : null,
+  }));
+  const cached: VersionSnapshot = { repos: cachedRepos, source: 'Cached', builtAt, checkedAt: null, snapshotCommitDate };
   const token = resolveGitHubToken();
 
   // If no token is found, return the cached fallback data immediately
-  if (!token) {
-    return fallbackData.map((item) => ({
-      ...item,
-      changelogUrl: item.releaseUrl || `https://github.com/krabka-io/${item.repo}/commits/main`,
-      compareUrl: item.releaseVersion
-        ? `https://github.com/krabka-io/${item.repo}/compare/${item.releaseVersion}...main`
-        : null,
-    })) as EcosystemRepo[];
-  }
+  if (!token) return cached;
 
   try {
     const graphqlQuery = {
@@ -116,15 +142,17 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
 
     if (!response.ok) {
       console.warn(`GitHub GraphQL responded with status ${response.status}; using cached versions.`);
-      return fallbackData as unknown as EcosystemRepo[];
+      return cached;
     }
 
     const payload = await response.json();
-    const liveNodes = payload?.data?.organization?.repositories?.nodes || [];
+    const liveNodes = payload?.data?.organization?.repositories?.nodes;
+    if (payload.errors?.length || !Array.isArray(liveNodes) || !liveNodes.length) return cached;
 
-    const resolved = await Promise.all(
+    const resolved: EcosystemRepo[] = await Promise.all(
       fallbackData.map(async (fallbackItem) => {
         const liveRepo = liveNodes.find((n: { name: string }) => n.name === fallbackItem.repo);
+        if (!liveRepo?.defaultBranchRef?.target?.oid) return cachedRepos.find((item) => item.repo === fallbackItem.repo)!;
         // A repository can tag a version without publishing a GitHub Release.
         // Fall back to its highest semver tag, so the page and `versions.json` agree.
         const release =
@@ -132,7 +160,7 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
           tagRelease(fallbackItem.repo, liveRepo?.tags?.nodes?.map((n: { name: string }) => n.name) ?? []);
         const mainSha = liveRepo?.defaultBranchRef?.target?.oid?.slice(0, 7) || fallbackItem.mainCommit;
 
-        let aheadBy = fallbackItem.aheadBy;
+        let aheadBy: number | null = null;
         let compareUrl: string | null = null;
 
         if (release?.tagName) {
@@ -150,18 +178,12 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
               aheadBy = typeof cmpData.ahead_by === 'number' ? cmpData.ahead_by : aheadBy;
             }
           } catch {
-            // retain fallback aheadBy
+            // A failed comparison has no current ahead count.
           }
         }
 
         const releaseVersion = release?.tagName || null;
         const releaseUrl = release?.url || null;
-        let status: 'Stable' | 'Beta / Pre-1.0' | 'In Development' = 'In Development';
-
-        if (releaseVersion) {
-          status = releaseVersion.startsWith('v1.') ? 'Stable' : 'Beta / Pre-1.0';
-        }
-
         // Dynamically compute provenance: if released, use verified artifact provenance; otherwise Planned (L3)
         let provenance = 'Planned (L3)';
         if (releaseVersion) {
@@ -177,23 +199,19 @@ export async function getEcosystemVersions(): Promise<EcosystemRepo[]> {
           releaseUrl,
           mainCommit: mainSha,
           aheadBy: releaseVersion ? aheadBy : null,
-          status,
+          releaseTrack: releaseTrack(releaseVersion),
+          dataSource: 'GitHub' as const,
           changelogUrl: releaseUrl || `https://github.com/krabka-io/${fallbackItem.repo}/commits/main`,
           compareUrl,
         };
       })
     );
 
-    return resolved;
+    const liveCount = resolved.filter((item) => item.dataSource === 'GitHub').length;
+    return { ...cached, repos: resolved, source: liveCount === resolved.length ? 'GitHub' : liveCount ? 'Mixed' : 'Cached', checkedAt: liveCount ? new Date().toISOString() : null };
   } catch (err) {
     console.warn('Failed to query GitHub for live repo status; using cached versions.', err);
-    return fallbackData.map((item) => ({
-      ...item,
-      changelogUrl: item.releaseUrl || `https://github.com/krabka-io/${item.repo}/commits/main`,
-      compareUrl: item.releaseVersion
-        ? `https://github.com/krabka-io/${item.repo}/compare/${item.releaseVersion}...main`
-        : null,
-    })) as EcosystemRepo[];
+    return cached;
   }
 }
 

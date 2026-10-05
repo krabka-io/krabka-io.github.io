@@ -117,6 +117,7 @@ async function main() {
             topic: 'quickstart-events',
             messages: [{ key: 'user-1', value: 'Hello Krabka from KafkaJS!' }],
         });
+        console.log('Record delivered to quickstart-events.');
     } finally {
         await producer.disconnect();
     }
@@ -126,16 +127,37 @@ main().catch(error => {
     console.error(error);
     process.exitCode = 1;
 });`,
-  cli: `kafka-topics.sh --bootstrap-server localhost:9092 --create --topic quickstart-events --partitions 1 --replication-factor 1
-kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
-kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning`
+  cli: `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
+KAFKA_NETWORK="container:$(docker compose ps -q broker)"
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh \\
+  --bootstrap-server localhost:9092 --create --if-not-exists --topic quickstart-events --partitions 1 --replication-factor 1
+printf 'hello krabka\\n' | docker run --rm -i --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" \\
+  /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-console-consumer.sh \\
+  --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning --max-messages 1 --timeout-ms 30000`
 };
 
-const inspectSnippet = `# The standard Apache Kafka admin tools work unmodified against Krabka.
-kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic quickstart-events
-kafka-metadata-quorum.sh --bootstrap-server localhost:9092 describe --status
-kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
-kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
+const inspectSnippet = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
+KAFKA_NETWORK="container:$(docker compose ps -q broker)"
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic quickstart-events
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server localhost:9092 describe --status
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
+
+const javascriptRunCode = `mkdir krabka-javascript
+cd krabka-javascript
+curl -fsSL https://krabka.io/quickstart/javascript/package.json -o package.json
+curl -fsSL https://krabka.io/quickstart/javascript/app.cjs -o app.cjs
+npm install
+npm start`;
+
+const tasks = [
+  { title: 'Try in your browser', href: '/docs/browser-tools', text: 'Run a real broker or explore consensus and proof tools without installing software.' },
+  { title: 'Run locally', href: '/docs/quickstart', text: 'Start a broker, check readiness, and produce and read a record with containerized Kafka tools.' },
+  { title: 'Migrate from Kafka', href: '/docs/migration', text: 'Check compatibility and plan data transfer and cutover.' },
+  { title: 'Operate a cluster', href: '/docs/operations', text: 'Find backup, recovery, and upgrade procedures.' },
+  { title: 'Explore verification', href: '/verification', text: 'Read the proofs, model bounds, and limits of the correctness evidence.' },
+];
 ---
 
 <BaseLayout
@@ -148,9 +170,14 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
         Get Started
       </h1>
       <p class="mt-4 text-lg text-gray-300">
-        Start a broker with Docker Compose or Kubernetes, then produce and consume records with a Kafka client.
+        Choose a task, then follow the local quickstart to produce and read your first record.
       </p>
     </div>
+
+    <nav aria-label="Getting started tasks" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-8">
+      {tasks.map(task => <a href={getPath(task.href)} class="frosted-card rounded-xl p-5 border border-white/10 hover:border-krab-500/50"><h2 class="font-bold text-white">{task.title} →</h2><p class="mt-2 text-sm text-gray-400">{task.text}</p></a>)}
+    </nav>
+    <p class="mb-12 text-sm text-gray-400">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls. The local commands below use Bash and require Docker with Compose; the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">complete quickstart</a> includes readiness, expected output, and optional cleanup.</p>
 
     <!-- Step 1: Deploy Cluster -->
     <div class="mb-14">
@@ -196,19 +223,20 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
     </div>
 
     <!-- Step 2: Produce & Consume Test -->
-    <div class="mb-14">
+    <div id="clients" class="mb-14">
       <div class="flex items-center gap-3 mb-6">
         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-krab-600 text-sm font-bold text-white">2</span>
-        <h2 class="text-2xl font-bold text-white">Produce and Consume Your First Records</h2>
+        <h2 class="text-2xl font-bold text-white">Read a record, then connect your application</h2>
       </div>
 
       <p class="mb-4 max-w-3xl text-sm text-gray-300 leading-relaxed font-sans">
-        The snippets connect to <code class="font-mono text-krab-300 text-xs">localhost:9092</code>, which the Docker Compose stack publishes. Create the topic first with <code class="font-mono text-krab-300 text-xs">kafka-topics.sh</code> (the Kafka CLI tab starts with that command). On Kubernetes the brokers advertise in-cluster names, so run the clients inside the cluster and use <code class="font-mono text-krab-300 text-xs">m20-quickstart-broker-headless.default.svc.cluster.local:9092</code> as the bootstrap address; the <a href={getPath('/docs/quickstart')} class="text-krab-400 hover:text-krab-300 font-semibold underline underline-offset-2">quickstart</a> shows a <code class="font-mono text-krab-300 text-xs">kubectl run</code> example.
+        First complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">quickstart readiness check</a>. The Kafka CLI tab creates <code>quickstart-events</code>, produces <code>hello krabka</code>, and consumes one record. The other tabs are producer examples for that topic at <code>localhost:9092</code>. Run Kubernetes clients inside the cluster; the quickstart shows their bootstrap address and commands.
       </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
         <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist" id="client-tabs" aria-label="Client language">
-          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+          <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">Kafka CLI</button>
+          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Rust
           </button>
           <button type="button" role="tab" id="client-tab-c-go" aria-controls="client-c-go" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
@@ -223,13 +251,10 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
           <button type="button" role="tab" id="client-tab-c-javascript" aria-controls="client-c-javascript" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Node.js
           </button>
-          <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Kafka CLI
-          </button>
         </div>
 
         <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
-          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust">
+          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
               <span>Native async Rust producer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
@@ -282,7 +307,7 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
             <CodeBlock size="sm" code={clientSnippets.javascript} lang="javascript" />
           </div>
 
-          <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli" hidden>
+          <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli">
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
               <span>CLI producer/consumer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.cli}>
@@ -294,6 +319,14 @@ kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
           </div>
         </div>
       </div>
+      <p class="mt-4 text-sm text-gray-400">A successful CLI round trip prints <code>hello krabka</code>. To inspect a producer example's record, run the CLI consumer without <code>--max-messages 1</code>, then press Ctrl+C to stop.</p>
+      <details class="mt-6 rounded-xl border border-white/10 p-5 space-y-4">
+        <summary class="cursor-pointer font-semibold text-white">Run the JavaScript example as a project</summary>
+        <p class="text-sm text-gray-300">Install Node.js with npm. After the local quickstart, download this project in a separate terminal and run it. It uses the same pinned KafkaJS dependency and producer code as the Node.js tab. A delivery failure exits with an error.</p>
+        <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-sm text-gray-300 hover:bg-white/10" data-copy={javascriptRunCode} aria-label="Copy JavaScript example setup">Copy setup</button>
+        <CodeBlock code={javascriptRunCode} lang="bash" />
+        <p class="text-sm text-gray-400">The record value is <code>Hello Krabka from KafkaJS!</code>. Use the CLI consumer with <code>--from-beginning</code> and without <code>--max-messages 1</code> to read the topic, then press Ctrl+C to stop. <a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download package manifest</a></p>
+      </details>
     </div>
 
     <!-- Step 3: Inspect the cluster with the standard Kafka admin tools -->

@@ -11,6 +11,16 @@ import { getPath } from '../utils/paths';
     <h1 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">Search</h1>
     <!-- Pagefind writes its index and UI into dist/pagefind after `astro build` (see package.json). -->
     <div id="search" class="mt-6" data-bundle={getPath('/pagefind/')}></div>
+    <template id="search-recovery">
+      <div role="alert" class="space-y-3 text-sm text-gray-300">
+        <p>Search could not load. Check your connection and try again, or browse the documentation.</p>
+        <div class="flex flex-wrap gap-4">
+          <button type="button" data-search-retry class="text-krab-400 underline underline-offset-2">Try again</button>
+          <a href={getPath('/docs')} class="text-krab-400 underline underline-offset-2">Browse documentation</a>
+          <a href="https://github.com/krabka-io/krabka-io.github.io/issues/new" class="text-krab-400 underline underline-offset-2">Report a search problem</a>
+        </div>
+      </div>
+    </template>
     <noscript><p class="mt-6 text-sm text-gray-400">Search needs JavaScript. The <a href={getPath('/docs')} class="text-krab-400 underline">documentation index</a> lists every guide.</p></noscript>
   </div>
 </BaseLayout>
@@ -44,7 +54,9 @@ import { getPath } from '../utils/paths';
   const query = new URLSearchParams(location.search).get('q') ?? '';
 
   const fail = () => {
-    root.innerHTML = '<p class="text-sm text-gray-400">The search index is built with the production site (<code>npm run build</code>) and is not available here.</p>';
+    const recovery = document.getElementById('search-recovery') as HTMLTemplateElement;
+    root.replaceChildren(recovery.content.cloneNode(true));
+    root.querySelector('[data-search-retry]')!.addEventListener('click', () => location.reload());
   };
 
   const css = document.createElement('link');
@@ -56,9 +68,14 @@ import { getPath } from '../utils/paths';
   script.src = `${bundle}pagefind-ui.js`;
   script.onerror = fail;
   script.onload = () => {
-    // @ts-expect-error: PagefindUI is the global the bundle defines.
-    const ui = new window.PagefindUI({ element: '#search', bundlePath: bundle, showSubResults: true, showImages: false, autofocus: !query });
-    if (query) ui.triggerSearch(query);
+    try {
+      // @ts-expect-error: PagefindUI is the global the bundle defines.
+      const ui = new window.PagefindUI({ element: '#search', bundlePath: bundle, showSubResults: true, showImages: false, autofocus: !query });
+      if (query) ui.triggerSearch(query);
+    } catch {
+      fail();
+      return;
+    }
     // Keep the query in the address bar, so a search can be shared or reloaded.
     root.addEventListener('input', (e) => {
       const input = e.target as HTMLInputElement;

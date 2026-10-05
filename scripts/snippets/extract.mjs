@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 export const pages = {
-  'get-started': ['deploySnippets.docker', 'deploySnippets.helm', 'clientSnippets.rust', 'clientSnippets.go', 'clientSnippets.java', 'clientSnippets.python', 'clientSnippets.javascript', 'clientSnippets.cli', 'inspectSnippet'],
-  'docs/quickstart': ['composeCode', 'helmCode'],
+  'get-started': ['deploySnippets.docker', 'deploySnippets.helm', 'clientSnippets.rust', 'clientSnippets.go', 'clientSnippets.java', 'clientSnippets.python', 'clientSnippets.javascript', 'clientSnippets.cli', 'inspectSnippet', 'javascriptRunCode'],
+  'docs/quickstart': ['composeCode', 'composeReadyCode', 'composeVerifyCode', 'composeCleanupCode', 'helmCode', 'helmVerifyCode', 'helmCleanupCode'],
   'docs/streams-rs': ['producerCode', 'consumerCode', 'shareConsumerCode', 'streamsCode'],
   'docs/streams-go': ['goInstallCode', 'goCode'],
   'docs/streams-java': ['javaGradle'],

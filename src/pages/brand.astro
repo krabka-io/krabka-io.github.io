@@ -25,6 +25,9 @@ const colors = [
   { name: 'Pacific navy', hex: '#0c1322', use: 'The page ground.' },
   { name: 'Abyss', hex: '#080d1a', use: 'The navigation bar and the darkest surface.' },
 ];
+
+// ponytail: static previews preserve the download URLs; regenerate these when the originals change.
+const preview = (file: string) => file.endsWith('.png') ? `/brand/previews/${file.split('/').pop()!.replace(/\.png$/, '.webp')}` : file;
 ---
 
 <BaseLayout
@@ -63,7 +66,7 @@ const colors = [
               <td class="row-span-2 min-w-0! sm:py-3 sm:px-4">
                 {/* A vertical lockup is taller than wide, so its tile is too; in a wide tile it shrank to a speck. */}
                 <div class={`inline-flex w-20 items-center justify-center rounded-lg ${m.file.includes('tall') ? 'h-24' : 'h-14'} ${m.dark ? 'bg-[#000] border border-white/10' : 'bg-[#fff]'}`}>
-                  <img src={getPath(m.file)} alt={m.file} class={`max-w-16 object-contain ${m.file.includes('tall') ? 'max-h-[5.5rem]' : 'max-h-12'}`} loading="lazy" />
+                  <img src={getPath(preview(m.file))} alt={m.use} class={`max-w-16 object-contain ${m.file.includes('tall') ? 'max-h-[5.5rem]' : 'max-h-12'}`} loading="lazy" />
                 </div>
               </td>
               {/* Below sm the path may break anywhere to fit its track; from sm up it stays whole, since the path is what people copy. */}

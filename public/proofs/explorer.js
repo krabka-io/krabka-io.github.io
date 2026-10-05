@@ -948,6 +948,8 @@ function main() {
       const first = visibleSessions()[0];
       if (first) select(first.id, false);
     }
+    root.dataset.ready = "true";
+    root.dataset.startupMs = String(Math.round(performance.now()));
     window.addEventListener("hashchange", followHash);
     window.addEventListener("popstate", followHash);
     probeBundle();

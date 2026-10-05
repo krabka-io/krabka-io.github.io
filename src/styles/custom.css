@@ -47,6 +47,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-krab-400);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Headings and short blocks break evenly instead of stranding a single word on
  * their last line; body copy avoids a one-word last line too. */
 h1, h2, h3, h4 {

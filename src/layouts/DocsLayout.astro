@@ -44,6 +44,12 @@ const docSections = [
       { label: 'Introduction', slug: '/docs' },
       { label: 'Quickstart Guide', slug: '/docs/quickstart' },
       { label: 'Migrating from Apache Kafka', slug: '/docs/migration' },
+    ],
+  },
+  {
+    category: 'Browser Tools',
+    items: [
+      { label: 'Choose a Browser Tool', slug: '/docs/browser-tools' },
       { label: 'Consensus Playground', slug: '/docs/playground' },
       { label: 'Cluster Lab', slug: '/docs/lab' },
       { label: 'Verification Playground', slug: '/docs/verification-playground' },
@@ -107,6 +113,12 @@ const docSections = [
   {
     category: 'Operations & Deployment',
     items: [
+      { label: 'Operations Index', slug: '/docs/operations' },
+      { label: 'Deploy & Rolling Upgrade', slug: '/docs/broker/operations/deploy' },
+      { label: 'Backup & Restore', slug: '/docs/broker/operations/backup-restore' },
+      { label: 'Restore from Archive', slug: '/docs/broker/operations/runbooks/restore-from-archive' },
+      { label: 'Metrics & Alerts', slug: '/docs/broker/operations/metrics' },
+      { label: 'Scale a Cluster', slug: '/docs/broker/operations/scaling' },
       { label: 'Kubernetes Operator', slug: '/docs/operator' },
       { label: 'Helm Chart Repository', slug: '/docs/helm-charts' },
       { label: 'CLI Tooling (krabka-cli)', slug: '/docs/cli' },
@@ -157,10 +169,15 @@ const isCategoryActive = (sec: typeof docSections[0]) => {
   });
 };
 
-// An exact item match wins over a parent prefix, so /docs/broker/qualification
-// belongs to Project Internals, not to Core Broker through /docs/broker.
+// An exact item match wins over the most specific parent prefix. Nested
+// operations runbooks belong to Operations, not the broker overview.
 const activeSection =
-  docSections.find((sec) => sec.items.some((item) => isItemActive(item.slug))) ?? docSections.find((sec) => isCategoryActive(sec));
+  docSections.find((sec) => sec.items.some((item) => isItemActive(item.slug))) ??
+  docSections.filter(isCategoryActive).sort((a, b) => {
+    const matchingLength = (sec: typeof docSections[0]) => Math.max(...sec.items.map((item) =>
+      currentNorm.startsWith(normalize(getPath(item.slug)) + '/') ? item.slug.length : 0));
+    return matchingLength(b) - matchingLength(a);
+  })[0];
 const activeCategory = activeSection?.category || 'Docs';
 // A synced guide's title carries its component, "Roadmap (Broker)"; the crumb
 // already names the category, so it matches the sidebar and the page heading.
@@ -199,7 +216,7 @@ const isDocsHome = currentNorm === normalize(getPath('/docs'));
 ---
 
 <BaseLayout
-  title={`${title} | krabka Documentation`}
+  title={`${title} | krabka docs`}
   description={description}
   type="article"
   image={image}
@@ -334,6 +351,15 @@ const isDocsHome = currentNorm === normalize(getPath('/docs'));
                 <span class="font-medium text-gray-200">Pre-1.0:</span> krabka is under active development. Wire protocol features, configuration properties, and APIs may change before a stable release. See <a href={getPath('/versions')} class="text-krab-400 hover:underline">release status</a>.
               </div>
             </div>
+          )}
+
+          {source?.commit && (
+            <aside aria-label="Guide source and version scope" data-pagefind-ignore class="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-relaxed text-gray-400">
+              Guide source: <a href={`${repoUrl}/blob/${source.commit}/${source.path}`} target="_blank" rel="noopener noreferrer" class="break-all font-mono text-gray-300 underline underline-offset-2 hover:text-white">{source.repo}@{source.commit.slice(0, 7)}</a>
+              {source.branch && <> · branch <code>{source.branch}</code></>}
+              {syncedOn && <> · source commit date <time datetime={source.date}>{syncedOn}</time></>}.
+              <span class="block mt-1">This guide may include unreleased changes. Check the guide at your installed release tag and the <a href={getPath('/versions')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">release status</a> before applying commands.</span>
+            </aside>
           )}
 
           {frontmatter ? (

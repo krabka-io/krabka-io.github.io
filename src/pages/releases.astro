@@ -4,6 +4,7 @@ import { getReleases } from '../utils/versions';
 import { getPath } from '../utils/paths';
 
 const releases = await getReleases();
+const components = [...new Set(releases.map((release) => release.repo))].sort();
 
 // The first real paragraph of a release's Markdown notes (not a heading or a
 // one-line title), as plain text.
@@ -13,6 +14,7 @@ const excerpt = (notes: string) =>
     .replace(/[`*_>#]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/^(?:full changelog:?|(?:full changelog:\s*)?https?:\/\/\S+)$/i, '')
     .replace(/^(.{280}).+$/, '$1…');
 const day = (date: string | null) => date?.slice(0, 10) ?? '';
 ---
@@ -39,9 +41,17 @@ const day = (date: string | null) => date?.slice(0, 10) ?? '';
     {releases.length === 0 ? (
       <p class="py-10 text-sm text-gray-400">No releases could be read when this page was built.</p>
     ) : (
-      <ol class="divide-y divide-white/10">
+      <div class="mt-6 flex flex-wrap items-center gap-3">
+        <label for="release-component" class="text-sm text-gray-300">Component</label>
+        <select id="release-component" class="rounded-lg border border-white/15 bg-ocean-900 px-3 py-2 text-sm text-gray-200">
+          <option value="">All components</option>
+          {components.map((repo) => <option value={repo}>{repo}</option>)}
+        </select>
+        <p id="release-count" role="status" class="text-xs text-gray-400">{releases.length} releases</p>
+      </div>
+      <ol id="release-list" class="divide-y divide-white/10 [overflow-wrap:anywhere]">
         {releases.map((r) => (
-          <li class="py-5">
+          <li class="py-5" data-repo={r.repo}>
             <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <h2 class="text-base font-semibold text-white">
                 <a href={r.url} target="_blank" rel="noopener noreferrer" class="hover:text-krab-400">{r.name}</a>
@@ -49,10 +59,20 @@ const day = (date: string | null) => date?.slice(0, 10) ?? '';
               {r.date && <time datetime={r.date} class="font-mono text-xs text-gray-400">{day(r.date)}</time>}
             </div>
             <p class="mt-1 font-mono text-xs text-krab-300">{r.repo} · {r.tag}</p>
-            {excerpt(r.notes) && <p class="mt-2 text-sm leading-relaxed text-gray-300">{excerpt(r.notes)}</p>}
+            <p class="mt-2 text-sm leading-relaxed text-gray-300">{excerpt(r.notes) || 'Read the full release notes to check the changes and any upgrade instructions.'}</p>
           </li>
         ))}
       </ol>
     )}
   </div>
 </BaseLayout>
+
+<script>
+  const filter = document.getElementById('release-component') as HTMLSelectElement | null;
+  filter?.addEventListener('change', () => {
+    const rows = [...document.querySelectorAll<HTMLElement>('#release-list > li')];
+    for (const row of rows) row.hidden = Boolean(filter.value && row.dataset.repo !== filter.value);
+    const count = rows.filter((row) => !row.hidden).length;
+    document.getElementById('release-count')!.textContent = `${count} ${count === 1 ? 'release' : 'releases'}`;
+  });
+</script>

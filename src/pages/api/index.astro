@@ -66,6 +66,12 @@ const apiModules = apiReference.map((entry) => {
       </div>
     </div>
 
+    <aside aria-label="API reference version scope" class="mb-6 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm leading-relaxed text-gray-300">
+      These references follow each repository's <code class="font-mono">main</code> branch and may include unreleased APIs.
+      The release tags are context for choosing a component; they do not select a release-specific reference.
+      Check your installed tag's source documentation before copying API calls. See <a href={getPath('/versions')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">release status and snapshot scope</a>.
+    </aside>
+
     <!-- API Reference Directory Table. Below lg each row is a card, so the
          documentation links are never pushed off-screen. -->
     <div class="frosted-card rounded-xl overflow-hidden border border-white/10 mb-8">
@@ -75,7 +81,7 @@ const apiModules = apiReference.map((entry) => {
             <th scope="col" class="py-3 px-5 lg:w-full">Component</th>
             <th scope="col" class="py-3 px-4">Format</th>
             <th scope="col" class="py-3 px-4">Language</th>
-            <th scope="col" class="py-3 px-4">Latest release</th>
+            <th scope="col" class="py-3 px-4">Release tag (context)</th>
             <th scope="col" class="py-3 px-5 text-right">Documentation</th>
           </tr>
         </thead>
@@ -129,7 +135,7 @@ const apiModules = apiReference.map((entry) => {
     <!-- Editorial Explanation Text (Clean, no bubbles) -->
     <div class="pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2">
       <p>
-        Every reference is generated from source docstrings by its own repository's build (Bazel <code class="text-gray-300">rust_doc</code> for Rust, Javadoc for Java, godoc for Go), rendered from the <code class="text-gray-300">main</code> branch, and published from that repository to <code class="text-gray-300">https://krabka.io/&lt;repository&gt;/</code>. The release column names the latest tagged release; the reference itself follows <code class="text-gray-300">main</code>.
+        Each repository generates its reference from source docstrings (Rustdoc, Javadoc, or Godoc) and publishes it to <code class="text-gray-300">https://krabka.io/&lt;repository&gt;/</code>.
       </p>
       <p>
         For architectural overviews, memory management specifications, and runnable tutorials, consult the <a href={getPath('/docs')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Documentation Hub</a>.

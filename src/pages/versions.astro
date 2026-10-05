@@ -2,9 +2,11 @@
 import CodeBlock from '../components/CodeBlock.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { getEcosystemVersions } from '../utils/versions';
+import { getPath } from '../utils/paths';
 import wireMatrix from '../data/kafka-wire-matrix.json';
 
-const ecosystemRepos = await getEcosystemVersions();
+const snapshot = await getEcosystemVersions();
+const ecosystemRepos = snapshot.repos;
 
 const provenanceSnippet = `# Verify the broker container image signature (Sigstore, keyless)
 cosign verify ghcr.io/krabka-io/krabka-broker:latest \\
@@ -62,13 +64,19 @@ const pageSchema = {
       <p class="mt-4 text-lg text-gray-300 max-w-3xl">
         Repository branches, release tags, runtime requirements, and Apache Kafka wire-protocol compatibility targets. The site reads repository status when it builds and uses a cached snapshot if GitHub is unavailable.
       </p>
+      <p class="mt-4 text-xs leading-relaxed text-gray-400">
+        Data source: <span class="font-semibold text-gray-200">{snapshot.source === 'GitHub' ? 'GitHub at build time' : snapshot.source === 'Mixed' ? 'GitHub and cached entries' : 'Cached repository snapshot'}</span>.
+        Page built: <time datetime={snapshot.builtAt}>{snapshot.builtAt.slice(0, 16).replace('T', ' ')} UTC</time>.
+        {snapshot.checkedAt && <> GitHub checked: <time datetime={snapshot.checkedAt}>{snapshot.checkedAt.slice(0, 16).replace('T', ' ')} UTC</time>.</>}
+        {snapshot.source !== 'GitHub' && <span class="block mt-1">Cached entries were not refreshed by this page build. Snapshot file commit date: {snapshot.snapshotCommitDate?.slice(0, 10) ?? 'unavailable'}; individual repository observations may be older. Follow each repository's release notes to confirm the current tag.</span>}
+      </p>
     </div>
 
     <!-- Section 1: Repository & Packages Status -->
     <div id="packages" class="mb-20">
       <h2 class="text-2xl font-bold text-white mb-2">Repository & Packages Status</h2>
       <p class="text-gray-400 text-sm mb-6">
-        Branches, releases, and target runtimes across krabka-io at build time.
+        The release track describes the tag: 1.0+ is a final tag with major version 1 or higher, Pre-1.0 is a final 0.x tag, Prerelease is another tagged version, and Unreleased has no recorded tag. A version number does not establish operational readiness. Check the <a href={getPath('/docs/broker/qualification')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">candidate qualification evidence</a> and <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">operational limits</a> for your deployment.
       </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
@@ -77,8 +85,8 @@ const pageSchema = {
             <thead class="border-b border-white/10 bg-slate-950/80 text-xs font-semibold uppercase text-gray-400">
               <tr>
                 <th scope="col" class="py-4 px-6">Repository</th>
-                <th scope="col" class="py-4 px-6">Current Track</th>
-                <th scope="col" class="py-4 px-6">Readiness</th>
+                <th scope="col" class="py-4 px-6">Release & Branch</th>
+                <th scope="col" class="py-4 px-6">Release Track</th>
                 <th scope="col" class="py-4 px-6">Target Runtime</th>
                 <th scope="col" class="py-4 px-6">Provenance</th>
                 <th scope="col" class="py-4 px-6 text-right">History</th>
@@ -134,27 +142,28 @@ const pageSchema = {
                         </div>
                       </div>
                     )}
+                    <span class="mt-1 block text-[11px] text-gray-400">{item.dataSource === 'GitHub' ? 'GitHub at build' : 'Cached entry'}</span>
                   </td>
                   <td class="py-3.5 px-6">
                     <span
                       class={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                        item.status === 'Stable'
+                        item.releaseTrack === '1.0+'
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : item.status === 'Beta / Pre-1.0'
+                          : item.releaseTrack === 'Pre-1.0' || item.releaseTrack === 'Prerelease'
                           ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           : 'bg-slate-500/10 text-slate-300 border border-slate-500/20'
                       }`}
                     >
                       <span
                         class={`h-1.5 w-1.5 rounded-full ${
-                          item.status === 'Stable'
+                          item.releaseTrack === '1.0+'
                             ? 'bg-emerald-400'
-                            : item.status === 'Beta / Pre-1.0'
+                            : item.releaseTrack === 'Pre-1.0' || item.releaseTrack === 'Prerelease'
                             ? 'bg-amber-400'
                             : 'bg-slate-400'
                         }`}
                       ></span>
-                      {item.status}
+                      {item.releaseTrack}
                     </span>
                   </td>
                   <td class="py-3.5 px-6 text-gray-400 text-xs">{item.target}</td>

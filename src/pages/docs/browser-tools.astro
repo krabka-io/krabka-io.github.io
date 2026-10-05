@@ -1,0 +1,32 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+
+const tools = [
+  { title: 'Cluster Lab', href: '/docs/lab', task: 'Try the broker', description: 'Run real krabka brokers, producers, consumers, and apps. Inspect records and traffic, then inject a network fault.', first: 'Start a producer and consumer scenario. Check that the acknowledged and consumed record counts increase.', scope: 'Brokers run in Web Workers with a virtual clock and network. Phone mode is view-only; use a wider screen to edit nodes and inject faults.' },
+  { title: 'Consensus Playground', href: '/docs/playground', task: 'Understand leader election', description: 'Explore KRaft elections, message delivery, and network partitions in a consensus simulation.', first: 'Choose a cluster, press Settle, and inspect its leader and followers.', scope: 'This models consensus events. Use Cluster Lab to inspect a running broker and Kafka records.' },
+  { title: 'Verification Playground', href: '/docs/verification-playground', task: 'Evaluate a decision kernel', description: 'Give selected production decision functions an input and read the result beside their contracts.', first: 'Open majority size, choose a preset, and compare the result with the stated contract.', scope: 'A kernel result applies to that function and its preconditions. It does not establish whole-system correctness.' },
+  { title: 'Proof Explorer', href: '/docs/proof-explorer', task: 'Inspect proof evidence', description: 'Browse recorded Why3 sessions, source contracts, proof obligations, and prover results.', first: 'Select a session and follow its tree to a prover result.', scope: 'Recorded proof results apply to the listed contracts and assumptions. See the verification page for the formal boundary.' },
+];
+---
+
+<DocsLayout title="Browser Tools" description="Choose a browser tool to run real krabka brokers, explore leader election, evaluate decision kernels, or inspect recorded proof sessions." currentSlug="/docs/browser-tools">
+  <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Try krabka in your browser</h1>
+      <p class="mt-2 text-gray-400">Choose a tool by the question you want to answer. These tools use JavaScript and WebAssembly; no local broker installation is required.</p>
+    </div>
+    <p class="rounded-xl border border-krab-500/30 bg-krab-500/5 p-4">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls. The first lab visit downloads its broker module; keep the page open while it loads.</p>
+    <div class="grid gap-5 sm:grid-cols-2">
+      {tools.map(tool => <article class="frosted-card rounded-xl border border-white/10 p-5 space-y-3 min-w-0">
+        <p class="text-xs font-semibold text-krab-400">{tool.task}</p>
+        <h2 class="text-xl font-bold text-white"><a href={getPath(tool.href)} class="hover:text-krab-400 underline underline-offset-4">{tool.title} →</a></h2>
+        <p>{tool.description}</p>
+        <p><span class="font-semibold text-white">First step:</span> {tool.first}</p>
+        <p class="text-xs text-gray-400">{tool.scope}</p>
+      </article>)}
+    </div>
+    <h2 class="text-xl font-bold text-white">After the browser trial</h2>
+    <p><a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">Run the broker locally</a> and produce and read a record with the containerized Kafka tools. Read <a href={getPath('/verification')} class="text-krab-400 underline underline-offset-2">how krabka is verified</a> for the proofs, bounded models, and what those checks cover.</p>
+  </div>
+</DocsLayout>
