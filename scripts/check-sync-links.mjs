@@ -25,4 +25,11 @@ assert.equal(
   'See [serdes](/docs/streams-go/serdes#avro) and [the tests](https://github.com/krabka-io/krabka-streams-go/blob/main/tests/foo_test.go) and [site](https://x.io/a).',
 );
 
+// A rustdoc intra-doc link has nowhere to go on the site: it becomes plain code, outside code only.
+const intraDoc = 'Maps to [`crate::BrokerConfig::extra_log_dirs`]. See [`x`](y.md).\n```rust\n/// [`Kept`]\n```';
+assert.equal(
+  rewriteDocLinks(intraDoc, opts),
+  'Maps to `crate::BrokerConfig::extra_log_dirs`. See [`x`](/docs/streams-go/y).\n```rust\n/// [`Kept`]\n```',
+);
+
 console.log('check-sync-links: ok');

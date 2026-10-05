@@ -39,6 +39,12 @@ pub struct Scenario {
     /// controller, the way `kafka-topics --create` would.
     #[serde(default)]
     pub topics: Vec<TopicSpec>,
+    /// A scripted experiment the page runs against this scenario: timed
+    /// faults and commands, and the checks that judge the run. The world
+    /// keeps it as it came and gives it back, so it travels with the
+    /// scenario through saves and share links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment: Option<serde_json::Value>,
 }
 
 impl Scenario {
@@ -54,6 +60,7 @@ impl Scenario {
             link_overrides: Vec::new(),
             nodes: Vec::new(),
             topics: Vec::new(),
+            experiment: None,
         }
     }
 }

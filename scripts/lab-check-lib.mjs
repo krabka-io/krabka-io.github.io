@@ -194,13 +194,15 @@ function run(cmd, cmdArgs, options = {}) {
   if (result.status !== 0) throw new Error(`${cmd} ${cmdArgs.join(' ')} exited with ${result.status}`);
 }
 
+// `[command, ...leading args]`: binaryen's npm wasm-opt is a Node script, run
+// through Node itself because Windows cannot spawn the `.bin` shim directly.
 function wasmOpt() {
   if (process.argv.includes('--no-opt')) return null;
-  const local = path.join(ROOT, 'node_modules', '.bin', 'wasm-opt');
-  if (fs.existsSync(local)) return local;
+  const local = path.join(ROOT, 'node_modules', 'binaryen', 'bin', 'wasm-opt');
+  if (fs.existsSync(local)) return [process.execPath, local];
   try {
     execFileSync('wasm-opt', ['--version'], { stdio: 'ignore' });
-    return 'wasm-opt';
+    return ['wasm-opt'];
   } catch {
     return null;
   }
@@ -218,7 +220,7 @@ export function buildGuest() {
   const opt = wasmOpt();
   if (!opt) return raw;
   const optimised = path.join(targetDir, 'wasm32-wasip1', 'release', 'krabka-wasi-guest.lab.wasm');
-  run(opt, ['-Oz', '--enable-bulk-memory', '--enable-sign-ext', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-reference-types', '--enable-multivalue', raw, '-o', optimised]);
+  run(opt[0], [...opt.slice(1), '-Oz', '--enable-bulk-memory', '--enable-sign-ext', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-reference-types', '--enable-multivalue', raw, '-o', optimised]);
   return optimised;
 }
 

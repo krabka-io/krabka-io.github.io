@@ -80,7 +80,7 @@ echo "==> Building krabka-broker-wasi (release)"
 # CARGO_TARGET_DIR is relative to the crate, not to the caller.
 target_dir="${CARGO_TARGET_DIR:-${crate_dir}/target}"
 case "${target_dir}" in
-  /*) ;;
+  /* | [A-Za-z]:[/]*) ;; # absolute, POSIX or Windows (Git Bash may print D:/...)
   *) target_dir="${crate_dir}/${target_dir}" ;;
 esac
 wasm_in="${target_dir}/wasm32-wasip1/release/krabka-broker.wasm"

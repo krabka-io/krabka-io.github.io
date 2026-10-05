@@ -143,6 +143,27 @@ The file methods:
 - `listFiles(path) -> Promise<[{ name, type, size }] | null>` lists a
   directory live.
 
+Injected faults (one small shared buffer per process, so processes that
+share a clock can still differ):
+
+- `pause()` and `resume()` stop the guest the way SIGSTOP does. From its
+  next `poll_oneoff` or blocking call on, it gets no input, readiness or
+  timers. Records still reach its socket buffers, up to one window per
+  connection, and requests are served. `quiesce()` resolves with no deadline.
+  A restart is not paused. `paused` says whether the guest is paused.
+- `setClockSkew(ms)` offsets this process's REALTIME by `ms`. MONOTONIC is
+  untouched, and so are the other processes on the clock. File times follow
+  REALTIME. `0` removes the skew.
+- `setDisk(mode, ms)` sets the volume's health. `"slow"` makes each
+  `fd_sync` and `fd_datasync` wait until host time has moved `ms` on, and
+  the guest answers `quiesce()` with that deadline. `"full"` caps the files at
+  their size now, so writes that grow them fail with `ENOSPC`. `"eio"` makes
+  writes and syncs fail with `EIO`. `"ok"` restores the volume. `disk` returns
+  `{ mode, ms }`.
+
+Skew and disk mode outlive `restart()`. `stats().guest` counts them under
+`paused` and `disk`.
+
 Waiting for the guest:
 
 - `quiesce() -> Promise<{ hostMs, deadlineMs } | null>` resolves once the

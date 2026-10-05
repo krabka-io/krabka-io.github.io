@@ -102,6 +102,20 @@ const structuredData = {
     <Footer />
     <!-- One polite live region for every copy button on the page. -->
     <div id="copy-status" role="status" class="sr-only"></div>
+    <!-- The Cluster Lab's isolation service worker (public/docs/lab/coi-sw.js, scope /docs/lab/ only), registered
+         from every page once it has loaded: a visitor who reaches the lab from here opens it isolated, with no reload.
+         The COEP value is the one coi.js chose for this browser; on the lab itself coi.js registers it. -->
+    <script is:inline define:vars={{ labWorker: getPath('/docs/lab/coi-sw.js'), labScope: getPath('/docs/lab/') }}>
+      if ('serviceWorker' in navigator && window.isSecureContext && location.pathname.indexOf(labScope) !== 0) {
+        addEventListener('load', function () {
+          var coep = 'credentialless';
+          try {
+            if (localStorage.getItem('krabka-coi-coep') === 'require-corp') coep = 'require-corp';
+          } catch (e) {}
+          navigator.serviceWorker.register(labWorker + '?coep=' + coep, { scope: labScope }).catch(function () {});
+        });
+      }
+    </script>
   </body>
 </html>
 

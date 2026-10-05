@@ -10,7 +10,10 @@
 //!   processes what it polls one record at a time.
 //! - [`StreamsNode`] (`"streams"`) runs a `krabka-client-streams` topology
 //!   as a KIP-1071 streams group member.
-//! - [`AdminNode`] (`"admin"`) creates the scenario's topics.
+//! - [`AdminNode`] (`"admin"`) creates the scenario's topics and observes
+//!   the cluster.
+//! - [`RebalancerNode`] (`"rebalancer"`) evens out replicas and leaders
+//!   across the brokers.
 //!
 //! [`templates`] renders record keys and values, [`serde`] frames values in
 //! the Confluent wire format, [`registry_client`] talks to a schema registry
@@ -19,6 +22,7 @@
 mod admin;
 mod consumer;
 mod producer;
+mod rebalancer;
 pub mod registry_client;
 pub mod serde;
 pub mod streams;
@@ -29,5 +33,6 @@ pub use self::{
     admin::AdminNode,
     consumer::{ConsumerNode, PartitionRow, Processing, partition_rows},
     producer::{ProducerNode, Rate, RateMeter},
+    rebalancer::RebalancerNode,
     streams::StreamsNode,
 };

@@ -485,7 +485,7 @@ struct SentFields {
 }
 
 /// An `OffsetCommit` capped at the last version that names topics.
-struct OffsetCommitByName(OffsetCommitRequest);
+pub struct OffsetCommitByName(pub OffsetCommitRequest);
 
 impl Encode for OffsetCommitByName {
     fn encode<B: BufMut>(&self, buf: &mut B, version: i16) -> Result<(), ProtocolError> {
@@ -507,7 +507,7 @@ impl ProtocolRequest for OffsetCommitByName {
 }
 
 /// An `OffsetFetch` capped at the last version that names topics.
-struct OffsetFetchByName(OffsetFetchRequest);
+pub struct OffsetFetchByName(pub OffsetFetchRequest);
 
 impl Encode for OffsetFetchByName {
     fn encode<B: BufMut>(&self, buf: &mut B, version: i16) -> Result<(), ProtocolError> {
@@ -895,6 +895,12 @@ impl Consumer {
                 state.position = record.offset + 1;
                 state.leader_epoch = record.leader_epoch;
                 out.push(record);
+            }
+            // Past the last record handed out lie only markers and aborted
+            // transactions: the position moves to the next fetch offset, as
+            // Kafka's `FetchCollector` moves it once a fetch is drained.
+            if state.buffered.is_empty() && state.state == PositionState::Ready {
+                state.position = state.position.max(state.next_fetch);
             }
             if out.len() >= max {
                 self.poll_cursor = (index + 1) % n;
@@ -2449,7 +2455,9 @@ impl Consumer {
                         .as_ref()
                         .and_then(RecordsPayload::as_v2)
                         .unwrap_or(&[]);
-                    let (records, next) = records_of(&key.0, key.1, batches, p.next_fetch);
+                    let aborted = (self.config.isolation_level == IsolationLevel::ReadCommitted)
+                        .then(|| row.aborted_transactions.as_deref().unwrap_or_default());
+                    let (records, next) = records_of(&key.0, key.1, batches, p.next_fetch, aborted);
                     let bytes: usize = batches.iter().map(RecordBatch::encoded_len).sum();
                     self.metrics.bytes += u64::try_from(bytes).unwrap_or(u64::MAX);
                     self.metrics.records += u64::try_from(records.len()).unwrap_or(u64::MAX);

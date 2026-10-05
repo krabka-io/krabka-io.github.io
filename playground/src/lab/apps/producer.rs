@@ -9,7 +9,8 @@
 //!   "value": { "format": "json", "template": { "id": "{seq}", "total": "{rand 1 500}" } },
 //!   "serialization": { "registry": 4, "format": "avro", "schema": "{...}", "subject": "orders-value" },
 //!   "linger_ms": 5, "batch_size": 16384, "enable_idempotence": true,
-//!   "compression": "none", "headers": { "source": "lab-{seq}" } }
+//!   "compression": "none", "headers": { "source": "lab-{seq}" },
+//!   "transactional_id": "orders-tx", "transaction_records": 10, "abort_every": 3 }
 //! ```
 //!
 //! - `bootstrap` (required): the broker node ids the client connects to first.
@@ -29,9 +30,13 @@
 //!   `format` is `"avro"` or `"json"`; `schema` is the schema text, or the
 //!   schema as a JSON document. Default: `null`.
 //! - `linger_ms`, `batch_size`, `enable_idempotence`, `compression`
-//!   (`none`, `gzip` or `snappy`): the Kafka producer settings of the same
-//!   names, with Kafka's defaults 5, 16384, `true` and `none`.
+//!   (`none`, `gzip`, `snappy`, `lz4` or `zstd`): the Kafka producer settings
+//!   of the same names, with Kafka's defaults 5, 16384, `true` and `none`.
 //! - `headers`: header name to a text template. Default: none.
+//! - `transactional_id`: `null`, or Kafka's `transactional.id`: the records
+//!   go out in transactions of `transaction_records` records each (default
+//!   10), and every `abort_every`-th transaction aborts (default 0, never).
+//!   Needs `acks` -1 and `enable_idempotence`, as Kafka's config check does.
 //!
 //! The templates are those of [`templates`](super::templates); `{seq}`
 //! counts the records this run of the node generated, from 0.
@@ -53,11 +58,26 @@
 //! connection ids come from a lane of its own ([`conn_base`]), so an answer
 //! still on the way to the previous run never reaches the new one.
 //!
+//! A transactional node numbers its transactions from 1 and marks each
+//! record with the header `lab-txn` = `"<number>:commit"` or
+//! `"<number>:abort"`, the outcome it plans, so a consumer can tell which
+//! records it should never see under `read_committed`. Once a transaction
+//! holds `transaction_records` records, the node waits until they are all
+//! acknowledged (Kafka's `flush`, so an aborted transaction's records reach
+//! the log), then commits or aborts it, and generates nothing while the
+//! transaction ends; the rate's records fall due meanwhile and go out
+//! after. A paused node, or one at rate 0, ends its open transaction with
+//! the records it holds. A transaction that hit an error aborts; a fenced producer
+//! (`PRODUCER_FENCED`, for example after the coordinator aborted a
+//! transaction past `transaction.timeout.ms`) is closed and a new one takes
+//! the transactional id, as an application restarts its producer.
+//!
 //! # Control commands
 //!
 //! - `{"cmd": "send", "count": n}` generates `n` records now, paused or not
-//!   (after the registration when one is pending). Answers
-//!   `{"generated": n}` or `{"queued": n}`.
+//!   (after the registration when one is pending, and in turn for a
+//!   transactional node whose open transaction is full). Answers
+//!   `{"generated": n}`, `{"queued": n}`, or both.
 //! - `{"cmd": "rate", "rate_per_sec": x}` changes the rate.
 //! - `{"cmd": "pause"}` and `{"cmd": "resume"}`.
 //!
@@ -70,7 +90,10 @@
 //! "registering"|"ready", "schema_id", "failed", "error", "client"}` (or
 //! `null`), and `last_records: [{"seq", "partition", "offset", "key",
 //! "value_preview"}]`, the last ten records generated, with the partition
-//! and offset once acknowledged.
+//! and offset once acknowledged. The producer's `acked_upto` maps
+//! `"<topic>-<partition>"` to the highest acknowledged offset, and
+//! `transactions` is `{"transactional_id", "state", "open", "committed",
+//! "aborted", "partitions", "last_error"}` or `null`.
 //!
 //! # Events
 //!
@@ -78,7 +101,10 @@
 //! (warn) and `produce_failed` (warn, once per step with the count, the last
 //! error code, and Kafka's exception text when the producer itself failed
 //! the record, such as a topic that did not appear within
-//! `max.block.ms`).
+//! `max.block.ms`); with transactions `transaction_committed`,
+//! `transaction_aborted` (`{"txn"}`, the node's number of it),
+//! `transaction_error` (warn, `{"code", "fatal"}`) and `producer_restarted`
+//! (warn, after a fatal error).
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -104,6 +130,9 @@ use crate::lab::{
 
 /// How many generated records the snapshot lists.
 const LAST_RECORDS: usize = 10;
+
+/// The header a transactional node marks each record with.
+pub const TXN_HEADER: &str = "lab-txn";
 
 /// A rate of records per second as an exact fraction `num / den`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -298,6 +327,50 @@ struct Config {
     compression: String,
     #[serde(default)]
     headers: BTreeMap<String, String>,
+    #[serde(default)]
+    transactional_id: Option<String>,
+    #[serde(default = "default_transaction_records")]
+    transaction_records: u64,
+    #[serde(default)]
+    abort_every: u64,
+}
+
+fn default_transaction_records() -> u64 {
+    10
+}
+
+/// The transactions of a transactional node: the number of the open or the
+/// next one, and how many records it holds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct TxnPlan {
+    records: u64,
+    abort_every: u64,
+    number: u64,
+    held: u64,
+}
+
+impl TxnPlan {
+    /// Whether the open transaction aborts.
+    fn aborts(&self) -> bool {
+        self.abort_every > 0 && self.number.is_multiple_of(self.abort_every)
+    }
+
+    /// The `lab-txn` header of the open transaction's records.
+    fn header(&self) -> String {
+        let outcome = if self.aborts() { "abort" } else { "commit" };
+        format!("{}:{outcome}", self.number)
+    }
+
+    /// The open transaction holds every record it takes.
+    fn full(&self) -> bool {
+        self.held >= self.records
+    }
+
+    /// Move on to the next transaction.
+    fn next(&mut self) {
+        self.number += 1;
+        self.held = 0;
+    }
 }
 
 /// The value a record carries before serialization.
@@ -382,6 +455,8 @@ pub struct ProducerNode {
     queued: u64,
     serialization: Option<SchemaRegistration>,
     last_records: VecDeque<LastRecord>,
+    /// The transactions, with a `transactional_id`.
+    txn: Option<TxnPlan>,
 }
 
 impl ProducerNode {
@@ -399,21 +474,34 @@ impl ProducerNode {
         if config.topic.is_empty() {
             return Err(bad("`topic` is empty".to_string()));
         }
-        let rate = Rate::from_json(&config.rate_per_sec).map_err(&bad)?;
+        let rate = Rate::from_json(&config.rate_per_sec).map_err(bad)?;
         let acks = Acks::from_wire(config.acks)
             .ok_or_else(|| bad(format!("`acks` is {}; use -1, 0 or 1", config.acks)))?;
         let compression = Compression::parse(&config.compression).ok_or_else(|| {
             bad(format!(
-                "`compression` is `{}`; use none, gzip or snappy",
+                "`compression` is `{}`; use none, gzip, snappy, lz4 or zstd",
                 config.compression
             ))
         })?;
+        if let Some(id) = &config.transactional_id {
+            if id.is_empty() {
+                return Err(bad("`transactional_id` is empty".to_string()));
+            }
+            if acks != Acks::All || !config.enable_idempotence {
+                return Err(bad(
+                    "`transactional_id` needs `acks` -1 and `enable_idempotence` true".to_string(),
+                ));
+            }
+            if config.transaction_records == 0 {
+                return Err(bad("`transaction_records` is at least 1".to_string()));
+            }
+        }
         let key = config
             .key
             .map(|k| Template::parse(&k.pattern))
             .transpose()
             .map_err(|e| bad(format!("`key.pattern`: {e}")))?;
-        let value = parse_value(config.value).map_err(&bad)?;
+        let value = parse_value(config.value).map_err(bad)?;
         let headers = config
             .headers
             .into_iter()
@@ -427,15 +515,22 @@ impl ProducerNode {
             .serialization
             .map(|s| parse_serialization(s, &config.topic))
             .transpose()
-            .map_err(&bad)?;
+            .map_err(bad)?;
         let producer_config = ProducerConfig {
             acks,
             linger_ms: config.linger_ms,
             batch_size: config.batch_size,
             enable_idempotence: config.enable_idempotence,
             compression,
+            transactional_id: config.transactional_id.clone(),
             ..ProducerConfig::default()
         };
+        let txn = config.transactional_id.as_ref().map(|_| TxnPlan {
+            records: config.transaction_records,
+            abort_every: config.abort_every,
+            number: 1,
+            held: 0,
+        });
         let bootstrap: Vec<Endpoint> = config
             .bootstrap
             .iter()
@@ -459,6 +554,7 @@ impl ProducerNode {
             queued: 0,
             serialization,
             last_records: VecDeque::new(),
+            txn,
         })
     }
 
@@ -482,11 +578,14 @@ impl ProducerNode {
     }
 
     /// Whether records can be generated: no schema to register, or it is
-    /// registered.
+    /// registered, and a transactional producer can take records into its
+    /// open transaction, which is not full.
     fn ready(&self) -> bool {
         self.serialization
             .as_ref()
             .is_none_or(|s| s.schema_id().is_some())
+            && self.producer.transaction_ready()
+            && self.txn.is_none_or(|t| !t.full())
     }
 
     /// Generate one record and hand it to the producer. Returns whether it
@@ -506,7 +605,7 @@ impl ProducerNode {
             ValueTemplate::Json(t) => t.render(&mut scope),
             ValueTemplate::Text(t) => Value::String(t.render(&mut scope)),
         };
-        let headers: Vec<RecordHeader> = self
+        let mut headers: Vec<RecordHeader> = self
             .headers
             .iter()
             .map(|(name, t)| RecordHeader {
@@ -514,6 +613,13 @@ impl ProducerNode {
                 value: Some(Bytes::from(t.render(&mut scope))),
             })
             .collect();
+        if let Some(plan) = &mut self.txn {
+            plan.held += 1;
+            headers.push(RecordHeader {
+                key: TXN_HEADER.to_string(),
+                value: Some(Bytes::from(plan.header())),
+            });
+        }
         let bytes = match &mut self.serialization {
             Some(registration) => match registration.serialize(&doc) {
                 Ok(Some(framed)) => framed,
@@ -558,7 +664,8 @@ impl ProducerNode {
         true
     }
 
-    /// Generate what the rate and the `send` command owe.
+    /// Generate what the rate and the `send` command owe. What a full
+    /// transaction cannot take waits in `queued` for the next one.
     fn generate_due(&mut self, ctx: &mut Ctx<'_>) {
         if !self.ready() {
             return;
@@ -568,9 +675,50 @@ impl ProducerNode {
         } else {
             self.meter.take_due(ctx.now())
         };
-        let total = due + std::mem::take(&mut self.queued);
-        for _ in 0..total {
+        let mut total = due + std::mem::take(&mut self.queued);
+        while total > 0 && self.ready() {
             self.generate(ctx);
+            total -= 1;
+        }
+        self.queued = total;
+    }
+
+    /// End a full transaction once its records are all acknowledged, abort
+    /// one that hit an error, and replace a fenced producer.
+    fn step_transaction(&mut self, ctx: &mut Ctx<'_>) {
+        let Some(plan) = &mut self.txn else {
+            return;
+        };
+        if self.producer.transaction_fatal() {
+            ctx.event("producer_restarted", json!({ "level": "warn" }));
+            self.producer.close(ctx);
+            self.producer = Self::build_producer(
+                &self.bootstrap,
+                ctx.me(),
+                &self.config,
+                ctx.rand(u64::MAX),
+                self.starts % CONN_ID_LANES,
+            );
+            self.starts = self.starts.wrapping_add(1);
+            plan.next();
+            return;
+        }
+        let failed = self.producer.transaction_state() == Some("abortable_error");
+        // A paused node, or one that sends only on command, ends the open
+        // transaction with what it holds, as an application commits before
+        // it idles, so the last stable offset moves on.
+        let idle = (self.paused || self.rate.is_zero()) && plan.held > 0 && self.queued == 0;
+        let flushed = (plan.full() || idle) && self.producer.pending_records() == 0;
+        if !failed && !flushed {
+            return;
+        }
+        let ended = if failed || plan.aborts() {
+            self.producer.abort_transaction()
+        } else {
+            self.producer.commit_transaction()
+        };
+        if ended.is_ok() {
+            plan.next();
         }
     }
 
@@ -596,6 +744,20 @@ impl ProducerNode {
                     last_code = code;
                     last_message = message;
                 }
+                ProducerEvent::TransactionEnded { committed } => {
+                    // The plan moved on when the end started.
+                    let number = self.txn.map_or(0, |t| t.number.saturating_sub(1));
+                    let kind = if committed {
+                        "transaction_committed"
+                    } else {
+                        "transaction_aborted"
+                    };
+                    ctx.event(kind, json!({ "txn": number }));
+                }
+                ProducerEvent::TransactionError { code, fatal } => ctx.event(
+                    "transaction_error",
+                    json!({ "code": code, "fatal": fatal, "level": "warn" }),
+                ),
             }
         }
         if failed > 0 {
@@ -636,6 +798,11 @@ impl ProducerNode {
         self.generate_due(ctx);
         let (events, _) = self.producer.on_tick(ctx);
         self.on_producer_events(ctx, events);
+        if self.txn.is_some() {
+            self.step_transaction(ctx);
+            let (events, _) = self.producer.on_tick(ctx);
+            self.on_producer_events(ctx, events);
+        }
         let now = ctx.now();
         let rate = (self.ready() && !self.paused)
             .then(|| self.meter.next_due())
@@ -676,6 +843,10 @@ impl Node for ProducerNode {
         self.next_seq = 0;
         self.queued = 0;
         self.last_records.clear();
+        if let Some(plan) = &mut self.txn {
+            plan.number = 1;
+            plan.held = 0;
+        }
         if let Some(registration) = &mut self.serialization {
             registration.restart(ctx.now());
         }
@@ -711,17 +882,20 @@ impl Node for ProducerNode {
                     .get("count")
                     .map_or(Some(1), Value::as_u64)
                     .ok_or_else(|| "`count` is a whole number".to_string())?;
-                if self.ready() {
-                    let mut generated = 0_u64;
-                    for _ in 0..count {
-                        if self.generate(ctx) {
-                            generated += 1;
-                        }
+                // A full transaction leaves the rest for the next one.
+                let mut generated = 0_u64;
+                let mut left = count;
+                while left > 0 && self.ready() {
+                    if self.generate(ctx) {
+                        generated += 1;
                     }
-                    json!({ "generated": generated })
-                } else {
-                    self.queued += count;
-                    json!({ "queued": count })
+                    left -= 1;
+                }
+                self.queued += left;
+                match (generated, left) {
+                    (_, 0) => json!({ "generated": generated }),
+                    (0, _) => json!({ "queued": left }),
+                    _ => json!({ "generated": generated, "queued": left }),
                 }
             }
             Some("rate") => {
@@ -876,8 +1050,12 @@ mod tests {
                 "`acks` is 2; use -1, 0 or 1",
             ),
             (
-                json!({ "bootstrap": [1], "topic": "t", "compression": "lz4" }),
-                "`compression` is `lz4`; use none, gzip or snappy",
+                json!({ "bootstrap": [1], "topic": "t", "compression": "brotli" }),
+                "`compression` is `brotli`; use none, gzip, snappy, lz4 or zstd",
+            ),
+            (
+                json!({ "bootstrap": [1], "topic": "t", "transactional_id": "x", "acks": 1 }),
+                "`transactional_id` needs `acks` -1 and `enable_idempotence` true",
             ),
             (
                 json!({ "bootstrap": [1], "topic": "t", "key": { "pattern": "{nope}" } }),
@@ -908,6 +1086,30 @@ mod tests {
         }
         // The page's probe config takes the defaults.
         assert!(node(json!({ "bootstrap": [1], "topic": "t" })).is_ok());
+    }
+
+    #[test]
+    fn transactions_take_their_records_and_every_nth_aborts() {
+        let mut plan = TxnPlan {
+            records: 2,
+            abort_every: 3,
+            number: 1,
+            held: 0,
+        };
+        let mut headers = Vec::new();
+        while plan.number <= 3 {
+            plan.held += 1;
+            headers.push(plan.header());
+            if plan.full() {
+                plan.next();
+            }
+        }
+        assert!(
+            headers
+                == [
+                    "1:commit", "1:commit", "2:commit", "2:commit", "3:abort", "3:abort"
+                ]
+        );
     }
 
     #[test]

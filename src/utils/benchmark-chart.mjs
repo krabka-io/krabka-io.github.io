@@ -142,6 +142,17 @@ export function overviewSeries(cases, category, metric) {
   }));
 }
 
+// Round values (0, 15, 30 … or 0, 20, 40 …) inside [min, max], about four or five of them.
+export function niceTicks(min, max) {
+  const raw = (max - min) / 4;
+  if (!(raw > 0)) return [min];
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].find(s => s * magnitude >= raw) * magnitude;
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) ticks.push(Number(v.toPrecision(12)));
+  return ticks;
+}
+
 export function plot(series, extent, logarithmic = false, reference = null) {
   const [minX, maxX] = extent;
   // Include one neighbor on each side for paths that cross a zoom boundary.
@@ -164,7 +175,7 @@ export function plot(series, extent, logarithmic = false, reference = null) {
     ? Array.from({ length: Math.round(Math.log10(maxY / minY)) + 1 }, (_, i) => minY * 10 ** i)
     : Array.from({ length: 5 }, (_, i) => maxY * i / 4);
   return { minX, maxX, log, x, y,
-    xTicks: Array.from({ length: 5 }, (_, i) => minX + (maxX - minX) * i / 4),
+    xTicks: niceTicks(minX, maxX),
     yTicks: ticks.map(value => ({ value, y: y(value) })),
     lines: visible.map(line => {
       let connected = false;
@@ -222,7 +233,8 @@ export function svgMarkup(graph, { id, label, axis, events = [], duration, overv
   if (events.length) for (const action of ['pause', 'unpause']) {
     const selected = events.filter(e => e.action === action);
     const x = selected.reduce((sum, e) => sum + e.x, 0) / selected.length;
-    if (x >= graph.minX && x <= graph.maxX) content += text(graph.x(x), 17, action === 'pause' ? 'pause' : 'resume');
+    // Outside the band, so a short pause never runs the two words together.
+    if (x >= graph.minX && x <= graph.maxX) content += action === 'pause' ? text(graph.x(x) - 4, 17, 'pause', 'end') : text(graph.x(x) + 4, 17, 'resume', 'start');
   }
   return content;
 }

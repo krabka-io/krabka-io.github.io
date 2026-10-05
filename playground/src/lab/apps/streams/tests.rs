@@ -10,12 +10,15 @@ use bytes::{BufMut, Bytes, BytesMut};
 use krabka_protocol::{
     Decode, Encode, ProtocolRequest,
     owned::{
+        add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+        add_partitions_to_txn_request::AddPartitionsToTxnRequest,
         api_versions_request::ApiVersionsRequest,
         api_versions_response::{ApiVersion, ApiVersionsResponse},
         common::{
             streams_group_heartbeat_request::task_ids::TaskIds as RequestTaskIds,
             streams_group_heartbeat_response::task_ids::TaskIds as ResponseTaskIds,
         },
+        end_txn_request::EndTxnRequest,
         fetch_request::FetchRequest,
         find_coordinator_request::FindCoordinatorRequest,
         init_producer_id_request::InitProducerIdRequest,
@@ -28,6 +31,7 @@ use krabka_protocol::{
         response_header::ResponseHeader,
         streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
         streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+        txn_offset_commit_request::TxnOffsetCommitRequest,
     },
 };
 use serde_json::{Value, json};
@@ -189,6 +193,10 @@ fn api_versions() -> ApiVersionsResponse {
             row::<InitProducerIdRequest>(),
             row::<ApiVersionsRequest>(),
             row::<StreamsGroupHeartbeatRequest>(),
+            row::<AddPartitionsToTxnRequest>(),
+            row::<AddOffsetsToTxnRequest>(),
+            row::<EndTxnRequest>(),
+            row::<TxnOffsetCommitRequest>(),
         ],
         ..Default::default()
     }
@@ -439,7 +447,7 @@ impl Cluster {
 
     fn read(&self, topic: &str, partition: i32) -> Vec<ConsumedRecord> {
         let batches = self.state.borrow().batches(topic, partition);
-        records_of(topic, partition, &batches, 0).0
+        records_of(topic, partition, &batches, 0, None).0
     }
 
     /// A partition's records as string keys and JSON values.
@@ -621,7 +629,8 @@ fn the_config_is_checked_at_load() {
         (
             with(json!({ "bogus": 1 })),
             "config: unknown field `bogus`, expected one of `bootstrap`, `application_id`, \
-             `topology`, `commit_interval_ms`, `num_standby_replicas`, `deserialize`, `serialize`",
+             `topology`, `commit_interval_ms`, `num_standby_replicas`, \
+             `processing_guarantee`, `deserialize`, `serialize`",
         ),
         (
             with(json!({ "bootstrap": [] })),
@@ -727,6 +736,8 @@ fn a_fresh_node_describes_its_topology() {
                 "records_out": 0,
                 "commits": 0,
                 "commit_interval_ms": 100,
+                "processing_guarantee": "at_least_once",
+                "aborted_transactions": 0,
                 "paused": false,
                 "last_outputs": [],
                 "deserialize": null,
@@ -904,6 +915,8 @@ fn the_snapshot_shows_the_member_its_tasks_and_their_stores() {
                 "records_out": 3,
                 "commits": c.requests(OffsetCommitRequest::API_KEY),
                 "commit_interval_ms": 100,
+                "processing_guarantee": "at_least_once",
+                "aborted_transactions": 0,
                 "paused": false,
                 "last_outputs": [output("a", 1, 1_000), output("a", 2, 1_002), output("c", 1, 1_003)],
                 "deserialize": null,
@@ -1368,4 +1381,86 @@ fn standbys_follow_their_changelogs_and_keep_what_they_restored() {
                 json!({ "tasks": ["0_1 (standby)"] }),
             ]
     );
+}
+
+// ---- exactly once ---------------------------------------------------------------
+
+/// The counting app with `exactly_once_v2`, after it counted a twice on
+/// partition 0.
+fn counted_exactly_once(end_txn_errors: &[i16]) -> Cluster {
+    let mut c = counting_cluster(&json!({ "processing_guarantee": "exactly_once_v2" }));
+    c.state
+        .borrow_mut()
+        .txn
+        .end_txn_errors
+        .extend(end_txn_errors.iter().copied());
+    c.append(
+        "orders",
+        0,
+        &[
+            ("a", json!({ "total": 150 }), 1_000),
+            ("a", json!({ "total": 200 }), 1_001),
+        ],
+    );
+    c.coordinator.next = Some(vec![("0", vec![0, 1])]);
+    c.start();
+    assert!(c.run_until(5_000, |c| c.committed("app")
+        == offsets(&[("orders", 0, 2)])));
+    c.run_for(100);
+    c
+}
+
+#[test]
+fn exactly_once_commits_the_outputs_and_the_offsets_in_one_transaction() {
+    let c = counted_exactly_once(&[]);
+    // The offsets went through the transaction, never `OffsetCommit`.
+    assert!(c.requests(OffsetCommitRequest::API_KEY) == 0);
+    assert!(c.requests(AddOffsetsToTxnRequest::API_KEY) >= 1);
+    assert!(c.requests(TxnOffsetCommitRequest::API_KEY) >= 1);
+    let commit: TxnOffsetCommitRequest =
+        c.state.borrow().seen(TxnOffsetCommitRequest::API_KEY)[0].decode();
+    let snapshot = c.node.snapshot();
+    assert!(commit.member_id == snapshot["member_id"]);
+    assert!(commit.generation_id_or_member_epoch == 1);
+    // Every fetch reads committed data.
+    let fetches = c.state.borrow().seen(FetchRequest::API_KEY);
+    assert!(
+        fetches
+            .iter()
+            .all(|s| s.decode::<FetchRequest>().isolation_level == 1)
+    );
+    assert!(c.json("order-counts", 0) == vec![count("a", 1), count("a", 2)]);
+    let process_id = snapshot["membership"]["process_id"].as_str().unwrap();
+    let txn = &snapshot["producer"]["transactions"];
+    assert!(txn["transactional_id"] == format!("app-{process_id}-1"));
+    assert!(txn["committed"].as_u64() >= Some(1));
+    assert!(txn["aborted"] == 0);
+    assert!(snapshot["processing_guarantee"] == "exactly_once_v2");
+}
+
+#[test]
+fn an_aborted_transaction_restores_the_tasks_and_processes_again() {
+    // The first commit fails at `EndTxn`: the transaction aborts, the task
+    // drops its counts and reads its source from the start again.
+    let mut c = counted_exactly_once(&[codes::UNKNOWN_SERVER_ERROR]);
+    let ends: Vec<bool> = c
+        .state
+        .borrow()
+        .seen(EndTxnRequest::API_KEY)
+        .iter()
+        .map(|s| s.decode::<EndTxnRequest>().committed)
+        .collect();
+    assert!(ends[..3] == [true, false, true]);
+    assert!(c.events_of("transaction_aborted").len() == 1);
+    assert!(c.node.snapshot()["aborted_transactions"] == 1);
+    // A read_uncommitted reader sees the aborted outputs and the outputs
+    // processed again; the store counted each record once.
+    assert!(
+        c.json("order-counts", 0)
+            == vec![count("a", 1), count("a", 2), count("a", 1), count("a", 2)]
+    );
+    let answer = c.control(json!({ "cmd": "query", "store": "counts", "key": "a" }));
+    assert!(answer.unwrap()["value"] == 2);
+    let aborted = c.state.borrow().txn.aborted.clone();
+    assert!(aborted.contains_key(&("order-counts".to_string(), 0)));
 }

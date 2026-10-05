@@ -330,8 +330,9 @@ class PlaygroundUI {
     for (const node of snap.nodes) {
       const { x, y } = pos.get(node.id);
       taken.push({ x: x - NODE_R - 2, y: y - NODE_R - 2, w: 2 * NODE_R + 4, h: 2 * NODE_R + 4 });
-      taken.push({ x: x - 26, y: y + NODE_R, w: 52, h: 32 }); // log / hwm caption
-      if (node.partitioned) taken.push({ x: x - 8, y: y - NODE_R - 20, w: 16, h: 18 });
+      const { above } = pos.get(node.id);
+      taken.push({ x: x - 28, y: above ? y - NODE_R - CAPTION_H : y + NODE_R, w: 56, h: CAPTION_H }); // log / hwm caption
+      if (node.partitioned) taken.push({ x: x + NODE_R - 4, y: y - NODE_R, w: 20, h: 20 });
     }
     const pairCount = new Map();
     for (const m of snap.in_flight) {
@@ -389,22 +390,25 @@ class PlaygroundUI {
 // ---- SVG helpers ------------------------------------------------------------
 
 const NODE_R = 28;
+// The two-line log / hwm caption.
+const CAPTION_H = 34;
 
 // Node centres on a ring sized to the column, in screen pixels, plus the
-// height that fits the ring with the partition marker above and the two-line
-// caption below.
+// height that fits the ring with each node's two-line caption on the outside
+// of the ring: above the nodes of the upper half, below the others. Arrows run
+// between the nodes, inside the ring, so they never cross a caption.
 function layoutRing(nodes, W) {
   const n = nodes.length;
   const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / n;
   const reach = Math.max(...nodes.map((_, i) => Math.abs(Math.cos(angle(i)))));
   const drop = Math.max(...nodes.map((_, i) => Math.sin(angle(i))));
   const r = Math.min(150, Math.max(56, (W / 2 - NODE_R - 6) / reach));
-  const cy = NODE_R + 22 + r;
+  const cy = NODE_R + CAPTION_H + 4 + r;
   const pos = new Map();
   nodes.forEach((node, i) => {
-    pos.set(node.id, { x: W / 2 + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) });
+    pos.set(node.id, { x: W / 2 + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)), above: Math.sin(angle(i)) < -0.01 });
   });
-  return { pos, height: Math.ceil(cy + r * drop + NODE_R + 34) };
+  return { pos, height: Math.ceil(cy + r * drop + NODE_R + CAPTION_H + 4) };
 }
 
 function svgEl(tag, cls) {
@@ -448,15 +452,14 @@ function createNode(id, onClick) {
   log.setAttribute("text-anchor", "middle");
   const logLine = svgEl("tspan");
   logLine.setAttribute("x", "0");
-  logLine.setAttribute("y", String(NODE_R + 13));
   const hwmLine = svgEl("tspan");
   hwmLine.setAttribute("x", "0");
-  hwmLine.setAttribute("y", String(NODE_R + 26));
   log.append(logLine, hwmLine);
 
+  // Beside the node, clear of the caption whichever side that is on.
   const cut = svgEl("text", "cp-node-cut");
-  cut.setAttribute("text-anchor", "middle");
-  cut.setAttribute("y", String(-(NODE_R + 6)));
+  cut.setAttribute("x", String(NODE_R - 2));
+  cut.setAttribute("y", String(-(NODE_R - 12)));
   cut.textContent = "✂";
 
   g.append(idText, role, log, cut);
@@ -473,6 +476,9 @@ function updateNode({ g, role, logLine, hwmLine }, node, p) {
       (node.partitioned ? "Partitioned; activate to heal." : "Activate to partition."),
   );
   role.textContent = `${style.glyph} e${node.epoch}`;
+  // Outside the ring, from the rim outward at a 14 px pitch.
+  logLine.setAttribute("y", String(p.above ? -(NODE_R + 20) : NODE_R + 14));
+  hwmLine.setAttribute("y", String(p.above ? -(NODE_R + 6) : NODE_R + 28));
   logLine.textContent = `log ${node.log_len}`;
   hwmLine.textContent = `hwm ${node.hwm}`;
 }

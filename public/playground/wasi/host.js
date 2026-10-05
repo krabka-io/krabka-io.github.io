@@ -14,7 +14,7 @@
 
 import { ERRNO } from "./abi.js";
 import { WasiClock } from "./clock.js";
-import { DEFAULTS, OUT, REC } from "./protocol.js";
+import { DEFAULTS, DISK, DISK_MODES, FAULT_BYTES, FAULT_DISK_MODE, FAULT_DISK_MS, FAULT_PAUSED, FAULT_SEQ, FAULT_SKEW, OUT, REC } from "./protocol.js";
 import { createRing, RingWriter } from "./ring.js";
 import { lockVolume, VolumeWriter, loadImage, readVolumeFile } from "./volumes.js";
 
@@ -329,6 +329,11 @@ export class WasiProcess extends Emitter {
     this.logs = { stdout: [], stderr: [] };
     this.hostStats = { bytesToGuest: 0, bytesFromGuest: 0, connections: 0, dials: 0, dialsAccepted: 0, journalBatches: 0, journalBytes: 0 };
     this.exited = null; // a promise per incarnation, resolved with the exit info
+    // Faults the host injects (pause, clock skew, disk mode): one buffer for
+    // every incarnation, so skew and disk mode outlive a restart; a pause does not.
+    this.faultBuffer = new SharedArrayBuffer(FAULT_BYTES);
+    this.faultI32 = new Int32Array(this.faultBuffer, 0, 4);
+    this.faultI64 = new BigInt64Array(this.faultBuffer, 16, 1);
   }
 
   // ---- lifecycle ------------------------------------------------------------------------------
@@ -340,6 +345,7 @@ export class WasiProcess extends Emitter {
     if (this.volume !== null && !this.releaseVolume) this.releaseVolume = await lockVolume(this.volume);
     const t0 = performance.now();
     this.helloAt = null;
+    Atomics.store(this.faultI32, FAULT_PAUSED, 0);
     this.state = "starting";
     const incarnation = ++this.incarnation;
     let resolveExit;
@@ -383,6 +389,7 @@ export class WasiProcess extends Emitter {
             maxLineBytes: this.options.maxLineBytes,
             maxBytes: this.options.maxBytes,
             seed: this.options.seed,
+            faults: this.faultBuffer,
           },
         },
         transfer,
@@ -901,6 +908,60 @@ export class WasiProcess extends Emitter {
     conn.state = "closed";
     conn.closeInfo ??= { reason: "host", reset };
     conn.emit("close", conn.closeInfo);
+  }
+
+  // ---- injected faults ----------------------------------------------------------------------
+
+  #setFault(slot, value) {
+    Atomics.store(this.faultI32, slot, value);
+    Atomics.add(this.faultI32, FAULT_SEQ, 1);
+    this.#wake();
+  }
+
+  /**
+   * Stops the guest the way SIGSTOP does: from its next `poll_oneoff` or
+   * blocking call on it gets no input, no readiness and no timers until
+   * `resume()`. Input still reaches its socket buffers (up to one window per
+   * connection), requests are served, and `quiesce()` resolves with no deadline.
+   */
+  pause() {
+    this.#setFault(FAULT_PAUSED, 1);
+  }
+
+  resume() {
+    this.#setFault(FAULT_PAUSED, 0);
+  }
+
+  get paused() {
+    return Atomics.load(this.faultI32, FAULT_PAUSED) !== 0;
+  }
+
+  /** Offsets this process's REALTIME clock by `ms` (MONOTONIC is untouched); 0 removes the skew. */
+  setClockSkew(ms) {
+    Atomics.store(this.faultI64, FAULT_SKEW, BigInt(Math.round(Number(ms) || 0)) * 1_000_000n);
+    Atomics.add(this.faultI32, FAULT_SEQ, 1);
+    this.#wake();
+  }
+
+  get clockSkewMs() {
+    return Number(Atomics.load(this.faultI64, FAULT_SKEW) / 1_000_000n);
+  }
+
+  /**
+   * The volume's health: "ok"; "slow", where each `fd_sync` / `fd_datasync`
+   * takes `ms` of host time (the guest waits for the clock); "full", where
+   * writes that grow the files fail with ENOSPC; "eio", where writes and
+   * syncs fail with EIO.
+   */
+  setDisk(mode, ms = 0) {
+    const code = DISK_MODES.indexOf(mode);
+    if (code < 0) throw new TypeError(`disk mode must be one of ${DISK_MODES.join(", ")}, not ${mode}`);
+    Atomics.store(this.faultI32, FAULT_DISK_MS, code === DISK.SLOW ? Math.max(0, Math.round(Number(ms) || 0)) : 0);
+    this.#setFault(FAULT_DISK_MODE, code);
+  }
+
+  get disk() {
+    return { mode: DISK_MODES[Atomics.load(this.faultI32, FAULT_DISK_MODE)], ms: Atomics.load(this.faultI32, FAULT_DISK_MS) };
   }
 
   // ---- requests and observability -----------------------------------------------------------

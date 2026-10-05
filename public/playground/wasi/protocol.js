@@ -58,6 +58,21 @@ export const CLOCK_REAL = 0;
 export const CLOCK_HOST = 1;
 
 /**
+ * Per-process fault buffer (host writes, worker reads): Int32 [SEQ, PAUSED,
+ * DISK_MODE, DISK_MS], then BigInt64 [skewNs] at byte 16. Unlike the clock it
+ * belongs to one process, so the lab can pause one broker, skew its wall
+ * clock or break its disk while the others share the clock.
+ */
+export const FAULT_SEQ = 0;
+export const FAULT_PAUSED = 1; // 1: poll_oneoff and blocking calls hand the guest nothing, like SIGSTOP
+export const FAULT_DISK_MODE = 2; // DISK.*
+export const FAULT_DISK_MS = 3; // host ms one fd_sync / fd_datasync takes in DISK.SLOW
+export const FAULT_SKEW = 0; // BigInt64 index (byte 16): added to REALTIME, in ns
+export const FAULT_BYTES = 24;
+export const DISK = Object.freeze({ OK: 0, SLOW: 1, FULL: 2, EIO: 3 });
+export const DISK_MODES = Object.freeze(["ok", "slow", "full", "eio"]);
+
+/**
  * The guest's MONOTONIC clock reads host time plus this offset (10^8 s), so
  * `Instant` arithmetic that reaches into the past, such as "now minus seven
  * days", cannot underflow in a freshly started guest.

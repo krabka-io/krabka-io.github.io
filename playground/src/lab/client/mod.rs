@@ -138,12 +138,14 @@ pub use self::{
         AutoOffsetReset, Consumer, ConsumerConfig, ConsumerError, ConsumerEvent, ConsumerMetrics,
         GroupProtocol, IsolationLevel, MemberState,
     },
+    // The admin node commits and fetches group offsets by topic name too.
+    consumer::{OffsetCommitByName, OffsetFetchByName},
     metadata::{BrokerInfo, MetadataCache, PartitionInfo, TopicInfo, endpoint_for_host, uuid_hex},
     partitioner::{
         StickyPartitioner, java_string_hash_code, murmur2, partition_for_key, to_positive,
     },
     producer::{
-        Acks, Compression, Producer, ProducerConfig, ProducerEvent, ProducerMetrics,
+        Acks, Compression, GroupMetadata, Producer, ProducerConfig, ProducerEvent, ProducerMetrics,
         ProducerRecord, RttHistogram, SeqNo,
     },
     request::{ApiSpec, VersionTable, api_name},
@@ -236,6 +238,9 @@ pub enum Target {
         key_type: CoordinatorType,
         key: String,
     },
+    /// One listener by address, outside the metadata: the admin node asks a
+    /// `KRaft` voter's controller listener for `DescribeQuorum` this way.
+    Endpoint(Endpoint),
 }
 
 /// What can go wrong with one request.
@@ -828,6 +833,7 @@ impl KafkaClient {
                 .map_or(Resolved::NeedCoordinator, |(_, endpoint)| {
                     Resolved::Endpoint(*endpoint)
                 }),
+            Target::Endpoint(endpoint) => Resolved::Endpoint(*endpoint),
         }
     }
 

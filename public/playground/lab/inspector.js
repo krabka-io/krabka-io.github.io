@@ -13,6 +13,7 @@
 import { el, button, select, plural } from "./dom.js";
 import { kindOf, renderState, commandObject, statusLine } from "./kinds.js";
 import { buildForm } from "./forms.js";
+import { cutOff } from "./faults.js";
 
 const STATE_INTERVAL_MS = 250;
 const RAW_INTERVAL_MS = 500;
@@ -110,6 +111,12 @@ export class Inspector {
       this.panels[id] = p;
       this.body.appendChild(p);
     }
+    // J2: a Last records row's Trace button (views.js). One listener here, since
+    // the state view patches its DOM in place and keeps old buttons.
+    this.panels.state.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-trace]");
+      if (b && this.selected != null) this.hooks.onTrace?.(this.selected, JSON.parse(b.dataset.trace));
+    });
     container.appendChild(this.root);
     this.showTab("state");
   }
@@ -181,6 +188,17 @@ export class Inspector {
     for (const n of nodes) {
       const sub = this.overviewSubs.get(n.id);
       if (sub) sub.textContent = overviewSub(n);
+    }
+    // J2: one line on the cluster's health, under the heading.
+    const health = nodes.length ? this.hooks.clusterHealth?.() : null;
+    if (!health) this.healthEl?.remove();
+    else {
+      this.healthEl ??= el("p", "lab-cl-health lab-small");
+      this.healthEl.dataset.field = "cluster-health";
+      this.healthEl.dataset.level = health.level;
+      this.healthEl.textContent = health.text;
+      const heading = this.emptyMsg.querySelector("h2");
+      if (heading && heading.nextSibling !== this.healthEl) heading.after(this.healthEl);
     }
   }
 
@@ -269,7 +287,8 @@ export class Inspector {
     const offline = this.hostOffline(n);
     // The id is in the key: two nodes can share a name and kind, and the
     // buttons below close over the id.
-    const key = [n.id, n.name, n.kind, n.alive, n.isolated, n.hosted, hostedBy, offline, session?.role, session?.peersKey].join("|");
+    const cut = cutOff(this.data?.snapshot, n.id);
+    const key = [n.id, n.name, n.kind, n.alive, n.isolated, cut, n.hosted, hostedBy, offline, session?.role, session?.peersKey, n.paused, n.skew_ms, n.disk].join("|"); // J3: paused, skew, disk
     if (key === this.headKey) return;
     this.headKey = key;
     this.glyph.textContent = k.glyph;
@@ -277,6 +296,10 @@ export class Inspector {
     this.nameEl.textContent = n.name;
     const bits = [k.label, `#${n.id}`, !n.alive ? "down" : offline ? "host offline" : "up"];
     if (n.isolated) bits.push("isolated");
+    // J3: the process faults.
+    if (n.paused) bits.push("paused");
+    if (n.skew_ms) bits.push(`clock ${n.skew_ms > 0 ? "+" : ""}${n.skew_ms} ms`);
+    if (n.disk && n.disk !== "ok") bits.push(`disk ${n.disk}`);
     if (session && session.role !== "solo") {
       const who = remote ? this.hooks.peerName(hostedBy) : "this tab";
       bits.push(`hosted by ${who}`);
@@ -323,7 +346,7 @@ export class Inspector {
       const fault = (label, command, title, cls = "") => this.actions.appendChild(button(label, `lab-btn-sm ${cls}`.trim(), () => this.hooks.onCommand(n.id, command), { title, data: { fault: command } }));
       if (n.alive) fault("Kill", "kill", "Halt the node; its disk survives", "lab-danger");
       else fault("Restart", "restart", "Boot again from the kept state", "lab-primary");
-      if (n.isolated) fault("Reconnect", "reconnect", "Restore every link of the node");
+      if (cut) fault("Reconnect", "reconnect", "Restore every link of the node");
       else fault("Isolate", "isolate", "Cut every link of the node");
     }
     if (n.kind === "krabka-broker" && n.hosted) {

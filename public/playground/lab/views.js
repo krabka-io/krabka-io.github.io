@@ -44,6 +44,7 @@ const VIEWS = {
   echo: renderCounters,
   pinger: renderCounters,
   admin: renderAdmin,
+  rebalancer: renderRebalancer,
 };
 
 // ---- real broker ------------------------------------------------------------------
@@ -63,6 +64,10 @@ function renderRealBroker(root, s, used, ctx) {
   addRow(rows, "why", p.reason, "process_reason");
   if (p.lagging) addRow(rows, "lagging", "it missed one instant of the lab's clock and runs free until it waits again", "process_lagging");
   if (p.exit) addRow(rows, "exit", p.exit.message ?? p.exit.reason, "process_exit");
+  // J3: the faults the page applies to the process.
+  if (p.paused) addRow(rows, "paused", "stopped like SIGSTOP: no timers, input waits in its socket buffers", "process_paused");
+  if (p.skew_ms) addRow(rows, "clock skew", `${p.skew_ms > 0 ? "+" : ""}${p.skew_ms} ms on its wall clock (REALTIME); monotonic untouched`, "process_skew");
+  if (p.disk && p.disk !== "ok") addRow(rows, "disk", p.disk === "slow" ? `slow: each fsync takes ${p.disk_ms} ms` : p.disk === "full" ? "full: writes that grow a file fail with ENOSPC" : "failing: writes and syncs fail with EIO", "process_disk");
   addRow(rows, "address", p.address, "process_address");
   addRow(rows, "volume", p.volume, "process_volume");
   addRow(rows, "module", p.module, "process_module");
@@ -281,6 +286,10 @@ function renderProducer(root, s, used, ctx) {
   const deferred = take(s, used, "deferred_topics");
   if (Array.isArray(deferred) && deferred.length) addRow(rows, "waiting for metadata of", deferred.join(", "), "deferred_topics");
   root.appendChild(section("Producer", kv(rows)));
+  // The partitions table shows the same highest acknowledged offsets.
+  take(s, used, "acked_upto");
+  const txn = take(s, used, "transactions");
+  if (txn && typeof txn === "object") root.appendChild(section("Transactions", kv(transactionRows(txn, "txn"))));
 
   const ser = take(s, used, "serialization");
   if (ser && typeof ser === "object") root.appendChild(serializationSection(ser, ctx));
@@ -297,6 +306,8 @@ function renderProducer(root, s, used, ctx) {
             { key: "offset", label: "offset", render: (v) => (v == null ? "unacked" : fmtNum(v)) },
             { key: "key", label: "key", render: (v) => shortText(valueText(v), 22) },
             { key: "value_preview", label: "value", wrap: true, render: (v) => shortText(valueText(v), 60) },
+            // J2: follow the record through the network capture (trace.js); the inspector handles the click.
+            { key: "trace", label: "", render: (_, r) => traceButton(r) },
           ],
           records.slice().reverse(),
           { rowKey: (r) => String(r.seq) },
@@ -343,6 +354,29 @@ function renderProducer(root, s, used, ctx) {
   if (client && typeof client === "object") root.appendChild(section("Client", jsonTree(client, ctx), { open: false }));
 }
 
+// The rows of a transactional producer's `transactions` snapshot.
+function transactionRows(t, prefix) {
+  const rows = [];
+  addRow(rows, "transactional id", t.transactional_id, `${prefix}_id`);
+  addRow(rows, "state", t.state, `${prefix}_state`);
+  addRow(rows, "open", t.open, `${prefix}_open`);
+  addRow(rows, "committed", t.committed, `${prefix}_committed`);
+  addRow(rows, "aborted", t.aborted, `${prefix}_aborted`);
+  if (Array.isArray(t.partitions) && t.partitions.length) addRow(rows, "partitions in it", t.partitions.join(", "), `${prefix}_partitions`);
+  addRow(rows, "last error", t.last_error, `${prefix}_error`);
+  return rows;
+}
+
+// J2: a Last records row's Trace button, carrying the row as `data-trace`.
+function traceButton(r) {
+  const b = el("button", "lab-btn-sm", "Trace");
+  b.type = "button";
+  b.dataset.trace = JSON.stringify({ seq: r.seq, partition: r.partition, offset: r.offset, key: r.key });
+  b.title = r.offset == null ? "Follow this record through the network capture (once acknowledged)" : "Follow this record through the network capture";
+  b.setAttribute("aria-label", `Trace record ${r.seq}`);
+  return b;
+}
+
 // A producer's or streams app's schema registration.
 function serializationSection(ser, ctx) {
   const rows = [];
@@ -387,9 +421,32 @@ function renderConsumer(root, s, used, ctx) {
   addRow(rows, "commits", take(s, used, "commits"), "commits");
   addRow(rows, "rebalances", take(s, used, "rebalances"), "rebalances");
   addRow(rows, "max.poll.records", take(s, used, "max_poll_records"), "max_poll_records");
+  addRow(rows, "isolation level", take(s, used, "isolation_level"), "isolation_level");
+  addRow(rows, "aborted records seen", take(s, used, "aborted_seen"), "aborted_seen");
   const des = take(s, used, "deserialize");
   if (des && typeof des === "object") addRow(rows, "decodes through", des.registry != null ? ctx.nodeName(des.registry) : shortJson(des, 40), "deserialize");
   root.appendChild(section("Consumer", kv(rows)));
+  // The assignment table shows the same positions.
+  take(s, used, "positions");
+  const regressions = take(s, used, "offset_regressions");
+  if (Array.isArray(regressions) && regressions.length) {
+    root.appendChild(
+      section(
+        `Offset regressions (${regressions.length})`,
+        table(
+          [
+            { key: "tp", label: "partition" },
+            { key: "from", label: "had reached", render: (v) => fmtNum(v) },
+            { key: "to", label: "went back to", render: (v) => fmtNum(v) },
+            { key: "at", label: "at", render: (v) => `${fmtNum(v)} ms` },
+          ],
+          regressions.slice().reverse(),
+          { rowKey: (r) => `${r.tp}-${r.at}-${r.to}` },
+        ),
+        { open: false },
+      ),
+    );
+  }
 
   const assignment = take(s, used, "assignment");
   if (Array.isArray(assignment)) {
@@ -452,6 +509,8 @@ function renderStreams(root, s, used, ctx) {
   addRow(rows, "records out", take(s, used, "records_out"), "records_out");
   addRow(rows, "commits", take(s, used, "commits"), "commits");
   addRow(rows, "commit interval", withUnit(take(s, used, "commit_interval_ms"), " ms"), "commit_interval_ms");
+  addRow(rows, "processing guarantee", take(s, used, "processing_guarantee"), "processing_guarantee");
+  addRow(rows, "aborted transactions", take(s, used, "aborted_transactions"), "aborted_transactions");
   const error = take(s, used, "error");
   addRow(rows, "error", error, "error");
   const des = take(s, used, "deserialize");
@@ -592,6 +651,7 @@ function renderStreams(root, s, used, ctx) {
     addRow(pr, "waiting to send", producer.pending_records, "producer_pending");
     addRow(pr, "batches in flight", producer.in_flight_batches, "producer_in_flight");
     addRow(pr, "producer id", producer.producer_id ?? "none yet", "producer_id");
+    if (producer.transactions && typeof producer.transactions === "object") pr.push(...transactionRows(producer.transactions, "producer_txn"));
     const body = el("div");
     body.appendChild(kv(pr));
     if (Array.isArray(producer.partitions) && producer.partitions.length) {
@@ -657,6 +717,65 @@ function renderAdmin(root, s, used, ctx) {
   const client = take(s, used, "client");
   if (client && typeof client === "object") root.appendChild(section("Client", jsonTree(client, ctx), { open: false }));
   renderCounters(root, s, used, ctx);
+}
+
+// ---- rebalancer (R1) ---------------------------------------------------------------
+
+// The rebalancer's last plan, the replicas and leaders per broker it planned
+// from, and its run state.
+function renderRebalancer(root, s, used, ctx) {
+  const rows = [];
+  addRow(rows, "state", take(s, used, "state"), "state");
+  addRow(rows, "paused", take(s, used, "paused"), "paused");
+  addRow(rows, "execute", take(s, used, "execute"), "execute");
+  const goals = take(s, used, "goals");
+  addRow(rows, "goals", Array.isArray(goals) ? goals.join(", ") : goals, "goals");
+  addRow(rows, "executed", take(s, used, "executed"), "executed");
+  addRow(rows, "reassignments in progress", take(s, used, "reassigning"), "reassigning");
+  addRow(rows, "last plan", withUnit(take(s, used, "last_plan_at"), " ms"), "last_plan_at");
+  root.appendChild(section("Rebalancer", kv(rows)));
+
+  const balance = take(s, used, "balance");
+  if (balance && typeof balance === "object") {
+    const brokers = Object.entries(balance).map(([id, b]) => ({ broker: Number(id), ...b }));
+    root.appendChild(
+      section(
+        "Balance",
+        table(
+          [
+            { key: "broker", label: "broker", render: (v) => ctx.nodeLabelForBroker(v) },
+            { key: "replicas", label: "replicas" },
+            { key: "leaders", label: "leaders" },
+          ],
+          brokers,
+          { rowKey: (b) => b.broker },
+        ),
+      ),
+    );
+  }
+  const proposals = take(s, used, "proposals");
+  if (Array.isArray(proposals)) {
+    root.appendChild(
+      section(
+        `Proposals (${proposals.length})`,
+        table(
+          [
+            { key: "topic", label: "topic" },
+            { key: "partition", label: "p" },
+            { key: "from", label: "from", render: (v) => listText(v) },
+            { key: "to", label: "to", render: (v) => listText(v) },
+            { key: "reason", label: "why" },
+          ],
+          proposals,
+          { rowKey: (p) => `${p.topic}-${p.partition}` },
+        ),
+      ),
+    );
+  }
+  const errors = take(s, used, "errors");
+  if (Array.isArray(errors) && errors.length) root.appendChild(section("Errors", kv(errors.map((e, i) => ({ label: String(i + 1), value: String(e), key: `error_${i}` })))));
+  const client = take(s, used, "client");
+  if (client && typeof client === "object") root.appendChild(section("Client", jsonTree(client, ctx), { open: false }));
 }
 
 // ---- echo, pinger, unknown kinds ------------------------------------------------------------

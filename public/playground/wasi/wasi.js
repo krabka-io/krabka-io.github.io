@@ -40,7 +40,7 @@ import {
 import { ClockView, nsToMs } from "./clock.js";
 import { MemFs } from "./fs.js";
 import { Dialer, LogFd, StdinFd, VirtualNet } from "./net.js";
-import { MONOTONIC_OFFSET_NS, OUT, REC } from "./protocol.js";
+import { DISK, FAULT_DISK_MODE, FAULT_DISK_MS, FAULT_PAUSED, FAULT_SEQ, MONOTONIC_OFFSET_NS, OUT, REC } from "./protocol.js";
 import { RingReader } from "./ring.js";
 
 const encoder = new TextEncoder();
@@ -256,7 +256,10 @@ export class Wasi {
     this.config = config;
     this.post = post;
     this.ring = new RingReader(ring);
-    this.clock = new ClockView(clock);
+    this.clock = new ClockView(clock, config.faults ?? null);
+    // The process's fault buffer (protocol.js): pause, disk mode, clock skew.
+    this.faults = config.faults ? new Int32Array(config.faults, 0, 4) : null;
+    this.faultSeq = 0;
     this.outbox = new Outbox(post);
     this.started = performance.now();
     this.lastResume = this.started;
@@ -277,6 +280,8 @@ export class Wasi {
       fs: { opens: 0, reads: 0, writes: 0, bytesRead: 0, bytesWritten: 0, syncs: 0 },
       journal: { flushes: 0, ops: 0, bytes: 0, waits: 0 },
       faults: 0,
+      paused: { times: 0, ms: 0 },
+      disk: { slowSyncs: 0, slowMs: 0, enospc: 0, eio: 0 },
     };
     this.journal = { lastFlush: this.started, deadline: Infinity, unacked: 0 };
 
@@ -427,6 +432,7 @@ export class Wasi {
 
   /** Applies every record the host queued; serves requests afterwards. Returns how many there were. */
   drain() {
+    this.#syncFaults();
     const count = this.ring.drain((kind, id, bytes) => this.#record(kind, id, bytes));
     if (this.ring.takeSpaceRequest()) this.outbox.push([OUT.SPACE]);
     if (this.requests.length > 0 && !this.serving) this.#serveRequests();
@@ -588,6 +594,69 @@ export class Wasi {
     }
   }
 
+  // ---- faults the host injects (lab) --------------------------------------------------------
+
+  /** The disk mode the host set: DISK.OK, SLOW, FULL or EIO. */
+  #disk() {
+    return this.faults ? Atomics.load(this.faults, FAULT_DISK_MODE) : DISK.OK;
+  }
+
+  /** Picks up a change of the fault buffer: a full disk caps the file system at its size now. */
+  #syncFaults() {
+    if (!this.faults) return;
+    const seq = Atomics.load(this.faults, FAULT_SEQ);
+    if (seq === this.faultSeq) return;
+    this.faultSeq = seq;
+    const limit = this.config.maxBytes ?? Infinity;
+    this.fs.maxBytes = this.#disk() === DISK.FULL ? Math.min(limit, this.fs.bytes) : limit;
+  }
+
+  /**
+   * While the host has the process paused (SIGSTOP), the guest gets nothing:
+   * records still land in the socket buffers, as a stopped process's kernel
+   * keeps receiving, requests are served, and idle requests are answered
+   * with no deadline, so a host in lockstep does not wait for it.
+   */
+  #holdWhilePaused() {
+    if (!this.faults || Atomics.load(this.faults, FAULT_PAUSED) === 0) return;
+    const started = performance.now();
+    this.stats.paused.times++;
+    while (Atomics.load(this.faults, FAULT_PAUSED) !== 0) {
+      const seen = this.ring.epoch();
+      this.drain();
+      this.flushOutput();
+      this.#replyIdle(null);
+      this.#maybeFlushJournal();
+      this.#sleep(seen, this.#journalWaitMs());
+    }
+    this.stats.paused.ms += performance.now() - started;
+  }
+
+  /** A slow disk: the guest waits in the sync until host time reaches the deadline, answering idle with it. */
+  #slowSync() {
+    const ms = Atomics.load(this.faults, FAULT_DISK_MS);
+    if (ms <= 0) return;
+    const deadline = this.clock.hostNs() + BigInt(ms) * 1_000_000n;
+    const started = performance.now();
+    this.stats.disk.slowSyncs++;
+    while (this.clock.hostNs() < deadline) {
+      const seen = this.ring.epoch();
+      this.drain();
+      this.flushOutput();
+      this.#replyIdle(deadline);
+      this.#maybeFlushJournal();
+      this.#sleep(seen, Math.min(this.#journalWaitMs(), this.clock.msUntil(deadline)));
+    }
+    this.stats.disk.slowMs += performance.now() - started;
+  }
+
+  /** EIO for anything that changes the volume (writes, syncs, resizes, creates, renames, unlinks) on a failing disk, else 0. */
+  #diskError() {
+    if (this.#disk() !== DISK.EIO) return 0;
+    this.stats.disk.eio++;
+    return E.IO;
+  }
+
   /** Blocks in `Atomics.wait` until the ring's epoch moves or `ms` passes. */
   #sleep(seen, ms) {
     const poll = this.stats.poll;
@@ -608,6 +677,7 @@ export class Wasi {
     this.#maybeFlushJournal();
     this.#sleep(seen, this.#journalWaitMs());
     this.drain();
+    this.#holdWhilePaused();
   }
 
   /** Flushes everything; called when the guest exits or traps. */
@@ -638,6 +708,8 @@ export class Wasi {
       net: { ...this.net.stats, sockets: this.net.sockets.size },
       fds: this.fds.filter(Boolean).length,
       faults: this.stats.faults,
+      paused: { ...this.stats.paused, now: Boolean(this.faults && Atomics.load(this.faults, FAULT_PAUSED)) },
+      disk: { ...this.stats.disk, mode: ["ok", "slow", "full", "eio"][this.#disk()] ?? "ok" },
       clock: {
         hostMs: Number(this.clock.hostNs() / 1000n) / 1000,
         realtimeMs: Number(this.clock.realtimeNs() / 1_000_000n),
@@ -829,6 +901,7 @@ export class Wasi {
     if ((d.rightsBase & (RIGHTS.FD_FILESTAT_SET_SIZE | RIGHTS.FD_WRITE)) === 0n) return E.BADF;
     const n = safeNumber(size);
     if (n < 0) return E.FBIG;
+    if (this.#diskError()) return E.IO;
     return this.fs.truncate(d.inode, n);
   }
 
@@ -906,7 +979,9 @@ export class Wasi {
   $fd_write(fd, iovs, count, nwrittenPtr) {
     const d = this.fds[fd];
     if (!d) return E.BADF;
+    if (d.kind === "file" && this.#diskError()) return E.IO;
     const errno = this.#writeFrom(d, iovs, count, nwrittenPtr, (src, at, len) => d.write(src, at, len));
+    if (errno === E.NOSPC) this.stats.disk.enospc++;
     if (d.kind === "file") {
       if (errno === E.SUCCESS) {
         this.stats.fs.writes++;
@@ -943,6 +1018,7 @@ export class Wasi {
     if (d.kind === "dir") return E.ISDIR;
     if (d.kind !== "file") return E.SPIPE;
     if (!d.canWrite()) return E.BADF;
+    if (this.#diskError()) return E.IO;
     let at = safeNumber(offset);
     if (at < 0) return E.INVAL;
     const errno = this.#writeFrom(d, iovs, count, nwrittenPtr, (src, ptr, len) => {
@@ -988,6 +1064,8 @@ export class Wasi {
     if (!d) return E.BADF;
     if (d.kind !== "file" && d.kind !== "dir") return E.INVAL;
     this.stats.fs.syncs++;
+    if (this.#diskError()) return E.IO;
+    if (this.#disk() === DISK.SLOW) this.#slowSync();
     // Durability is write-behind: fsync returns at once and only hurries the next journal flush.
     this.journal.deadline = Math.min(this.journal.deadline, performance.now() + SYNC_FLUSH_MS);
     return E.SUCCESS;
@@ -1018,6 +1096,7 @@ export class Wasi {
     const size = safeNumber(len);
     if (start < 0 || size < 0) return E.FBIG;
     const end = start + size;
+    if (this.#diskError()) return E.IO;
     return end > d.inode.size ? this.fs.truncate(d.inode, end) : E.SUCCESS;
   }
 
@@ -1073,6 +1152,8 @@ export class Wasi {
       directory: (oflags & OFLAGS.DIRECTORY) !== 0,
       write: (base & RIGHTS.FD_WRITE) !== 0n,
     };
+    // Creating or truncating a file writes to the disk.
+    if ((how.create || how.trunc) && this.#diskError()) return E.IO;
     const inode = this.fs.open(dir.inode, path, how);
     if (typeof inode === "number") return inode;
     this.stats.fs.opens++;
@@ -1087,6 +1168,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.mkdir(dir.inode, path);
   }
 
@@ -1095,6 +1177,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.rmdir(dir.inode, path);
   }
 
@@ -1103,6 +1186,7 @@ export class Wasi {
     if (typeof dir === "number") return dir;
     const path = this.#path(pathPtr, pathLen);
     if (typeof path === "number") return path;
+    if (this.#diskError()) return E.IO;
     return this.fs.unlink(dir.inode, path);
   }
 
@@ -1115,6 +1199,7 @@ export class Wasi {
     if (typeof fromPath === "number") return fromPath;
     const toPath = this.#path(toPtr, toLen);
     if (typeof toPath === "number") return toPath;
+    if (this.#diskError()) return E.IO;
     return this.fs.rename(from.inode, fromPath, to.inode, toPath);
   }
 
@@ -1267,6 +1352,7 @@ export class Wasi {
     }
     let waited = false;
     for (;;) {
+      this.#holdWhilePaused();
       const seen = this.ring.epoch();
       this.drain();
       const count = this.#collect(subs, outPtr, hasClock);
@@ -1295,7 +1381,7 @@ export class Wasi {
     if (clockId !== CLOCKID.MONOTONIC && clockId !== CLOCKID.REALTIME) return null;
     if (flags & SUBCLOCKFLAGS_ABSTIME) {
       this.clock.refresh();
-      return clockId === CLOCKID.MONOTONIC ? timeout - MONOTONIC_OFFSET_NS : timeout - this.clock.baseNs;
+      return clockId === CLOCKID.MONOTONIC ? timeout - MONOTONIC_OFFSET_NS : timeout - this.clock.realtimeBaseNs();
     }
     return this.clock.hostNs() + timeout;
   }
