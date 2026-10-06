@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,53 @@ import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeS
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
 import { ombCases, ombWorkload, ombDriver, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
+
+test('OpenMessaging workflow balances image order, preserves arguments and stops on failure', async () => {
+  const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
+  const step = workflow.split('      - name: Run OpenMessaging against all three brokers\n')[1]
+    .split('      - name: Add report to job summary\n')[0];
+  const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-workflow-'));
+  try {
+    await fs.mkdir(path.join(directory, 'scripts'));
+    await fs.writeFile(path.join(directory, 'scripts/benchmark.mjs'), `
+      import fs from 'node:fs';
+      fs.appendFileSync('calls.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
+      if (fs.readFileSync('calls.jsonl', 'utf8').trim().split('\\n').length === Number(process.env.FAIL_AT)) process.exit(7);
+    `);
+    const candidate = 'candidate;touch unexpected';
+    const control = 'control image';
+    for (const scenario of [
+      { comparison: '', mode: 'full', images: [candidate], status: 0 },
+      { comparison: control, mode: 'smoke', images: [control, candidate, candidate, control], status: 0 },
+      { comparison: control, mode: 'dry-run', images: [control, candidate], failAt: '2', status: 7 },
+      { comparison: control, mode: 'invalid', images: [], status: 1 },
+    ]) {
+      await fs.rm(path.join(directory, 'calls.jsonl'), { force: true });
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: directory, timeout: 10_000, encoding: 'utf8', env: { ...process.env,
+          BENCHMARK_MODE: scenario.mode, BENCHMARK_WORKLOADS: 'workload one,workload two',
+          BENCHMARK_RF: '1,3', BENCHMARK_REPETITIONS: '2', KRABKA_IMAGE: candidate,
+          KRABKA_COMPARISON_IMAGE: scenario.comparison, REDPANDA_IMAGE: 'redpanda image',
+          FAIL_AT: scenario.failAt ?? '',
+        },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, scenario.status, result.stderr);
+      const calls = await fs.readFile(path.join(directory, 'calls.jsonl'), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+      });
+      const args = ['--suite', 'openmessaging', '--workloads', 'workload one,workload two',
+        '--replication-factors', '1,3', '--repetitions', '2', '--redpanda-image', 'redpanda image'];
+      if (scenario.mode === 'smoke') args.push('--smoke');
+      if (scenario.mode === 'dry-run') args.push('--dry-run');
+      assert.deepEqual(calls.trim() ? calls.trim().split('\n').map(JSON.parse) : [],
+        scenario.images.map(image => [...args, '--krabka-image', image]));
+    }
+    await assert.rejects(fs.stat(path.join(directory, 'unexpected')), { code: 'ENOENT' });
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
 
 test('long benchmark logs are retained beyond execFile limits and failures remain bounded', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-logs-'));
@@ -48,6 +96,10 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
 
 test('OpenMessaging catalog and smoke configuration keep comparison settings consistent', () => {
   assert.equal(ombCases().length, 13);
+  assert.deepEqual(ombCases('1m-10-topics-1-partition-100b'), [{
+    id: '1m-10-topics-1-partition-100b', upstream_file: 'workloads/1m-10-topics-1-partition-100b.yaml',
+  }]);
+  assert.throws(() => ombCases('1m-10-topics-1-partition-100b,1m-10-topics-1-partition-100b'), /duplicate/);
   assert.throws(() => ombCases('../outside'), /unknown/);
   assert.throws(() => ombCases('simple-workload,simple-workload'), /duplicate/);
   const source = 'topics: 1\npartitionsPerTopic: 16\nmessageSize: 1024\npayloadFile: "payload/payload-1Kb.data"\nproducerRate: 100000\nconsumerBacklogSizeGB: 100\ntestDurationMinutes: 15\n';

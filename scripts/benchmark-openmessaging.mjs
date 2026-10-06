@@ -24,7 +24,8 @@ export const OMB_WORKLOADS = [
 export function ombCases(selection = 'all') {
   const names = selection === 'all' ? OMB_WORKLOADS : selection.split(',');
   assert.ok(names.length && new Set(names).size === names.length, 'empty or duplicate OMB workloads');
-  for (const name of names) assert.ok(OMB_WORKLOADS.includes(name), `unknown OMB workload: ${name}`);
+  for (const name of names) assert.ok(OMB_WORKLOADS.includes(name)
+    || name === '1m-10-topics-1-partition-100b', `unknown OMB workload: ${name}`);
   return names.map(id => ({ id, upstream_file: `workloads/${id}.yaml` }));
 }
 

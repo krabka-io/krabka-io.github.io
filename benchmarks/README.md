@@ -62,6 +62,20 @@ and backlog drain (five extra minutes in smoke). Large backlog cases can hit tha
 deadline, which is retained as a failure. Smoke is a wiring check, not a performance
 measurement of the original workload.
 
+Set `krabka_comparison_image` to a control image and `krabka_image` to a candidate
+to compare them on the same worker in control/candidate/candidate/control order.
+Each invocation runs all three vendors with fresh storage and the selected workload,
+RF and repetition settings. With `repetitions=1`, each Krabka image gets two rounds;
+the four invocations retain separate reports and provenance. The series stops after
+a failed invocation, and its diagnostics remain available. For example:
+
+```sh
+gh workflow run openmessaging.yml -f mode=full \
+  -f workloads=max-rate-1-topic-16-partitions-1kb -f replication_factors=3 \
+  -f repetitions=1 -f krabka_comparison_image="$CONTROL_IMAGE" \
+  -f krabka_image="$CANDIDATE_IMAGE"
+```
+
 The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
 with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
 **Kafka 3.6.1 client against every broker**, including the Kafka **4.3.1 server**.
@@ -95,6 +109,13 @@ The default catalog is the 13 workloads listed in the linked
 | `max-rate-1-topic-16-partitions-100b` |
 | `max-rate-1-topic-100-partitions-1kb` |
 | `max-rate-1-topic-100-partitions-100b` |
+
+The pinned upstream `1m-10-topics-1-partition-100b` workload is also available
+when selected explicitly. It uses ten topics with one partition each, randomized
+100-byte payloads, a fixed offered rate of 1,000,000 messages/s and a 15-minute
+measurement. Select it with `-f workloads=1m-10-topics-1-partition-100b` in Actions
+or `--workloads 1m-10-topics-1-partition-100b` locally. It supports the same RF,
+image comparison and repetition settings.
 
 Two single-partition maximum-rate filenames now include `1p-1c` upstream. Full
 runs retain upstream payloads, rates, partition counts, backlog sizes, and durations;
