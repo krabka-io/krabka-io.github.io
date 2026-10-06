@@ -12,6 +12,37 @@ import { curveCases, curveBudget, curveSummary, validateTimeline } from './bench
 import { ombCases, ombWorkload, ombDriver, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
+test('actual resource reader retains user and system CPU through the sampler', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const reader = source.slice(source.indexOf('async function readBroker('),
+    source.indexOf('\n    async function measureResources('));
+  const sampler = source.slice(source.indexOf('async function measureResources('),
+    source.indexOf('\n    async function trial('));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-cpu-'));
+  const cpu = 'usage_usec 900000\nuser_usec 200000\nsystem_usec 700000\n';
+  try {
+    for (const [name, data] of Object.entries({ 'cpu.stat': cpu, 'memory.current': '8192',
+      'memory.stat': 'anon 4096\ninactive_file 1024\n', 'memory.events': 'oom_kill 0\n',
+      'cgroup.procs': `${process.pid}\n` })) await fs.writeFile(path.join(directory, name), data);
+    const readBroker = runInNewContext(`(${reader.trim()})`, { fs, path, assert });
+    const measure = runInNewContext(`(${sampler.trim()})`, {
+      fs, performance, AbortController, Date, delay, aggregateSample,
+      controller: new AbortController(), readBroker,
+    });
+    const filename = path.join(directory, 'resources.jsonl');
+    const result = await measure([{ id: 'broker', cgroup: directory }], filename, async () => {});
+    assert.ok(result.samples.length >= 2);
+    for (const sample of (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse)) {
+      const row = sample.brokers[0];
+      assert.deepEqual([row.cpu_usage_us, row.cpu_user_us, row.cpu_system_us], [900000, 200000, 700000]);
+    }
+    for (const counter of ['user_usec', 'system_usec']) {
+      await fs.writeFile(path.join(directory, 'cpu.stat'), cpu.replace(new RegExp(`^${counter}.*\\n`, 'm'), ''));
+      await assert.rejects(readBroker({ id: 'broker', cgroup: directory }), /resource counter unavailable/);
+    }
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test('actual resource sampler retains its clock anchor when the client fails', async () => {
   const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
   const sampler = source.slice(source.indexOf('async function measureResources('),
