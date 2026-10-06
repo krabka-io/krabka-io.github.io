@@ -44,8 +44,14 @@ export function ombWorkload(source, smoke) {
   return { yaml: effective, config, sha256: createHash('sha256').update(source).digest('hex') };
 }
 
-export function ombDriver(vendor, rf) {
+export function ombTimeoutMs(config, smoke) {
+  return (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 90 : 30)) * 60_000;
+}
+
+export function ombDriver(vendor, rf, maxPollIntervalMs) {
   assert.ok(['krabka', 'kafka', 'redpanda'].includes(vendor) && [1, 3].includes(rf));
+  assert.ok(maxPollIntervalMs === undefined || (Number.isInteger(maxPollIntervalMs)
+    && maxPollIntervalMs > 0 && maxPollIntervalMs <= 2 ** 31 - 1), 'invalid poll interval');
   return `name: ${vendor}-rf${rf}
 driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
 replicationFactor: ${rf}
@@ -68,7 +74,7 @@ consumerConfig: |
   auto.offset.reset=earliest
   enable.auto.commit=false
   max.partition.fetch.bytes=10485760
-`;
+${maxPollIntervalMs === undefined ? '' : `  max.poll.interval.ms=${maxPollIntervalMs}\n`}`;
 }
 
 export async function prepareOmb(directory, command, oneShot) {

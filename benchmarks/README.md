@@ -57,10 +57,18 @@ Only `workflow_dispatch` triggers this workflow. Every trial gets fresh broker
 storage, and vendors run sequentially on the same VM with the same CPU affinity,
 4 CPU quotas, 10 GiB memory limits, and a separate 4 GiB client. Multiple rounds
 rotate vendor order. The workflow has a 24-hour deadline; individual workloads
-have their upstream duration plus 30 minutes for startup, sustainable-rate probing,
-and backlog drain (five extra minutes in smoke). Large backlog cases can hit that
-deadline, which is retained as a failure. Smoke is a wiring check, not a performance
+have their upstream duration plus 30 minutes for startup and sustainable-rate probing,
+or 90 extra minutes for a full backlog fill/drain (five extra minutes in smoke).
+Deadlines remain failures. Smoke is a wiring check, not a performance
 measurement of the original workload.
+
+During backlog fill, upstream OMB blocks the consumer's message callback. Filling
+100 GiB at 100,000 messages/s takes about 17½ minutes, exceeding the Kafka client's
+default five-minute poll interval and causing it to leave the group. Full backlog
+trials set `max.poll.interval.ms` to the workload's complete timeout, identically
+for all vendors, to allow that intentional pause. The effective driver YAML and
+`timeout_ms` are retained in artifacts; client errors still fail validation. Backlog
+size, offered rate, warm-up, post-drain duration and upstream driver code are preserved.
 
 The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
 with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
