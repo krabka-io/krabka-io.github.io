@@ -474,6 +474,7 @@ rpk:
         rss += Number(match[1]) * 1024;
       }
       return { id: broker.id, cpu_usage_us: counter(cpu, 'usage_usec'), rss_bytes: rss,
+        cpu_user_us: counter(cpu, 'user_usec'), cpu_system_us: counter(cpu, 'system_usec'),
         anon_bytes: counter(stats, 'anon'), memory_current_bytes: Number(memory.trim()),
         inactive_file_bytes: counter(stats, 'inactive_file'), oom_kill: counter(events, 'oom_kill') };
     }
