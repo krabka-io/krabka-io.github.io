@@ -25,6 +25,7 @@ mod producer;
 mod rebalancer;
 pub mod registry_client;
 pub mod serde;
+mod share_consumer;
 pub mod streams;
 pub mod templates;
 pub mod topology;
@@ -34,6 +35,7 @@ pub use self::{
     consumer::{ConsumerNode, PartitionRow, Processing, partition_rows},
     producer::{ProducerNode, Rate, RateMeter},
     rebalancer::RebalancerNode,
+    share_consumer::ShareConsumerNode,
     streams::StreamsNode,
 };
 

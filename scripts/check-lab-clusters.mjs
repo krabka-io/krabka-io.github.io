@@ -7,6 +7,12 @@
 // CPU, so 20x starves it). The hidden admin node creates each scenario's
 // topics on the brokers.
 //
+// - rebalancer: adding a data-only broker redistributes replicas and leaders;
+//   Plan previews, Execute applies, traffic continues, and reload retains it.
+// - share-group: three workers share one partition, pause/resume independently,
+//   rejoin after reload and release unfinished work on Close.
+// - share-redelivery: Release increments delivery counts; Accept and Reject
+//   finish work with acknowledgements from the real broker.
 // - three-brokers: two consumers share the three partitions and both consume;
 //   a section the reader opens stays open as the State tab renders again; the
 //   producer's command bar pauses, sends, resumes and sets the rate; the
@@ -28,7 +34,7 @@
 //   encryption off and on using the same scenario and broker disks.
 //
 // Usage:  npm run build && npm run build:broker && npm run check-lab-clusters [-- --headed]
-// A single flow: npm run check-lab-clusters -- --preset=sspi-encrypted
+// A single flow: npm run check-lab-clusters -- --preset=share-group --repeat=2
 // Needs Playwright and a Chromium (see lab-check-lib.mjs). Exits 2 when one
 // is missing, or when dist/ has no broker build, 1 when a check fails.
 
@@ -364,7 +370,97 @@ async function partition(page, preset) {
   check('a restarted producer sees five brokers in its metadata', Boolean(five), JSON.stringify(five));
 }
 
+async function shareGroup(page, preset) {
+  check('share consumers can be added from the palette', await page.locator('#krabka-lab .lab-kind-btn[data-kind="share-consumer"]').isEnabled());
+  if (preset.id === 'share-redelivery') {
+    const released = await until(page, 'released work to be redelivered', '(n) => n[3].state.released > 0 && n[3].state.last_records.some((r) => r.delivery_count > 1 && r.acknowledgement === "release") ? n[3].state : null', 120_000);
+    check('Release returns records to the real broker for redelivery', released.last_records.some((r) => r.delivery_count > 1), JSON.stringify(released.last_records));
+    await inspect(page, 3, 'retry-worker');
+    await command(page, 'acknowledgement', { type: 'accept' });
+    await until(page, 'Accept acknowledgements', '(n) => n[3].state.accepted > 0', 60_000);
+    check('Set acknowledgement changes the worker to Accept', (await nodeStateOf(page, 3)).acknowledgement === 'accept');
+    await command(page, 'acknowledgement', { type: 'reject' });
+    await until(page, 'Reject acknowledgements', '(n) => n[3].state.rejected > 0', 60_000);
+    check('Reject is acknowledged by the real broker', (await nodeStateOf(page, 3)).rejected > 0);
+    await command(page, 'close');
+    await until(page, 'the worker to close its sessions and leave', '(n) => n[3].state.closed', 60_000);
+    check('Close finishes share sessions before leaving the group', (await nodeStateOf(page, 3)).state === 'closed');
+    return;
+  }
+  const workers = await until(page, 'three workers to accept work from one partition', `(n) => {
+    const workers = [3,4,5].map((id) => n[id].state);
+    return workers.every((s) => s.state === 'stable' && s.accepted > 0) ? workers : null;
+  }`, 120_000);
+  check('three share consumers process the same single partition', workers.every((s) => s.assignment.some((p) => p.topic === 'jobs' && p.partition === 0)), JSON.stringify(workers.map((s) => s.assignment)));
+  const group = await until(page, 'the observer to describe all share members', `(n) => {
+    const admin = Object.values(n).find((x) => x.kind === 'admin');
+    return admin?.state.cluster?.groups.find((g) => g.id === 'workers' && g.type === 'share' && g.members === 3) || null;
+  }`, 120_000);
+  check('the cluster observer reports share-group membership without consumer offsets', group.offsets.length === 0 && group.lag === null, JSON.stringify(group));
+  await inspect(page, 3, 'worker-1');
+  check('the inspector displays delivery counts and acknowledgements', await page.locator('#krabka-lab .lab-inspector').getByText('delivery count', { exact: true }).count() > 0);
+  await command(page, 'pause');
+  const paused = await nodeStateOf(page, 3), peer = await nodeStateOf(page, 4);
+  const pausedAt = await page.evaluate(() => window.krabkaLab.world.liveSnapshot().now);
+  await until(page, 'another worker to continue while one is paused', `(n) => n[4].state.accepted > ${peer.accepted + 5}`, 60_000);
+  await waitFor(page, `window.krabkaLab.world.liveSnapshot().now >= ${pausedAt + 50_000}`, 'heartbeats to retain the paused membership beyond its 45-second timeout', 120_000);
+  check('Pause holds work while heartbeats retain membership and peers continue', (await nodeStateOf(page, 3)).processed <= paused.processed + 1);
+  await command(page, 'resume');
+  await until(page, 'the resumed share consumer to accept work', `(n) => n[3].state.accepted > ${paused.accepted}`, 60_000);
+  check('Resume continues the same share membership', (await nodeStateOf(page, 3)).member_id === paused.member_id);
+  await inspect(page, 3, 'worker-1');
+  await command(page, 'process_ms', { ms: 10_000 });
+  const slow = await nodeStateOf(page, 3);
+  await until(page, 'new unfinished work before closing', `(n) => n[3].state.processing_backlog > 0 && n[3].state.records > ${slow.records}`, 60_000);
+  const peers = await Promise.all([4, 5].map((id) => nodeStateOf(page, id)));
+  await command(page, 'close');
+  await until(page, 'closed worker to leave and peers to continue', `(n) => n[3].state.closed && n[4].state.accepted > ${peers[0].accepted} && n[5].state.accepted > ${peers[1].accepted}
+    && Object.values(n).find((x) => x.kind === 'admin')?.state.cluster?.groups.some((g) => g.id === 'workers' && g.members === 2)`, 60_000);
+  check('Close releases work while other share members continue', (await nodeStateOf(page, 3)).closed && (await nodeStateOf(page, 3)).released > 0);
+  await page.evaluate(() => window.krabkaLab.saveNow()); await page.evaluate(() => window.krabkaLab.storage.flush());
+  await reload(page, preset.name);
+  await until(page, 'the reloaded share group to accept work', '(n) => [3,4,5].every((id) => n[id].state.accepted > 0)', 120_000);
+  const reloaded = await nodeStateOf(page, 3);
+  check('share consumers reconnect after reload with new member IDs on the existing broker disk', reloaded.member_id !== paused.member_id);
+}
+
+async function rebalancer(page, preset) {
+  check('rebalancers can be added from the palette', await page.locator('#krabka-lab .lab-kind-btn[data-kind="rebalancer"]').isEnabled());
+  await until(page, 'the two-broker cluster to consume', '(n) => n[4].state.processed > 0 && n[5].state.balance[1]?.replicas === 6 && n[5].state.balance[2]?.replicas === 6', 120_000);
+  await inspect(page, 5, 'replica-rebalancer'); await command(page, 'pause');
+  await page.locator('#krabka-lab .lab-kind-btn[data-kind="krabka-broker"]').click();
+  const dialog = page.locator('#krabka-lab dialog[open]');
+  await dialog.getByLabel('Name', { exact: true }).fill('new-data-broker');
+  await dialog.getByLabel('KRaft voter', { exact: true }).uncheck();
+  await dialog.locator('button[type="submit"]').click();
+  const added = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.name === 'new-data-broker')?.id);
+  if (!added) throw new Error('could not add the data-only broker');
+  await until(page, 'the added data broker to register', `(n) => Object.values(n).find((x) => x.kind === 'admin')?.state.cluster?.brokers.some((b) => b.id === ${added})`, 120_000);
+  const executedBefore = (await nodeStateOf(page, 5)).executed;
+  await fit(page);
+  await inspect(page, 5, 'replica-rebalancer');
+  await command(page, 'plan');
+  const planned = await until(page, 'the rebalancer to propose replica moves', '(n) => n[5].state.proposals.length > 0 && n[5].state.state.startsWith("planned") ? n[5].state : null', 60_000);
+  check('Plan now proposes replicas for the new data-only broker', planned.proposals.some((p) => p.to.includes(added)) && planned.executed === executedBefore, JSON.stringify(planned.proposals));
+  await command(page, 'execute'); await command(page, 'resume');
+  const balanced = await until(page, 'replicas and leaders to balance over all three brokers', `(n) => {
+    const s = n[5].state, counts = Object.values(s.balance);
+    return s.state === 'balanced' && counts.length === 3 && counts.every((b) => b.replicas === 4 && b.leaders === 2) ? s : null;
+  }`, 120_000);
+  check('the real brokers complete reassignments and preferred leader elections', balanced.executed > 0 && balanced.proposals.length === 0, JSON.stringify(balanced.balance));
+  const consumed = (await nodeStateOf(page, 4)).processed;
+  await until(page, 'the consumer to continue after reassignment', `(n) => n[4].state.processed > ${consumed}`, 60_000);
+  check('production and consumption continue after the replica moves', true);
+  await page.evaluate(() => window.krabkaLab.saveNow()); await page.evaluate(() => window.krabkaLab.storage.flush());
+  await reload(page, preset.name);
+  await until(page, 'the grown cluster and rebalancer after reload', '(n) => n[4].state.processed > 0 && Object.values(n[5].state.balance).length === 3', 120_000);
+  check('reload retains the added broker and rebalancer', true);
+}
+
 const FLOWS = [
+  ['rebalancer', rebalancer],
+  ['share-group', shareGroup],
+  ['share-redelivery', shareGroup],
   ['sspi-encrypted', sspiEncrypted],
   ['broker-acls', brokerAcls],
   ['broker-acls-deny', brokerAcls],
@@ -392,32 +488,39 @@ async function main() {
   try {
     const selected = process.argv.find((arg) => arg.startsWith('--preset='))?.slice('--preset='.length);
     if (selected && !FLOWS.some(([id]) => id === selected)) throw new Error(`Unknown cluster check: ${selected}`);
-    for (const [id, flow] of FLOWS.filter(([id]) => !selected || id === selected)) {
-      const preset = PRESETS.find((p) => p.id === id);
-      console.log(`Cluster Lab: ${preset.name}`);
-      const t0 = Date.now();
-      // A context of its own: its IndexedDB and broker disks are the flow's.
-      const context = await newLabContext(browser, { width: 1400, height: 1000 });
-      const page = await context.newPage();
-      errors.push(watchErrors(page, id, base));
-      await t.flow(id, async () => {
-        await openLab(page, base);
-        await openScenario(page, preset.scenario, 120_000);
-        await setSpeed(page, SPEED);
-        try { await flow(page, preset); }
-        catch (err) {
-          const evidence = await page.evaluate(() => ({
-            world: window.krabkaLab.world.liveSnapshot(),
-            events: window.krabkaLab.timeline.events.slice(-100),
-          })).catch(() => null);
-          const directory = path.join(ROOT, 'artifacts', 'lab-clusters');
-          fs.mkdirSync(directory, { recursive: true });
-          fs.writeFileSync(path.join(directory, `${id}-failure.json`), JSON.stringify(evidence, null, 2));
-          throw err;
-        }
-      });
-      console.log(`  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
-      await context.close();
+    const repeat = Number(process.argv.find((arg) => arg.startsWith('--repeat='))?.slice('--repeat='.length) ?? 1);
+    if (!Number.isInteger(repeat) || repeat < 1 || repeat > 10) throw new Error('--repeat must be 1 through 10');
+    for (let run = 1; run <= repeat; run++) {
+      for (const [id, flow] of FLOWS.filter(([id]) => !selected || id === selected)) {
+        const preset = PRESETS.find((p) => p.id === id);
+        console.log(`Cluster Lab: ${preset.name}${repeat > 1 ? ` (run ${run}/${repeat})` : ""}`);
+        const t0 = Date.now();
+        // A context of its own: its IndexedDB and broker disks are the flow's.
+        const context = await newLabContext(browser, { width: 1400, height: 1000 });
+        const page = await context.newPage();
+        errors.push(watchErrors(page, id, base));
+        await t.flow(id, async () => {
+          try {
+            await openLab(page, base);
+            await openScenario(page, preset.scenario, 120_000);
+            await setSpeed(page, SPEED);
+            await flow(page, preset);
+          } catch (err) {
+            const evidence = await page.evaluate(() => ({
+              world: window.krabkaLab.world.liveSnapshot(),
+              events: window.krabkaLab.timeline.events.slice(-100),
+            })).catch(() => null);
+            const directory = path.join(ROOT, 'artifacts', 'lab-clusters');
+            fs.mkdirSync(directory, { recursive: true });
+            const filename = `${id}${repeat > 1 ? `-${run}` : ""}-failure`;
+            fs.writeFileSync(path.join(directory, `${filename}.json`), JSON.stringify({ error: String(err), browser_errors: errors.flat(), ...evidence }, null, 2));
+            await page.screenshot({ path: path.join(directory, `${filename}.png`) }).catch(() => {});
+            throw err;
+          }
+        });
+        console.log(`  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+        await context.close();
+      }
     }
   } finally {
     await browser.close();

@@ -185,11 +185,25 @@ jobs:
 
       - name: Check browser SSPI encryption on real brokers
         run: npm run check-lab-clusters -- --preset=sspi-encrypted
+      - name: Check rebalancing and share consumers on real brokers
+        run: |
+          npm run check-lab-clusters -- --preset=rebalancer --repeat=2
+          npm run check-lab-clusters -- --preset=share-group --repeat=2
+          npm run check-lab-clusters -- --preset=share-redelivery --repeat=2
       - name: Check broker ACL identities and allow/deny examples
         run: |
           npm run check-lab-acls
           npm run check-lab-clusters -- --preset=broker-acls
           npm run check-lab-clusters -- --preset=broker-acls-deny
+
+      - name: Save Cluster Lab browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lab-cluster-failures
+          path: artifacts/lab-clusters
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.

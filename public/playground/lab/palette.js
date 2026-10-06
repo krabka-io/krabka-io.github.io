@@ -15,8 +15,8 @@ const FULL_BUILD_NOTE = "needs the full build: this kind is not in the loaded mo
 
 // The kinds the Build tab offers, grouped by what a reader is adding.
 const GROUPS = [
-  { title: "The cluster", help: "The servers that store and replicate records.", kinds: ["krabka-broker", "schema-registry"] },
-  { title: "Clients and apps", help: "What writes to and reads from the cluster.", kinds: ["producer", "consumer", "streams"] },
+  { title: "The cluster", help: "The servers that store and replicate records.", kinds: ["krabka-broker", "schema-registry", "rebalancer"] },
+  { title: "Clients and apps", help: "What writes to and reads from the cluster.", kinds: ["producer", "consumer", "share-consumer", "streams"] },
   { title: "Network probes", help: "Cheap nodes for watching latency and cuts.", kinds: ["echo", "pinger"] },
 ];
 

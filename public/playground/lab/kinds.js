@@ -555,6 +555,28 @@ export const KINDS = {
     edges: (spec) => (spec.config?.bootstrap || []).slice(0, 1).map((b) => edge(spec.id, node(b), "bootstrap")),
     status: (s) => (s && typeof s === "object" && s.state ? String(s.state) : ""),
   },
+  "share-consumer": {
+    kind: "share-consumer", label: "Share consumer", glyph: "⇤", color: "#e879f9",
+    description: "Shares records with other members of a share group, including on the same partition. The broker tracks acquisition locks, delivery counts and Accept, Release or Reject acknowledgements.",
+    probe: { bootstrap: [1], group: "g", topics: ["t"] },
+    fields: [BOOTSTRAP,
+      { key: "group", label: "Share group", type: "text", required: true, placeholder: "workers" },
+      { key: "topics", label: "Topics", type: "list", required: true, placeholder: "jobs" },
+      num("process_ms", "Processing time per record (ms)", 0, "Acknowledgements are sent after processing finishes."),
+      num("max_records", "Maximum records per fetch", 10, "One batch is processed before fetching again.", { min: 1, max: 1000 }),
+      { key: "acknowledgement", label: "After processing", type: "select", default: "accept", emitDefault: false, options: ["accept", "release", "reject"], help: "Accept completes the record; Release makes it available for redelivery; Reject archives it. These are broker acknowledgements, not offset commits." },
+    ],
+    suggest: () => ({ process_ms: 100, max_records: 1 }),
+    commands: [
+      { cmd: "pause", label: "Pause", title: "Stop taking work; heartbeats continue", enabled: (s) => !s.paused && !s.closed },
+      { cmd: "resume", label: "Resume", title: "Take work again", enabled: (s) => s.paused && !s.closed },
+      { cmd: "process_ms", label: "Set processing", params: [{ key: "ms", label: "ms per record", type: "number", default: 100, min: 0, step: 1, fromState: (s) => s.process_ms }] },
+      { cmd: "acknowledgement", label: "Set acknowledgement", params: [{ key: "type", label: "after processing", type: "select", options: ["accept", "release", "reject"], fromState: (s) => s.acknowledgement }] },
+      { cmd: "close", label: "Close", title: "Release unfinished work, close share sessions and leave the group", enabled: (s) => !s.closed && s.state !== "closing" },
+    ],
+    edges: (spec) => KINDS.consumer.edges(spec),
+    status: (s) => [s.state, s.paused ? "paused" : null, `${s.accepted || 0} accepted`, s.redelivered ? `${s.redelivered} redelivered` : null].filter(Boolean).join(" · "),
+  },
   rebalancer: {
     kind: "rebalancer",
     label: "Rebalancer",
@@ -592,7 +614,7 @@ function adminTopics(s) {
 }
 
 // The kinds the palette offers, in order.
-export const KIND_ORDER = [REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "streams", "rebalancer", "echo", "pinger"];
+export const KIND_ORDER = [REAL_BROKER_KIND, "schema-registry", "producer", "consumer", "share-consumer", "streams", "rebalancer", "echo", "pinger"];
 
 const UNKNOWN = {
   kind: "?",
