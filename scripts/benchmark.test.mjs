@@ -96,6 +96,10 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
 
 test('OpenMessaging catalog and smoke configuration keep comparison settings consistent', () => {
   assert.equal(ombCases().length, 13);
+  assert.deepEqual(ombCases('1m-10-topics-1-partition-100b'), [{
+    id: '1m-10-topics-1-partition-100b', upstream_file: 'workloads/1m-10-topics-1-partition-100b.yaml',
+  }]);
+  assert.throws(() => ombCases('1m-10-topics-1-partition-100b,1m-10-topics-1-partition-100b'), /duplicate/);
   assert.throws(() => ombCases('../outside'), /unknown/);
   assert.throws(() => ombCases('simple-workload,simple-workload'), /duplicate/);
   const source = 'topics: 1\npartitionsPerTopic: 16\nmessageSize: 1024\npayloadFile: "payload/payload-1Kb.data"\nproducerRate: 100000\nconsumerBacklogSizeGB: 100\ntestDurationMinutes: 15\n';

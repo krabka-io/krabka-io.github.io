@@ -110,6 +110,13 @@ The default catalog is the 13 workloads listed in the linked
 | `max-rate-1-topic-100-partitions-1kb` |
 | `max-rate-1-topic-100-partitions-100b` |
 
+The pinned upstream `1m-10-topics-1-partition-100b` workload is also available
+when selected explicitly. It uses ten topics with one partition each, randomized
+100-byte payloads, a fixed offered rate of 1,000,000 messages/s and a 15-minute
+measurement. Select it with `-f workloads=1m-10-topics-1-partition-100b` in Actions
+or `--workloads 1m-10-topics-1-partition-100b` locally. It supports the same RF,
+image comparison and repetition settings.
+
 Two single-partition maximum-rate filenames now include `1p-1c` upstream. Full
 runs retain upstream payloads, rates, partition counts, backlog sizes, and durations;
 only the payload path is adapted to the container mount. Full runs warm up for the
