@@ -80,7 +80,11 @@ scenario document. Clearing the settings field disables ACLs. Optional scenario 
 ```
 
 ACLs require Kerberos encryption. An empty `acls` array denies all ordinary
-clients. Omit `authorization` to disable the authorizer. At world startup the
+clients. ACL scenario node IDs must be 1 through 9999, leaving ID 10000 available
+for the generated admin. ACL scenarios reject user-supplied `admin` nodes. Requests held
+for authentication, ACL readiness, or a full broker send buffer are bounded to
+100 MiB and 2048 frames per connection; exceeding either resets the connection.
+Omit `authorization` to disable the authorizer. At world startup the
 admin replaces the broker's ACL records using `DeleteAcls` and `CreateAcls`,
 then verifies the exact policy with `DescribeAcls` on every broker. Application
 requests wait for that verification, including after reload. The admin snapshot

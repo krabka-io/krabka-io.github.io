@@ -526,6 +526,26 @@ impl World {
         NodeId(self.nodes.keys().last().map_or(1, |id| id.0 + 1))
     }
 
+    fn validate_node_spec(&self, spec: &NodeSpec) -> Result<(), LabError> {
+        if self.authorization.is_none() {
+            return Ok(());
+        }
+        let generated_admin =
+            spec.kind == "admin" && self.admin.is_some_and(|(id, _)| id == spec.id);
+        if spec.kind == "admin" && !generated_admin {
+            return Err(LabError::InvalidScenario(
+                "admin nodes are reserved for the world-generated scenario admin".to_owned(),
+            ));
+        }
+        // Leave id 10000 available for sync_admin's generated identity.
+        if !generated_admin && !(1..10000).contains(&spec.id.0) {
+            return Err(LabError::InvalidScenario(
+                "broker ACL scenario node ids must be 1 through 9999; 10000 is reserved for the admin".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Add a node and start it. The spec's id must be free; an id of `0` asks
     /// the world to pick the next free one.
     ///
@@ -554,6 +574,7 @@ impl World {
         if spec.id.0 == 0 {
             spec.id = self.next_free_id();
         }
+        self.validate_node_spec(&spec)?;
         if self.nodes.contains_key(&spec.id) {
             return Err(LabError::InvalidScenario(format!(
                 "node id {} is taken",
@@ -626,6 +647,7 @@ impl World {
     pub fn update_node(&mut self, id: NodeId, spec: NodeSpec) -> Result<(), LabError> {
         let mut spec = spec;
         spec.id = id;
+        self.validate_node_spec(&spec)?;
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
@@ -2004,6 +2026,61 @@ mod tests {
         let pinger = world.node_snapshot(NodeId(3)).unwrap();
         assert!(pinger["echoes"] == 0);
         assert!(pinger["closes"].as_u64().unwrap() >= 2);
+    }
+
+    #[test]
+    fn acl_node_ids_reserve_space_for_the_generated_admin() {
+        let mut scenario = external_scenario();
+        scenario.security = SecurityMode::KerberosEncrypted;
+        scenario.authorization = Some(super::super::apps::acls::Authorization { acls: vec![] });
+        scenario
+            .nodes
+            .push(NodeSpec::new(9999, "echo", "", serde_json::json!({})));
+        let mut world = World::from_scenario(&scenario).unwrap();
+        assert_eq!(world.admin.unwrap().0, NodeId(10000));
+        for id in [0, 10000, 10001, u32::MAX] {
+            assert!(matches!(
+                world.add_node(NodeSpec::new(id, "echo", "", serde_json::json!({}))),
+                Err(LabError::InvalidScenario(reason)) if reason.contains("1 through 9999")
+            ));
+        }
+        world
+            .add_node(NodeSpec::new(9998, "echo", "", serde_json::json!({})))
+            .unwrap();
+        for id in [10000, 10001, u32::MAX] {
+            scenario.nodes.last_mut().unwrap().id = NodeId(id);
+            assert!(matches!(
+                World::from_scenario(&scenario),
+                Err(LabError::InvalidScenario(reason)) if reason.contains("1 through 9999")
+            ));
+        }
+    }
+
+    #[test]
+    fn only_the_world_can_create_an_acl_admin_node() {
+        let mut scenario = external_scenario();
+        scenario.security = SecurityMode::KerberosEncrypted;
+        scenario.authorization = Some(super::super::apps::acls::Authorization { acls: vec![] });
+        let admin = NodeSpec::new(9000, "admin", "", serde_json::json!({ "bootstrap": [1] }));
+        let mut world = World::from_scenario(&scenario).unwrap();
+        let existing = world.admin.unwrap().0;
+        assert!(world.add_node(admin.clone()).is_err());
+        assert!(world.add_node_with_state(admin.clone(), None).is_err());
+        assert!(world.update_node(NodeId(3), admin.clone()).is_err());
+        assert_eq!(world.admin.unwrap().0, existing);
+        assert_eq!(
+            world
+                .nodes
+                .values()
+                .filter(|s| s.spec.kind == "admin")
+                .count(),
+            1
+        );
+        scenario.nodes.push(admin);
+        assert!(matches!(
+            World::from_scenario(&scenario),
+            Err(LabError::InvalidScenario(reason)) if reason.contains("world-generated")
+        ));
     }
 
     #[test]

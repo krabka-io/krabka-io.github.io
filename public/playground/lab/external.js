@@ -17,7 +17,8 @@
 // Kafka stream is cut into one `Data` frame per Kafka frame, length prefix
 // included, the way the lab's nodes expect them; any other stream travels in
 // the chunks the process writes. Frames for the process wait in this module
-// while its connection's send buffer is full; none is dropped.
+// while its connection's send buffer is full; exceeding the bounded queue
+// resets the connection.
 //
 // Time. Every process of the tab reads one host-driven `WasiClock` that
 // follows the world's clock. While a process runs, the world steps event by
@@ -78,6 +79,7 @@ const MODULE_OVERRIDE_KEY = "krabka-lab.broker-module";
 const MAX_KAFKA_FRAME = 100 * 1024 * 1024;
 // The bytes a connection may hold in the runtime's send buffer; the rest waits here.
 const HOLD_HIGH_WATER = 1 << 20;
+const MAX_HELD_FRAMES = 2048;
 const TAIL_LINES = 40;
 const STATS_INTERVAL_MS = 1000;
 const PUBLISH_DELAY_MS = 100;
@@ -1022,7 +1024,7 @@ export class ExternalHost {
     }
     const conn = node.servers.get(key);
     if (!conn) return;
-    if (kind === "data") this.send(conn, base64ToBytes(frame.payload.data));
+    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
     else if (kind === "close") this.closeFromLab(node, conn);
   }
 
@@ -1030,13 +1032,19 @@ export class ExternalHost {
     const conn = node.clients.get(Number(frame.conn));
     if (!conn) return;
     const kind = frame.payload?.kind;
-    if (kind === "data") this.send(conn, base64ToBytes(frame.payload.data));
+    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
     else if (kind === "close") this.closeFromLab(node, conn);
   }
 
   // Bytes for the process, in order. An accepted connection is a Kafka stream
   // when the lab's first message on it is exactly one Kafka frame.
-  send(conn, bytes) {
+  send(node, conn, bytes) {
+    if (conn.done || bytes.length === 0) return;
+    if (conn.held + bytes.length > MAX_KAFKA_FRAME || conn.hold.length >= MAX_HELD_FRAMES) {
+      this.emit(closeFrame(conn.local, conn.peer, conn.id));
+      this.dropConn(node, conn);
+      return;
+    }
     if (conn.framing === null) conn.framing = isKafkaFrame(bytes) ? new KafkaFramer() : RAW;
     conn.hold.push(bytes);
     conn.held += bytes.length;

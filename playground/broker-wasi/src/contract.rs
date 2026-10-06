@@ -390,6 +390,8 @@ mod tests {
         let mut env = node_two();
         env.insert("KRABKA_LAB_PRINCIPALS", "[1,2,3,7]".to_owned());
         assert!(read(&env).unwrap().lab_principals == Some(vec![1, 2, 3, 7]));
+        env.insert("KRABKA_LAB_PRINCIPALS", "[1,2,9999,10000]".to_owned());
+        assert!(read(&env).unwrap().lab_principals == Some(vec![1, 2, 9999, 10000]));
         for invalid in ["[]", "[1,3]", "[0,2]", "[2,10001]", "[2,1.5]", "null", "{}"] {
             env.insert("KRABKA_LAB_PRINCIPALS", invalid.to_owned());
             assert!(matches!(
