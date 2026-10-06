@@ -17,7 +17,8 @@
 // Kafka stream is cut into one `Data` frame per Kafka frame, length prefix
 // included, the way the lab's nodes expect them; any other stream travels in
 // the chunks the process writes. Frames for the process wait in this module
-// while its connection's send buffer is full; none is dropped.
+// while its connection's send buffer is full; exceeding the bounded queue
+// resets the connection.
 //
 // Time. Every process of the tab reads one host-driven `WasiClock` that
 // follows the world's clock. While a process runs, the world steps event by
@@ -78,6 +79,7 @@ const MODULE_OVERRIDE_KEY = "krabka-lab.broker-module";
 const MAX_KAFKA_FRAME = 100 * 1024 * 1024;
 // The bytes a connection may hold in the runtime's send buffer; the rest waits here.
 const HOLD_HIGH_WATER = 1 << 20;
+const MAX_HELD_FRAMES = 2048;
 const TAIL_LINES = 40;
 const STATS_INTERVAL_MS = 1000;
 const PUBLISH_DELAY_MS = 100;
@@ -312,7 +314,7 @@ export function fitInternalTopics(fileConfig, brokers) {
  * runtime sets (`KRABKA_LISTEN_FDS`, `KRABKA_LISTEN_PORTS`, `KRABKA_DIAL_FD`).
  * `logLevel` is a `KRABKA_LOG` directive; left out, the broker logs its default.
  */
-export function processEnv({ nodeId, voters, clusterId, fileConfig, logLevel }) {
+export function processEnv({ nodeId, voters, clusterId, fileConfig, logLevel, labPrincipals }) {
   return {
     KRABKA_NODE_ID: String(nodeId),
     KRABKA_HOST: nodeIp(nodeId),
@@ -320,12 +322,50 @@ export function processEnv({ nodeId, voters, clusterId, fileConfig, logLevel }) 
     KRABKA_CLUSTER_ID: clusterId,
     KRABKA_CONFIG: JSON.stringify(fileConfig),
     ...(logLevel ? { KRABKA_LOG: logLevel } : {}),
+    ...(labPrincipals ? { KRABKA_LAB_PRINCIPALS: JSON.stringify(labPrincipals) } : {}),
   };
 }
 
 /** Whether the scenario has a real broker. */
 export function hasRealBroker(scenario) {
   return (scenario?.nodes || []).some((n) => n.kind === REAL_BROKER_KIND);
+}
+
+// SASL v1 requests establish the real broker principal behind the SSPI adapter.
+export function saslRequest(api, correlation, token) {
+  const size = api === 17 ? 2 : 4;
+  const bytes = new Uint8Array(14 + size + token.length);
+  const view = new DataView(bytes.buffer);
+  view.setInt32(0, bytes.length-4); view.setInt16(4, api); view.setInt16(6, 1);
+  view.setInt32(8, correlation); view.setInt16(12, -1); // nullable client id
+  if (size === 2) view.setInt16(14, token.length); else view.setInt32(14, token.length);
+  bytes.set(token, 14+size); return bytes;
+}
+
+export function validateSaslResponse(bytes, handshake) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const expected = handshake ? -2147483648 : -2147483647;
+  if (bytes.length < 10 || view.getInt32(0) !== bytes.length-4 || view.getInt32(4) !== expected || view.getInt16(8) !== 0)
+    throw new Error("broker SASL authentication refused or returned an invalid response");
+  let at = 10;
+  const string = () => {
+    const length = view.getInt16(at); at += 2;
+    if (length < -1 || at + Math.max(0,length) > bytes.length) throw new Error("invalid SASL response string");
+    const value = length < 0 ? null : new TextDecoder().decode(bytes.subarray(at,at+length));
+    at += Math.max(0,length); return value;
+  };
+  if (handshake) {
+    const count = view.getInt32(at); at += 4;
+    if (count < 0 || count > 32) throw new Error("invalid SASL mechanisms");
+    const mechanisms = Array.from({length:count},string);
+    if (!mechanisms.includes("PLAIN")) throw new Error("broker does not support PLAIN binding");
+  } else {
+    string();
+    const length = view.getInt32(at); at += 4;
+    if (length < 0 || at+length+8 !== bytes.length) throw new Error("invalid SASL authentication response");
+    at += length+8;
+  }
+  if (at !== bytes.length) throw new Error("unexpected SASL response bytes");
 }
 
 // ---- framing ------------------------------------------------------------------------------------
@@ -619,6 +659,7 @@ export class ExternalHost {
     if (!world) return;
     const doc = this.hooks.scenario();
     const present = new Set((doc.nodes || []).map((n) => n.id));
+    const identitySet = doc.authorization ? JSON.stringify(world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === "admin"])) : null;
     const wanted = new Map();
     for (const n of world.nodes) if (n.kind === REAL_BROKER_KIND && n.hosted) wanted.set(n.id, n);
     for (const [id, node] of this.nodes) {
@@ -629,6 +670,12 @@ export class ExternalHost {
     for (const [id, n] of wanted) {
       const known = this.nodes.get(id);
       if (known) {
+        if (known.identitySet !== undefined && known.identitySet !== identitySet) {
+          for (const conn of [...known.servers.values(), ...known.clients.values()]) this.emit(closeFrame(conn.local, conn.peer, conn.id));
+          known.identitySet = identitySet;
+          this.stopProcess(known);
+          if (n.alive) this.launch(known);
+        }
         if (known.state === "waiting" && doc.id) this.launch(known);
         continue;
       }
@@ -810,7 +857,15 @@ export class ExternalHost {
       this.unavailable(node, reason);
       return;
     }
-    const env = processEnv({ nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.forked_from || doc.id), fileConfig: fitInternalTopics(config.fileConfig, (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length), logLevel: this.hooks.logLevel?.(node.id) });
+    const world = this.hooks.world();
+    node.identitySet = doc.authorization ? JSON.stringify(world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === "admin"])) : null;
+    const labPrincipals = doc.authorization ? world.nodes.map((n) => n.id).sort((a,b) => a-b) : undefined;
+    let fileConfig = fitInternalTopics(config.fileConfig, (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length);
+    if (doc.authorization) fileConfig = { ...fileConfig, authorization: {
+      type: "simple", allow_everyone_if_no_acl_found: false,
+      super_users: world.nodes.filter((n) => n.kind === REAL_BROKER_KIND || n.kind === "admin").map((n) => `User:node-${n.id}@LAB.KRABKA`),
+    } };
+    const env = processEnv({ labPrincipals, nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.forked_from || doc.id), fileConfig, logLevel: this.hooks.logLevel?.(node.id) });
     await this.volumeBusy.get(node.volume);
     if (gen !== node.gen) return;
     this.clock ??= new wasi.WasiClock({ mode: "host", timeMs: this.clockMs });
@@ -901,7 +956,7 @@ export class ExternalHost {
   /** Frames `drainExternal` returned (`{ deliver_at, frame }`), each due now. */
   deliver(timedFrames) {
     for (const t of timedFrames) {
-      const frame = t.frame ?? t;
+      const frame = t.frame ? { ...t.frame, principal: t.principal } : t;
       const node = this.nodes.get(Number(frame.dst?.node));
       if (node) this.input(node, frame);
       else this.refuse(frame);
@@ -940,6 +995,13 @@ export class ExternalHost {
         this.refuse(frame);
         return;
       }
+      const world = this.hooks.world();
+      const source = world.nodes.find((n) => n.id === frame.src.node);
+      const authorized = Boolean(this.hooks.scenario().authorization);
+      if (authorized && (!source || frame.principal !== `node-${source.id}@LAB.KRABKA`)) {
+        this.event(node, "broker_auth_failed", { level: "error", peer: frame.src.node, reason: "missing verified Kerberos identity" });
+        this.refuse(frame); return;
+      }
       let wasi;
       try {
         wasi = node.proc.connect(Number(frame.dst.port));
@@ -948,13 +1010,21 @@ export class ExternalHost {
         return;
       }
       const conn = { key, wasi, local: endpoint(frame.dst), peer: endpoint(frame.src), id: frame.conn, framing: null, hold: [], held: 0, done: false };
+      const bridge = authorized && source.kind !== REAL_BROKER_KIND;
+      conn.aclClient = bridge && source.kind !== "admin";
+      conn.aclGate = conn.aclClient;
+      if (bridge) {
+        conn.framing = new KafkaFramer();
+        conn.auth = { stage: "handshake", principal: frame.principal, peer: source.id };
+      }
       node.servers.set(key, conn);
       this.attach(node, conn);
+      if (bridge) conn.wasi.send(saslRequest(17, -2147483648, new TextEncoder().encode("PLAIN")));
       return;
     }
     const conn = node.servers.get(key);
     if (!conn) return;
-    if (kind === "data") this.send(conn, base64ToBytes(frame.payload.data));
+    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
     else if (kind === "close") this.closeFromLab(node, conn);
   }
 
@@ -962,13 +1032,19 @@ export class ExternalHost {
     const conn = node.clients.get(Number(frame.conn));
     if (!conn) return;
     const kind = frame.payload?.kind;
-    if (kind === "data") this.send(conn, base64ToBytes(frame.payload.data));
+    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
     else if (kind === "close") this.closeFromLab(node, conn);
   }
 
   // Bytes for the process, in order. An accepted connection is a Kafka stream
   // when the lab's first message on it is exactly one Kafka frame.
-  send(conn, bytes) {
+  send(node, conn, bytes) {
+    if (conn.done || bytes.length === 0) return;
+    if (conn.held + bytes.length > MAX_KAFKA_FRAME || conn.hold.length >= MAX_HELD_FRAMES) {
+      this.emit(closeFrame(conn.local, conn.peer, conn.id));
+      this.dropConn(node, conn);
+      return;
+    }
     if (conn.framing === null) conn.framing = isKafkaFrame(bytes) ? new KafkaFramer() : RAW;
     conn.hold.push(bytes);
     conn.held += bytes.length;
@@ -976,6 +1052,7 @@ export class ExternalHost {
   }
 
   flushHold(conn) {
+    if (conn.auth || conn.aclGate || conn.done) return;
     while (conn.hold.length > 0 && conn.wasi.bufferedAmount < HOLD_HIGH_WATER) {
       const bytes = conn.hold.shift();
       conn.held -= bytes.length;
@@ -989,7 +1066,8 @@ export class ExternalHost {
     if (conn.done) return;
     conn.done = true;
     this.forgetConn(node, conn);
-    for (const bytes of conn.hold.splice(0)) conn.wasi.send(bytes);
+    if (!conn.auth && !conn.aclGate) for (const bytes of conn.hold) conn.wasi.send(bytes);
+    conn.hold = [];
     conn.held = 0;
     conn.wasi.close();
   }
@@ -1008,7 +1086,25 @@ export class ExternalHost {
     this.activity(node);
     if (conn.framing === null) conn.framing = RAW;
     const messages = conn.framing === RAW ? [bytes] : conn.framing.push(bytes);
-    for (const message of messages) this.emit(dataFrame(conn.local, conn.peer, conn.id, message));
+    for (const message of messages) {
+      if (!conn.auth) { this.emit(dataFrame(conn.local, conn.peer, conn.id, message)); continue; }
+      try {
+        const handshake = conn.auth.stage === "handshake";
+        validateSaslResponse(message, handshake);
+        if (handshake) {
+          conn.auth.stage = "authenticate";
+          const token = new TextEncoder().encode(`\0${conn.auth.principal}\0lab-only-node-${conn.auth.peer}`);
+          conn.wasi.send(saslRequest(36, -2147483647, token));
+        } else {
+          this.event(node, "broker_authenticated", { peer: conn.auth.peer, principal: conn.auth.principal });
+          conn.auth = null;
+          this.flushHold(conn);
+        }
+      } catch (err) {
+        this.event(node, "broker_auth_failed", { level: "error", peer: conn.peer.node, reason: err.message });
+        this.emit(closeFrame(conn.local, conn.peer, conn.id)); this.dropConn(node, conn); return;
+      }
+    }
   }
 
   // The process shut its write side. The lab has no half-open connection, so
@@ -1195,6 +1291,15 @@ export class ExternalHost {
    * a frame or its timer falls due, then the frames go to their processes.
    */
   at(now, frames) {
+    if (this.hooks.scenario().authorization) {
+      const ready = this.hooks.world()?.nodes.some((n) => n.kind === "admin" && n.alive !== false && n.state?.authorization?.ready);
+      for (const node of this.nodes.values()) for (const conn of node.servers.values()) {
+        if (conn.aclClient && conn.aclGate === ready) {
+          conn.aclGate = !ready;
+          if (ready) { this.flushHold(conn); node.dirty = true; }
+        }
+      }
+    }
     let wake = frames.length > 0;
     for (const node of this.nodes.values()) {
       if (node.inStep && node.deadline <= now) {

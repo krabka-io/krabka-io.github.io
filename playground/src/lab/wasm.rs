@@ -266,7 +266,7 @@ impl Lab {
     /// Returns an error when the frames cannot be serialized.
     #[wasm_bindgen(js_name = drainExternal)]
     pub fn drain_external(&mut self) -> Result<String, JsError> {
-        let frames: Vec<TimedFrame> = self.world.drain_external();
+        let frames = self.world.drain_external();
         serde_json::to_string(&frames).map_err(js)
     }
 

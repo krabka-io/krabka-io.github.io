@@ -344,6 +344,45 @@ export const PRESETS = [
   },
 ];
 
+PRESETS.push({
+  id: "sspi-encrypted",
+  name: "SSPI / Kerberos encrypted cluster",
+  description: "A three-broker cluster with pure Rust Kerberos authentication and SSPI encryption on every virtual link. Network → Frames shows tokens and ciphertext. Uses lab-only identities and an embedded KDC.",
+  scenario: { ...PRESETS.find((p) => p.id === "three-brokers").scenario, name: "SSPI / Kerberos encrypted cluster", security: "kerberos-encrypted" },
+});
+
+// These rules become Kafka ACL records. Brokers and the hidden admin are
+// superusers; every other node starts with no grants.
+const acl = (id, resource_type, resource_name, operation, permission = "allow", pattern_type = "literal") => ({
+  principal: `User:node-${id}@LAB.KRABKA`, resource_type, resource_name, pattern_type, operation, permission,
+});
+const aclBase = PRESETS.find((p) => p.id === "three-brokers").scenario;
+const aclRules = [
+  acl(4, "topic", "orders", "write"),
+  acl(4, "cluster", "kafka-cluster", "idempotent-write"),
+  acl(5, "topic", "orders", "read"), acl(5, "group", "billing", "read"),
+  acl(6, "topic", "orders", "read"),
+];
+PRESETS.push({
+  id: "broker-acls",
+  name: "Broker ACLs: topic and group permissions",
+  description: "Kerberos identities become real broker principals. Producer node-4 writes orders; node-5 reads with group billing. Node-6 can read the topic but group audit is denied by default. Inspect its events for GROUP_AUTHORIZATION_FAILED (30).",
+  scenario: { ...aclBase, name: "Broker ACLs: topic and group permissions", security: "kerberos-encrypted",
+    authorization: { acls: aclRules },
+    nodes: aclBase.nodes.map((n) => n.id === 6 ? { ...n, name: "denied-audit", config: { ...n.config, group: "audit" } } : n),
+  },
+}, {
+  id: "broker-acls-deny",
+  name: "Broker ACLs: prefixed allow, explicit deny",
+  description: "A prefixed Write allow for order is overridden by a literal Write deny on orders for node-7. The allowed producer and billing consumer keep working. Node-7 receives TOPIC_AUTHORIZATION_FAILED (29); node-6 still has no permission for group audit.",
+  scenario: { ...aclBase, name: "Broker ACLs: prefixed allow, explicit deny", security: "kerberos-encrypted",
+    authorization: { acls: [...aclRules, acl(7, "topic", "order", "write", "allow", "prefixed"), acl(7, "topic", "orders", "write", "deny")] },
+    nodes: [...aclBase.nodes.map((n) => n.id === 6 ? { ...n, name: "denied-audit", config: { ...n.config, group: "audit" } } : n),
+      { ...aclBase.nodes.find((n) => n.id === 4), id: 7, name: "denied-writer", x: 120, y: 520,
+        config: { ...aclBase.nodes.find((n) => n.id === 4).config, enable_idempotence: false } }],
+  },
+});
+
 // ---- J3: scripted experiments (experiment.js) ----
 // Each was run on the real brokers (scripts/check-lab-experiments.mjs runs
 // them in CI). Times are lab ms from the start of the run.

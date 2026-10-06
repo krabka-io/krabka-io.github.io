@@ -36,3 +36,6 @@ pub use self::{
     rebalancer::RebalancerNode,
     streams::StreamsNode,
 };
+
+/// Scenario ACL schema and the admin provisioning path.
+pub use admin::acls;

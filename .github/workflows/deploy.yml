@@ -183,6 +183,14 @@ jobs:
       - name: Check the Cluster Lab's preset experiments on real brokers
         run: npm run check-lab-experiments
 
+      - name: Check browser SSPI encryption on real brokers
+        run: npm run check-lab-clusters -- --preset=sspi-encrypted
+      - name: Check broker ACL identities and allow/deny examples
+        run: |
+          npm run check-lab-acls
+          npm run check-lab-clusters -- --preset=broker-acls
+          npm run check-lab-clusters -- --preset=broker-acls-deny
+
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.
       - name: Upload GitHub Pages artifact

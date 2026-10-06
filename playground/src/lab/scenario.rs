@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::net::{Millis, NodeId};
+use super::{
+    net::{Millis, NodeId},
+    security::SecurityMode,
+};
 
 /// The scenario document version this crate reads and writes.
 pub const SCENARIO_VERSION: u32 = 1;
@@ -28,6 +31,12 @@ pub struct Scenario {
     pub id: String,
     #[serde(default)]
     pub seed: u64,
+    /// SSPI transport adapters at each node, outside the application/broker.
+    #[serde(default, skip_serializing_if = "SecurityMode::is_plaintext")]
+    pub security: SecurityMode,
+    /// Initial Kafka ACL records; omitted leaves the broker authorizer disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<super::apps::acls::Authorization>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -55,6 +64,8 @@ impl Scenario {
             version: SCENARIO_VERSION,
             id: String::new(),
             seed,
+            security: SecurityMode::default(),
+            authorization: None,
             name: String::new(),
             links: LinkDefaults::default(),
             link_overrides: Vec::new(),

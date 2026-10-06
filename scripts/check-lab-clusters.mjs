@@ -23,8 +23,12 @@
 // - five-brokers-partition: the majority serves while brokers 4 and 5 are cut
 //   off (they log no "serving" line); once the links heal both serve and a
 //   restarted producer lists five brokers.
+// - sspi-encrypted: clients and brokers mutually authenticate; only tokens
+//   and ciphertext are captured; reload retains the mode; settings switch
+//   encryption off and on using the same scenario and broker disks.
 //
 // Usage:  npm run build && npm run build:broker && npm run check-lab-clusters [-- --headed]
+// A single flow: npm run check-lab-clusters -- --preset=sspi-encrypted
 // Needs Playwright and a Chromium (see lab-check-lib.mjs). Exits 2 when one
 // is missing, or when dist/ has no broker build, 1 when a check fails.
 
@@ -143,6 +147,99 @@ async function threeBrokers(page, preset) {
   await inspect(page, 2, 'broker-2');
   const process_ = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="process_state"]')?.textContent || null`, 'the process in the broker inspector');
   check('a broker inspector shows its running process', process_ === 'running', process_);
+}
+
+async function sspiEncrypted(page, preset) {
+  const consumed = `(n) => n[4].state.acked > 0 && [5, 6].every((id) => n[id].state.processed > 0)`;
+  await until(page, 'both consumers to read over encrypted links', consumed, 120_000);
+  const wire = await page.evaluate(() => {
+    const lab = window.krabkaLab;
+    const data = lab.capture.frames.filter((f) => f.kind === 'data');
+    return {
+      labels: [...new Set(data.map((f) => f.label))],
+      protected: data.length > 0 && data.every((f) => f.bytes && f.bytes[0] === 83 && f.bytes[1] === 83 && f.bytes[2] === 80 && f.bytes[3] === 73),
+      exchanges: lab.capture.exchanges.length,
+      authenticated: [...new Set(lab.timeline.events.filter((e) => e.kind === 'sspi_authenticated').map((e) => e.node))],
+      failures: lab.timeline.events.filter((e) => e.kind === 'sspi_failed'),
+      id: lab.world.scenario().id,
+    };
+  });
+  check('encrypted clients and all three real brokers authenticate', [1, 2, 3, 4, 5, 6].every((id) => wire.authenticated.includes(id)) && wire.failures.length === 0, JSON.stringify(wire));
+  check('the capture holds Kerberos tokens and ciphertext without bogus Kafka exchanges', wire.protected && wire.labels.includes('Kerberos token') && wire.labels.includes('SSPI encrypted') && wire.exchanges === 0, JSON.stringify(wire.labels));
+
+  await page.evaluate(() => window.krabkaLab.saveNow());
+  await page.evaluate(() => window.krabkaLab.storage.flush());
+  await reload(page, preset.name);
+  await until(page, 'the reloaded encrypted cluster to consume', consumed, 120_000);
+  const saved = await page.evaluate(() => window.krabkaLab.world.scenario());
+  check('a reload preserves the encryption mode and scenario identity', saved.security === 'kerberos-encrypted' && saved.id === wire.id, `${saved.security}, ${saved.id}`);
+
+  // Change the real settings form, restarting on the same broker disks.
+  await page.evaluate(() => { window.krabkaLab.settingsDialog(); });
+  await page.getByLabel('SSPI / Kerberos transport', { exact: true }).selectOption('plaintext');
+  await page.locator('#krabka-lab dialog button[type="submit"]').click();
+  await waitFor(page, `!window.krabkaLab.world.scenario().security && document.querySelector('#krabka-lab[data-ready="true"]') !== null`, 'the plaintext scenario');
+  await setSpeed(page, SPEED);
+  await until(page, 'the plaintext cluster to consume', consumed, 120_000);
+  const plain = await page.evaluate(() => ({
+    id: window.krabkaLab.world.scenario().id,
+    exchanges: window.krabkaLab.capture.exchanges.length,
+    failures: window.krabkaLab.timeline.events.filter((e) => e.kind === 'sspi_failed'),
+  }));
+  check('settings turn encryption off on the existing scenario', plain.id === wire.id && plain.exchanges > 0 && plain.failures.length === 0, JSON.stringify(plain));
+  await page.evaluate(() => { window.krabkaLab.settingsDialog(); });
+  await page.getByLabel('SSPI / Kerberos transport', { exact: true }).selectOption('kerberos-encrypted');
+  await page.locator('#krabka-lab dialog button[type="submit"]').click();
+  await waitFor(page, `window.krabkaLab.world.scenario().security === 'kerberos-encrypted' && document.querySelector('#krabka-lab[data-ready="true"]') !== null`, 'the encrypted scenario');
+  await setSpeed(page, SPEED);
+  await until(page, 'the re-enabled encrypted cluster to consume', consumed, 120_000);
+  check('settings enable encryption again on the existing scenario', await page.evaluate((id) => window.krabkaLab.world.scenario().id === id && window.krabkaLab.capture.frames.some((f) => f.label === 'SSPI encrypted') && !window.krabkaLab.timeline.events.some((e) => e.kind === 'sspi_failed'), wire.id));
+}
+
+async function brokerAcls(page, preset) {
+  await until(page, 'the authorized producer and consumer to exchange records', `(n) => n[4].state.acked > 0 && n[5].state.processed > 0`, 120_000);
+  const evidence = await waitFor(page, `(() => {
+    const lab = window.krabkaLab;
+    const admin = lab.world.liveSnapshot().nodes.find((n) => n.kind === 'admin');
+    const denied = lab.timeline.events.find((e) => e.node === 6 && e.detail?.code === 30);
+    if (!admin?.state.authorization?.ready || !denied) return null;
+    return { authorization: admin.state.authorization, denied,
+      principals: lab.timeline.events.filter((e) => e.kind === 'broker_authenticated').map((e) => e.detail.principal),
+      failures: lab.timeline.events.filter((e) => e.kind === 'broker_auth_failed') };
+  })()`, 'replicated ACLs and the broker group denial', 120_000);
+  check('every real broker confirms the exact ACL set', evidence.authorization.verified_brokers === 3, JSON.stringify(evidence.authorization));
+  check('verified Kerberos identities bind to distinct broker principals', [4,5,6].every((id) => evidence.principals.includes(`node-${id}@LAB.KRABKA`)) && evidence.failures.length === 0, JSON.stringify(evidence.principals));
+  const blocked = await nodeStateOf(page, 6);
+  check('a topic grant does not grant another consumer group', evidence.denied.detail.code === 30 && blocked.processed === 0, JSON.stringify(blocked));
+  if (preset.id === 'broker-acls-deny') {
+    const denied = await waitFor(page, `window.krabkaLab.timeline.events.find((e) => e.node === 7 && e.detail?.code === 29)`, 'the broker topic denial', 120_000);
+    const producer = await nodeStateOf(page,7);
+    check('literal deny overrides a prefixed write allow', denied.detail.code === 29 && producer.acked === 0, JSON.stringify(producer));
+  }
+  await page.evaluate(() => window.krabkaLab.saveNow());
+  await page.evaluate(() => window.krabkaLab.storage.flush());
+  await reload(page,preset.name);
+  await until(page, 'the reloaded ACL cluster to exchange authorized records', `(n) => n[4].state.acked > 0 && n[5].state.processed > 0`, 120_000);
+  const saved = await page.evaluate(() => window.krabkaLab.world.scenario());
+  check('reload retains the ACL policy and encrypted transport', saved.security === 'kerberos-encrypted' && JSON.stringify(saved.authorization) === JSON.stringify(preset.scenario.authorization));
+  if (preset.id === 'broker-acls') {
+    const policy = { acls: saved.authorization.acls.filter((r) => !(r.principal === 'User:node-5@LAB.KRABKA' && r.resource_type === 'group')) };
+    await page.evaluate(() => { window.krabkaLab.settingsDialog(); });
+    await page.getByLabel('Broker ACL policy (JSON)', { exact: true }).fill(JSON.stringify(policy));
+    await page.locator('#krabka-lab dialog button[type="submit"]').click();
+    await waitFor(page, `window.krabkaLab.world.scenario().authorization.acls.length === 4`, 'the revised ACL policy');
+    await setSpeed(page,SPEED);
+    await waitFor(page, `window.krabkaLab.world.liveSnapshot().nodes.some((n) => n.kind === 'admin' && n.state.authorization?.ready) && window.krabkaLab.timeline.events.some((e) => e.node === 5 && e.detail?.code === 30)`, 'the revoked group grant', 120_000);
+    const revoked = await nodeStateOf(page,5);
+    check('editing the policy revokes a stored grant on the existing broker disks', revoked.processed === 0 && await page.evaluate((id) => window.krabkaLab.world.scenario().id === id,saved.id));
+    await page.evaluate(() => { window.krabkaLab.settingsDialog(); });
+    await page.getByLabel('Broker ACL policy (JSON)', { exact: true }).fill('');
+    await page.locator('#krabka-lab dialog button[type="submit"]').click();
+    await waitFor(page, `!window.krabkaLab.world.scenario().authorization`, 'ACL enforcement to be disabled');
+    await setSpeed(page,SPEED);
+    await until(page, 'both consumers to read with ACL enforcement disabled', `(n) => n[5].state.processed > 0 && n[6].state.processed > 0`,120_000);
+    check('clearing the ACL policy restores the default unrestricted broker',true);
+  }
 }
 
 async function schemaRegistry(page, preset) {
@@ -268,6 +365,9 @@ async function partition(page, preset) {
 }
 
 const FLOWS = [
+  ['sspi-encrypted', sspiEncrypted],
+  ['broker-acls', brokerAcls],
+  ['broker-acls-deny', brokerAcls],
   ['three-brokers', threeBrokers],
   ['schema-registry', schemaRegistry],
   ['streams-word-count', wordCount],
@@ -290,19 +390,31 @@ async function main() {
   const errors = [];
   const started = Date.now();
   try {
-    for (const [id, flow] of FLOWS) {
+    const selected = process.argv.find((arg) => arg.startsWith('--preset='))?.slice('--preset='.length);
+    if (selected && !FLOWS.some(([id]) => id === selected)) throw new Error(`Unknown cluster check: ${selected}`);
+    for (const [id, flow] of FLOWS.filter(([id]) => !selected || id === selected)) {
       const preset = PRESETS.find((p) => p.id === id);
       console.log(`Cluster Lab: ${preset.name}`);
       const t0 = Date.now();
       // A context of its own: its IndexedDB and broker disks are the flow's.
       const context = await newLabContext(browser, { width: 1400, height: 1000 });
       const page = await context.newPage();
-      errors.push(...watchErrors(page, id, base));
+      errors.push(watchErrors(page, id, base));
       await t.flow(id, async () => {
         await openLab(page, base);
         await openScenario(page, preset.scenario, 120_000);
         await setSpeed(page, SPEED);
-        await flow(page, preset);
+        try { await flow(page, preset); }
+        catch (err) {
+          const evidence = await page.evaluate(() => ({
+            world: window.krabkaLab.world.liveSnapshot(),
+            events: window.krabkaLab.timeline.events.slice(-100),
+          })).catch(() => null);
+          const directory = path.join(ROOT, 'artifacts', 'lab-clusters');
+          fs.mkdirSync(directory, { recursive: true });
+          fs.writeFileSync(path.join(directory, `${id}-failure.json`), JSON.stringify(evidence, null, 2));
+          throw err;
+        }
       });
       console.log(`  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
       await context.close();
@@ -311,7 +423,7 @@ async function main() {
     await browser.close();
     server.close();
   }
-  check('no page errors or console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  check('no page errors or console errors', errors.flat().length === 0, errors.flat().slice(0, 3).join(' | '));
   t.finish('✅ PASS: the cluster presets run on real brokers.', started);
 }
 

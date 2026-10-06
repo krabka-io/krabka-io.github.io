@@ -8,7 +8,7 @@ This document is the contract between the modules. Every module owner codes agai
 
 The brokers are the real thing: the `krabka-broker` binary, built for `wasm32-wasip1` and run as a process in a Web Worker (see [External nodes](#external-nodes-labexternal) and [`lab-real-broker.md`](lab-real-broker.md)). Its KRaft quorum, metadata, partition logs, replication, group coordinators and request handling are the broker's own code, unmodified; the page supplies its clock, network and disk.
 
-Everything else in the lab is a **sans-IO simulation**. The echo and pinger probes, the schema registry, the producer, consumer and streams apps, and the Kafka client they share are synchronous state machines that receive frames and timer ticks and emit frames. Nothing in the crate opens a socket, reads a clock, spawns a thread, or touches a file. The host (the JavaScript page) owns the clock and the transport. Faults, latency and loss are applied to frames by the world, so they reach a broker process the same way they reach a simulated node, and the world, the clients and the apps replay under the scenario's seed; a broker process does not (it draws real randomness).
+Everything else in the lab is a **sans-IO simulation**. The echo and pinger probes, the schema registry, the producer, consumer and streams apps, and the Kafka client they share are synchronous state machines that receive frames and timer ticks and emit frames. Nothing in the crate opens a socket, spawns a thread, or touches a file. The host (the JavaScript page) owns the clock and the transport; the optional Kerberos adapter uses real time and randomness for its tokens. Faults, latency and loss are applied to frames by the world, so they reach a broker process the same way they reach a simulated node. Without Kerberos, the world, clients and apps replay under the scenario's seed; a broker process does not (it draws real randomness).
 
 The following pieces are the real Krabka code:
 
@@ -24,6 +24,98 @@ The following pieces are the real Krabka code:
 
 The following pieces are written for the lab, in this crate, and they model the behaviour of the real components rather than link them: the schema registry's REST surface and `_schemas` store, the JSON Schema and Protobuf compatibility rules (a documented subset), and the Kafka client used by the producer, consumer, streams and registry nodes. The real `krabka-schema-registry` and `krabka-client-*` crates are tokio programs over TCP and files, so they do not run in the lab module. Where the lab's model and Apache Kafka disagree, the lab is wrong: match Kafka.
 
+## SSPI / Kerberos transport
+
+Scenario settings offers plaintext (the default) or Kerberos authentication with
+encryption. The scenario's optional `security` string is `plaintext` or
+`kerberos-encrypted`. Changing it
+restarts the nodes on their existing disks; it survives saves, exports, share links
+and peer hosting.
+
+`lab::security::Transport` is a node-local adapter around every virtual connection,
+including browser clients, registry HTTP, real brokers' client/controller traffic,
+and the hidden admin. It uses the pinned pure Rust `sspi` Kerberos implementation
+and its `kdc` crate. AS/TGS exchanges execute against an embedded lab KDC; AP-REQ
+and AP-REP travel over the faulted links. The application only sees `Open` after
+its adapter verifies the peer. Requests sent during authentication wait in a
+bounded queue. Every subsequent frame is sealed with SSPI's `encrypt_message`,
+then verified with `decrypt_message` before delivery. The adapter requires the
+Kerberos WRAP token's actual Sealed flag, not just its outer envelope label.
+A MAC-protected message sequence rejects replay and reordering. Invalid tokens,
+wrong service keys, wrong node principals, modified records, protection-mode
+mismatches and replays reset the connection. Network captures contain the actual
+tokens and encrypted records, not a second plaintext capture.
+
+This is **lab transport security**, not Kafka SASL/GSSAPI or TLS. The KDC's service
+is `TERMSRV/node-<id>.lab.krabka`, which its existing implementation supports; the
+authenticated client is `node-<id>@LAB.KRABKA`. Identities and service keys are
+derived demonstration material available to every participant. There is no access
+to a Windows credential store, Active Directory or Windows single sign-on, and no
+protection against a participant who knows those demonstration credentials. A
+real broker receives plaintext behind its browser adapter and sees its existing
+Kafka principal unless the scenario enables broker ACLs below.
+
+## Broker ACLs
+
+The `broker-acls` and `broker-acls-deny` presets exercise the real broker's
+`simple` authorizer with `allow_everyone_if_no_acl_found = false`. The SSPI
+adapter supplies its verified `node-N@LAB.KRABKA` identity to a local SASL/PLAIN
+binding before delivering Kafka requests to the WASI broker. The browser never
+makes ACL decisions. Broker/controller clients authenticate with their own node
+credentials. Brokers and the hidden scenario admin are superusers; ordinary
+clients have no grants until ACL records allow them.
+
+Edit **Broker ACL policy (JSON)** in Scenario settings, or export/edit/import the
+scenario document. Clearing the settings field disables ACLs. Optional scenario JSON:
+
+```json
+"security": "kerberos-encrypted",
+"authorization": {
+  "acls": [
+    { "principal": "User:node-4@LAB.KRABKA", "resource_type": "topic",
+      "resource_name": "orders", "pattern_type": "literal",
+      "operation": "write", "permission": "allow" }
+  ]
+}
+```
+
+ACLs require Kerberos encryption. An empty `acls` array denies all ordinary
+clients. ACL scenario node IDs must be 1 through 9999, leaving ID 10000 available
+for the generated admin. ACL scenarios reject user-supplied `admin` nodes. Requests held
+for authentication, ACL readiness, or a full broker send buffer are bounded to
+100 MiB and 2048 frames per connection; exceeding either resets the connection.
+Omit `authorization` to disable the authorizer. At world startup the
+admin replaces the broker's ACL records using `DeleteAcls` and `CreateAcls`,
+then verifies the exact policy with `DescribeAcls` on every broker. Application
+requests wait for that verification, including after reload. The admin snapshot
+contains `authorization.ready`, rules, verified brokers and setup errors.
+
+Rules accept `User:node-N@LAB.KRABKA` or `User:*`, resources `topic`, `group`,
+`cluster`, `transactional-id`, patterns `literal`/`prefixed`, permissions
+`allow`/`deny`, and Kafka operations `all`, `read`, `write`, `create`, `delete`,
+`alter`, `describe`, `cluster-action`, `describe-configs`, `alter-configs`,
+`idempotent-write`. Hosts are `*`; the WASI listener's host is the local adapter.
+At most 128 distinct rules are supported. These are the same demonstration
+credentials as the SSPI transport, not a native WASI GSSAPI provider.
+
+The topic/group preset grants producer Write plus cluster IdempotentWrite and
+consumer Read on both topic `orders` and group `billing`. A second consumer can
+read the topic but cannot join group `audit` (broker error 30). The deny preset
+adds a producer with a prefixed Write allow and a literal Write deny on `orders`
+(error 29), demonstrating the broker's deny precedence.
+
+The SSPI/KDC clocks and random bytes are real browser time/randomness, so tokens
+are not deterministic under the scenario seed. Link faults and scheduling still
+use lab time. Ticket clock skew remains five minutes; changing a broker's simulated
+clock skew does not change its adapter's Kerberos clock. The authenticator replay
+cache holds at most 65,536 distinct AP-REQs for ten wall-clock minutes (twice the
+allowed skew, covering future-dated authenticators), and
+the handshake queue holds at most 100 MiB per connection; exceeding either closes
+the connection. A pending handshake times out after 30 seconds of lab time, so a
+connection opened during a partition can retry once the link heals. Peer movement
+and node restarts discard contexts and authenticate
+again. Broker processes and node state stay unchanged by the adapter.
+
 ## Module map and ownership
 
 Everything lives under `playground/src/lab/`. One owner per directory; nobody edits another owner's directory in the same batch.
@@ -33,6 +125,7 @@ Everything lives under `playground/src/lab/`. One owner per directory; nobody ed
 | `lab/mod.rs`, `lab/net.rs`, `lab/world.rs`, `lab/scenario.rs`, `lab/events.rs`, `lab/testing.rs` | core | the virtual network, the scheduler, the node trait, faults, the scenario format, the event log, and the test harness |
 | `lab/codes.rs` | core | Kafka error codes as `i16` constants (the broker's `codes.rs` names) |
 | `lab/external.rs` | core | `ExternalNode`, the world's stand-in for a real `krabka-broker` process that runs in a Web Worker |
+| `lab/security.rs` | core | optional pure Rust Kerberos authentication and SSPI encryption of virtual connections |
 | `lab/registry/**` | registry | the schema registry node: HTTP layer, REST routes, store, compatibility engines, `_schemas` client |
 | `lab/client/**` | client | the sans-IO Kafka client: connections, metadata, produce, fetch, group membership, offsets |
 | `lab/apps/**` | apps | the producer, consumer and streams application nodes, and the topology compiler |

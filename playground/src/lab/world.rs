@@ -5,7 +5,7 @@
 //! deliver or a timer to fire, ordered by `(time, sequence)`, so the nodes it
 //! runs are deterministic for a seed and a sequence of inputs (the real broker
 //! processes behind external nodes are not: they keep their own time and
-//! scheduling). The page drives it with
+//! scheduling; Kerberos tokens also use real time and randomness). The page drives it with
 //! [`World::step_until`] from its animation loop and reads
 //! [`World::snapshot`] back.
 //!
@@ -30,7 +30,17 @@ use super::{
         Payload, Rng, TimedFrame,
     },
     scenario::{LinkOverride, NodeSpec, Scenario, TopicSpec},
+    security::{SecurityMode, Transport},
 };
+
+/// A local backend arrival. Identity is assigned by SSPI, never peer JSON.
+#[derive(Clone, Debug, Serialize)]
+pub struct ExternalFrame {
+    pub deliver_at: Millis,
+    pub frame: Frame,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+}
 
 /// A fault the page injects. Faults apply immediately at the current time.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -161,7 +171,15 @@ struct Paused {
 
 enum Item {
     Deliver(Frame),
-    Timer { node: NodeId, generation: u64 },
+    Timer {
+        node: NodeId,
+        generation: u64,
+    },
+    SecurityTimeout {
+        frame: Frame,
+        local: Endpoint,
+        generation: u64,
+    },
 }
 
 struct Scheduled {
@@ -319,7 +337,7 @@ pub struct World {
     durable: Vec<(NodeId, DurableOp)>,
     /// Frames due at external nodes this world hosts, for the page to hand
     /// to their processes.
-    external_out: Vec<TimedFrame>,
+    external_out: Vec<ExternalFrame>,
     events: EventLog,
     delivered: BTreeMap<(NodeId, NodeId), u64>,
     wire: VecDeque<WireFrame>,
@@ -330,6 +348,8 @@ pub struct World {
     one_way: BTreeSet<(NodeId, NodeId)>,
     /// The scenario's experiment, kept as it came for [`World::scenario`].
     experiment: Option<serde_json::Value>,
+    security: Transport,
+    authorization: Option<super::apps::acls::Authorization>,
 }
 
 impl World {
@@ -361,6 +381,8 @@ impl World {
             rng: Rng::new(seed ^ 0xA5A5_5A5A),
             one_way: BTreeSet::new(),
             experiment: None,
+            security: Transport::new(SecurityMode::Plaintext, ""),
+            authorization: None,
         }
     }
 
@@ -408,6 +430,18 @@ impl World {
         world.default_latency = scenario.links.default_latency_ms;
         world.topics.clone_from(&scenario.topics);
         world.experiment.clone_from(&scenario.experiment);
+        if let Some(authorization) = &scenario.authorization {
+            if scenario.security != SecurityMode::KerberosEncrypted {
+                return Err(LabError::InvalidScenario(
+                    "broker ACLs require Kerberos authentication and encryption".to_owned(),
+                ));
+            }
+            authorization
+                .validate()
+                .map_err(LabError::InvalidScenario)?;
+        }
+        world.authorization.clone_from(&scenario.authorization);
+        world.security = Transport::new(scenario.security, &scenario.id);
         if !hosted.is_empty() {
             world.hosted = Some(hosted.iter().copied().collect());
         }
@@ -444,6 +478,11 @@ impl World {
             if let Some((admin, _)) = self.admin.take() {
                 self.remove_node(admin);
             }
+            if self.authorization.is_some() {
+                return Err(LabError::InvalidScenario(
+                    "broker ACLs need at least one broker".to_owned(),
+                ));
+            }
             if !self.topics.is_empty() {
                 return Err(LabError::InvalidScenario(
                     "topics need at least one broker".to_string(),
@@ -451,10 +490,17 @@ impl World {
             }
             return Ok(());
         };
-        let config = serde_json::json!({ "bootstrap": bootstrap, "topics": self.topics });
+        let mut config = serde_json::json!({ "bootstrap": bootstrap, "topics": self.topics });
+        if let Some(authorization) = &self.authorization {
+            config["authorization"] =
+                serde_json::to_value(authorization).expect("ACL serialization");
+        }
         let existing = self.admin.map(|(admin, _)| admin);
         if let Some(admin) = existing
-            && self.nodes.get(&admin).is_some_and(|s| s.spec.config == config)
+            && self
+                .nodes
+                .get(&admin)
+                .is_some_and(|s| s.spec.config == config)
         {
             return Ok(());
         }
@@ -478,6 +524,26 @@ impl World {
 
     fn next_free_id(&self) -> NodeId {
         NodeId(self.nodes.keys().last().map_or(1, |id| id.0 + 1))
+    }
+
+    fn validate_node_spec(&self, spec: &NodeSpec) -> Result<(), LabError> {
+        if self.authorization.is_none() {
+            return Ok(());
+        }
+        let generated_admin =
+            spec.kind == "admin" && self.admin.is_some_and(|(id, _)| id == spec.id);
+        if spec.kind == "admin" && !generated_admin {
+            return Err(LabError::InvalidScenario(
+                "admin nodes are reserved for the world-generated scenario admin".to_owned(),
+            ));
+        }
+        // Leave id 10000 available for sync_admin's generated identity.
+        if !generated_admin && !(1..10000).contains(&spec.id.0) {
+            return Err(LabError::InvalidScenario(
+                "broker ACL scenario node ids must be 1 through 9999; 10000 is reserved for the admin".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Add a node and start it. The spec's id must be free; an id of `0` asks
@@ -508,6 +574,7 @@ impl World {
         if spec.id.0 == 0 {
             spec.id = self.next_free_id();
         }
+        self.validate_node_spec(&spec)?;
         if self.nodes.contains_key(&spec.id) {
             return Err(LabError::InvalidScenario(format!(
                 "node id {} is taken",
@@ -580,6 +647,7 @@ impl World {
     pub fn update_node(&mut self, id: NodeId, spec: NodeSpec) -> Result<(), LabError> {
         let mut spec = spec;
         spec.id = id;
+        self.validate_node_spec(&spec)?;
         if spec.name.is_empty() {
             spec.name = spec.display_name();
         }
@@ -626,6 +694,8 @@ impl World {
             .collect();
         s.topics.clone_from(&self.topics);
         s.experiment.clone_from(&self.experiment);
+        s.security = self.security.mode;
+        s.authorization.clone_from(&self.authorization);
         s.link_overrides = self
             .links
             .iter()
@@ -694,6 +764,15 @@ impl World {
         match item {
             Item::Deliver(frame) => self.deliver(frame),
             Item::Timer { node, generation } => self.fire_timer(node, generation),
+            Item::SecurityTimeout {
+                frame,
+                local,
+                generation,
+            } => {
+                if self.security.pending_generation(&frame, local) == Some(generation) {
+                    self.security_failed(&frame, local, "SSPI authentication timed out after 30 s");
+                }
+            }
         }
         true
     }
@@ -714,6 +793,48 @@ impl World {
     }
 
     fn deliver(&mut self, frame: Frame) {
+        if !self.is_hosted(frame.dst.node) {
+            self.egress.push(TimedFrame {
+                deliver_at: self.now,
+                frame,
+            });
+            return;
+        }
+        if self
+            .nodes
+            .get(&frame.dst.node)
+            .is_some_and(|slot| !slot.alive)
+        {
+            self.deliver_plain(frame);
+            return;
+        }
+        if let Some(slot) = self.nodes.get_mut(&frame.dst.node)
+            && !slot.external
+            && let Some(paused) = &mut slot.paused
+        {
+            paused.held.push(frame);
+            return;
+        }
+        match self.security.receive(frame.clone()) {
+            Ok(arrival) => {
+                if frame.payload == Payload::Open {
+                    self.arm_security_timeout(&frame, frame.dst);
+                }
+                if let Some(principal) = arrival.principal {
+                    self.record(Some(frame.dst.node), "sspi_authenticated", serde_json::json!({ "peer": frame.src.node, "principal": principal, "encrypted": self.security.mode == SecurityMode::KerberosEncrypted }));
+                }
+                for wire in arrival.wire {
+                    self.route_wire(wire.src.node, wire);
+                }
+                for plain in arrival.plain {
+                    self.deliver_plain(plain);
+                }
+            }
+            Err(reason) => self.security_failed(&frame, frame.dst, &reason),
+        }
+    }
+
+    fn deliver_plain(&mut self, frame: Frame) {
         let dst = frame.dst.node;
         if !self.is_hosted(dst) {
             self.egress.push(TimedFrame {
@@ -741,8 +862,13 @@ impl World {
             self.forget_conn(frame.conn_key());
         }
         if external {
-            self.external_out.push(TimedFrame {
+            self.external_out.push(ExternalFrame {
                 deliver_at: self.now,
+                principal: if frame.payload == Payload::Open {
+                    self.security.principal(&frame)
+                } else {
+                    None
+                },
                 frame,
             });
             return;
@@ -788,7 +914,13 @@ impl World {
             self.schedule(now, Item::Deliver(frame));
         }
         if timer_due {
-            self.schedule(now, Item::Timer { node: id, generation });
+            self.schedule(
+                now,
+                Item::Timer {
+                    node: id,
+                    generation,
+                },
+            );
         }
     }
 
@@ -847,6 +979,57 @@ impl World {
     /// the delivery or hand it to the host for a node hosted elsewhere.
     fn route(&mut self, from: NodeId, frame: Frame) {
         if frame.src.node != from {
+            return;
+        }
+        let failure = Frame::close(frame.src, frame.dst, frame.conn);
+        let opening = frame.payload == Payload::Open;
+        match self.security.send(frame) {
+            Ok(frames) => {
+                if opening {
+                    self.arm_security_timeout(&failure, failure.src);
+                }
+                for wire in frames {
+                    self.route_wire(from, wire);
+                }
+            }
+            Err(reason) => self.security_failed(&failure, failure.src, &reason),
+        }
+    }
+
+    fn arm_security_timeout(&mut self, frame: &Frame, local: Endpoint) {
+        if let Some(generation) = self.security.pending_generation(frame, local) {
+            self.schedule(
+                self.now + 30_000,
+                Item::SecurityTimeout {
+                    frame: frame.clone(),
+                    local,
+                    generation,
+                },
+            );
+        }
+    }
+
+    fn security_failed(&mut self, frame: &Frame, local: Endpoint, reason: &str) {
+        let peer = if local == frame.src {
+            frame.dst
+        } else {
+            frame.src
+        };
+        self.record(
+            Some(local.node),
+            "sspi_failed",
+            serde_json::json!({ "peer": peer.node, "reason": reason, "level": "error" }),
+        );
+        // Reset both applications and discard the failed contexts. Never hand
+        // unverified bytes to an application or a broker process.
+        let close = Frame::close(peer, local, frame.conn);
+        let _ = self.security.receive(close.clone());
+        self.route_wire(local.node, close.reply(Payload::Close));
+        self.deliver_plain(close);
+    }
+
+    fn route_wire(&mut self, from: NodeId, frame: Frame) {
+        if frame.src.node != from {
             // A node may only speak for itself.
             return;
         }
@@ -859,7 +1042,10 @@ impl World {
         let link = self.link(a, b);
         let isolated = |w: &Self, n: NodeId| w.nodes.get(&n).is_some_and(|s| s.isolated);
         if a != b
-            && (link.cut || isolated(self, a) || isolated(self, b) || self.one_way.contains(&(a, b)))
+            && (link.cut
+                || isolated(self, a)
+                || isolated(self, b)
+                || self.one_way.contains(&(a, b)))
         {
             if closing {
                 self.forget_conn(key);
@@ -968,7 +1154,7 @@ impl World {
             .into_iter()
             .filter(|Reverse(s)| match &s.item {
                 Item::Deliver(f) => !pred(f),
-                Item::Timer { .. } => true,
+                Item::Timer { .. } | Item::SecurityTimeout { .. } => true,
             })
             .collect();
         self.queue = kept.into_iter().collect();
@@ -992,6 +1178,7 @@ impl World {
     /// live node needs; a node that halted, was rebuilt or moved away never
     /// sees its own closes.
     fn close_connections_of(&mut self, id: NodeId, notify_self: bool) {
+        self.security.forget_node(id);
         let affected: Vec<((Endpoint, ConnId), Endpoint)> = self
             .conns
             .iter()
@@ -1345,7 +1532,7 @@ impl World {
     /// Frames that reached external nodes this world hosts since the last
     /// drain, in delivery order. Each is due now: the world held it for its
     /// link latency, so the page hands it to the process at once.
-    pub fn drain_external(&mut self) -> Vec<TimedFrame> {
+    pub fn drain_external(&mut self) -> Vec<ExternalFrame> {
         std::mem::take(&mut self.external_out)
     }
 
@@ -1415,6 +1602,9 @@ fn frame_label(frame: &Frame) -> String {
         Payload::Open => "open".to_string(),
         Payload::Close => "close".to_string(),
         Payload::Data(bytes) => {
+            if let Some(label) = super::security::wire_label(bytes) {
+                return label.to_owned();
+            }
             if frame.dst.port == KAFKA_PORT {
                 bytes
                     .get(4..6)
@@ -1632,9 +1822,10 @@ mod tests {
             node: NodeId(2),
             ms: -5_000,
         });
-        let fault: Fault =
-            serde_json::from_value(serde_json::json!({ "kind": "disk", "node": 2, "mode": "slow", "ms": 200 }))
-                .unwrap();
+        let fault: Fault = serde_json::from_value(
+            serde_json::json!({ "kind": "disk", "node": 2, "mode": "slow", "ms": 200 }),
+        )
+        .unwrap();
         w.world_mut().fault(fault);
         let node = w.world().snapshot().nodes[1].clone();
         assert!((node.faults.skew_ms, node.faults.disk) == (-5_000, DiskMode::Slow));
@@ -1661,7 +1852,12 @@ mod tests {
         let back: Scenario = serde_json::from_str(&text).unwrap();
         assert!(back.experiment == scenario.experiment);
         // A scenario without one serializes without the field.
-        let plain = serde_json::to_value(TestWorld::from_scenario(&super::tests::scenario()).world().scenario()).unwrap();
+        let plain = serde_json::to_value(
+            TestWorld::from_scenario(&super::tests::scenario())
+                .world()
+                .scenario(),
+        )
+        .unwrap();
         assert!(plain.get("experiment").is_none());
     }
 
@@ -1772,7 +1968,7 @@ mod tests {
     /// echo every data frame back through the link model, as the real process
     /// behind it would answer on the same connection. Only the pinger's
     /// frames count: the hidden admin's go unanswered.
-    fn echo_externally(world: &mut World) -> Vec<TimedFrame> {
+    fn echo_externally(world: &mut World) -> Vec<ExternalFrame> {
         let mut due = world.drain_external();
         due.retain(|t| t.frame.src.node == NodeId(3));
         let replies = due
@@ -1830,6 +2026,95 @@ mod tests {
         let pinger = world.node_snapshot(NodeId(3)).unwrap();
         assert!(pinger["echoes"] == 0);
         assert!(pinger["closes"].as_u64().unwrap() >= 2);
+    }
+
+    #[test]
+    fn acl_node_ids_reserve_space_for_the_generated_admin() {
+        let mut scenario = external_scenario();
+        scenario.security = SecurityMode::KerberosEncrypted;
+        scenario.authorization = Some(super::super::apps::acls::Authorization { acls: vec![] });
+        scenario
+            .nodes
+            .push(NodeSpec::new(9999, "echo", "", serde_json::json!({})));
+        let mut world = World::from_scenario(&scenario).unwrap();
+        assert_eq!(world.admin.unwrap().0, NodeId(10000));
+        for id in [0, 10000, 10001, u32::MAX] {
+            assert!(matches!(
+                world.add_node(NodeSpec::new(id, "echo", "", serde_json::json!({}))),
+                Err(LabError::InvalidScenario(reason)) if reason.contains("1 through 9999")
+            ));
+        }
+        world
+            .add_node(NodeSpec::new(9998, "echo", "", serde_json::json!({})))
+            .unwrap();
+        for id in [10000, 10001, u32::MAX] {
+            scenario.nodes.last_mut().unwrap().id = NodeId(id);
+            assert!(matches!(
+                World::from_scenario(&scenario),
+                Err(LabError::InvalidScenario(reason)) if reason.contains("1 through 9999")
+            ));
+        }
+    }
+
+    #[test]
+    fn only_the_world_can_create_an_acl_admin_node() {
+        let mut scenario = external_scenario();
+        scenario.security = SecurityMode::KerberosEncrypted;
+        scenario.authorization = Some(super::super::apps::acls::Authorization { acls: vec![] });
+        let admin = NodeSpec::new(9000, "admin", "", serde_json::json!({ "bootstrap": [1] }));
+        let mut world = World::from_scenario(&scenario).unwrap();
+        let existing = world.admin.unwrap().0;
+        assert!(world.add_node(admin.clone()).is_err());
+        assert!(world.add_node_with_state(admin.clone(), None).is_err());
+        assert!(world.update_node(NodeId(3), admin.clone()).is_err());
+        assert_eq!(world.admin.unwrap().0, existing);
+        assert_eq!(
+            world
+                .nodes
+                .values()
+                .filter(|s| s.spec.kind == "admin")
+                .count(),
+            1
+        );
+        scenario.nodes.push(admin);
+        assert!(matches!(
+            World::from_scenario(&scenario),
+            Err(LabError::InvalidScenario(reason)) if reason.contains("world-generated")
+        ));
+    }
+
+    #[test]
+    fn acl_scenarios_require_encryption_and_external_opens_carry_verified_identity() {
+        let mut scenario = external_scenario();
+        scenario.authorization = Some(super::super::apps::acls::Authorization { acls: vec![] });
+        assert!(
+            matches!(World::from_scenario(&scenario), Err(LabError::InvalidScenario(reason)) if reason.contains("require Kerberos"))
+        );
+        scenario.security = SecurityMode::KerberosEncrypted;
+        let mut world = World::from_scenario(&scenario).unwrap();
+        world.step_until(50);
+        let external = world.drain_external();
+        let opens: Vec<_> = external
+            .iter()
+            .filter(|t| t.frame.payload == Payload::Open)
+            .collect();
+        assert!(!opens.is_empty());
+        assert!(
+            opens
+                .iter()
+                .all(|t| t.principal == Some(format!("node-{}@LAB.KRABKA", t.frame.src.node)))
+        );
+        assert!(
+            external
+                .iter()
+                .filter(|t| t.frame.payload != Payload::Open)
+                .all(|t| t.principal.is_none())
+        );
+        assert!(world.scenario().authorization == scenario.authorization);
+        scenario.nodes.retain(|n| n.kind != "krabka-broker");
+        assert!(
+            matches!(World::from_scenario(&scenario), Err(LabError::InvalidScenario(reason)) if reason.contains("at least one broker"))
+        );
     }
 
     #[test]

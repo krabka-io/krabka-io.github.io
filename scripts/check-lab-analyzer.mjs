@@ -102,6 +102,13 @@ check('varints and version ranges', () => {
 // ---- the capture ----
 const capture = new Capture();
 capture.add(fixture.frames);
+check('SSPI records stay in the capture without pairing as Kafka', () => {
+  const c = new Capture();
+  const [frame] = fixture.frames;
+  c.add([1, 2, 3].map((tag) => ({ ...frame, bytes: Buffer.from([83, 83, 80, 73, tag, ...Buffer.alloc(24)]).toString('base64') })));
+  assert.equal(c.frames.length, 3);
+  assert.equal(c.exchanges.length, 0);
+});
 check('every fixture request pairs with its response', () => {
   assert.equal(capture.exchanges.length, fixture.frames.length / 2);
   assert.ok(capture.exchanges.every((ex) => ex.resp && ex.rtt >= ex.serverMs && ex.serverMs >= 0), 'timing');
