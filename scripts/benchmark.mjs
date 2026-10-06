@@ -482,6 +482,10 @@ rpk:
       const samples = [];
       const startedAt = new Date().toISOString();
       const start = performance.now();
+      // Retain the clock anchor even when the client or sampler fails.
+      await fs.writeFile(`${filename}.metadata.json`, `${JSON.stringify({
+        schema_version: 1, started_at: startedAt, sampling_interval_ms: 250,
+      })}\n`);
       const sampleFile = await fs.open(filename, 'w');
       const samplingController = new AbortController();
       let sampleError;
