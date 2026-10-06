@@ -16,8 +16,9 @@
 //! earliest (-2: the log start), and one `ListGroups` per broker (each lists
 //! only the groups it coordinates). Phase three sends per group an
 //! `OffsetFetch` and a describe to its coordinator: `ConsumerGroupDescribe`
-//! for a KIP-848 group, `DescribeGroups` for a classic one (a streams or
-//! share group is not described, so its member count stays `null`).
+//! for a KIP-848 group, `DescribeGroups` for a classic one, and
+//! `ShareGroupDescribe` for a share group. Share groups have acknowledgements
+//! rather than committed consumer offsets, so no `OffsetFetch` is sent for them.
 //!
 //! A question that fails lands in `errors` as short text; the values it would
 //! have replaced stay as the last good round left them.
@@ -52,6 +53,8 @@ use krabka_protocol::{
             OffsetFetchRequestTopics,
         },
         offset_fetch_response::OffsetFetchResponse,
+        share_group_describe_request::ShareGroupDescribeRequest,
+        share_group_describe_response::ShareGroupDescribeResponse,
     },
     primitives::uuid::Uuid,
 };
@@ -94,6 +97,7 @@ enum Ask {
     GroupOffsets(String),
     DescribeGroup(String),
     DescribeConsumerGroup(String),
+    DescribeShareGroup(String),
 }
 
 /// One partition as the last good answers gave it.
@@ -467,6 +471,15 @@ impl Observer {
                         found.map(|g| (g.error_code, g.group_state, g.members.len())),
                     )
                 }),
+            Ask::DescribeShareGroup(group) => {
+                response.downcast::<ShareGroupDescribeResponse>().map(|r| {
+                    let found = r.groups.into_iter().find(|g| g.group_id == group);
+                    self.on_described(
+                        &group,
+                        found.map(|g| (g.error_code, g.group_state, g.members.len())),
+                    )
+                })
+            }
         };
         match failed {
             Some(Some(problem)) => self.errors.push(format!("{name}: {problem}")),
@@ -869,7 +882,7 @@ impl Observer {
                 key_type: CoordinatorType::Group,
                 key: group.clone(),
             };
-            if !partitions.is_empty() {
+            if !partitions.is_empty() && kind != "share" {
                 self.send(
                     ctx,
                     target.clone(),
@@ -878,6 +891,15 @@ impl Observer {
                 );
             }
             match kind.as_str() {
+                "share" => self.send(
+                    ctx,
+                    target,
+                    Ask::DescribeShareGroup(group.clone()),
+                    ShareGroupDescribeRequest {
+                        group_ids: vec![group],
+                        ..Default::default()
+                    },
+                ),
                 "consumer" => self.send(
                     ctx,
                     target,
@@ -968,10 +990,15 @@ impl Observer {
                         )
                     })
                     .collect();
-                let lag: Option<i64> = offsets.iter().map(|(_, lag)| *lag).sum();
+                let lag: Option<i64> = if g.kind == "share" {
+                    None
+                } else {
+                    offsets.iter().map(|(_, lag)| *lag).sum()
+                };
                 json!({
                     "id": id,
                     "state": g.state,
+                    "type": g.kind,
                     "members": g.members,
                     "lag": lag,
                     "offsets": offsets.into_iter().map(|(v, _)| v).collect::<Vec<_>>(),
@@ -1061,6 +1088,7 @@ fn ask_name(ask: &Ask) -> String {
         Ask::GroupOffsets(g) => format!("OffsetFetch {g}"),
         Ask::DescribeGroup(g) => format!("DescribeGroups {g}"),
         Ask::DescribeConsumerGroup(g) => format!("ConsumerGroupDescribe {g}"),
+        Ask::DescribeShareGroup(g) => format!("ShareGroupDescribe {g}"),
     }
 }
 

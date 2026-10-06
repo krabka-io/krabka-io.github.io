@@ -66,7 +66,7 @@ export class Sampler {
     // Each node's counter, so a restart that resets one does not cancel the
     // progress of the others.
     const counts = new Map();
-    for (const [kind, field] of [["producer", "acked"], ["consumer", "processed"]]) {
+    for (const [kind, field] of [["producer", "acked"], ["consumer", "processed"], ["share-consumer", "processed"]]) {
       for (const n of snapshot.nodes) if (n.kind === kind && typeof n.state?.[field] === "number") counts.set(`${kind}:${n.id}`, n.state[field]);
     }
     const delta = (kind) => {
@@ -80,7 +80,7 @@ export class Sampler {
       const dt = (t - this.last.t) / 1000;
       // A restarted node counts from zero again: its drop is not a negative rate.
       row.produce = delta("producer") / dt;
-      row.consume = delta("consumer") / dt;
+      row.consume = (delta("consumer") + delta("share-consumer")) / dt;
     }
     Object.assign(row, rtts(capture, this.last ? this.last.t : -Infinity, t));
     const c = clusterOf(snapshot);
@@ -95,7 +95,7 @@ export class Sampler {
 }
 
 // RTT percentiles of the Produce (0) and Fetch (1) exchanges whose response
-// reached the client in (from, to].
+// reached the client in (from, to]. ShareFetch (78) also contributes to Fetch RTT.
 export function rtts(capture, from, to) {
   const out = { produce_p50: null, produce_p99: null, fetch_p50: null, fetch_p99: null };
   const xs = capture?.exchanges;
@@ -104,8 +104,9 @@ export function rtts(capture, from, to) {
   for (let i = xs.length - 1; i >= 0; i--) {
     const ex = xs[i];
     if (ex.req.at < from - RTT_WINDOW_MS) break;
-    if (!ex.resp || ex.rtt == null || !(ex.apiKey in got) || ex.resp.deliverAt <= from || ex.resp.deliverAt > to) continue;
-    got[ex.apiKey].push(ex.rtt);
+    const key = ex.apiKey === 78 ? 1 : ex.apiKey;
+    if (!ex.resp || ex.rtt == null || !(key in got) || ex.resp.deliverAt <= from || ex.resp.deliverAt > to) continue;
+    got[key].push(ex.rtt);
   }
   for (const [key, name] of [[0, "produce"], [1, "fetch"]]) {
     const s = got[key].sort((a, b) => a - b);

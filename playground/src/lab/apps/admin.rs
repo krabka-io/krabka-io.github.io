@@ -1550,7 +1550,7 @@ pub(super) mod tests {
         assert!(
             cluster["groups"]
                 == json!([{
-                    "id": "billing", "state": "Empty", "members": 0, "lag": 5,
+                    "id": "billing", "type": "classic", "state": "Empty", "members": 0, "lag": 5,
                     "offsets": [
                         { "topic": "orders", "partition": 0, "committed": 7, "lag": 3 },
                         { "topic": "orders", "partition": 1, "committed": 3, "lag": 2 },

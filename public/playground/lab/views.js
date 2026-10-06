@@ -40,6 +40,7 @@ const VIEWS = {
   "schema-registry": renderRegistry,
   producer: renderProducer,
   consumer: renderConsumer,
+  "share-consumer": renderShareConsumer,
   streams: renderStreams,
   echo: renderCounters,
   pinger: renderCounters,
@@ -491,6 +492,26 @@ function renderConsumer(root, s, used, ctx) {
   }
   const client = take(s, used, "client");
   if (client && typeof client === "object") root.appendChild(section("Client", jsonTree(client, ctx), { open: false }));
+}
+
+function renderShareConsumer(root, s, used, ctx) {
+  const rows = [];
+  for (const key of ["state", "group", "member_id", "member_epoch", "paused", "closed", "process_ms", "max_records", "acknowledgement", "processed", "processing_backlog", "records", "accepted", "released", "rejected", "redelivered"]) {
+    addRow(rows, key.replaceAll("_", " "), take(s, used, key), key);
+  }
+  root.appendChild(section("Share consumer", kv(rows)));
+  for (const [key, title, columns] of [
+    ["assignment", "Shared assignment", ["topic", "partition"]],
+    ["sessions", "Share sessions", ["broker", "epoch"]],
+    ["last_records", "Last deliveries", ["topic", "partition", "offset", "delivery_count", "acknowledgement", "key", "value"]],
+  ]) {
+    const data = take(s, used, key);
+    if (Array.isArray(data)) root.appendChild(section(title, table(columns.map((key) => ({ key, label: key.replaceAll("_", " "), render: (v) => v && typeof v === "object" ? shortJson(v, 80) : v })), data)));
+  }
+  for (const key of ["subscription", "errors", "client"]) {
+    const value = take(s, used, key);
+    if (value != null) root.appendChild(section(key, jsonTree(value, ctx), { open: key === "errors" }));
+  }
 }
 
 // ---- streams --------------------------------------------------------------------------

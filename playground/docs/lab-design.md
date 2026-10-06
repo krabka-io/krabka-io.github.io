@@ -116,6 +116,54 @@ connection opened during a partition can retry once the link heals. Peer movemen
 and node restarts discard contexts and authenticate
 again. Broker processes and node state stay unchanged by the adapter.
 
+## Rebalancer and share-group examples
+
+The `rebalancer` preset starts two brokers with six partitions at replication
+factor two. Add a data-only broker (`voter: false`) so the static controller
+quorum stays the same. The existing rebalancer node discovers it through Metadata,
+plans replica moves and preferred leader changes, and runs the broker's
+`AlterPartitionReassignments` and `ElectLeaders`. Pause stops periodic runs;
+Plan now previews a fresh plan and Execute now applies it. This node is a lab
+model of the rebalancer, rather than the native rebalancer service.
+
+`share-consumer` is a separate palette node with configuration
+`{ "bootstrap": [1], "group": "workers", "topics": ["jobs"],
+"process_ms": 100, "max_records": 1, "acknowledgement": "accept" }`.
+The `share-group` preset runs three workers against one partition; the
+`share-redelivery` preset releases work so the broker can redeliver it.
+The node uses the existing Kafka client and generated protocol types for
+`ShareGroupHeartbeat`, `ShareFetch` and `ShareAcknowledge`, following
+[KIP-932](https://cwiki.apache.org/confluence/spaces/KAFKA/pages/255070434/KIP-932%2BQueues%2Bfor%2BKafka).
+The real broker owns assignments, acquisition locks, delivery counts and
+durable acknowledgements. Group membership uses the group coordinator;
+share-state persistence and share sessions remain broker responsibilities.
+
+Heartbeats run independently of processing. Each broker has its own fetch/ack
+session epoch, distinct from the member epoch. A worker processes one fetch at
+a time, with at most 1000 records requested and 1 MiB requested bytes. Kafka can
+return the first record batch beyond the byte limit. Only acquired offsets are
+processed; control or compacted gaps receive Gap acknowledgements. Accept,
+Release and Reject are sent after processing and counted only after the broker
+confirms them. Close accepts completed work, releases unfinished records, closes
+share sessions, then leaves membership. Transport failures reset the affected
+session; membership fencing rejoins with a new member ID and discards old work.
+A durable incarnation counter prevents reuse of a member ID after reload or restart.
+Broker lock expiry can produce redelivery when a worker stalls; heartbeats do
+not renew record locks. Processing is not an exactly-once guarantee.
+
+Use Pause/Resume, Set processing, Set acknowledgement and Close in the inspector.
+The state view shows shared assignments, broker session epochs, delivery counts
+and accepted/released/rejected totals. The cluster observer describes share-group
+members with `ShareGroupDescribe` and shows no consumer offset lag for them.
+SSPI and broker ACL policies apply to share consumers and rebalancers through
+the same transport and identity binding as other browser clients.
+
+The Playwright checks run against the built site and WASI broker:
+`npm run check-lab-clusters -- --preset=rebalancer --repeat=2`, with
+`share-group` and `share-redelivery` as the other new preset IDs. CI runs each
+twice in fresh browser contexts and uploads screenshots, browser errors and
+world/event snapshots when a flow fails.
+
 ## Module map and ownership
 
 Everything lives under `playground/src/lab/`. One owner per directory; nobody edits another owner's directory in the same batch.

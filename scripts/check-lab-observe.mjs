@@ -151,6 +151,22 @@ await check('a read_committed consumer that sees aborted records', () => {
 
 // ---- the chart sampler ----
 
+await check('share workers contribute processing rates and ShareFetch RTT without consumer lag', () => {
+  const s = new Sampler();
+  const at = (now, processed) => ({ now, nodes: [
+    { id: 3, kind: 'share-consumer', state: { processed } },
+    { id: 4, kind: 'share-consumer', state: { processed: processed * 2 } },
+  ] });
+  s.sample(at(1000, 2));
+  const r = s.sample(at(2000, 5), { exchanges: [
+    { apiKey: 78, req: { at: 1500 }, resp: { deliverAt: 1512 }, rtt: 12 },
+  ] });
+  assert.equal(r.consume, 9);
+  assert.equal(r.lag, null);
+  assert.equal(r.fetch_p50, 12);
+  assert.equal(s.sample(at(3000, 0)).consume, 0);
+});
+
 await check('the sampler takes one row per lab second with rates, lag, RTTs and ISR', () => {
   const s = new Sampler();
   const ex = (apiKey, at, rtt) => ({ apiKey, req: { at }, resp: { deliverAt: at + rtt }, rtt });

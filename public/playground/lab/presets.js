@@ -42,6 +42,37 @@ const ORDERS = { format: "json", template: { id: "{seq}", total: "{rand 1 500}" 
 
 export const PRESETS = [
   {
+    id: "rebalancer", name: "Rebalancer: grow a two-broker cluster",
+    description: "Two brokers hold all replicas of six partitions. Add a data-only broker (KRaft voter unchecked); the rebalancer moves replicas onto it and elects preferred leaders. Plan now previews moves, Execute now applies them, and Pause stops periodic runs.",
+    scenario: { version: 1, seed: 51, name: "Rebalancer: grow a two-broker cluster", links: { default_latency_ms: 5 },
+      nodes: [broker(1, 180, 80, "a"), broker(2, 550, 80, "b"),
+        { id: 3, kind: "producer", name: "orders-producer", x: 100, y: 320, config: { bootstrap: [1, 2], topic: "orders", rate_per_sec: 10, value: ORDERS } },
+        consumer(4, "billing", 730, 320, [1, 2], "billing", ["orders"]),
+        { id: 5, kind: "rebalancer", name: "replica-rebalancer", x: 430, y: 480, config: { bootstrap: [1, 2], interval_ms: 2000 } }],
+      topics: [{ name: "orders", partitions: 6, replication_factor: 2 }],
+    },
+  },
+  {
+    id: "share-group", name: "Share group: three workers, one partition",
+    description: "Three share consumers process records from one partition in the same group. The broker distributes acquired records and persists Accept acknowledgements; workers can outnumber partitions. Pause a worker or Close it while others continue.",
+    scenario: { version: 1, seed: 52, name: "Share group: three workers, one partition", links: { default_latency_ms: 5 },
+      nodes: [broker(1, 430, 80, "a"),
+        { id: 2, kind: "producer", name: "jobs-producer", x: 100, y: 230, config: { bootstrap: [1], topic: "jobs", rate_per_sec: 15, value: ORDERS } },
+        ...[3, 4, 5].map((id, i) => ({ id, kind: "share-consumer", name: `worker-${i+1}`, x: 250+i*240, y: 420, config: { bootstrap: [1], group: "workers", topics: ["jobs"], process_ms: 100, max_records: 1 } }))],
+      topics: [{ name: "jobs", partitions: 1, replication_factor: 1 }],
+    },
+  },
+  {
+    id: "share-redelivery", name: "Share group: release and redelivery",
+    description: "A worker releases processed records so the broker can deliver them again. Inspect delivery count, then use Set acknowledgement to Accept or Reject: accepted and rejected records stop returning. Close releases unfinished records before leaving.",
+    scenario: { version: 1, seed: 53, name: "Share group: release and redelivery", links: { default_latency_ms: 5 },
+      nodes: [broker(1, 430, 80, "a"),
+        { id: 2, kind: "producer", name: "jobs-producer", x: 140, y: 330, config: { bootstrap: [1], topic: "jobs", rate_per_sec: 2, value: ORDERS } },
+        { id: 3, kind: "share-consumer", name: "retry-worker", x: 640, y: 330, config: { bootstrap: [1], group: "retry-workers", topics: ["jobs"], process_ms: 100, max_records: 1, acknowledgement: "release" } }],
+      topics: [{ name: "jobs", partitions: 1, replication_factor: 1 }],
+    },
+  },
+  {
     id: "single-broker",
     name: "Single broker quickstart",
     description: "One real broker, one topic, a producer and a consumer. Start here to watch a record move from write to read.",

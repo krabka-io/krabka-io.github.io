@@ -84,6 +84,7 @@ pub fn build_node(spec: &NodeSpec) -> Result<Box<dyn Node>, LabError> {
         "schema-registry" => Box::new(registry::RegistryNode::from_spec(spec)?),
         "producer" => Box::new(apps::ProducerNode::from_spec(spec)?),
         "consumer" => Box::new(apps::ConsumerNode::from_spec(spec)?),
+        "share-consumer" => Box::new(apps::ShareConsumerNode::from_spec(spec)?),
         "streams" => Box::new(apps::StreamsNode::from_spec(spec)?),
         "admin" => Box::new(apps::AdminNode::from_spec(spec)?),
         "rebalancer" => Box::new(apps::RebalancerNode::from_spec(spec)?),
