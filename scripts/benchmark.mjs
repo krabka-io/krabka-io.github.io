@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
-import { OMB, ombCases, ombWorkload, ombDriver, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { OMB, ombCases, ombWorkload, ombDriver, ombTimeoutMs, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -337,7 +337,8 @@ async function main() {
       for (const workload of cases) {
         const source = await fs.readFile(path.join(ombRuntime.source, workload.upstream_file), 'utf8');
         const effective = ombWorkload(source, options.smoke);
-        Object.assign(workload, { config: effective.config, source_sha256: effective.sha256 });
+        Object.assign(workload, { config: effective.config, source_sha256: effective.sha256,
+          timeout_ms: ombTimeoutMs(effective.config, options.smoke) });
         await fs.writeFile(path.join(artifacts, `${workload.id}.yaml`), effective.yaml);
       }
       await save();
@@ -622,8 +623,11 @@ rpk:
             const brokers = await launchCluster(vendor, rf, `${repetition}-${workload.id}`, directory);
             await fs.copyFile(path.join(artifacts, `${workload.id}.yaml`), path.join(directory, 'workload.yaml'));
             await fs.copyFile(path.join(ombRuntime.source, workload.upstream_file), path.join(directory, 'upstream-workload.yaml'));
-            await fs.writeFile(path.join(directory, 'driver.yaml'), ombDriver(vendor, rf));
-            const timeout = (workload.config.testDurationMinutes + (options.smoke ? 5 : 30)) * 60_000;
+            // OMB pauses inside the message callback during backlog fill, so
+            // Kafka's poll loop must survive that pause without leaving its group.
+            await fs.writeFile(path.join(directory, 'driver.yaml'), ombDriver(vendor, rf,
+              workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined));
+            const timeout = workload.timeout_ms;
             const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
               () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
                 '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--cpus', String(provenance.cpu_sets.client.length),

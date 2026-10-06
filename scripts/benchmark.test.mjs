@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
-import { ombCases, ombWorkload, ombDriver, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { ombCases, ombWorkload, ombDriver, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 test('OpenMessaging workflow balances image order, preserves arguments and stops on failure', async () => {
@@ -106,19 +106,26 @@ test('OpenMessaging catalog and smoke configuration keep comparison settings con
   const full = ombWorkload(source, false);
   assert.equal(full.config.consumerBacklogSizeGB, 100);
   assert.equal(full.config.testDurationMinutes, 15);
+  assert.equal(ombTimeoutMs(full.config, false), 105 * 60_000);
   assert.match(full.yaml, /payloadFile: "\/src\/payload\/payload-1Kb.data"/);
   const smoke = ombWorkload(source, true);
   assert.equal(smoke.config.consumerBacklogSizeGB, 0);
   assert.equal(smoke.config.producerRate, 5000);
   assert.equal(smoke.config.testDurationMinutes, 1);
+  assert.equal(ombTimeoutMs(smoke.config, true), 6 * 60_000);
+  assert.equal(ombTimeoutMs({ ...full.config, consumerBacklogSizeGB: 0 }, false), 45 * 60_000);
   assert.equal(full.sha256, smoke.sha256);
   for (const vendor of ['krabka', 'kafka', 'redpanda']) {
     const driver = ombDriver(vendor, 3);
+    assert.doesNotMatch(driver, /max.poll.interval.ms/);
+    const backlogDriver = ombDriver(vendor, 3, ombTimeoutMs(full.config, false));
+    assert.match(backlogDriver, /^  max.poll.interval.ms=6300000$/m);
     assert.match(driver, /acks=all\n  enable.idempotence=true/);
     assert.match(driver, /replicationFactor: 3/);
     assert.match(driver, /batch.size=1048576/);
     assert.match(driver, vendor === 'redpanda' ? /write.caching=true/ : /min.insync.replicas=2/);
   }
+  assert.throws(() => ombDriver('krabka', 3, NaN), /invalid poll interval/);
 });
 
 const broker = (id, cpu, rss, current, inactive = 0) => ({ id, cpu_usage_us: cpu, rss_bytes: rss,
