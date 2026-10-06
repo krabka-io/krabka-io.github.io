@@ -5,10 +5,47 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
+import { runInNewContext } from 'node:vm';
+import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
 import { ombCases, ombWorkload, ombDriver, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
+
+test('actual resource sampler retains its clock anchor when the client fails', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const sampler = source.slice(source.indexOf('async function measureResources('),
+    source.indexOf('\n    async function trial('));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-clock-'));
+  try {
+    const measure = runInNewContext(`(${sampler.trim()})`, {
+      fs, performance, AbortController, Date, delay, aggregateSample,
+      controller: new AbortController(), readBroker: async () => broker('a', 100, 200, 300, 50),
+    });
+    for (const failed of [false, true]) {
+      const filename = path.join(directory, `${failed}.resources.jsonl`);
+      const before = Date.now();
+      let anchor;
+      const action = async () => {
+        anchor = JSON.parse(await fs.readFile(`${filename}.metadata.json`, 'utf8'));
+        assert.ok(Date.parse(anchor.started_at) >= before && Date.parse(anchor.started_at) <= Date.now());
+        if (failed) throw new Error('client failed');
+        return 'client output';
+      };
+      if (failed) await assert.rejects(measure([{}], filename, action), /client failed/);
+      else {
+        const result = await measure([{}], filename, action);
+        assert.equal(result.startedAt, anchor.started_at);
+        assert.equal(result.output, 'client output');
+      }
+      assert.deepEqual(anchor, { schema_version: 1, started_at: anchor.started_at, sampling_interval_ms: 250 });
+      assert.deepEqual(JSON.parse(await fs.readFile(`${filename}.metadata.json`, 'utf8')), anchor);
+      const samples = (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse);
+      assert.equal(samples.length, 2);
+      assert.ok(samples[1].elapsed_ms > samples[0].elapsed_ms);
+    }
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
 
 test('OpenMessaging workflow balances image order, preserves arguments and stops on failure', async () => {
   const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
