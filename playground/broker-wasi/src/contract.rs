@@ -53,6 +53,8 @@ pub struct Contract {
     pub cluster_id: Uuid,
     /// `KRABKA_CONFIG`: the JSON form of the broker's `broker.toml`.
     pub file_config: FileConfig,
+    /// Demo identities bridged from verified lab SSPI connections. Absent disables the bridge.
+    pub lab_principals: Option<Vec<i32>>,
 }
 
 /// Why the environment is not the lab's process contract.
@@ -179,6 +181,26 @@ impl Contract {
                 reason: err.to_string(),
             })?;
 
+        let lab_principals = var("KRABKA_LAB_PRINCIPALS")
+            .map(|value| {
+                let ids: Vec<i32> =
+                    serde_json::from_str(&value).map_err(|err| ContractError::Invalid {
+                        name: "KRABKA_LAB_PRINCIPALS",
+                        value: value.clone(),
+                        reason: err.to_string(),
+                    })?;
+                if !ids.contains(&node_id) || ids.iter().any(|id| !(1..=10000).contains(id)) {
+                    return Err(ContractError::Invalid {
+                        name: "KRABKA_LAB_PRINCIPALS",
+                        value,
+                        reason:
+                            "identities must be node ids 1 through 10000, including this broker"
+                                .to_owned(),
+                    });
+                }
+                Ok(ids)
+            })
+            .transpose()?;
         let contract = Self {
             node_id,
             host,
@@ -187,6 +209,7 @@ impl Contract {
             voters,
             cluster_id,
             file_config,
+            lab_principals,
         };
         contract.require_listener(KAFKA_PORT, "the broker")?;
         if contract.is_voter() {
@@ -353,12 +376,30 @@ mod tests {
                     cluster_id: Uuid::from_bytes([
                         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
                     ]),
+                    lab_principals: None,
                     file_config: FileConfig {
                         rack: Some("a".to_owned()),
                         ..FileConfig::default()
                     },
                 })
         );
+    }
+
+    #[test]
+    fn lab_identities_are_checked_before_the_process_starts() {
+        let mut env = node_two();
+        env.insert("KRABKA_LAB_PRINCIPALS", "[1,2,3,7]".to_owned());
+        assert!(read(&env).unwrap().lab_principals == Some(vec![1, 2, 3, 7]));
+        for invalid in ["[]", "[1,3]", "[0,2]", "[2,10001]", "[2,1.5]", "null", "{}"] {
+            env.insert("KRABKA_LAB_PRINCIPALS", invalid.to_owned());
+            assert!(matches!(
+                read(&env),
+                Err(ContractError::Invalid {
+                    name: "KRABKA_LAB_PRINCIPALS",
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]

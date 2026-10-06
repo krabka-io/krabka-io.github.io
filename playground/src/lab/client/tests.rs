@@ -1214,3 +1214,46 @@ fn two_clients_of_one_node_draw_disjoint_connection_ids() {
         .collect();
     assert!(client_ids == vec![Some("lane-1".to_string()), Some("lane-2".to_string())]);
 }
+
+#[test]
+fn coordinator_acl_refusals_are_reported_once_for_legacy_and_batched_responses() {
+    use crate::lab::testing::CtxBuffers;
+    use krabka_protocol::owned::find_coordinator_response::{Coordinator, FindCoordinatorResponse};
+    for batched in [false, true] {
+        let mut client = client(&[1]);
+        let mut buffers = CtxBuffers::new(NodeId(4));
+        let key = (CoordinatorType::Group, "audit".to_owned());
+        for _ in 0..2 {
+            let response = if batched {
+                FindCoordinatorResponse {
+                    coordinators: vec![Coordinator {
+                        key: "audit".to_owned(),
+                        error_code: 30,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            } else {
+                FindCoordinatorResponse {
+                    error_code: 30,
+                    ..Default::default()
+                }
+            };
+            buffers.with(0, |ctx| {
+                client.on_coordinator(ctx, key.clone(), Ok(Box::new(response)))
+            });
+        }
+        assert!(
+            buffers.events
+                == vec![(
+                    "authorization_failed",
+                    serde_json::json!({"api":"FindCoordinator","code":30,"key":"audit","key_type":"group","level":"warn"})
+                )]
+        );
+        assert!(
+            client
+                .coordinator(CoordinatorType::Group, "audit")
+                .is_none()
+        );
+    }
+}

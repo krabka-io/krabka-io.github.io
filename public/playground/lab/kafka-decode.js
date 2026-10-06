@@ -298,12 +298,18 @@ export async function decodeMessage(msg, version, r, schemas, ctx = {}) {
 // ---- frames ---------------------------------------------------------------------------------
 
 // The header of a request without decoding its body: what pairing needs.
+export function isSspiFrame(bytes) {
+  return bytes?.length >= 5 && bytes[0] === 83 && bytes[1] === 83 && bytes[2] === 80 && bytes[3] === 73 && bytes[4] >= 1 && bytes[4] <= 3;
+}
+
 export function peekRequest(bytes) {
+  if (isSspiFrame(bytes)) return null;
   if (bytes.length < 12) return null;
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return { apiKey: v.getInt16(4), version: v.getInt16(6), corr: v.getInt32(8) };
 }
 export function peekCorrelation(bytes) {
+  if (isSspiFrame(bytes)) return null;
   if (bytes.length < 8) return null;
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(4);
 }

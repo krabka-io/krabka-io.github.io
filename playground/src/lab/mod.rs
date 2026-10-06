@@ -30,6 +30,7 @@ pub mod external;
 pub mod net;
 pub mod registry;
 pub mod scenario;
+pub mod security;
 pub mod testing;
 pub mod wasm;
 pub mod world;

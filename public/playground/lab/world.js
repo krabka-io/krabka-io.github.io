@@ -276,6 +276,8 @@ export class LabWorld {
       !this.lab ||
       cur.id !== next.id ||
       cur.seed !== next.seed ||
+      (cur.security ?? "plaintext") !== (next.security ?? "plaintext") ||
+      JSON.stringify(cur.authorization) !== JSON.stringify(next.authorization) ||
       cur.links.default_latency_ms !== next.links.default_latency_ms ||
       JSON.stringify(cur.topics) !== JSON.stringify(next.topics)
     ) {
@@ -798,6 +800,10 @@ export function normalizeScenario(input) {
     }),
   };
   if (typeof s.id === "string" && s.id) out.id = s.id;
+  // Preserve an invalid value too: the Rust enum rejects it instead of
+  // silently downgrading an imported encrypted scenario to plaintext.
+  if (s.security != null && s.security !== "plaintext") out.security = s.security;
+  if (s.authorization != null) out.authorization = s.authorization;
   // J3: a scripted experiment (experiment.js) travels with the document, opaque here.
   if (s.experiment && typeof s.experiment === "object" && !Array.isArray(s.experiment)) out.experiment = s.experiment;
   // J3: a fork boots its brokers from copies of another scenario's disks, so they keep that scenario's cluster id.

@@ -82,6 +82,7 @@ use crate::lab::{
     scenario::{NodeSpec, TopicSpec},
 };
 
+pub mod acls;
 pub mod observer;
 
 /// The `timeout_ms` of the admin requests.
@@ -159,6 +160,7 @@ pub struct AdminNode {
     commands: BTreeMap<RequestId, Value>,
     /// `DescribeConfigs` results by `<resource>:<name>`.
     configs: BTreeMap<String, Value>,
+    acls: Option<acls::Setup>,
 }
 
 impl AdminNode {
@@ -181,7 +183,10 @@ impl AdminNode {
             .into_iter()
             .flatten()
         {
-            if !matches!(key.as_str(), "bootstrap" | "topics" | "observe_ms") {
+            if !matches!(
+                key.as_str(),
+                "bootstrap" | "topics" | "observe_ms" | "authorization"
+            ) {
                 return Err(LabError::config(
                     spec,
                     format!("unknown config field `{key}`"),
@@ -189,6 +194,13 @@ impl AdminNode {
             }
         }
         let observe_ms: Millis = config_field_or(spec, "observe_ms", OBSERVE_MS)?;
+        let authorization: Option<acls::Authorization> =
+            config_field_or(spec, "authorization", None)?;
+        if let Some(auth) = &authorization {
+            auth.validate()
+                .map_err(|reason| LabError::config(spec, reason))?;
+        }
+        let acls = authorization.map(|a| acls::Setup::new(a, bootstrap.clone()));
         let client = Self::build_client(&bootstrap, spec.id);
         let observer = Observer::new(&bootstrap, &format!("admin-{}", spec.id), observe_ms);
         Ok(Self {
@@ -216,6 +228,7 @@ impl AdminNode {
             observer,
             commands: BTreeMap::new(),
             configs: BTreeMap::new(),
+            acls,
         })
     }
 
@@ -230,8 +243,17 @@ impl AdminNode {
     fn drive(&mut self, ctx: &mut Ctx<'_>, events: Vec<ClientEvent>) {
         for event in events {
             if let ClientEvent::Response { id, result } = event {
-                self.on_response(ctx, id, result);
+                if let Some(acls) = &mut self.acls
+                    && acls.owns(id)
+                {
+                    acls.answer(ctx, result);
+                } else {
+                    self.on_response(ctx, id, result);
+                }
             }
+        }
+        if let Some(acls) = &mut self.acls {
+            acls.drive(ctx, &mut self.client);
         }
         self.send_due(ctx);
         self.announce(ctx);
@@ -240,6 +262,7 @@ impl AdminNode {
             .next_deadline(ctx.now())
             .into_iter()
             .chain(self.observer.next_deadline(ctx.now()))
+            .chain(self.acls.as_ref().and_then(acls::Setup::deadline))
             .chain(
                 self.topics
                     .values()
@@ -870,6 +893,9 @@ impl Node for AdminNode {
         self.client = Self::build_client(&self.bootstrap, self.id);
         self.observer.restart(&self.bootstrap);
         self.commands.clear();
+        if let Some(acls) = &mut self.acls {
+            acls.restart();
+        }
         for topic in self.topics.values_mut() {
             topic.request = None;
             topic.retry_at = 0;
@@ -990,6 +1016,7 @@ impl Node for AdminNode {
             .collect();
         json!({
             "topics": topics,
+            "authorization": self.acls.as_ref().map(acls::Setup::snapshot),
             "cluster": self.observer.snapshot(),
             "configs": self.configs,
             "reassignments": self.observer.reassignments(),

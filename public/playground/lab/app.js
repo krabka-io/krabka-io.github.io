@@ -864,7 +864,8 @@ class LabApp {
     const t = this.toolbar;
     const brand = el("div", "lab-tb-brand");
     this.nameEl = el("span", "lab-tb-scenario");
-    brand.append(el("span", "lab-brand", "Cluster Lab"), this.nameEl);
+    this.securityEl = el("span", "lab-muted lab-small");
+    brand.append(el("span", "lab-brand", "Cluster Lab"), this.nameEl, this.securityEl);
 
     this.playBtn = el("button", "lab-btn lab-primary lab-play");
     this.playBtn.type = "button";
@@ -1083,6 +1084,8 @@ class LabApp {
     this.timeline.setNodes(this.nodeList());
     this.palette.update({ scenario, availability: this.availability, role: this.session.role, saveState: this.saveState });
     this.nameEl.textContent = scenario?.name || "Untitled scenario";
+    this.nameEl.title = scenario.security === "kerberos-encrypted" ? "SSPI / Kerberos: authenticated and encrypted virtual links" : "Plaintext virtual links";
+    this.securityEl.textContent = scenario.authorization ? "SSPI encrypted · broker ACLs" : scenario.security === "kerberos-encrypted" ? "SSPI encrypted" : "";
     this.dock.setBadge("events", this.timeline.events.length ? fmtNum(this.timeline.events.length) : "");
     this.renderClock(snap);
     this.j2Update(snap); // J2
@@ -1824,19 +1827,29 @@ class LabApp {
       { key: "name", label: "Name", type: "text", placeholder: "My cluster" },
       { key: "seed", label: "Seed", type: "number", required: true, min: 0, step: 1, help: "Changing the seed restarts the world." },
       { key: "latency", label: "Default link latency (ms)", type: "number", required: true, min: 0, step: 1, help: "Changing it restarts the world." },
+      { key: "security", label: "SSPI / Kerberos transport", type: "select", default: "plaintext", options: [
+        { value: "plaintext", label: "Plaintext" },
+        { value: "kerberos-encrypted", label: "Kerberos authentication + encryption" },
+      ], help: "Pure Rust SSPI in this browser, with lab-only identities and an embedded KDC. Protects the virtual links. Broker ACL scenarios bind the verified identity through the broker’s SASL path. Demo credentials are not Windows single sign-on or TLS. Changing it restarts nodes on their existing disks." },
+      { key: "authorization", label: "Broker ACL policy (JSON)", type: "json", placeholder: '{"acls": []}',
+        validate: (value) => value && typeof value === "object" && !Array.isArray(value) && Array.isArray(value.acls) ? null : 'Use {"acls": [rules]}; leave empty to disable ACLs.',
+        help: "Requires Kerberos encryption. Rules use User:node-N@LAB.KRABKA. An empty ACL array denies ordinary clients; an empty field disables ACLs. Changing the policy replaces broker ACL records and restarts nodes on their existing disks." },
     ];
-    const form = buildForm(fields, { name: cur.name, seed: cur.seed, latency: cur.links.default_latency_ms }, {});
+    const form = buildForm(fields, { name: cur.name, seed: cur.seed, latency: cur.links.default_latency_ms, security: cur.security || "plaintext", authorization: cur.authorization }, {});
     await openDialog(this.root, {
       title: "Scenario settings",
       body: form.root,
-      onSubmit: () => {
+      onSubmit: async () => {
         const r = form.read();
         if (r.errors.length) return false;
-        if (r.value.seed === cur.seed && r.value.latency === cur.links.default_latency_ms) {
+        if (r.value.authorization && r.value.security !== "kerberos-encrypted") {
+          this.toasts.warn("Broker ACLs require Kerberos encryption. Choose Kerberos encryption or clear the ACL policy."); return false;
+        }
+        if (r.value.seed === cur.seed && r.value.latency === cur.links.default_latency_ms && r.value.security === (cur.security || "plaintext") && JSON.stringify(r.value.authorization) === JSON.stringify(cur.authorization)) {
           this.world.setName(r.value.name || "");
         } else {
-          const doc = { ...cur, name: r.value.name || "", seed: r.value.seed, links: { default_latency_ms: r.value.latency } };
-          this.openScenario(doc, { keepId: true });
+          const doc = { ...cur, name: r.value.name || "", seed: r.value.seed, links: { default_latency_ms: r.value.latency }, security: r.value.security, authorization: r.value.authorization };
+          return this.openScenario(doc, { keepId: true });
         }
         return true;
       },

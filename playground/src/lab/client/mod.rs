@@ -399,6 +399,7 @@ impl Default for ClientOptions {
 /// A coordinator lookup that is in flight or waits for its retry.
 #[derive(Clone, Copy, Debug)]
 struct Lookup {
+    authorization_error: Option<i16>,
     in_flight: bool,
     retry_at: Millis,
 }
@@ -950,7 +951,7 @@ impl KafkaClient {
                 }),
             }),
             Purpose::Metadata => self.on_metadata(ctx, result, out),
-            Purpose::FindCoordinator(key) => self.on_coordinator(ctx.now(), key, result),
+            Purpose::FindCoordinator(key) => self.on_coordinator(ctx, key, result),
         }
     }
 
@@ -970,7 +971,7 @@ impl KafkaClient {
                 result: Err(error),
             }),
             Purpose::Metadata => self.on_metadata(ctx, Err(error), out),
-            Purpose::FindCoordinator(key) => self.on_coordinator(ctx.now(), key, Err(error)),
+            Purpose::FindCoordinator(key) => self.on_coordinator(ctx, key, Err(error)),
         }
     }
 
@@ -1046,14 +1047,39 @@ impl KafkaClient {
 
     fn on_coordinator(
         &mut self,
-        now: Millis,
+        ctx: &mut Ctx<'_>,
         key: CoordinatorKey,
         result: Result<Box<dyn Any>, ClientError>,
     ) {
-        let found = result
+        let response = result
             .ok()
-            .and_then(|b| b.downcast::<FindCoordinatorResponse>().ok())
-            .and_then(|response| coordinator_of(&response, &key.1));
+            .and_then(|b| b.downcast::<FindCoordinatorResponse>().ok());
+        let authorization_error = response
+            .as_ref()
+            .map(|r| {
+                r.coordinators
+                    .iter()
+                    .find(|row| row.key == key.1)
+                    .map_or(r.error_code, |row| row.error_code)
+            })
+            .filter(|code| {
+                matches!(
+                    *code,
+                    codes::GROUP_AUTHORIZATION_FAILED
+                        | codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED
+                        | codes::CLUSTER_AUTHORIZATION_FAILED
+                )
+            });
+        if let Some(code) = authorization_error
+            && self
+                .lookups
+                .get(&key)
+                .and_then(|lookup| lookup.authorization_error)
+                != Some(code)
+        {
+            ctx.event("authorization_failed", serde_json::json!({ "api": "FindCoordinator", "code": code, "key": key.1, "key_type": key.0, "level": "warn" }));
+        }
+        let found = response.and_then(|r| coordinator_of(&r, &key.1));
         match found {
             Some((node_id, endpoint)) => {
                 self.coordinators.insert(key.clone(), (node_id, endpoint));
@@ -1063,8 +1089,9 @@ impl KafkaClient {
                 self.lookups.insert(
                     key,
                     Lookup {
+                        authorization_error,
                         in_flight: false,
-                        retry_at: now + self.opts.retry_backoff_ms,
+                        retry_at: ctx.now() + self.opts.retry_backoff_ms,
                     },
                 );
             }
@@ -1301,6 +1328,7 @@ impl KafkaClient {
     fn start_lookup(&mut self, ctx: &mut Ctx<'_>, key: CoordinatorKey) {
         let now = ctx.now();
         let lookup = self.lookups.entry(key.clone()).or_insert(Lookup {
+            authorization_error: None,
             in_flight: false,
             retry_at: 0,
         });

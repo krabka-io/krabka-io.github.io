@@ -19,7 +19,7 @@
 // row per exchange).
 
 import { nodeIp } from "./external.js";
-import { KAFKA_PORTS, peekRequest, peekCorrelation, decodeFrame } from "./kafka-decode.js";
+import { KAFKA_PORTS, peekRequest, peekCorrelation, decodeFrame, isSspiFrame } from "./kafka-decode.js";
 
 export const DEFAULT_BUDGET = 64 * 1024 * 1024;
 
@@ -99,6 +99,7 @@ export class Capture {
   }
 
   pair(f) {
+    if (isSspiFrame(f.bytes)) return;
     if (KAFKA_PORTS.has(f.dst.port)) {
       const peek = peekRequest(f.bytes);
       if (!peek) return;

@@ -7,7 +7,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use krabka_broker::{
     BootstrapMode, BrokerConfig,
     bootstrap::MetaProperties,
-    config::NodeRole,
+    config::{InterBrokerCredentials, NodeRole},
     file_config::{FileAuditConfig, FileConfigError},
 };
 
@@ -63,6 +63,30 @@ pub fn broker_config(
         ..FileAuditConfig::default()
     });
     file_config.apply_to(&mut config)?;
+    if let Some(ids) = &contract.lab_principals {
+        // The WASI broker has no GSSAPI provider. The trusted lab adapter binds
+        // its verified Kerberos identity using the broker's existing SASL path.
+        config.plain_credentials = ids
+            .iter()
+            .map(|id| {
+                (
+                    format!("node-{id}@LAB.KRABKA"),
+                    format!("lab-only-node-{id}"),
+                )
+            })
+            .collect();
+        config.enabled_sasl_mechanisms = vec![krabka_security::SaslMechanism::Plain];
+        config.inter_broker_credentials = Some(InterBrokerCredentials::Plain {
+            username: format!("node-{}@LAB.KRABKA", contract.node_id),
+            password: format!("lab-only-node-{}", contract.node_id),
+        });
+        config.controller_listener_protocol = krabka_security::ListenerProtocol::SaslPlaintext;
+        config.listeners = config.effective_listeners();
+        for listener in &mut config.listeners {
+            listener.protocol = krabka_security::ListenerProtocol::SaslPlaintext;
+            listener.sasl_mechanisms = Some(config.enabled_sasl_mechanisms.clone());
+        }
+    }
     Ok(config)
 }
 
@@ -141,6 +165,7 @@ mod tests {
     fn contract(node_id: i32, file_config: &str) -> Contract {
         Contract {
             node_id,
+            lab_principals: None,
             host: IpAddr::V4(Ipv4Addr::new(10, 0, 0, u8::try_from(node_id).unwrap())),
             listeners: vec![
                 Listener { fd: 4, port: 9092 },
@@ -255,6 +280,54 @@ mod tests {
             .unwrap();
             assert!(config.audit_enabled == audit_enabled, "{file_config}");
         }
+    }
+
+    #[test]
+    fn sspi_binding_requires_sasl_and_uses_each_brokers_own_identity() {
+        let mut contract = contract(
+            2,
+            r#"{"authorization":{"type":"simple","super_users":["User:node-2@LAB.KRABKA","User:node-7@LAB.KRABKA"]}}"#,
+        );
+        contract.lab_principals = Some(vec![1, 2, 3, 4, 5, 6, 7]);
+        let config = broker_config(&contract, &formatted(), BootstrapMode::Bootstrap).unwrap();
+        assert!(config.authorizer.is_configured());
+        assert!(!config.super_users.contains("ANONYMOUS"));
+        assert!(config.super_users.contains("node-2@LAB.KRABKA"));
+        assert!(!config.super_users.contains("node-4@LAB.KRABKA"));
+        assert!(config.plain_credentials.as_map().len() == 7);
+        assert!(
+            config
+                .plain_credentials
+                .as_map()
+                .get("node-4@LAB.KRABKA")
+                .map(String::as_str)
+                == Some("lab-only-node-4")
+        );
+        assert!(config.controller_listener_protocol.requires_sasl());
+        assert!(
+            config
+                .effective_listeners()
+                .iter()
+                .all(|l| l.protocol.requires_sasl())
+        );
+        assert!(
+            config.inter_broker_credentials
+                == Some(InterBrokerCredentials::Plain {
+                    username: "node-2@LAB.KRABKA".to_owned(),
+                    password: "lab-only-node-2".to_owned(),
+                })
+        );
+        contract.lab_principals = None;
+        contract.file_config = FileConfig::default();
+        let plain = broker_config(&contract, &formatted(), BootstrapMode::Bootstrap).unwrap();
+        assert!(!plain.authorizer.is_configured());
+        assert!(plain.inter_broker_credentials.is_none());
+        assert!(
+            plain
+                .effective_listeners()
+                .iter()
+                .all(|l| !l.protocol.requires_sasl())
+        );
     }
 
     #[test]
