@@ -181,6 +181,10 @@ async function main() {
     }
     for (const [id, label] of containers) {
       try {
+        await fs.writeFile(path.join(artifacts, `${label}.container-state.json`),
+          `${await docker(['inspect', '--format', '{{json .State}}', id], { ignoreAbort: true, timeout: 30_000 })}\n`);
+      } catch { /* Diagnostics must not prevent removal of this run's resources. */ }
+      try {
         await docker(['logs', id], { output: path.join(artifacts, `${label}.container`), streamOutput: true,
           ignoreAbort: true, timeout: 30_000 });
       } catch { /* A created container may never have started. */ }
