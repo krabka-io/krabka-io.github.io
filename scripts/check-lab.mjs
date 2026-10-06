@@ -17,6 +17,7 @@
 // Node.
 //
 // Usage:  npm run build && npm run check-lab [-- --no-webrtc] [--headed]
+// `--loading-only` checks slow downloads, the reveal, reloads, and recovery.
 // Needs `playwright` or `playwright-core` and a Chromium, found as
 // lab-check-lib.mjs finds them. Exits 2 when either is missing, 1 when a check
 // fails.
@@ -24,6 +25,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'url';
 import { DIST_DIR, NETWORK_PROBE, STEP_TIMEOUT, args, checker, launchOrExit, newLabContext, nodeState, openLab, openScenario, serve, waitFor, watchErrors } from './lab-check-lib.mjs';
 
@@ -119,11 +121,96 @@ async function main() {
   // The analyzers' decoders have their own check: npm run check-lab-analyzer.
 
   const browser = await launchOrExit();
-  const { server, port } = await serve(DIST_DIR);
+  let loadingMode = null;
+  const { server, port } = await serve(DIST_DIR, (req, res, pathname) => {
+    if (!loadingMode) return false;
+    if (loadingMode === 'reload' && pathname === '/playground/broker/krabka-broker.wasm' && req.method === 'HEAD') {
+      res.writeHead(200).end(); // Exercise isolation setup without needing a broker build.
+      return true;
+    }
+    if (pathname === '/docs/lab/' && loadingMode === 'unknown') {
+      const html = fs.readFileSync(path.join(DIST_DIR, 'docs/lab/index.html'), 'utf8').replace(/data-lab-wasm-size="[^"]*"/, '');
+      res.writeHead(200, { 'content-type': 'text/html' }).end(html);
+      return true;
+    }
+    if (pathname !== '/playground/krabka_playground_bg.wasm') return false;
+    if (loadingMode === 'failure') {
+      setTimeout(() => res.writeHead(503).end('temporarily unavailable'), 250);
+      return true;
+    }
+    let bytes = fs.readFileSync(path.join(DIST_DIR, pathname));
+    const headers = { 'content-type': 'application/wasm' };
+    if (loadingMode === 'gzip') {
+      bytes = gzipSync(bytes);
+      headers['content-encoding'] = 'gzip';
+    }
+    res.writeHead(200, headers);
+    let offset = 0;
+    const send = () => {
+      if (res.destroyed) return;
+      res.write(bytes.subarray(offset, offset += 64 * 1024));
+      if (offset >= bytes.length) res.end();
+      else setTimeout(send, 30);
+    };
+    setTimeout(send, 150);
+    return true;
+  });
   const base = `http://127.0.0.1:${port}`;
   const context = await newLabContext(browser, { width: 1400, height: 1000 });
   const errors = [];
   try {
+    console.log('Cluster Lab: loading experience');
+    for (const mode of ['known', 'gzip', 'unknown', 'reload', 'failure']) {
+      loadingMode = mode;
+      const loadingContext = await newLabContext(browser, { width: mode === 'unknown' ? 390 : 1400, height: 844 });
+      try {
+        const loadingPage = await loadingContext.newPage();
+        await loadingPage.emulateMedia({ reducedMotion: mode === 'known' ? 'no-preference' : 'reduce' });
+        await loadingPage.addInitScript(() => addEventListener('beforeunload', () => {
+          const loader = document.querySelector('.lab-loader');
+          sessionStorage.setItem('loading-at-reload', String(!!loader && !loader.classList.contains('leaving') && !document.querySelector('#krabka-lab').dataset.ready));
+        }));
+        await loadingPage.goto(`${base}/docs/lab/`, { waitUntil: 'commit' });
+        await loadingPage.waitForSelector('.lab-loader');
+        check(`${mode}: loader is present before the workspace`, await loadingPage.locator('#krabka-lab').getAttribute('aria-busy') === 'true');
+        if (mode === 'failure') {
+          await loadingPage.waitForSelector('.lab-error');
+          check('failed download offers reload and clears busy state', await loadingPage.getByRole('button', { name: 'Reload the lab' }).isVisible() && await loadingPage.locator('#krabka-lab').getAttribute('aria-busy') === null);
+          continue;
+        }
+        await loadingPage.waitForFunction((unknown) => {
+          const bar = document.querySelector('.lab-loader-progress');
+          return bar && (unknown ? !bar.hasAttribute('value') && document.querySelector('.lab-loader-detail').textContent.includes('downloaded') : bar.value > 0 && bar.value < 85);
+        }, mode === 'unknown');
+        const first = await loadingPage.locator('progress').evaluate((bar) => bar.value);
+        if (mode !== 'unknown') await loadingPage.waitForFunction((value) => document.querySelector('progress')?.value > value, first);
+        check(`${mode}: download progress updates while streaming`, true);
+        if (mode !== 'known') check(`${mode}: reduced motion disables the loading animation`, await loadingPage.locator('progress').evaluate((bar) => getComputedStyle(bar).animationName === 'none'));
+        const bounds = await loadingPage.locator('.lab-loader-card').boundingBox();
+        check(`${mode}: loading card fits the viewport`, bounds.x >= 0 && bounds.x + bounds.width <= loadingPage.viewportSize().width);
+        fs.mkdirSync(path.join(DIST_DIR, '..', 'artifacts'), { recursive: true });
+        if (mode === 'known' || mode === 'unknown') await loadingPage.screenshot({ path: path.join(DIST_DIR, '..', 'artifacts', `lab-loading-${mode === 'unknown' ? 'mobile' : 'desktop'}.png`) });
+        await loadingPage.waitForSelector('#krabka-lab[data-ready="true"]');
+        if (mode === 'known') {
+          const reveal = await loadingPage.waitForFunction(() => {
+            const loader = document.querySelector('.lab-loader.leaving');
+            return loader && { duration: getComputedStyle(loader).transitionDuration, animating: loader.getAnimations().some((animation) => animation.transitionProperty === 'opacity') };
+          });
+          const state = await reveal.jsonValue();
+          check('workspace reveal fades smoothly', state.animating, state.duration);
+        }
+        await loadingPage.waitForSelector('.lab-loader', { state: 'detached' });
+        check(`${mode}: ready workspace releases controls and clears busy state`, await loadingPage.locator('#krabka-lab').evaluate((root) => !root.hasAttribute('aria-busy') && [...root.children].every((child) => !child.inert)));
+        if (mode === 'reload') check('browser setup reload keeps the loader visible until isolated', await loadingPage.evaluate(() => crossOriginIsolated && sessionStorage.getItem('loading-at-reload') === 'true'));
+      } finally {
+        await loadingContext.close();
+      }
+    }
+    loadingMode = null;
+    if (args.has('--loading-only')) {
+      t.finish('✅ PASS: the Cluster Lab loading experience works.');
+      return;
+    }
     console.log('Cluster Lab: solo flow');
     const page = await context.newPage();
     const pageErrors = watchErrors(page, 'page', base);

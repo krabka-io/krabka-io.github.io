@@ -10,13 +10,16 @@ import path from 'node:path';
 // A module's content hash, for its URL: the lab's service worker keeps each
 // version of a module once, so a deploy with a new build misses its cache.
 // Empty when the module is not staged (the page then loads it uncached).
-function wasmVersion(file: string) {
+function wasmAsset(file: string) {
   try {
-    return createHash('sha256').update(readFileSync(path.join(process.cwd(), 'public', 'playground', file))).digest('hex').slice(0, 16);
+    const bytes = readFileSync(path.join(process.cwd(), 'public', 'playground', file));
+    return { version: createHash('sha256').update(bytes).digest('hex').slice(0, 16), size: bytes.length };
   } catch {
-    return undefined;
+    return {};
   }
 }
+const labWasm = wasmAsset('krabka_playground_bg.wasm');
+const brokerWasm = wasmAsset('broker/krabka-broker.wasm');
 
 const real = [
   { piece: 'The broker: request handlers, partition logs and replication, group coordinators, the KRaft quorum and metadata', crate: 'krabka-broker, krabka-raft, krabka-metadata', runs: 'a Web Worker', use: 'every broker node' },
@@ -58,10 +61,23 @@ const controls = [
     <p class="text-sm text-gray-400">Run krabka brokers, clients, and apps in your browser. Inject network faults and inspect the resulting traffic and node state.</p>
   </header>
 
-  <div id="krabka-lab" class="not-prose" data-lab-wasm={wasmVersion('krabka_playground_bg.wasm')} data-broker-wasm={wasmVersion('broker/krabka-broker.wasm')}>
-    <p class="lab-fallback" role="status">
-      Loading the Cluster Lab. The first visit downloads WebAssembly modules (about 22 MB in total). Keep this page open while it loads. This panel needs JavaScript and WebAssembly.
-    </p>
+  <div id="krabka-lab" class="not-prose lab-app" aria-busy="true" data-lab-wasm={labWasm.version} data-lab-wasm-size={labWasm.size} data-broker-wasm={brokerWasm.version}>
+    <div class="lab-loader">
+      <div class="lab-loader-card">
+        <svg class="lab-loader-mark" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+          <path d="M40 18 62 56H18L40 18Z" stroke="currentColor" stroke-opacity=".3" stroke-width="1.5" />
+          <circle cx="40" cy="18" r="7" fill="currentColor" />
+          <circle cx="18" cy="56" r="7" fill="currentColor" />
+          <circle cx="62" cy="56" r="7" fill="currentColor" />
+        </svg>
+        <h2>Preparing your lab</h2>
+        <p class="lab-loader-status" role="status">Getting things ready…</p>
+        <progress class="lab-loader-progress" max="100" aria-label="Loading the Cluster Lab"></progress>
+        <p class="lab-loader-detail">The first visit takes a little longer. Future visits are usually quicker.</p>
+        <p class="lab-loader-hint">A cluster of your own. Right here in your browser.</p>
+        <noscript><p>This lab needs JavaScript and WebAssembly. Enable JavaScript and reload to get started.</p></noscript>
+      </div>
+    </div>
   </div>
 
   <div class="mx-auto max-w-4xl space-y-6 px-4 py-10 font-sans sm:px-6">
@@ -340,9 +356,12 @@ const controls = [
 <script src={getPath('/playground/lab/app.js')} type="module" is:inline></script>
 <!-- A module that cannot be fetched never runs its own error handling: say so here instead of loading forever. -->
 <script is:inline>
+  var labRoot = document.getElementById('krabka-lab');
+  if (labRoot) labRoot.style.setProperty('--lab-top', Math.round(labRoot.getBoundingClientRect().top + window.scrollY) + 'px');
   document.currentScript.previousElementSibling.addEventListener('error', function () {
     var root = document.getElementById('krabka-lab');
     if (!root || root.dataset.ready) return;
+    root.removeAttribute('aria-busy');
     root.innerHTML = '<p class="lab-error">The Cluster Lab could not load its scripts. Check your connection and reload.</p><button type="button" class="lab-btn" onclick="location.reload()">Reload the lab</button>';
   });
 </script>

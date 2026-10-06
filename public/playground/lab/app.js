@@ -71,7 +71,7 @@ function newScenarioId() {
 class LabApp {
   constructor(root) {
     this.root = root;
-    root.innerHTML = "";
+    root.replaceChildren(...root.querySelectorAll(".lab-loader"));
     this.selection = [];
     this.availability = {};
     this.saveState = "";
@@ -1641,6 +1641,8 @@ class LabApp {
       return false;
     }
     if (!(await this.external.moduleAvailable())) return false;
+    const loadingStatus = this.root.querySelector(".lab-loader-status");
+    if (loadingStatus) loadingStatus.textContent = "Preparing your browser…";
     const notice = this.toasts.warn("A real Krabka broker needs one page reload before it can run in the browser. The scenario is kept.");
     await this.keepScenarioForReload();
     sessionFlag(RELOADED_KEY, true);
@@ -2236,18 +2238,56 @@ function freePosition(existing) {
 async function boot() {
   const root = document.getElementById(ROOT_ID);
   if (!root) return;
+  const loader = root.querySelector(".lab-loader");
+  const progress = loader.querySelector("progress");
+  const status = loader.querySelector(".lab-loader-status");
+  const detail = loader.querySelector(".lab-loader-detail");
+  const update = (label, value, text) => {
+    if (status.textContent !== label) status.textContent = label;
+    if (value == null) progress.removeAttribute("value");
+    else progress.value = value;
+    detail.textContent = text;
+  };
   try {
     // The build's content hash rides on the URL: the isolation service worker
     // keeps each version once (`/docs/lab/coi-sw.js`), and a new build misses.
     const wasm = new URL("../krabka_playground_bg.wasm", import.meta.url);
     if (root.dataset.labWasm) wasm.searchParams.set("v", root.dataset.labWasm);
-    await init({ module_or_path: wasm });
+    update("Downloading your lab…", null, "Keep this page open. Your lab will appear as soon as it’s ready.");
+    const response = await fetch(wasm);
+    if (!response.ok) throw new Error(`Cannot download the lab: HTTP ${response.status}`);
+    // The build knows the uncompressed size, even when the host sends gzip.
+    const total = Number(root.dataset.labWasmSize) || (!response.headers.get("content-encoding") && Number(response.headers.get("content-length"))) || 0;
+    let loaded = 0;
+    const mb = (bytes) => `${(bytes / 1e6).toFixed(1)} MB`;
+    const stream = response.body?.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        loaded += chunk.byteLength;
+        update("Downloading your lab…", total ? Math.min(85, loaded / total * 85) : null, total ? `${mb(loaded)} of ${mb(total)}` : `${mb(loaded)} downloaded`);
+        controller.enqueue(chunk);
+      },
+      flush() { update("Starting the lab engine…", 90, "Your download is complete. Bringing the workspace to life."); },
+    }));
+    // Pass the counted stream to wasm-bindgen: compilation still overlaps download.
+    await init({ module_or_path: stream ? new Response(stream, { headers: response.headers }) : response });
+    update("Opening your workspace…", 95, "Restoring your cluster and getting the controls ready.");
     const app = new LabApp(root);
+    for (const child of root.children) if (child !== loader) child.inert = true;
     window.krabkaLab = app; // for the end-to-end check and the curious
     await app.start();
+    if (app.reloading) return; // Keep the same loading surface through browser setup.
+    update("Your lab is ready", 100, "Time to explore.");
     root.dataset.ready = "true";
     root.dataset.startupMs = String(Math.round(performance.now()));
+    root.removeAttribute("aria-busy");
+    for (const child of root.children) child.inert = false;
+    // Paint the finished bar before revealing the already laid-out workspace.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      loader.classList.add("leaving");
+      setTimeout(() => loader.remove(), matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 450);
+    }));
   } catch (err) {
+    root.removeAttribute("aria-busy");
     root.innerHTML = "";
     const p = el("p", "lab-error", `The Cluster Lab failed to load. Check your connection and reload. Details: ${err instanceof Error ? err.message : String(err)}`);
     root.append(p, button("Reload the lab", "", () => window.location.reload()));
