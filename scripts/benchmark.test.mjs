@@ -12,6 +12,47 @@ import { curveCases, curveBudget, curveSummary, validateTimeline } from './bench
 import { ombCases, ombWorkload, ombDriver, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
+test('actual cleanup retains final exit state before removal and tolerates inspect failure', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const cleanupSource = source.slice(source.indexOf('async function cleanup()'), source.indexOf('\n\n  try {'));
+  const artifacts = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-exit-'));
+  const state = { Status: 'exited', Running: false, OOMKilled: true, ExitCode: 137,
+    Error: '', FinishedAt: '2026-10-06T05:42:15Z' };
+  try {
+    for (const unavailable of [false, true]) {
+      const filename = path.join(artifacts, 'broker.container-state.json');
+      await fs.rm(filename, { force: true });
+      const containers = new Map([['owned-broker', 'broker']]);
+      let inspected = false, removed = false;
+      const cleanup = runInNewContext(`(${cleanupSource.trim()})`, {
+        fs, path, artifacts, containers, volumes: new Set(), network: undefined,
+        resourceCreationStarted: false,
+        docker: async (args, options) => {
+          assert.equal(args.at(-1), 'owned-broker');
+          assert.equal(options.ignoreAbort, true);
+          if (args[0] === 'inspect') {
+            assert.deepEqual(Array.from(args), ['inspect', '--format', '{{json .State}}', 'owned-broker']);
+            inspected = true;
+            if (unavailable) throw new Error('container unavailable');
+            return JSON.stringify(state);
+          }
+          assert.equal(args[0], 'logs');
+        },
+        removeContainer: async id => {
+          assert.ok(inspected);
+          if (!unavailable) assert.deepEqual(JSON.parse(await fs.readFile(filename, 'utf8')), state);
+          containers.delete(id); removed = true;
+        },
+      });
+      await cleanup();
+      assert.ok(removed);
+      assert.equal(containers.size, 0);
+    }
+    const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
+    assert.ok(workflow.includes('.benchmarks/*/*.container-state.json'));
+  } finally { await fs.rm(artifacts, { recursive: true, force: true }); }
+});
+
 test('actual resource reader retains user and system CPU through the sampler', async () => {
   const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
   const reader = source.slice(source.indexOf('async function readBroker('),
