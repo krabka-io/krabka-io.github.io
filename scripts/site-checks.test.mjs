@@ -55,14 +55,15 @@ test('link and SEO checks reject missing and empty builds', (t) => {
 test('links cover the authored API page, encoded fragments and safe URL resolution', (t) => {
   const dir = fixture(t);
   write(dir, 'index.html', '<h1 id="home">Home</h1><a href="/api/?q=1&amp;x=2#caf%C3%A9">API</a><a href="#home">Home</a><a href="//example.com/remote">Remote</a><script>const example = \'<a href="/not-a-link">\';</script>');
-  write(dir, 'api/index.html', '<h1 id="café">API</h1><a href="../#home">Home</a><a href="https://krabka.io/krabka-broker/">Separate API deployment</a>');
+  write(dir, 'api/index.html', '<h1 id="café">API</h1><a href="../#home">Home</a><a href="https://krabka.io/krabka-broker/">Separate API deployment</a><a href="https://krabka.io/krabka-o11y/">Observability site</a><a href="https://krabka.io/krabka-o11y/docs/observing_krabka_clusters/">Observability guide</a>');
   check('check-links.mjs', dir, 0);
-  write(dir, 'api/index.html', '<a href="/#missing">Broken fragment</a><a href="/missing">Broken file</a><a href="/%2e%2e%2foutside">Escape</a><a href="javascript:alert(1)">Unsafe</a><a href="#bad%escape">Malformed</a>');
+  write(dir, 'api/index.html', '<a href="/#missing">Broken fragment</a><a href="/missing">Broken file</a><a href="/%2e%2e%2foutside">Escape</a><a href="javascript:alert(1)">Unsafe</a><a href="#bad%escape">Malformed</a><a href="/krabka-o11y-other/">Unknown project</a>');
   const output = check('check-links.mjs', dir, 1);
   assert.match(output, /api[\\/]index\.html/);
   assert.match(output, /Missing fragment/);
   assert.match(output, /escapes the built site/);
   assert.match(output, /Unsupported link protocol/);
+  assert.match(output, /Target not found: \/krabka-o11y-other\//);
 });
 
 test('demo fragments validate scenarios, kernels and proof-session IDs', async (t) => {

@@ -86,6 +86,8 @@ for (const file of files) {
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`Unsupported link protocol ${url.protocol}`);
       if (url.origin !== SITE.origin) continue;
       if (apiPaths.some((prefix) => url.pathname.startsWith(prefix))) continue;
+      // The observability website is published independently by krabka-o11y.
+      if (url.pathname.startsWith('/krabka-o11y/')) continue;
       total++;
       const decodedPath = decodeURIComponent(url.pathname);
       const target = path.resolve(DIST_DIR, '.' + decodedPath);

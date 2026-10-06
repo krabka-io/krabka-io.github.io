@@ -21,8 +21,8 @@ export default defineConfig({
     // The quickstart files are served from /quickstart/ (docker-compose.yml and
     // friends); the guide is under /docs, which is where trimming a file URL lands.
     '/quickstart': '/docs/quickstart',
-    '/features/observability': 'https://github.com/krabka-io/krabka-o11y',
-    '/docs/observability': 'https://github.com/krabka-io/krabka-o11y/blob/main/docs/observing_krabka_clusters.md',
+    '/features/observability': 'https://krabka.io/krabka-o11y/',
+    '/docs/observability': 'https://krabka.io/krabka-o11y/docs/observing_krabka_clusters/',
     // The API reference used to be built into this site; each project now
     // publishes its own, so the old `latest` routes forward to those.
     '/api/broker/latest': 'https://krabka.io/krabka-broker/',
