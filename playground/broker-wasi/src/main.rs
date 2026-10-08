@@ -116,13 +116,14 @@ async fn run(contract: Contract, listeners: Listeners) -> ExitCode {
             return ExitCode::from(EXIT_FATAL);
         }
     };
-    // The broker binary's rule: a metadata log with raft state is a restart.
-    let bootstrap_mode = if krabka_raft::metadata_log_nonempty(&log_dir.join("__cluster_metadata"))
-    {
-        BootstrapMode::Rejoin
-    } else {
-        BootstrapMode::Bootstrap
-    };
+    // The broker binary's rule: a metadata partition directory with raft
+    // state is a restart.
+    let bootstrap_mode =
+        if krabka_raft::metadata_log_nonempty(&krabka_raft::metadata_partition_dir(log_dir)) {
+            BootstrapMode::Rejoin
+        } else {
+            BootstrapMode::Bootstrap
+        };
     let config = match profile::broker_config(&contract, &identity, bootstrap_mode) {
         Ok(config) => config,
         Err(err) => {
