@@ -7,7 +7,8 @@ import { ROOT, DIST_DIR, launchOrExit, serve } from './lab-check-lib.mjs';
 // Alt-Ergo leaves, by session and tree key, that the browser's Alt-Ergo does
 // not finish within the 60 s budget. krabka-broker #1315 and #1317 rewrote
 // this proof, and these leaves have timed out since; natively each takes about
-// 0.2 s. Remove an entry once its upstream proof fits the budget again.
+// 0.2 s. Remove an entry once its upstream proof fits the budget again
+// (krabka-io/krabka-broker#1322).
 const SLOW_LEAVES = {
   'composition/consume_trace/metered_consumes_conserve_elapsed_credit': ['3/0/11', '3/0/18'],
 };
