@@ -86,7 +86,11 @@ try {
       assert.ok(session, `a small recorded ${prover} session`);
       return { prover, session };
     };
-    const cvc4Sessions = data.sessions.filter((session) => session.stats.provers.cvc4);
+    // A session with Z3 leaves registers the isolation service worker for the
+    // whole context, so the sessions without Z3, which must stay unisolated,
+    // run first.
+    const cvc4Sessions = data.sessions.filter((session) => session.stats.provers.cvc4)
+      .sort((a, b) => Boolean(a.stats.provers.z3) - Boolean(b.stats.provers.z3));
     assert.ok(cvc4Sessions.length, 'recorded CVC4 sessions');
     // Include every CVC4 session, including its Alt-Ergo/Z3 leaves and tactics.
     for (const { prover, session } of [...cvc4Sessions.map((session) => ({ prover: 'cvc4', session })), smallSession('z3'), smallSession('cvc5')]) {
@@ -94,7 +98,8 @@ try {
       await page.locator('[data-tab="check"]').click();
       await page.getByRole('button', { name: 'Re-check this session', exact: true }).click();
       try {
-        await page.locator('.px-check-ok, .px-check-partial, .px-check-failed').waitFor({ timeout: 90_000 });
+        // Leaves that report the 60 s budget keep a run past it.
+        await page.locator('.px-check-ok, .px-check-partial, .px-check-failed').waitFor({ timeout: 180_000 });
       } catch (error) {
         throw new Error(`${error.message}\n${await page.locator('.px-check').innerText()}`);
       }
