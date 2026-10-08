@@ -34,7 +34,7 @@ mod profile;
 
 use std::{net::TcpListener, path::Path, process::ExitCode, time::Instant};
 
-use krabka_broker::{BootstrapMode, Broker, bootstrap::read_and_validate_meta_properties};
+use krabka_broker::{BootstrapMode, Broker, bootstrap::initialize_log_dirs};
 use krabka_client_core::transport::install_connector;
 
 use crate::{
@@ -104,8 +104,13 @@ async fn run(contract: Contract, listeners: Listeners) -> ExitCode {
         return ExitCode::from(u8::try_from(code).unwrap_or(EXIT_FATAL));
     }
     let log_dir = Path::new(LOG_DIR);
-    let formatted = match read_and_validate_meta_properties(log_dir, Some(contract.cluster_id)) {
-        Ok(formatted) => formatted,
+    let identity = match initialize_log_dirs(
+        log_dir,
+        &[log_dir.to_path_buf()],
+        contract.raft_node_id(),
+        Some(contract.cluster_id),
+    ) {
+        Ok(identity) => identity,
         Err(err) => {
             tracing::error!("{LOG_DIR} is not this cluster's log directory: {err}");
             return ExitCode::from(EXIT_FATAL);
@@ -118,7 +123,7 @@ async fn run(contract: Contract, listeners: Listeners) -> ExitCode {
     } else {
         BootstrapMode::Bootstrap
     };
-    let config = match profile::broker_config(&contract, &formatted, bootstrap_mode) {
+    let config = match profile::broker_config(&contract, &identity, bootstrap_mode) {
         Ok(config) => config,
         Err(err) => {
             tracing::error!("KRABKA_CONFIG: {err}");
@@ -129,7 +134,7 @@ async fn run(contract: Contract, listeners: Listeners) -> ExitCode {
         node_id = contract.node_id,
         voter = contract.is_voter(),
         ?bootstrap_mode,
-        directory_id = %formatted.directory_id,
+        directory_id = %identity.directory_id,
         "starting the broker on {LOG_DIR}"
     );
     let (controller, data) = match listeners.into_tokio() {
