@@ -2,6 +2,8 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 import BenchmarkGraphs from '../components/BenchmarkGraphs.astro';
+import versions from '../data/versions.json';
+import { getPath } from '../utils/paths';
 import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, provenanceURL, curveProvenanceURL, methodologyURL, format } from '../utils/benchmarks.mjs';
 
 const completed = new Date(curveProvenance.completed_at).toISOString();
@@ -23,6 +25,10 @@ npm run benchmark -- --suite curves`;
       <p class="mt-4 text-base text-gray-300 leading-relaxed">
         {curveVendors.map(v => `${v.name} ${v.version}`).join(', ')} on the same host.
         Follow delivery, latency, backlog, CPU, and memory through a leader pause, or compare load and memory limits.
+      </p>
+      <p class="mt-4 text-sm text-gray-300">
+        These local results are from krabka {curveVendors.find(v => v.id === 'krabka').version}. The current broker release is {versions.broker.version}; the local suites have not been re-run for it yet.
+        OpenMessaging results for {versions.broker.version} on Google Cloud are pending. See the <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">1.0.0 announcement</a>.
       </p>
       <p class="mt-4 text-sm text-gray-400">Curves completed <time datetime={completed}>{completed.slice(0, 10)} at {completed.slice(11, 16)} UTC</time> · {curveProvenance.repetitions} repetitions per case · 72 curve trials and 108 throughput trials</p>
       <div class="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold">
