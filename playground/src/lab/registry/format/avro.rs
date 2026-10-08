@@ -8,7 +8,10 @@
 //! a reader alias matches the writer's name, and a reader enum with a
 //! `default` accepts symbols the writer has and the reader lacks.
 
-use apache_avro::{Schema, schema_compatibility::SchemaCompatibility};
+use apache_avro::{
+    Schema,
+    schema_compatibility::{Compatibility, SchemaCompatibility},
+};
 use serde_json::Value;
 
 use super::{ResolvedReference, canonical_json};
@@ -74,7 +77,16 @@ pub fn check(
         parse(&reader_value.to_string(), reader_refs).map_err(|e| vec![format!("reader: {e}")])?;
     let writer_schema =
         parse(&writer_value.to_string(), writer_refs).map_err(|e| vec![format!("writer: {e}")])?;
-    SchemaCompatibility::can_read(&writer_schema, &reader_schema).map_err(|e| vec![e.to_string()])
+    match SchemaCompatibility::can_read(&writer_schema, &reader_schema) {
+        Ok(Compatibility::Full) => Ok(()),
+        // Some writer data resolves and some does not: an enum symbol the
+        // reader lacks, or a union branch it cannot take. Confluent rejects
+        // the pair.
+        Ok(Compatibility::Partial) => Err(vec![
+            "reader resolves only part of what the writer can produce".to_owned(),
+        ]),
+        Err(e) => Err(vec![e.to_string()]),
+    }
 }
 
 /// Drop `logicalType` (and the decimal attributes that go with it) at every

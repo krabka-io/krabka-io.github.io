@@ -23,8 +23,10 @@ use std::{collections::HashMap, fmt::Write as _};
 
 use apache_avro::{
     Schema as AvroSchema,
+    reader::datum::GenericDatumReader,
     schema::{Name, RecordSchema, ResolvedSchema, UnionSchema},
     types::Value as AvroValue,
+    writer::datum::GenericDatumWriter,
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
@@ -191,7 +193,9 @@ impl ValueSchema {
             Compiled::Avro(avro) => {
                 let datum = json_to_avro(doc, &avro.schema, &avro.names, "value")
                     .map_err(SerdeError::Mismatch)?;
-                apache_avro::to_avro_datum(&avro.schema, datum)
+                GenericDatumWriter::builder(&avro.schema)
+                    .build()
+                    .and_then(|writer| writer.write_value_to_vec(datum))
                     .map_err(|e| SerdeError::Mismatch(e.to_string()))
             }
             Compiled::Json(validator) => {
@@ -212,7 +216,9 @@ impl ValueSchema {
         match &self.compiled {
             Compiled::Avro(avro) => {
                 let mut reader = body;
-                let datum = apache_avro::from_avro_datum(&avro.schema, &mut reader, None)
+                let datum = GenericDatumReader::builder(&avro.schema)
+                    .build()
+                    .and_then(|datum_reader| datum_reader.read_value(&mut reader))
                     .map_err(|e| SerdeError::Decode(e.to_string()))?;
                 Ok(avro_to_json(datum))
             }
@@ -349,7 +355,7 @@ fn logical_to_avro(doc: &Value, schema: &AvroSchema, path: &str) -> Result<AvroV
         AvroSchema::LocalTimestampNanos => as_i64(doc)
             .map(AvroValue::LocalTimestampNanos)
             .ok_or_else(|| mismatch("a local timestamp (ns)")),
-        AvroSchema::Uuid => match doc {
+        AvroSchema::Uuid(_) => match doc {
             Value::String(s) => AvroValue::String(s.clone())
                 .resolve(schema)
                 .map_err(|_| mismatch("a UUID string")),

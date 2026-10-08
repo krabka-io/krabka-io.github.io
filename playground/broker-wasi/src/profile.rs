@@ -6,7 +6,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use krabka_broker::{
     BootstrapMode, BrokerConfig,
-    bootstrap::MetaProperties,
+    bootstrap::LocalIdentity,
     config::{InterBrokerCredentials, NodeRole},
     file_config::{FileAuditConfig, FileConfigError},
 };
@@ -35,7 +35,7 @@ pub const LOG_DIR: &str = "/data/log";
 /// Returns the error of applying `KRABKA_CONFIG`, a value the broker refuses.
 pub fn broker_config(
     contract: &Contract,
-    formatted: &MetaProperties,
+    identity: &LocalIdentity,
     bootstrap_mode: BootstrapMode,
 ) -> Result<BrokerConfig, FileConfigError> {
     let listen_addr = SocketAddr::new(contract.host, KAFKA_PORT);
@@ -52,8 +52,8 @@ pub fn broker_config(
         controller_listen_addr: SocketAddr::new(contract.host, CONTROLLER_PORT),
         controller_quorum_voters: contract.voters.clone(),
         log_dir: PathBuf::from(LOG_DIR),
-        cluster_id: Some(formatted.cluster_id),
-        directory_id: formatted.directory_id,
+        cluster_id: Some(identity.cluster_id),
+        directory_id: identity.directory_id,
         bootstrap_mode,
         ..BrokerConfig::default()
     };
@@ -178,11 +178,10 @@ mod tests {
         }
     }
 
-    fn formatted() -> MetaProperties {
-        MetaProperties {
+    fn identity() -> LocalIdentity {
+        LocalIdentity {
             cluster_id: CLUSTER,
             directory_id: DIRECTORY,
-            version: krabka_broker::bootstrap::META_PROPERTIES_VERSION,
         }
     }
 
@@ -235,7 +234,7 @@ mod tests {
             ),
         ];
         for (node, mode, profile) in cases {
-            let config = broker_config(&contract(node, "{}"), &formatted(), mode).unwrap();
+            let config = broker_config(&contract(node, "{}"), &identity(), mode).unwrap();
             assert!(Profile::from(&config) == profile, "node {node}, {mode:?}");
         }
     }
@@ -247,7 +246,7 @@ mod tests {
                 2,
                 r#"{"rack":"a","runtime":{"num_partitions":3,"default_replication_factor":3,"default_min_insync_replicas":2},"replica_lag_time_max":"10000ms"}"#,
             ),
-            &formatted(),
+            &identity(),
             BootstrapMode::Bootstrap,
         )
         .unwrap();
@@ -274,7 +273,7 @@ mod tests {
         for (file_config, audit_enabled) in cases {
             let config = broker_config(
                 &contract(2, file_config),
-                &formatted(),
+                &identity(),
                 BootstrapMode::Bootstrap,
             )
             .unwrap();
@@ -289,7 +288,7 @@ mod tests {
             r#"{"authorization":{"type":"simple","super_users":["User:node-2@LAB.KRABKA","User:node-7@LAB.KRABKA"]}}"#,
         );
         contract.lab_principals = Some(vec![1, 2, 3, 4, 5, 6, 7]);
-        let config = broker_config(&contract, &formatted(), BootstrapMode::Bootstrap).unwrap();
+        let config = broker_config(&contract, &identity(), BootstrapMode::Bootstrap).unwrap();
         assert!(config.authorizer.is_configured());
         assert!(!config.super_users.contains("ANONYMOUS"));
         assert!(config.super_users.contains("node-2@LAB.KRABKA"));
@@ -319,7 +318,7 @@ mod tests {
         );
         contract.lab_principals = None;
         contract.file_config = FileConfig::default();
-        let plain = broker_config(&contract, &formatted(), BootstrapMode::Bootstrap).unwrap();
+        let plain = broker_config(&contract, &identity(), BootstrapMode::Bootstrap).unwrap();
         assert!(!plain.authorizer.is_configured());
         assert!(plain.inter_broker_credentials.is_none());
         assert!(
@@ -334,7 +333,7 @@ mod tests {
     fn a_value_the_broker_refuses_is_an_error() {
         let refused = broker_config(
             &contract(2, r#"{"replica_lag_time_max":"0ms"}"#),
-            &formatted(),
+            &identity(),
             BootstrapMode::Bootstrap,
         );
         assert!(
