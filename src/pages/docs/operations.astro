@@ -24,7 +24,7 @@ const guides = [
     </div>
 
     <aside class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-      The broker is pre-1.0 and has no persisted-state compatibility guarantee between builds. Review the source guide and changelog for the exact build you deploy. Test recovery and any upgrade or rollback on a disposable cluster before using them on retained data.
+      From 1.0.0, every 1.x broker reads every on-disk artifact an earlier 1.x broker wrote, and a new format stays off until you finalize its feature level, so you can roll back until then. <a href="https://github.com/krabka-io/krabka-broker/blob/v1.0.0/docs/persisted_formats.md" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Persisted formats</a> lists every artifact and the gaps that remain. A data directory that a 0.x broker wrote is not covered: reformat it with <code>krabka-format</code> before you start 1.0.0 on it. Review the source guide and changelog for the exact build you deploy. Test recovery and any upgrade or rollback on a disposable cluster before using them on retained data.
     </aside>
 
     <h2 class="text-xl font-bold text-white">Choose a task</h2>

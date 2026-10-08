@@ -2,6 +2,8 @@
 
 # Local latency, memory, and recovery curves
 
+> **Krabka version:** these results are from krabka-broker 0.7.0. They have not been re-run for 1.0.0; a 1.0.0 run needs the dedicated benchmark host.
+
 Run: 2026-10-03T21-56-13Z-d2a6685e. Completed: 2026-10-03T22:50:35.166Z.
 
 One vendor at a time on a shared host. RF1 load/memory curves; RF3 leader pause/resume recovery. These are buffered-write local measurements, not machine-failure or power-loss tests.

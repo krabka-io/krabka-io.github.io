@@ -7,7 +7,7 @@ import apiReference from '../../data/api-reference.json';
 const apiHref = (id: string) => new URL(apiReference.find((entry) => entry.id === id)!.apiPath, 'https://krabka.io').href;
 import versionsData from '../../data/versions.json';
 
-const activeRelease = `v${versionsData.broker?.version ?? '0.6.1'}`;
+const activeRelease = `v${versionsData.broker?.version ?? '1.0.0'}`;
 
 const runCommand = `# 1. Initialize KRaft metadata on a fresh storage volume
 docker run --rm \\
@@ -43,7 +43,7 @@ const brokerCrates = [
   { name: 'krabka-throttle', desc: 'Shared token-bucket throttling primitives' },
   { name: 'krabka-authz', desc: 'Shared Kafka-ACL authorization evaluator for the broker and gateway' },
   { name: 'krabka-audit', desc: 'Audit event model, OCSF serialization, and write pipeline; ships the krabka-audit verify binary' },
-  { name: 'krabka-format', desc: 'Formats a log directory: meta.properties.json, bootstrap records, and the singleton VotersRecord (krabka-format binary)' },
+  { name: 'krabka-format', desc: 'Formats the metadata log and data directories: Kafka\'s meta.properties, bootstrap records, and the singleton VotersRecord (krabka-format binary)' },
   { name: 'krabka-restore', desc: 'Offline point-in-time restore: rebuilds a bootable log directory from a KIP-405 tiered-storage archive (krabka-restore binary)' },
   { name: 'krabka-backup', desc: 'Captures the inputs a point-in-time restore needs (RLMM snapshot, controller checkpoint, committed group offsets) and restores offsets afterwards', folder: 'backup-cli' },
   { name: 'krabka-records-legacy', desc: 'Kafka v0/v1 MessageSet codec and v2 RecordBatch bridge' },
@@ -180,6 +180,11 @@ const brokerCrates = [
               <td class="py-2 px-4 text-gray-400">Byte-exact request/response schema serialization</td>
             </tr>
             <tr>
+              <td class="py-2 px-4 font-medium text-white">On-disk formats</td>
+              <td class="py-2 px-4">Readable across 1.x</td>
+              <td class="py-2 px-4 text-gray-400">Every 1.x broker reads what an earlier 1.x broker wrote; new formats wait for a finalized feature level. Reformat 0.x data directories. See <a href="https://github.com/krabka-io/krabka-broker/blob/v1.0.0/docs/persisted_formats.md" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">persisted formats</a>.</td>
+            </tr>
+            <tr>
               <td class="py-2 px-4 font-medium text-white">OS Architecture</td>
               <td class="py-2 px-4">Linux x86_64, aarch64</td>
               <td class="py-2 px-4 text-gray-400">Container image is built on a Wolfi (glibc) base</td>
@@ -187,6 +192,9 @@ const brokerCrates = [
           </tbody>
         </table>
       </div>
+      <p class="text-sm text-gray-300">
+        <a href="https://crates.io/crates/krabka-log" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">krabka-log</a>, <a href="https://crates.io/crates/krabka-verified" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">krabka-verified</a> and <a href="https://crates.io/crates/krabka-macros" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:underline">krabka-macros</a> 1.0.0 are on crates.io. The other broker crates, the broker included, are not published; pin this repository by git revision to use them.
+      </p>
       <p class="text-sm text-gray-300">
         Full version matrices and SLSA Level 3 build provenance records are tracked on the <a href={getPath('/versions')} class="text-krab-400 hover:underline">Versions page</a>.
       </p>
