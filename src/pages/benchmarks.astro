@@ -4,10 +4,13 @@ import CodeBlock from '../components/CodeBlock.astro';
 import BenchmarkGraphs from '../components/BenchmarkGraphs.astro';
 import versions from '../data/versions.json';
 import { getPath } from '../utils/paths';
-import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, provenanceURL, curveProvenanceURL, methodologyURL, format } from '../utils/benchmarks.mjs';
+import { vendors, provenance, curveProvenance, sourceURL, curveSourceURL, provenanceURL, curveProvenanceURL, methodologyURL, format, openmessaging } from '../utils/benchmarks.mjs';
 
 const completed = new Date(curveProvenance.completed_at).toISOString();
 const curveVendors = vendors.map(v => ({ ...v, ...curveProvenance.images[v.id], version: curveProvenance.images[v.id].requested.split(':').at(-1).replace(/^v/, '') }));
+const latency = (ms: number | null) => ms === null ? '—' : ms >= 1000 ? format(ms / 1000, 1) + ' s' : format(ms, ms < 10 ? 1 : 0) + ' ms';
+const offered = (rate: number) => rate > 0 ? format(rate) + '/s' : 'max (probed)';
+const ombCompleted = openmessaging ? new Date(openmessaging.provenance.completed_at).toISOString() : null;
 const repeat = `# Resolve and check the pinned images and local prerequisites
 npm run benchmark -- --suite curves --dry-run
 
@@ -26,9 +29,11 @@ npm run benchmark -- --suite curves`;
         {curveVendors.map(v => `${v.name} ${v.version}`).join(', ')} on the same host.
         Follow delivery, latency, backlog, CPU, and memory through a leader pause, or compare load and memory limits.
       </p>
-      <p class="mt-4 text-sm text-gray-300">
+      <p class="mt-4 text-sm text-gray-300 [overflow-wrap:anywhere]">
         These local results are from krabka {curveVendors.find(v => v.id === 'krabka').version}. The current broker release is {versions.broker.version}; the local suites have not been re-run for it yet.
-        OpenMessaging results for {versions.broker.version} on Google Cloud are pending. See the <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">1.0.0 announcement</a>.
+        {openmessaging
+          ? <>The <a href="#openmessaging" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging results below</a> were measured on Google Cloud with {openmessaging.images[0].label}.</>
+          : <>OpenMessaging results for {versions.broker.version} on Google Cloud are pending.</>} See the <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">1.0.0 announcement</a>.
       </p>
       <p class="mt-4 text-sm text-gray-400">Curves completed <time datetime={completed}>{completed.slice(0, 10)} at {completed.slice(11, 16)} UTC</time> · {curveProvenance.repetitions} repetitions per case · 72 curve trials and 108 throughput trials</p>
       <div class="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold">
@@ -48,6 +53,80 @@ npm run benchmark -- --suite curves`;
     </details>
 
     <BenchmarkGraphs />
+
+    {openmessaging && (
+      <section id="openmessaging" aria-labelledby="openmessaging-heading" class="mt-16 scroll-mt-24">
+        <h2 id="openmessaging-heading" class="text-2xl font-bold text-white sm:text-3xl">OpenMessaging on Google Cloud</h2>
+        <div class="mt-4 max-w-4xl space-y-3 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
+          <p>
+            The upstream <a href="https://openmessaging.cloud/docs/benchmarks/" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging Benchmark</a> workloads, run by its unmodified Kafka driver and Kafka {openmessaging.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against every broker:
+            {openmessaging.images.map((image, i) => <>{i ? (i === openmessaging.images.length - 1 ? ', and ' : ', ') : ' '}{image.label}</>)}.
+            One ephemeral {openmessaging.provenance.host.logical_cpus}-vCPU Google Cloud VM ran the brokers one vendor at a time, with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
+            Run {openmessaging.provenance.run_id}, completed <time datetime={ombCompleted}>{ombCompleted.slice(0, 10)}</time>; {openmessaging.provenance.repetitions === 1 ? 'one round' : openmessaging.provenance.repetitions + ' rounds (medians shown)'} per workload.
+          </p>
+          <p>
+            Writes are buffered: Kafka and krabka acknowledge in-sync replication with <code>acks=all</code>; Redpanda acknowledges a Raft majority with <code>write.caching=true</code>. This does not establish equal crash durability.
+            OMB reports rates and latency, not exact delivery or duplicate checks. Backlog workloads fill a 100 GB backlog before consumers drain it, so their end-to-end latency includes that wait.
+            CPU and memory windows include client startup, warm-up, rate probing, measurement and shutdown. Results apply only to this runner, these images and these workloads.
+          </p>
+        </div>
+        {openmessaging.rows.map(group => (
+          <div class="mt-8">
+            <h3 class="text-lg font-semibold text-white">Replication factor {group.rf}</h3>
+            <div class="relative mt-3 overflow-x-auto rounded-xl border border-white/10">
+              <table class="w-full min-w-[46rem] text-left text-xs" aria-label={`Mean publish rate and end-to-end p99 latency per broker, RF${group.rf}`}>
+                <thead class="bg-slate-950/60 text-gray-400">
+                  <tr>
+                    <th scope="col" rowspan="2" class="px-3 py-2 font-semibold">Workload</th>
+                    <th scope="col" rowspan="2" class="px-3 py-2 font-semibold text-right">Offered</th>
+                    {openmessaging.images.map(image => <th scope="colgroup" colspan="2" class="px-3 pt-2 font-semibold text-center text-white">{image.name}</th>)}
+                  </tr>
+                  <tr>
+                    {openmessaging.images.map(() => <><th scope="col" class="px-3 pb-2 font-normal text-right">msg/s</th><th scope="col" class="px-3 pb-2 font-normal text-right">E2E p99</th></>)}
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5 text-gray-300">
+                  {group.cases.map(workload => (
+                    <tr>
+                      <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap">{workload.id}</th>
+                      <td class="px-3 py-2 text-right whitespace-nowrap">{offered(workload.config.producerRate)}</td>
+                      {workload.vendors.map(v => <><td class="px-3 py-2 text-right tabular-nums">{format(v.publish_rate)}</td><td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{latency(v.end_to_end_p99_ms)}</td></>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+        <details class="frosted-card rounded-2xl mt-6 p-5 sm:p-6">
+          <summary class="cursor-pointer font-semibold text-white hover:text-krab-400">Publish p99, broker CPU and peak memory</summary>
+          {openmessaging.rows.map(group => (
+            <div class="relative mt-5 overflow-x-auto">
+              <table class="w-full min-w-[46rem] text-left text-xs">
+                <caption class="text-left font-semibold text-white pb-2">RF{group.rf}: publish p99 · broker CPU seconds · peak RSS</caption>
+                <thead class="text-gray-400"><tr><th scope="col" class="px-3 py-2">Workload</th>{openmessaging.images.map(image => <th scope="col" class="px-3 py-2 text-right">{image.name}</th>)}</tr></thead>
+                <tbody class="divide-y divide-white/5 text-gray-300">
+                  {group.cases.map(workload => (
+                    <tr>
+                      <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap">{workload.id}</th>
+                      {workload.vendors.map(v => <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{latency(v.publish_p99_ms)} · {format(v.cpu_seconds)} s · {format(v.rss_peak_mib)} MiB</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          <dl class="mt-6 space-y-4 text-sm">
+            {openmessaging.images.map(image => <div>
+              <dt class="font-semibold text-white [overflow-wrap:anywhere]">{image.label}</dt>
+              <dd class="mt-1 font-mono text-xs text-gray-300 break-all">{image.requested}</dd>
+              <dd class="mt-1 font-mono text-xs text-gray-400 break-all">{image.reference}</dd>
+            </div>)}
+          </dl>
+          <p class="mt-5 text-sm text-gray-300">The <a href={openmessaging.summaryURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">run summary</a> lists every trial, and the <a href={openmessaging.provenanceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">provenance</a> records the host, CPU sets, OMB commit, client jar hashes and effective driver settings.</p>
+        </details>
+      </section>
+    )}
 
     <section id="methodology" aria-labelledby="methodology-heading" class="mt-16 scroll-mt-24">
       <h2 id="methodology-heading" class="text-2xl font-bold text-white sm:text-3xl">Methodology and resource settings</h2>

@@ -148,8 +148,14 @@ logged client/consumer errors and missing resource counters fail the run,
 including when upstream exits zero after
 catching a workload exception. Failed trials are recorded and the remaining matrix
 is attempted; failed matrices do not produce a successful summary. Artifacts stay
-under `.benchmarks/<run-id>/`; this suite never rewrites `latest.md`, commits, pushes,
-or publishes website performance claims.
+under `.benchmarks/<run-id>/`; the runner never rewrites `latest.md`, commits or pushes.
+
+To publish a complete full-mode run on the website, download its `openmessaging-<run>-<attempt>`
+artifact and run `node scripts/publish-openmessaging.mjs <artifact>/<run-id>`. The script
+rejects smoke, failed and incomplete matrices, re-validates every trial, and writes
+`benchmarks/openmessaging/<run-id>/` (provenance, summary and a compact `trials.json` without raw
+time series) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
+and commit those files; the raw artifact stays in Actions for 30 days.
 
 ## Local runner prerequisites
 
