@@ -6,7 +6,7 @@
     "module": "consensus",
     "function": "majority_size",
     "summary": "Majority size for a voter set: floor(n / 2) + 1.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/consensus/failover.rs#L8",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/consensus/failover.rs#L8",
     "signature": "pub const fn majority_size(voter_count: usize) -> usize",
     "requires": [],
     "ensures": [
@@ -30,7 +30,7 @@
     "module": "consensus",
     "function": "election_has_quorum",
     "summary": "Whether the unique grants from current voters reach a majority.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/consensus/failover.rs#L15",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/consensus/failover.rs#L15",
     "signature": "pub const fn election_has_quorum(voter_count: usize, current_grants: usize) -> bool",
     "requires": [],
     "ensures": [
@@ -55,7 +55,7 @@
     "module": "consensus",
     "function": "log_is_up_to_date",
     "summary": "True if the candidate's log is at least as up-to-date as ours. Per KIP-595 the higher last epoch wins; on a tie, the higher or equal offset wins.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/consensus/log_is_up_to_date.rs#L185",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/consensus/log_is_up_to_date.rs#L181",
     "signature": "pub const fn log_is_up_to_date(my_epoch: u32, my_end: i64, cand_epoch: u32, cand_offset: i64) -> bool",
     "requires": [],
     "ensures": [
@@ -82,7 +82,7 @@
     "module": "consensus",
     "function": "recompute_high_watermark",
     "summary": "The HWM as the majority-th largest match offset across the leader's own log end, when leader_counts, and every follower's acknowledged fetch offset. The leader-completeness rule of Raft Fig. 8 and KIP-595 gates this value: the HWM may only advance once the majority offset is strictly past epoch_start_offset, and it never regresses below current_hwm.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/consensus/watermark.rs#L70",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/consensus/watermark.rs#L70",
     "signature": "pub fn recompute_high_watermark(log_end: i64, follower_offsets: &[i64], majority: usize, epoch_start_offset: i64, current_hwm: i64, leader_counts: bool) -> i64",
     "requires": [
       "1 <= majority@ && majority@ <= follower_offsets@.len() + 1",
@@ -119,7 +119,7 @@
     "module": "consensus",
     "function": "election_jitter_ms",
     "summary": "Deterministic per-(node, epoch) election-timeout jitter in [0, base_ms). This is Raft's randomized backoff made reproducible for the deterministic sims: the jitter is a fixed hash of the node id and the epoch, so the same run replays the same way. The contract proves only the range, 0 for a zero base and below base_ms otherwise. It does not prove that two nodes, or two epochs of one node, get different values: the hash usually spreads them, but a collision is possible and nothing here rules it out.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/consensus/log_is_up_to_date.rs#L167",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/consensus/log_is_up_to_date.rs#L163",
     "signature": "pub fn election_jitter_ms(me: u64, epoch: u32, base_ms: u64) -> u64",
     "requires": [],
     "ensures": [
@@ -146,7 +146,7 @@
     "module": "throttle",
     "function": "plan_consume",
     "summary": "Caps a refill, grants at most the request, and returns the new balance.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/throttle.rs#L96",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/throttle.rs#L56",
     "signature": "pub fn plan_consume(available: AvailableTokens, refill: RefillTokens, burst: BurstCapacity, requested: RequestedTokens) -> (GrantedTokens, NewAvailable)",
     "requires": [],
     "ensures": [
@@ -176,7 +176,7 @@
     "module": "authz",
     "function": "acl_decision",
     "summary": "Decides a request from whether any matching ACL allowed or denied it, in the order of Kafka's AclAuthorizer.authorizeAction: a super user is always allowed; otherwise a matching DENY wins over any ALLOW; otherwise a matching ALLOW allows; otherwise the default decides. The default reflects allow.everyone.if.no.acl.found (default false), which allows a request only when no ACL at all applies to the resource, so it never overrides an explicit ALLOW or DENY.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/authz/acl_decision.rs#L133",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/authz/acl_decision.rs#L133",
     "signature": "pub fn acl_decision(facts: AclFacts) -> AclDecision",
     "requires": [],
     "ensures": [
@@ -204,7 +204,7 @@
     "module": "producer",
     "function": "producer_decision",
     "summary": "Classifies an incoming batch against a producer's tracked entry and the sequence ranges of the batches it retains, Kafka's UnifiedLog.analyzeAndValidateProducerState for a client append. At the entry's epoch, a batch whose base sequence and last sequence (base_sequence + last_offset_delta modulo 2^31) equal a retained batch's is a duplicate of the first such batch, and a null slot never matches. Only a batch that repeats no retained batch goes on to the sequence check: a producer with no entry can start at any sequence (under Kafka trunk rules an empty log requires sequence 0; this page runs Kafka 4.3.1 rules, log_empty = false and trunk_rules = false); a lower epoch is fenced; a higher epoch must start at sequence 0 and is otherwise out of order; the same epoch must continue at the last sequence plus one modulo 2^31 and is otherwise out of order.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/producer/decision.rs#L47",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/producer/decision.rs#L47",
     "signature": "pub fn producer_decision(entry: Option<ProducerEntryFacts>, retained: &[Option<RetainedSequenceRange>], producer_epoch: i16, base_sequence: i32, last_offset_delta: i32, log_empty: bool, trunk_rules: bool) -> ProducerDecision",
     "requires": [],
     "ensures": [
@@ -240,7 +240,7 @@
     "module": "leader_epoch",
     "function": "epoch_and_offset_for_entries",
     "summary": "Resolves a requested leader epoch to (found_epoch, end_offset), the KIP-101 pair a follower uses to truncate a divergent suffix, exactly as Kafka's LeaderEpochFileCache.endOffsetFor does: the latest recorded epoch ends at the log end; an exact older epoch or a gap epoch resolves to the floor epoch and ends where the next recorded epoch begins; an epoch below every recorded one keeps its number and ends at the first entry's start; and (-1, -1), Kafka's UNDEFINED_EPOCH and UNDEFINED_EPOCH_OFFSET, answers an undefined request, an empty cache, and a request above the latest epoch. The checkpoint entries must be strictly increasing in both epoch and start offset.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/leader_epoch.rs#L109",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/leader_epoch.rs#L103",
     "signature": "pub fn epoch_and_offset_for_entries(entries: &[EpochEntry], requested_epoch: LeaderEpoch, log_end_offset: Offset) -> (LeaderEpoch, Offset)",
     "requires": [
       "forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len() ==> entries@[i].epoch.0@ < entries@[j].epoch.0@ && entries@[i].start_offset.0@ < entries@[j].start_offset.0@"
@@ -273,7 +273,7 @@
     "module": "log_index",
     "function": "offset_index_lookup",
     "summary": "The byte position to start reading at for a target relative offset: the position field of the largest entry with relative_offset <= target, or 0 if no such entry exists. The entries must be strictly sorted by relative offset, which the construction of OffsetIndex guarantees.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/log_index.rs#L26",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/log_index.rs#L44",
     "signature": "pub fn offset_index_lookup(entries: &[(u32, u32)], target: u32) -> u32",
     "requires": [
       "forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len() ==> entries@[i].0@ < entries@[j].0@"
@@ -301,7 +301,7 @@
     "module": "stretch",
     "function": "site_loss_survivors + min_insync_is_site_loss_safe",
     "summary": "site_loss_survivors gives the replica count that survives the loss of any one site under round-robin placement, where replica r of a partition lands on site r % sites: site 0 is a fullest site, so the result is rf minus what it holds, rf - ceil(rf / sites), and the contract proves that no other site's loss leaves fewer. min_insync_is_site_loss_safe is true if min.insync.replicas keeps acks=all writes durable and available through that loss: no single site may hold min_insync replicas (else one site alone could acknowledge a write the others never saw), and the loss of any one site must leave at least min_insync.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs#L142",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/stretch/min_insync_is_site_loss_safe.rs#L155",
     "signature": "pub fn site_loss_survivors(rf: i64, sites: i64) -> i64\npub fn min_insync_is_site_loss_safe(rf: i64, sites: i64, min_insync: i64) -> bool",
     "requires": [
       "site_loss_survivors: rf@ >= 1 && rf@ <= 1024",
@@ -338,7 +338,7 @@
     "module": "stretch",
     "function": "quorum_survives_any_single_site_loss",
     "summary": "True if the surviving KRaft voters still form a strict majority after the loss of any one site: for every site k, 2 * (total - voters_per_site[k]) > total. Two sites never pass, which is why a third site must hold at least one voter; an empty slice returns true.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs#L105",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/stretch/quorum_survives_any_single_site_loss.rs#L105",
     "signature": "pub fn quorum_survives_any_single_site_loss(voters_per_site: &[i64]) -> bool",
     "requires": [
       "voters_per_site@.len() <= 1024",
@@ -365,18 +365,19 @@
     "module": "quota",
     "function": "user_client_quota_precedence",
     "summary": "Selects Kafka's first present user/client quota candidate, in the order of DefaultQuotaCallback in Kafka's ClientQuotaManager: every user=U level ranks above every user=<default> level, and both rank above the client-id-only levels.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/quota.rs#L174",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/quota.rs#L166",
     "signature": "pub fn user_client_quota_precedence(facts: UserClientQuotaFacts) -> UserClientQuotaPrecedence",
     "requires": [],
     "ensures": [
       "(result == UserClientQuotaPrecedence::ExactPair) == (facts.exact_pair == QuotaCandidatePresence::Present)",
       "(result == UserClientQuotaPrecedence::ExactUserDefaultClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Present)",
       "(result == UserClientQuotaPrecedence::ExactUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultUserExactClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultPair) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultUser) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::ExactClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Present)",
-      "(result == UserClientQuotaPrecedence::DefaultClient) == (facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Absent && facts.default_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultUserExactClient) == (exact_user_quota_absent(facts) && facts.default_user_exact_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultPair) == (exact_user_quota_absent(facts) && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultUser) == (exact_user_quota_absent(facts) && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::ExactClient) == (exact_user_quota_absent(facts) && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Present)",
+      "(result == UserClientQuotaPrecedence::DefaultClient) == (exact_user_quota_absent(facts) && facts.default_user_exact_client == QuotaCandidatePresence::Absent && facts.default_pair == QuotaCandidatePresence::Absent && facts.default_user == QuotaCandidatePresence::Absent && facts.exact_client == QuotaCandidatePresence::Absent && facts.default_client == QuotaCandidatePresence::Present)",
+      "exact_user_quota_absent(facts) = facts.exact_pair == QuotaCandidatePresence::Absent && facts.exact_user_default_client == QuotaCandidatePresence::Absent && facts.exact_user == QuotaCandidatePresence::Absent",
       "(result == UserClientQuotaPrecedence::None) == !( facts.exact_pair == QuotaCandidatePresence::Present || facts.exact_user_default_client == QuotaCandidatePresence::Present || facts.exact_user == QuotaCandidatePresence::Present || facts.default_user_exact_client == QuotaCandidatePresence::Present || facts.default_pair == QuotaCandidatePresence::Present || facts.default_user == QuotaCandidatePresence::Present || facts.exact_client == QuotaCandidatePresence::Present || facts.default_client == QuotaCandidatePresence::Present)"
     ],
     "fields": [
@@ -405,7 +406,7 @@
     "module": "isr",
     "function": "isr_maintenance_selected",
     "summary": "krabka's former ISR scan rule, kept for the leader-failover model's expansion stand-in; the broker's scan runs isr_candidate_selected. The leader always stays and a member that is no longer assigned leaves. An in-sync follower stays exactly while Kafka's ReplicaState.isCaughtUp holds: its log end offset equals the leader's, or it last caught up within replica.lag.time.max.ms. An out-of-sync follower is admitted when it fetched and caught up within the bound, which is not Kafka's Partition.isFollowerInSync.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/isr/admission.rs#L143",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/isr/admission.rs#L143",
     "signature": "pub fn isr_maintenance_selected(facts: IsrMemberFacts) -> bool",
     "requires": [],
     "ensures": [
@@ -435,7 +436,7 @@
     "module": "isr",
     "function": "isr_candidate_selected",
     "summary": "Decides whether one candidate belongs in the next ISR proposal, the rule the broker's ISR maintenance scan runs. The leader always stays, and a member that is no longer assigned leaves. An in-sync follower stays exactly while Kafka's ReplicaState.isCaughtUp holds, which is Partition.getOutOfSyncReplicas: a follower that keeps fetching but never catches up leaves once its last caught-up time is older than replica.lag.time.max.ms. An out-of-sync follower joins exactly when Kafka's Partition.needsExpandIsr would add it: it is ISR-eligible by Partition.isReplicaIsrEligible (KIP-841) and in sync by Partition.isFollowerInSync, so its log end has reached both the leader's high watermark and the start of the leader's current epoch.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/isr/watermark.rs#L94",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/isr/watermark.rs#L94",
     "signature": "pub fn isr_candidate_selected(facts: IsrCandidateFacts) -> bool",
     "requires": [],
     "ensures": [
@@ -474,7 +475,7 @@
     "module": "compaction",
     "function": "retain_decision",
     "summary": "The single per-record KIP-534 retain decision. Control batches (transaction commit and abort markers) are retained as long as their transaction's data survives and then age out through the delete horizon; data records dedup newest-wins; a tombstone ages out through the delete horizon after it becomes the newest entry for its key.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/compaction/retain_decision.rs#L87",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/compaction/retain_decision.rs#L87",
     "signature": "pub const fn retain_decision(rec: RecordMeta, batch: BatchMeta, is_newest_for_key: bool, txn: TxnDataState, now_ms: i64, delete_retention_ms: i64) -> RetainDecision",
     "requires": [],
     "ensures": [
@@ -513,7 +514,7 @@
     "module": "vote",
     "function": "vote_admission_decision",
     "summary": "Classifies exact recipient and membership admission for a KIP-595 Vote request, shared by binding votes and pre-votes before the epoch and log checks. The target alone decides IgnoreWrongTarget: a Vote addressed to another voter or directory is ignored without a reply. For the exact target, the memberships decide between Deny and Consider: the request is denied unless the cluster matches and both the local node and the candidate are voters.",
-    "source_url": "https://github.com/krabka-io/krabka-broker/blob/c13710e50f81cc4adafddcf1837683a5700bf5b7/crates/verified/src/vote.rs#L159",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/d2ee0d14003c7ccc52d792db495120f48e13028e/crates/verified/src/vote.rs#L152",
     "signature": "pub fn vote_admission_decision(target: VoteTarget, membership: VoteMembership) -> VoteAdmissionDecision",
     "requires": [],
     "ensures": [
