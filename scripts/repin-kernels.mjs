@@ -8,8 +8,11 @@
 // crates/verified, checks that the quoted signature and every quoted
 // `requires`/`ensures` clause still appear in the source (a helper
 // predicate's clause, `name(args) = body`, by its body), and rewrites
-// `source_url` to the new revision, file and line. With any mismatch it
-// changes nothing and names the kernels; `--check` only reports.
+// `source_url` to the new revision, file and line. A kernel that a
+// `macro_rules!` of the crate generates is checked against the macro's body
+// with the invocation's arguments substituted, and linked at the invocation.
+// With any mismatch it changes nothing and names the kernels; `--check` only
+// reports.
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -32,7 +35,61 @@ const norm = (s) => s.replace(/\s+/g, ' ').replace(/([([{]) /g, '$1').replace(/ 
 
 const files = git(broker, 'ls-tree', '-r', '--name-only', sha, 'crates/verified/src').split('\n').filter((f) => f.endsWith('.rs') && !/\/tests?\//.test(f));
 const sources = new Map(files.map((f) => [f, git(broker, 'show', `${sha}:${f}`)]));
-const crate = norm([...sources.values()].join('\n'));
+
+// The text between the bracket at `open` and its match, past the brackets of
+// strings, char literals and line comments.
+function bracketed(text, open) {
+  const pairs = { '{': '}', '(': ')', '[': ']' };
+  const stack = [];
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++;
+    } else if (c === "'" && /^'(\\.|[^\\'])'/.test(text.slice(i, i + 4))) {
+      i = text.indexOf("'", i + 2);
+    } else if (c === '/' && text[i + 1] === '/') {
+      i = text.indexOf('\n', i);
+      if (i < 0) break;
+    } else if (pairs[c]) stack.push(pairs[c]);
+    else if (c === stack[stack.length - 1] && stack.pop() && !stack.length) return text.slice(open + 1, i);
+  }
+  throw new Error(`unbalanced bracket at ${open}`);
+}
+
+// Every invocation of a single-arm `macro_rules!` in `text`, expanded: the
+// macro's body with each `$param` replaced by the invocation's comma-separated
+// argument, after the leading attributes that a `$(#[$doc:meta])*` repetition
+// takes. `line` is the line of the first argument (the generated item's name).
+function expansions(text) {
+  const out = [];
+  for (const m of text.matchAll(/macro_rules!\s+(\w+)\s*\{/g)) {
+    // A macro this cannot read generates nothing here; its kernels then report as missing.
+    try {
+    const rules = bracketed(text, m.index + m[0].length - 1);
+    const pattern = bracketed(rules, rules.indexOf('('));
+    const body = bracketed(rules, rules.indexOf('{', rules.indexOf('=>')));
+    const repetition = /\$\((?:[^()]|\([^()]*\))*\)[*+?]/g;
+    const params = [...pattern.replace(repetition, '').matchAll(/\$(\w+):\w+/g)].map((p) => p[1]);
+    const template = body.replace(repetition, '');
+    for (const call of text.matchAll(new RegExp(`(?<!macro_rules!\\s+)\\b${m[1]}!\\s*[{(]`, 'g'))) {
+      const start = call.index + call[0].length;
+      const inner = bracketed(text, start - 1);
+      const attrs = /^(\s*#\[(?:"(?:[^"\\]|\\.)*"|[^\]"])*\])*\s*/.exec(inner)[0];
+      const args = inner.slice(attrs.length).split(',').map((a) => a.trim());
+      if (args.length !== params.length) continue;
+      let expanded = template;
+      for (const [i, p] of params.entries()) expanded = expanded.replace(new RegExp(`\\$${p}\\b`, 'g'), args[i]);
+      const line = text.slice(0, start + attrs.length).split('\n').length;
+      out.push({ text: expanded, line });
+    }
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+const generated = [...sources].flatMap(([file, text]) => expansions(text).map((e) => ({ file, ...e })));
+const crate = norm([...sources.values(), ...generated.map((g) => g.text)].join('\n'));
 
 const original = fs.readFileSync(FILE, 'utf8');
 const kernels = JSON.parse(original);
@@ -42,12 +99,13 @@ for (const k of kernels) {
   const fn = k.function.split(' + ')[0];
   const pattern = new RegExp(`^\\s*(pub(\\([^)]*\\))? )?(const )?fn ${fn}\\b`, 'm');
   const hit = [...sources].find(([, text]) => pattern.test(text));
-  if (!hit) {
+  const macro = hit ? null : generated.find((g) => pattern.test(g.text));
+  if (!hit && !macro) {
     problems.push(`${k.id}: fn ${fn} is not in crates/verified`);
     continue;
   }
-  const [file, text] = hit;
-  const line = text.split('\n').findIndex((l) => pattern.test(`${l}\n`));
+  const file = hit ? hit[0] : macro.file;
+  const line = hit ? hit[1].split('\n').findIndex((l) => pattern.test(`${l}\n`)) : macro.line - 1;
   // A kernel of several functions lists one signature per line and prefixes each clause with its function.
   const names = k.function.split(' + ');
   for (const sig of k.signature.split('\n')) {

@@ -47,8 +47,11 @@ krabka-kraft-core = { git = "https://github.com/krabka-io/krabka-broker", rev = 
 # interactively. This revision matches the verified-kernels catalog
 # (`src/data/verified-kernels.json`), so it moves only with
 # `npm run repin-kernels`, not with the other broker pins.
-krabka-verified = { git = "https://github.com/krabka-io/krabka-broker", rev = "c13710e50f81cc4adafddcf1837683a5700bf5b7" }
-krabka-ids = "0.6.0"
+krabka-verified = { git = "https://github.com/krabka-io/krabka-broker", rev = "d2ee0d14003c7ccc52d792db495120f48e13028e" }
+# The kernels take krabka-verified's `LeaderEpoch` and `Offset`, so this
+# requirement follows that revision's (0.5, from crates.io) rather than the
+# protocol pins below, and moves with `npm run repin-kernels`.
+krabka-ids = "0.5.1"
 krabka-units = "0.6.0"
 # The Kafka wire codec every lab client speaks and the real broker's frames are
 # read with, with every codec. Upstream `lz4` and `zstd` bind C libraries, so
@@ -59,7 +62,7 @@ krabka-protocol = { version = "0.6.0", default-features = false, features = ["gz
 # its topology with the crate's `Topology`, and joins its group with the
 # byte-exact KIP-1071 wire topology the crate derives. `main` with the
 # embedder API.
-krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "44afe9b6936eddaaef9eff85f22c9f11fa9056b5" }
+krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "b9f1d8a4f26f169f3b35e13ecd48bfd948750a29" }
 
 # ---- Schema engines. The schema registry node parses and checks schemas with
 # the same crates `krabka-schema-registry` uses.
@@ -125,7 +128,7 @@ krabka-client-consumer = { git = "https://github.com/krabka-io/krabka-client-rs"
 krabka-client-coordination = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "ee411691e39a05f3ed4e4ed8adc1e8939fd111b4" }
 krabka-client-core = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "ee411691e39a05f3ed4e4ed8adc1e8939fd111b4" }
 krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "ee411691e39a05f3ed4e4ed8adc1e8939fd111b4" }
-krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "44afe9b6936eddaaef9eff85f22c9f11fa9056b5" }
+krabka-client-streams = { git = "https://github.com/krabka-io/krabka-streams-rs", rev = "b9f1d8a4f26f169f3b35e13ecd48bfd948750a29" }
 krabka-compression = { path = "vendor/krabka-compression" }
 krabka-connect = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-connect-derive = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }

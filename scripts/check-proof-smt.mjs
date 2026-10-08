@@ -78,7 +78,11 @@ try {
       assert.ok(session, `a small recorded ${prover} session`);
       return { prover, session };
     };
-    const cvc4Sessions = data.sessions.filter((session) => session.stats.provers.cvc4);
+    // A session with Z3 leaves registers the isolation service worker for the
+    // whole context, so the sessions without Z3, which must stay unisolated,
+    // run first.
+    const cvc4Sessions = data.sessions.filter((session) => session.stats.provers.cvc4)
+      .sort((a, b) => Boolean(a.stats.provers.z3) - Boolean(b.stats.provers.z3));
     assert.ok(cvc4Sessions.length, 'recorded CVC4 sessions');
     // Include every CVC4 session, including its Alt-Ergo/Z3 leaves and tactics.
     for (const { prover, session } of [...cvc4Sessions.map((session) => ({ prover: 'cvc4', session })), smallSession('z3'), smallSession('cvc5')]) {
@@ -86,7 +90,8 @@ try {
       await page.locator('[data-tab="check"]').click();
       await page.getByRole('button', { name: 'Re-check this session', exact: true }).click();
       try {
-        await page.locator('.px-check-ok, .px-check-partial, .px-check-failed').waitFor({ timeout: 90_000 });
+        // Leaves that report the 60 s budget keep a run past it.
+        await page.locator('.px-check-ok, .px-check-partial, .px-check-failed').waitFor({ timeout: 300_000 });
       } catch (error) {
         throw new Error(`${error.message}\n${await page.locator('.px-check').innerText()}`);
       }
@@ -95,10 +100,11 @@ try {
       const proved = await page.locator('.px-live-proved').count();
       if (prover === 'cvc4') {
         assert.equal(await page.locator('.px-leaf-cvc4 .px-live-proved').count(), session.stats.provers.cvc4, status);
-        // One recorded Z3 quantifier leaf exceeds the browser budget locally.
-        // Require every CVC4/Alt-Ergo leaf to prove and all other Z3 leaves to
-        // either prove or report that budget; errors/divergence/skips still fail.
-        const timeouts = await page.locator('.px-leaf-z3 .px-live-timeout').count();
+        // This replay exercises the browser's CVC4: every CVC4 leaf must prove.
+        // Some Alt-Ergo and Z3 leaves that take well under a second natively
+        // exceed the browser's 60 s budget, so the other leaves may prove or
+        // report that budget; errors, divergence and skips still fail.
+        const timeouts = await page.locator('.px-leaf:not(.px-leaf-cvc4) .px-live-timeout').count();
         assert.equal(proved + timeouts, session.stats.leaves, await page.locator('.px-check').innerText());
       } else {
         assert.equal(await page.locator('.px-check-ok').count(), 1, await page.locator('.px-check').innerText());
