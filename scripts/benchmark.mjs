@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
-import { OMB, ombCases, ombWorkload, ombDriver, ombTimeoutMs, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -104,6 +104,7 @@ async function main() {
     provenance.replication_factors = replicationFactors;
     Object.assign(provenance.contract, { partitions: 'from upstream workload', batch_bytes: 1048576, linger_ms: 1,
       compression: 'none', max_in_flight_requests: 1, client_heap_bytes: 2 * GIB,
+      retention: { default: 'unlimited', backlog_topics: `${OMB_BACKLOG_RETENTION_RATIO}x the backlog, split across partitions` },
       delivery_verification: 'OMB rates/latencies only; no sequence or exact delivery check',
       warmup_minutes: options.smoke ? 0 : 1, smoke_overrides: options.smoke ? { minutes: 1, rate: 5000, backlog_gb: 0 } : null });
     delete provenance.contract.warmup_records;
@@ -635,7 +636,7 @@ rpk:
             // OMB pauses inside the message callback during backlog fill, so
             // Kafka's poll loop must survive that pause without leaving its group.
             await fs.writeFile(path.join(directory, 'driver.yaml'), ombDriver(vendor, rf,
-              workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined));
+              workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined, ombRetentionBytes(workload.config)));
             const timeout = workload.timeout_ms;
             const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
               () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
