@@ -242,10 +242,11 @@ async function main() {
     assert.ok(memoryAvailable >= requiredMemory, `need ${requiredMemory / GIB} GiB available RAM; found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
     const disk = await fs.statfs(ROOT);
     const freeDisk = disk.bavail * disk.bsize;
-    // OMB backlog files retain 100 GB logical data with RF3. Allow replica
-    // storage, headers and drain traffic; fresh volumes bound accumulation.
+    // OMB backlog topics retain 120 GiB, three times over at RF3. Allow up to
+    // five minutes of writes between retention checks (about 84 GiB at RF3),
+    // segment granularity, record overhead and the 20 GiB abort reserve.
     const ombBacklog = omb && cases.some(c => c.id.startsWith('backlog-'));
-    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : ombBacklog ? 450 : 150) * GIB;
+    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : ombBacklog ? 540 : 150) * GIB;
     assert.ok(freeDisk >= requiredDisk, `insufficient disk: ${(freeDisk / GIB).toFixed(1)} GiB free`);
     const dockerDisk = await fs.statfs(info.DockerRootDir);
     const dockerFreeDisk = dockerDisk.bavail * dockerDisk.bsize;

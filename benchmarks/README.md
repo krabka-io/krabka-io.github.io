@@ -139,10 +139,11 @@ runs retain upstream payloads, rates, partition counts, backlog sizes, and durat
 only the payload path is adapted to the container mount. Full runs warm up for the
 upstream default one minute. OMB may additionally probe sustainable rates when
 `producerRate=0`. The default matrix is 78 trials and takes many hours. The
-100 GB backlog cases need **450 GiB free disk** in both the checkout filesystem and
+100 GB backlog cases need **540 GiB free disk** in both the checkout filesystem and
 Docker storage; full runs without backlog need 150 GiB, and smoke needs 4 GiB.
-At RF3 the three replicas of the retained 120 GiB, plus the up to five minutes of
-writes a broker accumulates between retention checks, take most of that.
+At RF3 that covers three replicas of the retained 120 GiB, the up to five minutes
+of writes a broker accumulates between retention checks, segment granularity, record
+overhead and the 20 GiB abort reserve below.
 Maximum-rate cases have no record ceiling and can outgrow a fixed disk. The runner
 monitors both filesystems and aborts with diagnostics before free space falls below
 20 GiB (1 GiB in smoke). Choose a larger worker or narrower matrix if this occurs.
