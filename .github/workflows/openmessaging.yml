@@ -47,10 +47,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    # One shard per workload and replication factor. All three brokers for a
+    # shard, and every round of them, run on the same runner, so each
+    # comparison stays on one machine.
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Plan shards
+        id: plan
+        env:
+          BENCHMARK_WORKLOADS: ${{ inputs.workloads }}
+          BENCHMARK_RF: ${{ inputs.replication_factors }}
+        run: |
+          shards=$(node scripts/benchmark-openmessaging-shards.mjs plan \
+            --workloads "$BENCHMARK_WORKLOADS" --replication-factors "$BENCHMARK_RF")
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "$shards"
+
   benchmark:
-    # Cyclenerd provisions an ephemeral VM from this label when the job queues.
+    needs: plan
+    name: benchmark (${{ matrix.shard.name }})
+    # Cyclenerd provisions an ephemeral VM from this label when each job queues.
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 1440
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -68,8 +97,8 @@ jobs:
       - name: Run OpenMessaging against all three brokers
         env:
           BENCHMARK_MODE: ${{ inputs.mode }}
-          BENCHMARK_WORKLOADS: ${{ inputs.workloads }}
-          BENCHMARK_RF: ${{ inputs.replication_factors }}
+          BENCHMARK_WORKLOADS: ${{ matrix.shard.workload }}
+          BENCHMARK_RF: ${{ matrix.shard.rf }}
           BENCHMARK_REPETITIONS: ${{ inputs.repetitions }}
           KRABKA_IMAGE: ${{ inputs.krabka_image }}
           KRABKA_COMPARISON_IMAGE: ${{ inputs.krabka_comparison_image }}
@@ -101,7 +130,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}
+          name: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard.name }}
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: warn
@@ -114,6 +143,47 @@ jobs:
             .benchmarks/*/*.stdout
             .benchmarks/*/*.stderr
             .benchmarks/*/*.yaml
+            .benchmarks/*/rf*/*.json
+            .benchmarks/*/rf*/*.jsonl
+            .benchmarks/*/rf*/*.yaml
+            .benchmarks/*/rf*/*.stdout
+            .benchmarks/*/rf*/*.stderr
+
+  merge:
+    # Assemble the shards into one run in the single-runner layout, so
+    # scripts/publish-openmessaging.mjs can publish it. Fails unless every
+    # workload x RF x broker x round is present exactly once. A control/candidate
+    # comparison keeps its four separate reports per shard and is not merged.
+    needs: [plan, benchmark]
+    if: ${{ !cancelled() && inputs.mode != 'dry-run' && inputs.krabka_comparison_image == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Download shard results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: shards
+      - name: Merge shards
+        env:
+          RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p .benchmarks
+          node scripts/benchmark-openmessaging-shards.mjs merge --out ".benchmarks/$RUN_ID" shards/*/*/
+          cat ".benchmarks/$RUN_ID/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain merged results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .benchmarks/*/provenance.json
+            .benchmarks/*/summary.md
             .benchmarks/*/rf*/*.json
             .benchmarks/*/rf*/*.jsonl
             .benchmarks/*/rf*/*.yaml

@@ -61,7 +61,10 @@ npm run benchmark -- --suite curves`;
           <p>
             The upstream <a href="https://openmessaging.cloud/docs/benchmarks/" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging Benchmark</a> workloads, run by its unmodified Kafka driver and Kafka {openmessaging.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against every broker:
             {openmessaging.images.map((image, i) => <>{i ? (i === openmessaging.images.length - 1 ? ', and ' : ', ') : ' '}{image.label}</>)}.
-            One ephemeral {openmessaging.provenance.host.logical_cpus}-vCPU Google Cloud VM ran the brokers one vendor at a time, with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
+            {openmessaging.provenance.shards
+              ? <>Each workload and replication factor ran on its own ephemeral {openmessaging.provenance.host.logical_cpus}-vCPU Google Cloud VM ({openmessaging.provenance.shards.length} {openmessaging.provenance.shards.length === 1 ? 'VM' : 'VMs'} in all), and the three brokers ran one at a time on that VM,</>
+              : <>One ephemeral {openmessaging.provenance.host.logical_cpus}-vCPU Google Cloud VM ran the brokers one vendor at a time,</>}
+            with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
             Run {openmessaging.provenance.run_id}, completed <time datetime={ombCompleted}>{ombCompleted.slice(0, 10)}</time>; {openmessaging.provenance.repetitions === 1 ? 'one round' : openmessaging.provenance.repetitions + ' rounds (medians shown)'} per workload.
           </p>
           <p>
