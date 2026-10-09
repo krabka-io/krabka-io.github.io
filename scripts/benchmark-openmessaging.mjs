@@ -49,17 +49,34 @@ export function ombTimeoutMs(config, smoke) {
   return (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 90 : 30)) * 60_000;
 }
 
-export function ombDriver(vendor, rf, maxPollIntervalMs) {
+// Headroom over the requested backlog that a backlog topic retains.
+export const OMB_BACKLOG_RETENTION_RATIO = 1.2;
+
+// Per-partition retention.bytes for a workload, or -1 (unlimited) without a
+// backlog. OMB keeps producing while the backlog drains, so with unlimited
+// retention an RF3 backlog run stores every byte it ever published three
+// times on one disk. Retaining 1.2x the backlog keeps every unconsumed record
+// (the backlog only shrinks once filled) and lets the brokers delete what the
+// consumer has already read.
+export function ombRetentionBytes(config) {
+  if (!(config.consumerBacklogSizeGB > 0)) return -1;
+  const partitions = config.topics * config.partitionsPerTopic;
+  assert.ok(Number.isInteger(partitions) && partitions > 0, 'invalid OMB partition count');
+  return Math.ceil(OMB_BACKLOG_RETENTION_RATIO * config.consumerBacklogSizeGB * 1024 ** 3 / partitions);
+}
+
+export function ombDriver(vendor, rf, maxPollIntervalMs, retentionBytes = -1) {
   assert.ok(['krabka', 'kafka', 'redpanda'].includes(vendor) && [1, 3].includes(rf));
   assert.ok(maxPollIntervalMs === undefined || (Number.isInteger(maxPollIntervalMs)
     && maxPollIntervalMs > 0 && maxPollIntervalMs <= 2 ** 31 - 1), 'invalid poll interval');
+  assert.ok(retentionBytes === -1 || (Number.isSafeInteger(retentionBytes) && retentionBytes > 0), 'invalid retention.bytes');
   return `name: ${vendor}-rf${rf}
 driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
 replicationFactor: ${rf}
 topicConfig: |
   ${vendor === 'redpanda' ? 'write.caching=true' : `min.insync.replicas=${rf === 1 ? 1 : 2}`}
   retention.ms=-1
-  retention.bytes=-1
+  retention.bytes=${retentionBytes}
 commonConfig: |
   bootstrap.servers=broker-0:9092
   request.timeout.ms=30000

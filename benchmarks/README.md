@@ -94,7 +94,12 @@ with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
 The driver code is unmodified. The common configuration follows upstream
 `kafka-exactly-once.yaml`: idempotence, `acks=all`, one in-flight request, 1 MiB
 batches and 1 ms linger, with no compression. This means idempotent production,
-not transactional exactly-once application processing. Topic retention is unlimited;
+not transactional exactly-once application processing. Topic retention is unlimited,
+except that a backlog workload's topic keeps 1.2x its backlog (`retention.bytes`
+split evenly across its partitions, so 120 GiB per topic for the 100 GB cases).
+OMB keeps producing while the backlog drains, so unlimited retention would store
+every byte published three times on the one RF3 disk; the backlog only shrinks
+once it is filled, so the limit deletes only records the consumer has read.
 Kafka/Krabka use minISR1/minISR2, while Redpanda uses Raft majorities and
 `write.caching=true`. This measures buffered writes, without a claim of identical
 crash durability. OMB creates topics and consumers; the existing Kafka 4.3.1 admin
@@ -134,8 +139,11 @@ runs retain upstream payloads, rates, partition counts, backlog sizes, and durat
 only the payload path is adapted to the container mount. Full runs warm up for the
 upstream default one minute. OMB may additionally probe sustainable rates when
 `producerRate=0`. The default matrix is 78 trials and takes many hours. The
-100 GB backlog cases need **450 GiB free disk** in both the checkout filesystem and
+100 GB backlog cases need **540 GiB free disk** in both the checkout filesystem and
 Docker storage; full runs without backlog need 150 GiB, and smoke needs 4 GiB.
+At RF3 that covers three replicas of the retained 120 GiB, the up to five minutes
+of writes a broker accumulates between retention checks, segment granularity, record
+overhead and the 20 GiB abort reserve below.
 Maximum-rate cases have no record ceiling and can outgrow a fixed disk. The runner
 monitors both filesystems and aborts with diagnostics before free space falls below
 20 GiB (1 GiB in smoke). Choose a larger worker or narrower matrix if this occurs.

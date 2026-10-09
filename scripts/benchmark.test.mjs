@@ -9,7 +9,7 @@ import { runInNewContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
-import { ombCases, ombWorkload, ombDriver, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 test('actual cleanup retains final exit state before removal and tolerates inspect failure', async () => {
@@ -235,6 +235,26 @@ test('OpenMessaging catalog and smoke configuration keep comparison settings con
     assert.match(driver, vendor === 'redpanda' ? /write.caching=true/ : /min.insync.replicas=2/);
   }
   assert.throws(() => ombDriver('krabka', 3, NaN), /invalid poll interval/);
+});
+
+test('OMB backlog topics retain 1.2x the backlog per partition and other topics retain everything', () => {
+  const config = { topics: 1, partitionsPerTopic: 1, messageSize: 1024, testDurationMinutes: 5, producerRate: 100000 };
+  const cases = [
+    [{ ...config, consumerBacklogSizeGB: 0 }, -1],
+    [{ ...config, consumerBacklogSizeGB: 100 }, Math.ceil(1.2 * 100 * 1024 ** 3)],
+    [{ ...config, partitionsPerTopic: 16, consumerBacklogSizeGB: 100 }, Math.ceil(1.2 * 100 * 1024 ** 3 / 16)],
+    [{ ...config, topics: 2, partitionsPerTopic: 8, consumerBacklogSizeGB: 100 }, Math.ceil(1.2 * 100 * 1024 ** 3 / 16)],
+  ];
+  for (const [workload, expected] of cases) {
+    const bytes = ombRetentionBytes(workload);
+    assert.equal(bytes, expected);
+    for (const vendor of ['krabka', 'kafka', 'redpanda']) {
+      const driver = ombDriver(vendor, 3, undefined, bytes);
+      assert.match(driver, new RegExp(`^  retention.ms=-1\n  retention.bytes=${bytes}$`, 'm'));
+    }
+  }
+  assert.match(ombDriver('kafka', 1), /^  retention.bytes=-1$/m);
+  for (const bad of [0, -2, 1.5, NaN]) assert.throws(() => ombDriver('kafka', 1, undefined, bad), /invalid retention.bytes/);
 });
 
 const broker = (id, cpu, rss, current, inactive = 0) => ({ id, cpu_usage_us: cpu, rss_bytes: rss,
