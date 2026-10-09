@@ -115,6 +115,9 @@ export function format(value, digits = 0) { return value.toLocaleString('en-US',
 // scripts/publish-openmessaging.mjs. Absent until a run is published.
 const ombImageLabels = {
   'sha256:117df778e3e8af143d8bc3681233c0151dc97d51cfafd3844c4daa09afaf9690': 'krabka-broker 1.0.0 (ada8e3ad, CI delivery image)',
+  // The signed v1.0.1 release index and its amd64 image, which the runner pulls.
+  'sha256:d0a383b12176a55eb771c870d819ccb4f60ce0bb6b5356b5ec44285c01d7fd93': 'krabka-broker 1.0.1 (6c64d9a, signed release)',
+  'sha256:299ff81dba7d4cbb96a4d2a7fca341c003929610e5be628ba0083587bd488c4d': 'krabka-broker 1.0.1 (6c64d9a, signed release)',
 };
 function loadOpenMessaging() {
   const pointer = path.join(root, 'latest-openmessaging.md');
