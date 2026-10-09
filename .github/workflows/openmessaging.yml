@@ -81,8 +81,8 @@ jobs:
       # Cyclenerd creates a VM only when GitHub reports a job queued, and does
       # not retry one it could not create. Run 37871941914 got four 16-core VMs
       # (likely the project's vCPU quota) and its other 22 shards never got a
-      # runner. With
-      # max-parallel, GitHub queues each further shard only as a slot frees.
+      # runner. With max-parallel, GitHub queues each further shard only as a
+      # slot frees.
       max-parallel: 4
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
