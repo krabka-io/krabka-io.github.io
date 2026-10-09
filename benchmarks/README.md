@@ -53,12 +53,14 @@ npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
 
 Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
 and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
-Only `workflow_dispatch` triggers this workflow. It runs in parallel shards: one
-job per workload and replication factor, each on its own runner VM, at most four
-at once: Cyclenerd creates a VM only when a job queues and does not retry one it
-could not create, and the Google Cloud project has room for about four 16-core
-VMs. All three vendors for a shard, and every round of them,
-run on that shard's VM, so each comparison stays on one machine; shards never split
+Only `workflow_dispatch` triggers this workflow. It splits the run into shards,
+one per workload and replication factor, and spreads them over four lanes (two
+with the 32-core template). Each lane is one runner VM that runs its shards one
+after another, with each 100 GB backlog shard on a different lane. Cyclenerd
+creates a VM for each queued job and does not retry one it could not create, and
+the Google Cloud project has room for about four 16-core VMs, so a job per shard
+left most shards without a runner. All three vendors for a shard, and every round
+of them, run on one VM, so each comparison stays on one machine; shards never split
 vendors. Every trial gets fresh broker storage, and vendors run sequentially on the
 same VM with the same CPU affinity, 4 CPU quotas, 10 GiB memory limits, and a
 separate 4 GiB client. Multiple rounds rotate vendor order. Each shard has a
@@ -150,7 +152,7 @@ Maximum-rate cases have no record ceiling and can outgrow a fixed disk. The runn
 monitors both filesystems and aborts with diagnostics before free space falls below
 20 GiB (1 GiB in smoke). Choose a larger worker or narrower matrix if this occurs.
 
-Each shard uploads its own `openmessaging-<run>-<attempt>-rf<RF>-<workload>` artifact.
+Each lane uploads its shards in one `openmessaging-<run>-<attempt>-lane-<N>` artifact.
 A final `merge` job (`scripts/benchmark-openmessaging-shards.mjs merge`) checks that
 the shards ran identical images, mode, rounds, contract and OMB build, and that every
 workload × RF × vendor × round appears exactly once. It then writes one run in the

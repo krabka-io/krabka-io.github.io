@@ -119,9 +119,9 @@ test('actual resource sampler retains its clock anchor when the client fails', a
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
-test('OpenMessaging workflow balances image order, preserves arguments and stops on failure', async () => {
+test('OpenMessaging lanes run every shard, balance image order, preserve arguments and fail after a failed shard', async () => {
   const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
-  const step = workflow.split('      - name: Run OpenMessaging against all three brokers\n')[1]
+  const step = workflow.split("      - name: Run this lane's shards against all three brokers\n")[1]
     .split('      - name: Add report to job summary\n')[0];
   const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-workflow-'));
@@ -134,17 +134,23 @@ test('OpenMessaging workflow balances image order, preserves arguments and stops
     `);
     const candidate = 'candidate;touch unexpected';
     const control = 'control image';
+    const shards = [['simple-workload', '1'], ['backlog-1-topic-1-partition-1kb', '3']];
+    const each = images => shards.flatMap(shard => images.map(image => [shard, image]));
     for (const scenario of [
-      { comparison: '', mode: 'full', images: [candidate], status: 0 },
-      { comparison: control, mode: 'smoke', images: [control, candidate, candidate, control], status: 0 },
-      { comparison: control, mode: 'dry-run', images: [control, candidate], failAt: '2', status: 7 },
-      { comparison: control, mode: 'invalid', images: [], status: 1 },
+      { comparison: '', mode: 'full', calls: each([candidate]), status: 0 },
+      { comparison: control, mode: 'smoke', calls: each([control, candidate, candidate, control]), status: 0 },
+      // The first shard's second image fails: its remaining images are
+      // skipped, the next shard still runs, and the lane fails at the end.
+      { comparison: control, mode: 'dry-run', failAt: '2',
+        calls: [[shards[0], control], [shards[0], candidate], ...each([control, candidate, candidate, control]).slice(4)], status: 1 },
+      { comparison: control, mode: 'invalid', calls: [], status: 1 },
     ]) {
       await fs.rm(path.join(directory, 'calls.jsonl'), { force: true });
       const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
         cwd: directory, timeout: 10_000, encoding: 'utf8', env: { ...process.env,
-          BENCHMARK_MODE: scenario.mode, BENCHMARK_WORKLOADS: 'workload one,workload two',
-          BENCHMARK_RF: '1,3', BENCHMARK_REPETITIONS: '2', KRABKA_IMAGE: candidate,
+          BENCHMARK_MODE: scenario.mode, LANE_SHARDS: shards.map(([w, rf]) => `rf${rf}-${w}`).join(' '),
+          LANE_WORKLOADS: shards.map(([w]) => w).join(' '), LANE_RFS: shards.map(([, rf]) => rf).join(' '),
+          BENCHMARK_REPETITIONS: '2', KRABKA_IMAGE: candidate,
           KRABKA_COMPARISON_IMAGE: scenario.comparison, REDPANDA_IMAGE: 'redpanda image',
           FAIL_AT: scenario.failAt ?? '',
         },
@@ -155,12 +161,10 @@ test('OpenMessaging workflow balances image order, preserves arguments and stops
         if (error.code === 'ENOENT') return '';
         throw error;
       });
-      const args = ['--suite', 'openmessaging', '--workloads', 'workload one,workload two',
-        '--replication-factors', '1,3', '--repetitions', '2', '--redpanda-image', 'redpanda image'];
-      if (scenario.mode === 'smoke') args.push('--smoke');
-      if (scenario.mode === 'dry-run') args.push('--dry-run');
+      const mode = { smoke: ['--smoke'], 'dry-run': ['--dry-run'] }[scenario.mode] ?? [];
       assert.deepEqual(calls.trim() ? calls.trim().split('\n').map(JSON.parse) : [],
-        scenario.images.map(image => [...args, '--krabka-image', image]));
+        scenario.calls.map(([[workload, rf], image]) => ['--suite', 'openmessaging', '--workloads', workload,
+          '--replication-factors', rf, '--repetitions', '2', '--redpanda-image', 'redpanda image', ...mode, '--krabka-image', image]));
     }
     await assert.rejects(fs.stat(path.join(directory, 'unexpected')), { code: 'ENOENT' });
   } finally { await fs.rm(directory, { recursive: true, force: true }); }

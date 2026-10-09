@@ -50,10 +50,18 @@ jobs:
   plan:
     # One shard per workload and replication factor. All three brokers for a
     # shard, and every round of them, run on the same runner, so each
-    # comparison stays on one machine.
+    # comparison stays on one machine. Shards are spread over a fixed number of
+    # lanes; each lane is one runner VM that runs its shards one after another.
+    #
+    # Cyclenerd creates a VM for each workflow_job.queued event and does not
+    # retry one it could not create. Run 37871941914 queued one job per shard,
+    # got four 16-core VMs (likely the project's vCPU quota), and its other 22
+    # shards never got a runner. max-parallel does not help, because GitHub can
+    # send every matrix job's queued event at once. So the matrix has only as
+    # many jobs as VMs fit: four 16-core lanes (64 vCPUs) or two 32-core lanes.
     runs-on: ubuntu-latest
     outputs:
-      shards: ${{ steps.plan.outputs.shards }}
+      lanes: ${{ steps.plan.outputs.lanes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -64,28 +72,23 @@ jobs:
         env:
           BENCHMARK_WORKLOADS: ${{ inputs.workloads }}
           BENCHMARK_RF: ${{ inputs.replication_factors }}
+          BENCHMARK_LANES: ${{ inputs.runner == 'gcp-ubuntu-24-04-32core' && '2' || '4' }}
         run: |
-          shards=$(node scripts/benchmark-openmessaging-shards.mjs plan \
+          lanes=$(node scripts/benchmark-openmessaging-shards.mjs plan --lanes "$BENCHMARK_LANES" \
             --workloads "$BENCHMARK_WORKLOADS" --replication-factors "$BENCHMARK_RF")
-          echo "shards=$shards" >> "$GITHUB_OUTPUT"
-          echo "$shards"
+          echo "lanes=$lanes" >> "$GITHUB_OUTPUT"
+          echo "$lanes"
 
   benchmark:
     needs: plan
-    name: benchmark (${{ matrix.shard.name }})
+    name: benchmark (${{ matrix.lane.name }})
     # Cyclenerd provisions an ephemeral VM from this label when each job queues.
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 1440
+    timeout-minutes: 2880
     strategy:
       fail-fast: false
-      # Cyclenerd creates a VM only when GitHub reports a job queued, and does
-      # not retry one it could not create. Run 37871941914 got four 16-core VMs
-      # (likely the project's vCPU quota) and its other 22 shards never got a
-      # runner. With max-parallel, GitHub queues each further shard only as a
-      # slot frees.
-      max-parallel: 4
       matrix:
-        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+        lane: ${{ fromJSON(needs.plan.outputs.lanes) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -100,32 +103,49 @@ jobs:
       - name: Authenticate private Google Cloud image pulls
         if: startsWith(inputs.krabka_image, 'us-central1-docker.pkg.dev/') || startsWith(inputs.krabka_comparison_image, 'us-central1-docker.pkg.dev/')
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-      - name: Run OpenMessaging against all three brokers
+      - name: Run this lane's shards against all three brokers
         env:
           BENCHMARK_MODE: ${{ inputs.mode }}
-          BENCHMARK_WORKLOADS: ${{ matrix.shard.workload }}
-          BENCHMARK_RF: ${{ matrix.shard.rf }}
+          LANE_SHARDS: ${{ matrix.lane.shards }}
+          LANE_WORKLOADS: ${{ matrix.lane.workloads }}
+          LANE_RFS: ${{ matrix.lane.rfs }}
           BENCHMARK_REPETITIONS: ${{ inputs.repetitions }}
           KRABKA_IMAGE: ${{ inputs.krabka_image }}
           KRABKA_COMPARISON_IMAGE: ${{ inputs.krabka_comparison_image }}
           REDPANDA_IMAGE: ${{ inputs.redpanda_image }}
         run: |
-          args=(--suite openmessaging --workloads "$BENCHMARK_WORKLOADS"
-                --replication-factors "$BENCHMARK_RF" --repetitions "$BENCHMARK_REPETITIONS"
-                --redpanda-image "$REDPANDA_IMAGE")
+          read -r -a shards <<< "$LANE_SHARDS"
+          read -r -a workloads <<< "$LANE_WORKLOADS"
+          read -r -a rfs <<< "$LANE_RFS"
           case "$BENCHMARK_MODE" in
-            smoke) args+=(--smoke) ;;
-            dry-run) args+=(--dry-run) ;;
-            full) ;;
+            smoke) mode=(--smoke) ;;
+            dry-run) mode=(--dry-run) ;;
+            full) mode=() ;;
             *) exit 1 ;;
           esac
           images=("$KRABKA_IMAGE")
           if test -n "$KRABKA_COMPARISON_IMAGE"; then
             images=("$KRABKA_COMPARISON_IMAGE" "$KRABKA_IMAGE" "$KRABKA_IMAGE" "$KRABKA_COMPARISON_IMAGE")
           fi
-          for image in "${images[@]}"; do
-            node scripts/benchmark.mjs "${args[@]}" --krabka-image "$image"
+          # A failed shard does not stop the lane; the job fails at the end
+          # and the merge refuses the incomplete set.
+          failed=()
+          for i in "${!shards[@]}"; do
+            echo "::group::Shard ${shards[$i]}"
+            for image in "${images[@]}"; do
+              if ! node scripts/benchmark.mjs --suite openmessaging --workloads "${workloads[$i]}" \
+                  --replication-factors "${rfs[$i]}" --repetitions "$BENCHMARK_REPETITIONS" \
+                  --redpanda-image "$REDPANDA_IMAGE" "${mode[@]}" --krabka-image "$image"; then
+                failed+=("${shards[$i]}")
+                break
+              fi
+            done
+            echo "::endgroup::"
           done
+          if test "${#failed[@]}" -gt 0; then
+            echo "::error::Failed shards: ${failed[*]}"
+            exit 1
+          fi
       - name: Add report to job summary
         if: always()
         run: |
@@ -136,7 +156,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard.name }}
+          name: openmessaging-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lane.name }}
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: warn
