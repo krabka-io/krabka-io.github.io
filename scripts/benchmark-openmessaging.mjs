@@ -126,7 +126,12 @@ export async function prepareOmb(directory, command, oneShot) {
 export function validateOmbResult(result, vendor, rf, config, logs = '') {
   // Upstream catches workload exceptions and can exit zero without a result.
   // A process exit status alone is never enough to mark a trial successful.
-  assert.ok(!/\]\s+ERROR\s/.test(logs), 'OMB logged an error; inspect workload logs');
+  // One exception: at the end of a maximum-rate run, upstream closes the
+  // producer while its send loop is still blocked waiting for buffer memory,
+  // and LocalWorker logs the resulting KafkaException. It follows the final
+  // aggregated results, so it says nothing about the measurement.
+  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\norg\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory\b/g, '');
+  assert.ok(!/\]\s+ERROR\s/.test(errors), 'OMB logged an error; inspect workload logs');
   assert.equal(result.driver, `${vendor}-rf${rf}`, 'wrong OMB driver');
   for (const [key, expected] of [['topics', config.topics], ['partitions', config.partitionsPerTopic], ['messageSize', config.messageSize]]) {
     assert.equal(result[key], expected, `wrong OMB ${key}`);
