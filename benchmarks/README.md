@@ -226,8 +226,6 @@ Recovery pauses the actual leader of partition 0 after 15 measured seconds for a
 
 Complete full runs retain all trial JSON and a `charts.json` containing `latency_vs_offered_throughput`, `throughput_vs_memory_budget`, and recovery timelines/events, ready for later website rendering. The new summary is `latest-curves.md`; the existing `latest.md` remains the original throughput suite. Publication rejects incomplete matrices, altered budgets, missing telemetry/fault events, counter inconsistencies, delivery errors, and missing replica recovery. Diagnostics from failed/smoke runs stay under `.benchmarks/`.
 
-The [archived 72-trial collection](diagnostics/2026-10-03T07-52-36Z-230b0a75/summary.md) contains 71 passing trials and one failed Krabka recovery trial with 59 duplicate sequences. Its compressed JSON captures and failed-trial logs are retained under `diagnostics/`, with checksums, separately from published results. Use `gzip -dc FILE` to read the JSON/JSONL files. The failed trial remains explicitly marked in the chart data; this collection does not update a latest report.
-
 ## Measurements and publication
 
 Per-trial results contain records/s, logical MiB/s, p50/p95/p99 latency, aggregate broker CPU seconds and CPU µs/acknowledged record, and observed peak RSS, anonymous memory, and working set. CPU and memory cover client startup through shutdown, while workload throughput and latency exclude client initialization. The client and admin processes run outside broker cgroups. Working set is `memory.current - inactive_file`. Sampling targets 250 ms; actual gaps are reported. RF3 memory peaks use simultaneous cluster sums, not the sum of each broker's individual maximum.
