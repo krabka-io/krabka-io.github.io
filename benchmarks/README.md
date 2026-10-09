@@ -54,8 +54,10 @@ npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
 Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
 and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
 Only `workflow_dispatch` triggers this workflow. It runs in parallel shards: one
-job per workload and replication factor, each on its own runner VM, with no limit
-on how many run at once. All three vendors for a shard, and every round of them,
+job per workload and replication factor, each on its own runner VM, at most four
+at once: Cyclenerd creates a VM only when a job queues and does not retry one it
+could not create, and the Google Cloud project has room for about four 16-core
+VMs. All three vendors for a shard, and every round of them,
 run on that shard's VM, so each comparison stays on one machine; shards never split
 vendors. Every trial gets fresh broker storage, and vendors run sequentially on the
 same VM with the same CPU affinity, 4 CPU quotas, 10 GiB memory limits, and a
