@@ -53,10 +53,14 @@ npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
 
 Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
 and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
-Only `workflow_dispatch` triggers this workflow. Every trial gets fresh broker
-storage, and vendors run sequentially on the same VM with the same CPU affinity,
-4 CPU quotas, 10 GiB memory limits, and a separate 4 GiB client. Multiple rounds
-rotate vendor order. The workflow has a 24-hour deadline; individual workloads
+Only `workflow_dispatch` triggers this workflow. It runs in parallel shards: one
+job per workload and replication factor, each on its own runner VM, with no limit
+on how many run at once. All three vendors for a shard, and every round of them,
+run on that shard's VM, so each comparison stays on one machine; shards never split
+vendors. Every trial gets fresh broker storage, and vendors run sequentially on the
+same VM with the same CPU affinity, 4 CPU quotas, 10 GiB memory limits, and a
+separate 4 GiB client. Multiple rounds rotate vendor order. Each shard has a
+24-hour deadline; individual workloads
 have their upstream duration plus 30 minutes for startup and sustainable-rate probing,
 or 90 extra minutes for a full backlog fill/drain (five extra minutes in smoke).
 Deadlines remain failures. Smoke is a wiring check, not a performance
@@ -135,6 +139,16 @@ Docker storage; full runs without backlog need 150 GiB, and smoke needs 4 GiB.
 Maximum-rate cases have no record ceiling and can outgrow a fixed disk. The runner
 monitors both filesystems and aborts with diagnostics before free space falls below
 20 GiB (1 GiB in smoke). Choose a larger worker or narrower matrix if this occurs.
+
+Each shard uploads its own `openmessaging-<run>-<attempt>-rf<RF>-<workload>` artifact.
+A final `merge` job (`scripts/benchmark-openmessaging-shards.mjs merge`) checks that
+the shards ran identical images, mode, rounds, contract and OMB build, and that every
+workload × RF × vendor × round appears exactly once. It then writes one run in the
+single-runner layout to the `openmessaging-<run>-<attempt>` artifact. That run's
+`provenance.json` keeps each shard's host, runner and CPU sets under `shards`; the
+top-level host fields are the first shard's. A failed, cancelled or incomplete shard
+fails the merge. A `krabka_comparison_image` series keeps its four reports per shard
+and is not merged.
 
 Actions retains `provenance.json`, effective/upstream YAML, immutable image and
 source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
