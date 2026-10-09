@@ -76,7 +76,7 @@ default five-minute poll interval and causing it to leave the group. Full backlo
 trials set `max.poll.interval.ms` to the workload's complete timeout, identically
 for all vendors, to allow that intentional pause. The effective driver YAML and
 `timeout_ms` are retained in artifacts; client errors still fail validation. Backlog
-size, offered rate, warm-up, post-drain duration and upstream driver code are preserved.
+size, offered rate, warm-up and post-drain duration are preserved.
 
 Set `krabka_comparison_image` to a control image and `krabka_image` to a candidate
 to compare them on the same worker in control/candidate/candidate/control order.
@@ -95,7 +95,17 @@ gh workflow run openmessaging.yml -f mode=full \
 The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
 with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
 **Kafka 3.6.1 client against every broker**, including the Kafka **4.3.1 server**.
-The driver code is unmodified. The common configuration follows upstream
+One driver change is applied, [`omb-kafka-coalesce-commits.patch`](omb-kafka-coalesce-commits.patch),
+identically for every broker. Upstream's consumer sends an async offset commit after
+every poll without waiting for the previous one. A fast drain then queues thousands
+of commits per second in the client until they expire with "Failed to send request
+after 30000 ms", which failed RF3 backlog and maximum-rate trials for Kafka and Krabka
+alike ([openmessaging/benchmark#270](https://github.com/openmessaging/benchmark/issues/270)
+reports the same). The patch keeps at most one commit in flight and folds offsets
+polled meanwhile into the next one, as Redpanda's fork does
+([redpanda-data/openmessaging-benchmark#37](https://github.com/redpanda-data/openmessaging-benchmark/pull/37)).
+A commit that still fails is logged as an error and fails the trial. The patch's
+SHA-256 is in provenance. The common configuration follows upstream
 `kafka-exactly-once.yaml`: idempotence, `acks=all`, one in-flight request, 1 MiB
 batches and 1 ms linger, with no compression. This means idempotent production,
 not transactional exactly-once application processing. Topic retention is unlimited,

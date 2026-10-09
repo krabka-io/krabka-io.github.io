@@ -1,0 +1,50 @@
+diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
+index e07b417..18fd24b 100644
+--- a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
++++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
+@@ -64,12 +64,20 @@ public class KafkaBenchmarkConsumer implements BenchmarkConsumer {
+         this.consumerTask =
+                 this.executor.submit(
+                         () -> {
++                            // krabka-io: coalesce async offset commits, as
++                            // redpanda-data/openmessaging-benchmark#37 does. Upstream
++                            // commits after every poll without waiting, so a fast drain
++                            // queues thousands of commits per second in the client until
++                            // they expire (openmessaging/benchmark#270). Offsets polled
++                            // while a commit is in flight go out together in the next
++                            // one. Callbacks run on this thread, inside poll().
++                            Map<TopicPartition, OffsetAndMetadata> offsetMap = new HashMap<>();
++                            boolean[] commitInFlight = {false};
+                             while (!closing) {
+                                 try {
+                                     ConsumerRecords<String, byte[]> records =
+                                             consumer.poll(Duration.ofMillis(pollTimeoutMs));
+ 
+-                                    Map<TopicPartition, OffsetAndMetadata> offsetMap = new HashMap<>();
+                                     for (ConsumerRecord<String, byte[]> record : records) {
+                                         callback.messageReceived(record.value(), record.timestamp());
+ 
+@@ -78,9 +86,21 @@ public class KafkaBenchmarkConsumer implements BenchmarkConsumer {
+                                                 new OffsetAndMetadata(record.offset() + 1));
+                                     }
+ 
+-                                    if (!autoCommit && !offsetMap.isEmpty()) {
++                                    if (!autoCommit && !offsetMap.isEmpty() && !commitInFlight[0]) {
+                                         // Async commit all messages polled so far
+-                                        consumer.commitAsync(offsetMap, null);
++                                        Map<TopicPartition, OffsetAndMetadata> committing = offsetMap;
++                                        offsetMap = new HashMap<>();
++                                        commitInFlight[0] = true;
++                                        Map<TopicPartition, OffsetAndMetadata> pending = offsetMap;
++                                        consumer.commitAsync(
++                                                committing,
++                                                (offsets, exception) -> {
++                                                    commitInFlight[0] = false;
++                                                    if (exception != null) {
++                                                        log.error("Offset commit with offsets {} failed", offsets, exception);
++                                                        committing.forEach(pending::putIfAbsent);
++                                                    }
++                                                });
+                                     }
+                                 } catch (Exception e) {
+                                     log.error("exception occur while consuming message", e);
