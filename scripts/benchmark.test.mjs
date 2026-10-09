@@ -199,6 +199,10 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   validateOmbResult(capture, 'krabka', 3, config);
   validateOmbResult({ ...capture, aggregatedEndToEndLatency99pct: 0 }, 'krabka', 3, config);
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed'), /logged an error/);
+  const shutdown = '19:29:44.105 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.KafkaException: Producer closed while allocating memory\n\tat org.apache.kafka.clients.producer.internals.BufferPool.allocate(BufferPool.java:161)';
+  validateOmbResult(capture, 'krabka', 3, config, shutdown);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.errors.TimeoutException: Expiring 1 record(s)'), /logged an error/);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, `${shutdown}\n20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed`), /logged an error/);
   assert.throws(() => validateOmbResult({}, 'krabka', 3, config));
   assert.throws(() => validateOmbResult({ ...capture, publishErrorRate: [0, 0, 0, 0, 0, 1] }, 'krabka', 3, config), /publish errors/);
   assert.throws(() => validateOmbResult({ ...capture, consumeRate: Array(6).fill(0) }, 'krabka', 3, config), /consumed no/);
