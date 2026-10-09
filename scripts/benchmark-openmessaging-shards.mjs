@@ -1,6 +1,6 @@
 // Splits an OpenMessaging run across runners and merges the shards back.
 //
-//   node scripts/benchmark-openmessaging-shards.mjs plan --workloads all --replication-factors 1,3
+//   node scripts/benchmark-openmessaging-shards.mjs plan --workloads all --replication-factors 1,3 [--lanes 4]
 //   node scripts/benchmark-openmessaging-shards.mjs merge --out DIR SHARD_RUN_DIR...
 //
 // A shard is one workload at one replication factor, so all three brokers for
@@ -30,6 +30,27 @@ export function parseFactors(text) {
 export function plan(workloads = 'all', replicationFactors = '1,3') {
   const factors = parseFactors(replicationFactors);
   return ombCases(workloads).flatMap(({ id }) => factors.map(rf => ({ name: `rf${rf}-${id}`, workload: id, rf })));
+}
+
+// Relative running time of a shard, for spreading shards over lanes. A 100 GB
+// backlog fill and drain takes about three times as long as the other cases.
+export const shardWeight = shard => shard.workload.startsWith('backlog-') ? 3 : 1;
+
+// Assigns shards to a fixed number of lanes, heaviest first onto the lightest
+// lane. Each lane is one runner VM that runs its shards one after another, so
+// the provisioner sees one queued job per lane rather than one per shard.
+export function lanes(shards, count) {
+  assert.ok(Number.isInteger(count) && count > 0, 'lane count must be a positive integer');
+  const result = Array.from({ length: Math.min(count, shards.length) }, (_, i) => ({ name: `lane-${i + 1}`, weight: 0, shards: [] }));
+  const order = shards.map((shard, index) => ({ shard, index }))
+    .sort((a, b) => shardWeight(b.shard) - shardWeight(a.shard) || a.index - b.index);
+  for (const { shard } of order) {
+    const lane = result.reduce((min, l) => l.weight < min.weight ? l : min);
+    lane.shards.push(shard);
+    lane.weight += shardWeight(shard);
+  }
+  return result.map(({ name, shards: list }) => ({ name, shards: list.map(s => s.name).join(' '),
+    workloads: list.map(s => s.workload).join(' '), rfs: list.map(s => s.rf).join(' ') }));
 }
 
 const imageDigest = image => image.reference;
@@ -131,8 +152,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const [command, ...rest] = process.argv.slice(2);
   if (command === 'plan') {
     const { values } = parseArgs({ args: rest, options: { workloads: { type: 'string', default: 'all' },
-      'replication-factors': { type: 'string', default: '1,3' } } });
-    console.log(JSON.stringify(plan(values.workloads, values['replication-factors'])));
+      'replication-factors': { type: 'string', default: '1,3' }, lanes: { type: 'string' } } });
+    const shards = plan(values.workloads, values['replication-factors']);
+    console.log(JSON.stringify(values.lanes === undefined ? shards : lanes(shards, Number(values.lanes))));
   } else if (command === 'merge') {
     const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { out: { type: 'string' } } });
     assert.ok(values.out && positionals.length, 'usage: merge --out DIR SHARD_RUN_DIR...');

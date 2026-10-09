@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OMB_WORKLOADS } from './benchmark-openmessaging.mjs';
-import { merge, plan } from './benchmark-openmessaging-shards.mjs';
+import { lanes, merge, plan } from './benchmark-openmessaging-shards.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
 const config = { topics: 1, partitionsPerTopic: 1, messageSize: 1024, testDurationMinutes: 1, producerRate: 5000, consumerBacklogSizeGB: 0 };
@@ -59,6 +59,28 @@ test('the plan has one shard per workload and replication factor, in catalog ord
     ['rf3-simple-workload', 'rf3-1-topic-1-partition-1kb']);
   assert.throws(() => plan('all', '2'), /replication factors/);
   assert.throws(() => plan('not-a-workload', '1'), /unknown OMB workload/);
+});
+
+test('lanes split the shards evenly by weight and run every shard exactly once', () => {
+  const all = plan('all', '1,3');
+  for (const count of [1, 2, 4]) {
+    const result = lanes(all, count);
+    assert.deepEqual(result.map(l => l.name), Array.from({ length: count }, (_, i) => `lane-${i + 1}`));
+    const names = result.flatMap(l => l.shards.split(' '));
+    assert.deepEqual([...names].sort(), all.map(s => s.name).sort());
+    for (const lane of result) {
+      const shards = lane.shards.split(' ');
+      assert.deepEqual(lane.workloads.split(' '), shards.map(n => all.find(s => s.name === n).workload));
+      assert.deepEqual(lane.rfs.split(' ').map(Number), shards.map(n => all.find(s => s.name === n).rf));
+    }
+    // 26 shards, four of them backlog (weight 3): 34 units over the lanes.
+    const weights = result.map(l => l.workloads.split(' ').reduce((sum, w) => sum + (w.startsWith('backlog-') ? 3 : 1), 0));
+    assert.ok(Math.max(...weights) - Math.min(...weights) <= 1, `uneven lanes ${weights}`);
+  }
+  // The four backlog shards land on four different lanes.
+  assert.deepEqual(lanes(all, 4).map(l => l.workloads.split(' ').filter(w => w.startsWith('backlog-')).length), [1, 1, 1, 1]);
+  assert.deepEqual(lanes(plan('simple-workload', '1'), 4), [{ name: 'lane-1', shards: 'rf1-simple-workload', workloads: 'simple-workload', rfs: '1' }]);
+  assert.throws(() => lanes(all, 0), /lane count/);
 });
 
 test('complete shards merge into one run in the single-runner layout', async () => {
