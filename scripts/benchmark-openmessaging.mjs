@@ -2,12 +2,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 export const OMB = {
   repository: 'https://github.com/openmessaging/benchmark.git',
   commit: '5b1fa70951a323da26bd587174b58bb2c65b0b5c',
   build_image: 'maven@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc',
   kafka_client_version: '3.6.1',
+  // Applied to the checkout before the build. Upstream's Kafka consumer sends
+  // an async offset commit after every poll without waiting for the last one,
+  // so a fast drain queues commits in the client until they expire with
+  // "Failed to send request after 30000 ms" (openmessaging/benchmark#270), for
+  // every broker. The patch sends at most one commit at a time, as
+  // redpanda-data/openmessaging-benchmark#37 does.
+  patches: ['benchmarks/omb-kafka-coalesce-commits.patch'],
 };
 
 // Catalog from https://openmessaging.cloud/docs/benchmarks/; two max-rate
@@ -105,6 +113,13 @@ export async function prepareOmb(directory, command, oneShot) {
   await command('git', ['-C', source, 'fetch', '--depth=1', 'origin', OMB.commit]);
   await command('git', ['-C', source, 'checkout', '--detach', 'FETCH_HEAD']);
   assert.equal((await command('git', ['-C', source, 'rev-parse', 'HEAD'])).trim(), OMB.commit);
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const patches = {};
+  for (const patch of OMB.patches) {
+    const file = path.join(root, patch);
+    patches[patch] = createHash('sha256').update(await fs.readFile(file)).digest('hex');
+    await command('git', ['-C', source, 'apply', '--whitespace=nowarn', file]);
+  }
   await command('docker', ['pull', '--platform', 'linux/amd64', OMB.build_image], { timeout: 600_000 });
   const image = JSON.parse(await command('docker', ['image', 'inspect', OMB.build_image]))[0];
   await oneShot(['--user', `${process.getuid()}:${process.getgid()}`, '--cpus', '4', '--memory', '4g', '--memory-swap', '4g',
@@ -120,7 +135,7 @@ export async function prepareOmb(directory, command, oneShot) {
     return [jar, createHash('sha256').update(await fs.readFile(local)).digest('hex')];
   })));
   return { source, m2, classpath: `/src/benchmark-framework/target/classes:${classpath}`,
-    provenance: { ...OMB, build_image_id: image.Id, jars } };
+    provenance: { ...OMB, patches, build_image_id: image.Id, jars } };
 }
 
 export function validateOmbResult(result, vendor, rf, config, logs = '') {

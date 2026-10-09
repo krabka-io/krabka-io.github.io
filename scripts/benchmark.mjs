@@ -285,7 +285,7 @@ async function main() {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
         'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
-        'benchmarks/OpenMessagingMain.java',
+        'benchmarks/OpenMessagingMain.java', 'benchmarks/omb-kafka-coalesce-commits.patch',
         'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
