@@ -172,6 +172,17 @@ top-level host fields are the first shard's. A failed, cancelled or incomplete s
 fails the merge. A `krabka_comparison_image` series keeps its four reports per shard
 and is not merged.
 
+"Same OMB build" means the same OMB commit, patch hashes, build image and
+dependency jars under `/m2`. Each runner builds OMB itself, and Maven stamps the
+jars it builds from `/src` with the build time, so those hashes differ between
+builds of the same source and are recorded but not compared.
+
+`split --rf N --reason TEXT --out DIR RUN_DIR` turns one replication factor of a
+run that did not finish into a complete shard. Every vendor, round and workload
+at that RF must have a result and no failure. The shard's provenance, and the
+merged run's `shards` entry for it, record the source run, its status and the
+reason under `derived_from`.
+
 Actions retains `provenance.json`, effective/upstream YAML, immutable image and
 source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
 250 ms CPU/memory time series, and failure diagnostics for 30 days. A complete
