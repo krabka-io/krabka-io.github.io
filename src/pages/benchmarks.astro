@@ -52,6 +52,13 @@ npm run benchmark -- --suite curves`;
         This run does not establish equal crash durability or production readiness. The results apply to these images, host settings, and workloads.
         Shared-host noise and client bottlenecks can affect the measurements.
       </p>
+      <p class="mt-2 text-sm text-gray-300 leading-relaxed">
+        <strong class="text-white">Write path.</strong> Redpanda writes its log with direct I/O (<code>O_DIRECT</code>), bypassing the Linux page cache. Krabka and Kafka write through the page cache.
+        On this host, ext4 on an md RAID1 of NVMe drives, buffered writers wait for ext4 journal commits and stall for hundreds of milliseconds under sustained load.
+        Those stalls set most of krabka's and Kafka's p99 latency here; throughput and median latency are much less affected.
+        Direct I/O for krabka's log is a possible future direction, not a current feature.
+        <a href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md#write-path-and-latency" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Details</a>.
+      </p>
     </details>
 
     <BenchmarkGraphs />
