@@ -22,7 +22,7 @@ The following pieces are the real Krabka code:
 | Avro schema parsing and reader/writer compatibility | `apache-avro` (the engine `krabka-schema-registry` uses) | the lab module | the schema registry |
 | JSON Schema and Protobuf parsing | `jsonschema`, `protox-parse`, `prost-reflect` | the lab module | the schema registry |
 
-The following pieces are written for the lab, in this crate, and they model the behaviour of the real components rather than link them: the schema registry's REST surface and `_schemas` store, the JSON Schema and Protobuf compatibility rules (a documented subset), and the Kafka client used by the producer, consumer, streams and registry nodes. The real `krabka-schema-registry` and `krabka-client-*` crates are tokio programs over TCP and files, so they do not run in the lab module. Where the lab's model and Apache Kafka disagree, the lab is wrong: match Kafka.
+The following pieces are written for the lab, in this crate, and they model the behavior of the real components rather than link them: the schema registry's REST surface and `_schemas` store, the JSON Schema and Protobuf compatibility rules (a documented subset), and the Kafka client used by the producer, consumer, streams, and registry nodes. The real `krabka-schema-registry` and `krabka-client-*` crates are Tokio programs over TCP and files, so they do not run in the lab module. Where the lab's model and Apache Kafka disagree, the lab is wrong: match Kafka.
 
 ## SSPI / Kerberos transport
 
@@ -485,6 +485,6 @@ Every string is JSON; bytes inside JSON are base64. The page never sees a Rust t
 
 ## Testing
 
-`lab::testing::TestWorld` builds a world from a scenario literal and offers `run_for(ms)`, `run_until(pred, max_ms)`, `frames_between(a, b)` counters and `node_snapshot(id)`. Module tests use it, with `client::fake_broker::FakeBroker`, a test fixture that answers the requests a client makes, in place of a broker. There is no broker in the crate's tests: cluster behaviour (a quorum forming, topics created through the admin node, producers and consumers through replicated partitions, leadership moving when a leader is killed, a schema registry replaying `_schemas`, a streams app counting into a sink topic) is covered in headless Chromium against real brokers by `npm run check-real-broker` and `npm run check-lab-clusters`, and `npm run check-lab` covers the page, persistence and WebRTC hosting without a broker.
+`lab::testing::TestWorld` builds a world from a scenario literal and offers `run_for(ms)`, `run_until(pred, max_ms)`, `frames_between(a, b)` counters, and `node_snapshot(id)`. Module tests use it with `client::fake_broker::FakeBroker`, a fixture that answers client requests in place of a broker. The crate's tests do not run a broker. Headless Chromium tests against real brokers cover cluster behavior, including quorum formation, topic creation, producers and consumers on replicated partitions, leader changes after a kill, schema registry replay of `_schemas`, and streams aggregation into a sink topic. `npm run check-lab` covers the page, persistence, and WebRTC hosting without a broker.
 
 Every assertion uses `assert2`. Wire-facing tests compare whole decoded structs. No test reads source text.
