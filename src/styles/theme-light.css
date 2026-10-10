@@ -3,12 +3,38 @@
  * gray-700, white becomes near-black, the page background near-white).
  * Generated from Tailwind's own palette; brand colours are in custom.css.
  *
- * Code blocks and the interactive apps (Cluster Lab, playgrounds, proof
- * explorer) stay dark: their syntax colours and canvases are drawn for it, so
- * they get the dark values back as islands. */
+ * Interactive apps (Cluster Lab, playgrounds, proof explorer) keep their dark
+ * canvases. Code blocks switch to a high-contrast light palette below. */
+
+:root {
+  --code-bg: #050811;
+  --code-fg: #e5e7eb;
+  --code-dim: #9ca3af;
+  --code-comment: #8b949e;
+  --code-keyword: #ff8466;
+  --code-call: #93c5fd;
+  --code-type: #fcd9a8;
+  --code-string: #86efac;
+  --code-number: #fdba74;
+  --code-constant: #ffb39e;
+  --code-macro: #c4b5fd;
+  --code-invalid: #fca5a5;
+}
 
 :root[data-theme='light'] {
   color-scheme: light;
+  --code-bg: #f8fafc;
+  --code-fg: #1f2937;
+  --code-dim: #475569;
+  --code-comment: #586174;
+  --code-keyword: #b42318;
+  --code-call: #1d4ed8;
+  --code-type: #92400e;
+  --code-string: #15803d;
+  --code-number: #b45309;
+  --code-constant: #c2410c;
+  --code-macro: #6d28d9;
+  --code-invalid: #b91c1c;
   --color-gray-50:  oklch(13% 0.028 261.692);
   --color-gray-100:  oklch(21% 0.034 264.665);
   --color-gray-200:  oklch(27.8% 0.033 256.848);
@@ -95,9 +121,6 @@
 }
 
 :root[data-theme='light'] :is(
-  .code-block,
-  .code-fence,
-  pre.astro-code,
   .dark-island,
   [data-benchmark-viewer],
   #krabka-lab,
@@ -189,6 +212,23 @@
   --color-ocean-950: #080d1a;
   --color-white: #fff;
   --color-black: #000;
+}
+
+:root[data-theme='light'] .code-block {
+  color-scheme: light;
+  background: var(--code-bg);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+:root[data-theme='light'] .markdown-body pre.astro-code {
+  color-scheme: light;
+  background: var(--code-bg) !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+:root[data-theme='light'] .markdown-body .code-fence > div:first-child {
+  background: #eef2f7;
+  border-color: rgba(15, 23, 42, 0.16);
 }
 
 :root[data-theme='light'] body {
