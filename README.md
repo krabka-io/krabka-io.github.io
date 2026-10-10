@@ -4,7 +4,7 @@ The official website and unified documentation hub for the [krabka](https://gith
 
 Hosted live at [krabka.io](https://krabka.io) and [krabka-io.github.io](https://krabka-io.github.io).
 
-The site also publishes two things the rest of the organisation depends on: the aggregated Helm chart repository, and the brand assets that published charts point their icon at.
+The site also publishes two things the rest of the organization depends on: the aggregated Helm chart repository and the brand assets that published charts use for their icons.
 
 ---
 
@@ -178,7 +178,7 @@ helm repo add krabka https://krabka.io/charts
 helm repo update
 ```
 
-`scripts/build-helm-index.sh` walks the `krabka-io` organisation, takes every repository that holds a `charts/` directory, packages each chart (signing it when `HELM_GPG_KEY` is set), and writes one `index.yaml` over the whole set in `public/charts/`. It needs `helm`, an authenticated `gh` and `python3`. The `helm-index.yml` workflow runs daily and opens a pull request with the result, which a maintainer merges.
+`scripts/build-helm-index.sh` walks the `krabka-io` organization, takes every repository that holds a `charts/` directory, packages each chart (signing it when `HELM_GPG_KEY` is set), and writes one `index.yaml` over the whole set in `public/charts/`. It needs `helm`, an authenticated `gh`, and `python3`. The `helm-index.yml` workflow runs daily and opens a pull request for a maintainer to merge.
 
 A component repository can trigger an immediate index rebuild via repository dispatch:
 

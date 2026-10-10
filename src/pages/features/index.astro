@@ -4,30 +4,30 @@ import { getPath } from '../../utils/paths';
 
 const characteristics = [
   { feature: 'Runtime', detail: 'Rust binary with Tokio async I/O', href: getPath('/docs/runtime-architecture') },
-  { feature: 'Memory Safety', detail: 'unsafe_code forbidden by lint under Cargo and Bazel', href: getPath('/verification#memory-safety') },
-  { feature: 'Formal Verification', detail: 'Creusot-proved decision-kernel contracts in krabka-verified', href: getPath('/verification#proof-contracts') },
-  { feature: 'Model Checking', detail: 'Stateright models checked within stated bounds on every pull request', href: getPath('/verification#model-bounds') },
-  { feature: 'Metadata Consensus', detail: 'KRaft quorum with KIP-595 wire codecs', href: getPath('/features/kraft') },
-  { feature: 'Kafka Wire Protocol', detail: 'Apache Kafka 4.3 codecs generated from upstream schemas', href: getPath('/docs/kip-matrix') },
-  { feature: 'Admin Tooling', detail: 'Apache Kafka kafka-*.sh CLI tools and krabka-cli', href: getPath('/docs/cli') },
-  { feature: 'Connect & CDC', detail: 'Separate krabka-connect PostgreSQL CDC worker and replicator', href: getPath('/docs/connect-postgres') },
+  { feature: 'Memory safety', detail: 'unsafe_code forbidden by lint under Cargo and Bazel', href: getPath('/verification#memory-safety') },
+  { feature: 'Formal verification', detail: 'Creusot-proved decision-kernel contracts in krabka-verified', href: getPath('/verification#proof-contracts') },
+  { feature: 'Model checking', detail: 'Stateright models checked within stated bounds on every pull request', href: getPath('/verification#model-bounds') },
+  { feature: 'Metadata consensus', detail: 'KRaft quorum with KIP-595 wire codecs', href: getPath('/features/kraft') },
+  { feature: 'Kafka wire protocol', detail: 'Apache Kafka 4.3 codecs generated from upstream schemas', href: getPath('/docs/kip-matrix') },
+  { feature: 'Admin tooling', detail: 'Apache Kafka kafka-*.sh CLI tools and krabka-cli', href: getPath('/docs/cli') },
+  { feature: 'Connect and CDC', detail: 'Separate krabka-connect PostgreSQL CDC worker and replicator', href: getPath('/docs/connect-postgres') },
   { feature: 'License', detail: 'Apache License 2.0', href: 'https://www.apache.org/licenses/LICENSE-2.0' },
 ];
 
 const modules = [
   {
-    title: 'Native KRaft Consensus Quorum',
+    title: 'Native KRaft consensus quorum',
     tag: 'krabka-broker',
     slug: getPath('/features/kraft'),
     desc: 'The Rust KRaft quorum stores cluster metadata in krabka-raft and krabka-kraft-core. It implements KIP-595 wire codecs, separate broker and controller roles, and dynamic quorum reconfiguration without ZooKeeper.',
     points: [
-      'Byte-exact KRaft metadata records & in-memory image',
+      'Byte-exact KRaft metadata records and in-memory image',
       'Dynamic voter addition and decommission without cluster restart',
-      'Election and quorum decisions proved with Creusot, consensus model-checked with Stateright',
+      'Election and quorum decisions proved with Creusot; consensus model-checked with Stateright',
     ],
   },
   {
-    title: 'Tiered Storage',
+    title: 'Tiered storage',
     tag: 'krabka-broker',
     slug: getPath('/features/tiered-storage'),
     desc: 'krabka-remote-storage and krabka-object-store upload sealed partition segments to Amazon S3, Google Cloud Storage, or MinIO. The __remote_log_metadata topic stores the segment catalog.',
@@ -38,7 +38,7 @@ const modules = [
     ],
   },
   {
-    title: 'krabka Connect & Postgres CDC',
+    title: 'krabka Connect and Postgres CDC',
     tag: 'krabka-connect',
     slug: getPath('/features/connect'),
     desc: 'The separate krabka-connect worker streams PostgreSQL WAL changes into Kafka topics with checkpointed, at-least-once delivery. Changes to each primary key stay in order; the connector does not take an initial snapshot.',
@@ -49,29 +49,29 @@ const modules = [
     ],
   },
   {
-    title: 'Polyglot Stream Processing & Arrow',
+    title: 'Polyglot stream processing and Arrow',
     tag: 'krabka-streams-*',
     slug: getPath('/features/streams'),
     desc: 'Stream processing libraries for Rust, Go, and Java. The libraries provide state stores, Apache Arrow record-batch operators, schema serdes, and barrier coordination; support varies by language.',
     points: [
-      'Native Rust Streams (tokio async pipeline & state stores)',
-      'Go Streams with Arrow record batches and barrier cuts',
-      'Java client with Schema Registry and Arrow columnar serdes',
+      'Native Rust streams (Tokio async pipeline and state stores)',
+      'Go streams with Arrow record batches and barrier cuts',
+      'Java client with schema registry and Arrow columnar serdes',
     ],
   },
   {
-    title: 'Kubernetes Native Operator',
+    title: 'Kubernetes native operator',
     tag: 'krabka-operator',
     slug: getPath('/features/operator'),
     desc: 'The operator reconciles krabka.io/v1alpha1 custom resources for Kafka clusters, node pools, topics, users, connectors, schema registries, and partition rebalancing.',
     points: [
-      'CRDs for Kafka, KafkaNodePool, KafkaTopic, KafkaUser, KafkaConnector',
+      'CRDs for Kafka, KafkaNodePool, KafkaTopic, KafkaUser, and KafkaConnector',
       'StatefulSet rolling updates with readiness checks',
       'Integrated partition reassignment and rebalancing engine',
     ],
   },
   {
-    title: 'Correctness & Verification',
+    title: 'Correctness and verification',
     tag: 'krabka-verified',
     slug: getPath('/verification'),
     desc: 'The broker forbids unsafe Rust. Creusot proves selected decision-kernel contracts, and Stateright checks crash and retry sequences within model bounds. CI reruns the proofs and models on every pull request.',

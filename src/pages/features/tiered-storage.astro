@@ -31,10 +31,10 @@ replication = 3`;
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
       <a href={getPath('/features')} class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
-        Back to Features Overview
+        Back to features overview
       </a>
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-        Tiered Storage
+        Tiered storage
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
         <code class="text-krab-300 font-mono text-sm">krabka-remote-storage</code> and <code class="text-krab-300 font-mono text-sm">krabka-object-store</code> upload sealed log segments to S3-compatible object storage (including MinIO) or Google Cloud Storage. Active segments stay on local disk, and consumers can fetch older offsets from object storage.
@@ -45,25 +45,25 @@ replication = 3`;
       
       <!-- Section A: Two-Tier Architecture -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">Two-Tier Storage Architecture</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">Two-tier storage architecture</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           Partition segments use two storage tiers:
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-5 rounded-xl border border-white/5 space-y-2">
-            <h3 class="text-sm font-bold text-krab-400 font-sans">Hot Tier (Local Disk)</h3>
+            <h3 class="text-sm font-bold text-krab-400 font-sans">Hot tier (local disk)</h3>
             <p class="text-gray-300 leading-relaxed">Active write-ahead log (WAL) segments are appended and indexed on local disks via <code class="font-mono text-krab-300">krabka-log</code>, in Apache Kafka's on-disk log format.</p>
           </div>
           <div class="bg-black/30 p-5 rounded-xl border border-white/5 space-y-2">
-            <h3 class="text-sm font-bold text-krab-400 font-sans">Cold Tier (Object Storage Offloading)</h3>
-            <p class="text-gray-300 leading-relaxed">Once a segment reaches size or time limits, background copier threads upload the segment to an S3-compatible object store (Amazon S3, MinIO) or Google Cloud Storage via <code class="font-mono text-krab-300">krabka-remote-storage</code>.</p>
+            <h3 class="text-sm font-bold text-krab-400 font-sans">Cold tier (object storage)</h3>
+            <p class="text-gray-300 leading-relaxed">Once a segment reaches its configured size or time threshold, background copier threads upload it to an S3-compatible object store (Amazon S3 or MinIO) or Google Cloud Storage via <code class="font-mono text-krab-300">krabka-remote-storage</code>.</p>
           </div>
         </div>
       </div>
 
       <!-- Section B: Topic-Backed RLMM -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">Topic-Backed Remote Log Metadata Manager</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">Topic-backed remote log metadata manager</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           <code class="font-mono text-xs text-gray-200">krabka-remote-storage-topic</code> stores the segment catalog in the internal Kafka topic <code class="font-mono text-krab-300 text-xs">__remote_log_metadata</code>. Kafka replicates that topic; the catalog does not require a separate database.
         </p>
@@ -72,7 +72,7 @@ replication = 3`;
       <!-- Section C: Configuration -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-bold text-white font-sans"><a href={getPath('/docs/broker/config-reference#remote_storage')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Tiered Storage Configuration</a></h2>
+          <h2 class="text-xl font-bold text-white font-sans"><a href={getPath('/docs/broker/config-reference#remote_storage')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Tiered storage configuration</a></h2>
           <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={tieredConfig}>
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
             <span>Copy Config</span>
@@ -83,7 +83,7 @@ replication = 3`;
 
       <!-- Section D: Zero-Copy Fetch Routing -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">Remote Fetch Routing</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">Remote fetch routing</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           Consumers fetching offsets that have aged out of local storage are served from object storage through a bounded pool of remote reader threads, using an on-disk cache of remote segment indexes. Tokio async tasks handle socket transfer.
         </p>

@@ -25,10 +25,10 @@ krabka-connect-worker \\
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="mb-8">
       <a href={getPath('/features')} class="inline-flex items-center text-sm font-semibold text-krab-400 hover:text-krab-300 transition-colors font-sans mb-4">
-        Back to Features Overview
+        Back to features overview
       </a>
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-        krabka Connect & Postgres CDC
+        krabka Connect and Postgres CDC
       </h1>
       <p class="mt-4 text-lg text-gray-300 leading-relaxed font-sans max-w-3xl">
         Stream real-time PostgreSQL database mutations directly into krabka topics with <a href={getPath('/docs/connect-postgres#checkpoints')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">checkpointed, at-least-once delivery</a> and no separate Kafka Connect cluster. Each change is keyed by the row's primary key, so changes to one row stay in order.
@@ -39,21 +39,21 @@ krabka-connect-worker \\
       
       <!-- Section A: Connector Framework SPI -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">Connector SPI Contract (<code class="text-krab-400 font-mono text-xl">krabka-connect</code>)</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">Connector SPI contract (<code class="text-krab-400 font-mono text-xl">krabka-connect</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
-          The connector engine defines the core <code class="font-mono text-xs text-krab-300">Source</code>, <code class="font-mono text-xs text-krab-300">Sink</code>, and <code class="font-mono text-xs text-krab-300">Converter</code> traits, with derive macros in <code class="font-mono text-xs text-krab-300">krabka-connect-derive</code> for strongly-typed configuration validation.
+          The connector engine defines the core <code class="font-mono text-xs text-krab-300">Source</code>, <code class="font-mono text-xs text-krab-300">Sink</code>, and <code class="font-mono text-xs text-krab-300">Converter</code> traits, with derive macros in <code class="font-mono text-xs text-krab-300">krabka-connect-derive</code> for strongly typed configuration validation.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs font-sans">
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
-            <strong class="text-white font-bold">Source Trait</strong>
+            <strong class="text-white font-bold">Source trait</strong>
             <p class="text-gray-400 leading-relaxed">Polls external systems, producing typed change records and a checkpointable read position such as a PostgreSQL LSN.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
-            <strong class="text-white font-bold">Sink Trait</strong>
+            <strong class="text-white font-bold">Sink trait</strong>
             <p class="text-gray-400 leading-relaxed">Pushes records into an external system in batches, with an optional transactional write gate for exactly-once delivery.</p>
           </div>
           <div class="bg-black/30 p-4 rounded-xl border border-white/5 space-y-1.5">
-            <strong class="text-white font-bold">Worker Runtime</strong>
+            <strong class="text-white font-bold">Worker runtime</strong>
             <p class="text-gray-400 leading-relaxed">Runs one PostgreSQL source connector per process via <code class="font-mono text-krab-300">krabka-connect-worker</code>, checkpointing progress in a compacted Kafka topic and resuming after a restart.</p>
           </div>
         </div>
@@ -61,14 +61,14 @@ krabka-connect-worker \\
 
       <!-- Section B: Postgres CDC Source -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">PostgreSQL Logical Decoding Engine (<code class="text-krab-400 font-mono text-xl">krabka-connect-postgres</code>)</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">PostgreSQL logical decoding engine (<code class="text-krab-400 font-mono text-xl">krabka-connect-postgres</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           The PostgreSQL connector interfaces directly with <a href={getPath('/docs/connect-postgres')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">PostgreSQL logical replication</a> streams using the standard <code class="font-mono text-xs text-gray-200">pgoutput</code> decoding plugin:
         </p>
         <ul class="list-disc list-outside text-sm text-gray-400 space-y-2 font-sans pl-5">
-          <li><strong>Changes Only:</strong> There is no initial snapshot. The connector emits the changes that logical decoding makes available from its replication slot.</li>
-          <li><strong>Transaction Metadata:</strong> Every record value carries the source LSN, transaction ID, and commit timestamp. Deletes are emitted as tombstones.</li>
-          <li><strong>Schema Registry Framing:</strong> Keys and values are Protobuf, framed with schema IDs from a Confluent-compatible registry. The connector registers one shared change-record schema at startup, and the acceptance suite adds a column mid-stream without interrupting the flow.</li>
+          <li><strong>Changes only:</strong> There is no initial snapshot. The connector emits the changes that logical decoding makes available from its replication slot.</li>
+          <li><strong>Transaction metadata:</strong> Every record value carries the source LSN, transaction ID, and commit timestamp. Deletes are emitted as tombstones.</li>
+          <li><strong>Schema Registry framing:</strong> Keys and values are Protobuf, framed with schema IDs from a Confluent-compatible registry. The connector registers one shared change-record schema at startup, and the acceptance suite adds a column mid-stream without interrupting the flow.</li>
         </ul>
 
         <div class="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans">
@@ -93,7 +93,7 @@ krabka-connect-worker \\
       <!-- Section C: Configuration -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-bold text-white font-sans">PostgreSQL CDC Worker Invocation</h2>
+          <h2 class="text-xl font-bold text-white font-sans">PostgreSQL CDC worker invocation</h2>
           <button type="button" class="copy-btn flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-white/20 hover:text-white transition-all font-sans" data-copy={cdcConfig}>
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
             <span>Copy Command</span>
@@ -104,7 +104,7 @@ krabka-connect-worker \\
 
       <!-- Section D: Active-Active Replicator -->
       <div class="frosted-card rounded-2xl p-5 sm:p-8 border border-white/10 space-y-4">
-        <h2 class="text-2xl font-bold text-white font-sans">Active-Active Replicator (<code class="text-krab-400 font-mono text-xl">krabka-replicator</code>)</h2>
+        <h2 class="text-2xl font-bold text-white font-sans">Active-active replicator (<code class="text-krab-400 font-mono text-xl">krabka-replicator</code>)</h2>
         <p class="text-gray-300 leading-relaxed font-sans text-sm">
           A native replication service wire-compatible with MirrorMaker 2. It synchronizes topic partitions across distinct geographic clusters, handles consumer offset translation, and prevents circular record replication for active-passive or active-active multi-region failover.
         </p>

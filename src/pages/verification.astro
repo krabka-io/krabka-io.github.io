@@ -78,7 +78,7 @@ const localEvidence: EvidenceItem[] = [
     claim: 'Digest-pinned Apache Kafka and Confluent Platform brokers run beside krabka, real kafka-clients drive both, and responses are compared byte for byte.',
     body_html: [
       `<p>Digest-pinned Apache Kafka and Confluent Platform brokers run beside krabka. Real <code>kafka-clients</code> and the standard admin tools drive both, and responses are compared byte for byte.</p>`,
-      `<p>The wire layer in <a href="${protocolRepo}" target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Protocol encoding and decoding sit largely outside both formal tiers, so these suites are the evidence that the generated codecs are byte exact against a live Kafka.</p>`,
+      `<p>The wire layer in <a href="${protocolRepo}" target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas. These codecs are written in safe Rust; differential suites check their behavior against live Kafka brokers because protocol encoding and decoding sit largely outside both formal tiers.</p>`,
     ].join(''),
     links: [
       { label: 'README: container suites', url: `${brokerRepo}/blob/main/README.md#container-suites` },
@@ -238,7 +238,7 @@ const articleSchema = {
                 krabka is written in safe Rust. The workspace lint <code>unsafe_code = "forbid"</code> cannot be overridden by an inner attribute, and the Bazel build passes the same <code>-Funsafe_code</code> flag. Clippy runs at the <code>pedantic</code> level with warnings promoted to errors, and no suppression attributes are accepted.
               </p>
               <p>
-                The wire layer in <a href={protocolRepo} target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas, so a malformed request is a decode error, not undefined behavior. Byte exactness against Kafka is checked by differential suites that run digest-pinned Apache Kafka and Confluent Platform brokers beside krabka and compare live responses.
+                The wire layer in <a href={protocolRepo} target="_blank" rel="noopener noreferrer">krabka-protocol</a> generates its codecs from the upstream Apache Kafka JSON schemas and is written in safe Rust. Differential suites run digest-pinned Apache Kafka and Confluent Platform brokers beside krabka and compare live responses, covering protocol behavior that falls largely outside both formal tiers.
               </p>
             </div>
           </details>
