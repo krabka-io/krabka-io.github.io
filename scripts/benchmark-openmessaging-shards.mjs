@@ -2,6 +2,7 @@
 //
 //   node scripts/benchmark-openmessaging-shards.mjs plan --workloads all --replication-factors 1,3 [--lanes 4]
 //   node scripts/benchmark-openmessaging-shards.mjs merge --out DIR SHARD_RUN_DIR...
+//   node scripts/benchmark-openmessaging-shards.mjs split --rf N --reason TEXT --out DIR RUN_DIR
 //
 // A shard is one workload at one replication factor, so all three brokers for
 // that pair, and every round of them, run on the same machine. The merge
@@ -54,6 +55,16 @@ export function lanes(shards, count) {
 }
 
 const imageDigest = image => image.reference;
+// What defines a shard's OMB build. Each runner builds OMB itself, and Maven
+// stamps the jars it builds from /src with the build time, so their hashes
+// differ between two builds of the same source. The source is pinned by the
+// commit and the patch hashes, the toolchain by the build image, and every
+// dependency jar under /m2 is compared byte for byte.
+const ombBuild = provenance => {
+  const omb = provenance.openmessaging ?? {};
+  return { commit: omb.commit, patches: omb.patches, build_image_id: omb.build_image_id,
+    dependencies: Object.fromEntries(Object.entries(omb.jars ?? {}).filter(([jar]) => !jar.startsWith('/src/'))) };
+};
 const caseOrder = id => {
   const index = OMB_WORKLOADS.indexOf(id);
   return index === -1 ? OMB_WORKLOADS.length : index;
@@ -76,12 +87,52 @@ export async function loadShard(directory) {
   return { directory, provenance, trials };
 }
 
+// Turns one replication factor of a run that did not finish into a complete
+// shard. A run interrupted part-way through RF3 has every RF1 trial, run on
+// the same host, images and OMB build in one pass; this keeps those trials
+// instead of repeating them. Every vendor, round and workload at that RF must
+// have a trial.json and no failure.json, so nothing at the RF was skipped or
+// failed. The shard records the source run, its status and the reason under
+// derived_from, and the merged provenance keeps that record per shard.
+export async function split(directory, rf, out, reason) {
+  assert.ok(typeof reason === 'string' && reason.trim(), 'split needs a reason');
+  const source = JSON.parse(await fs.readFile(path.join(directory, 'provenance.json'), 'utf8'));
+  assert.equal(source.suite, 'openmessaging', `${directory} is not an OpenMessaging run`);
+  assert.notEqual(source.status, 'complete', `run ${source.run_id} is complete; merge it as it is`);
+  assert.ok(source.replication_factors.includes(rf), `run ${source.run_id} did not include RF${rf}`);
+  const names = [];
+  let completed = 0;
+  for (const vendor of VENDORS) for (let repetition = 1; repetition <= source.repetitions; repetition++) {
+    for (const workload of source.cases) {
+      const name = `rf${rf}-${vendor}-${repetition}-${workload.id}`;
+      await assert.rejects(fs.access(path.join(directory, name, 'failure.json')), undefined,
+        `${name} failed in run ${source.run_id}`);
+      const stat = await fs.stat(path.join(directory, name, 'trial.json')).catch(() => {
+        throw new assert.AssertionError({ message: `run ${source.run_id} has no completed ${name}` });
+      });
+      completed = Math.max(completed, stat.mtimeMs);
+      names.push(name);
+    }
+  }
+  const provenance = { ...source, run_id: `${source.run_id}-rf${rf}`, status: 'complete',
+    replication_factors: [rf], completed_trials: names.length, failed_trials: 0,
+    completed_at: new Date(completed).toISOString(),
+    derived_from: { run_id: source.run_id, status: source.status, replication_factor: rf, reason } };
+  await fs.mkdir(out, { recursive: false });
+  for (const name of names) {
+    await fs.cp(path.join(directory, name), path.join(out, name), { recursive: true, errorOnExist: true, force: false });
+  }
+  await fs.writeFile(path.join(out, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
+  // loadShard re-reads every trial and checks that it matches its name.
+  return loadShard(out);
+}
+
 export function mergeProvenance(shards, runId) {
   assert.ok(shards.length > 0, 'no shards to merge');
   const [first] = shards.map(s => s.provenance);
   for (const { provenance } of shards) {
     for (const key of SHARED) assert.deepEqual(provenance[key], first[key], `shard ${provenance.run_id} differs in ${key}`);
-    assert.deepEqual(provenance.openmessaging?.jars, first.openmessaging?.jars, `shard ${provenance.run_id} differs in the OMB build`);
+    assert.deepEqual(ombBuild(provenance), ombBuild(first), `shard ${provenance.run_id} differs in the OMB build`);
     for (const vendor of VENDORS) {
       assert.equal(imageDigest(provenance.images[vendor]), imageDigest(first.images[vendor]),
         `shard ${provenance.run_id} ran a different ${vendor} image`);
@@ -124,6 +175,7 @@ export function mergeProvenance(shards, runId) {
       runner: provenance.runner,
       cpu_sets: provenance.cpu_sets,
       images: provenance.images,
+      ...(provenance.derived_from ? { derived_from: provenance.derived_from } : {}),
     })),
   };
   for (const workload of merged.cases) for (const rf of merged.replication_factors) {
@@ -160,7 +212,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     assert.ok(values.out && positionals.length, 'usage: merge --out DIR SHARD_RUN_DIR...');
     const result = await merge(positionals.map(p => path.resolve(p)), path.resolve(values.out));
     console.log(`Merged ${result.shards} shards into ${result.run_id}: ${result.trials} trials.`);
+  } else if (command === 'split') {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
+      options: { out: { type: 'string' }, rf: { type: 'string' }, reason: { type: 'string' } } });
+    assert.ok(values.out && values.rf && values.reason && positionals.length === 1,
+      'usage: split --rf N --reason TEXT --out DIR RUN_DIR');
+    const shard = await split(path.resolve(positionals[0]), Number(values.rf), path.resolve(values.out), values.reason);
+    console.log(`Split ${shard.trials.length} RF${values.rf} trials into ${shard.provenance.run_id}.`);
   } else {
-    throw new Error('usage: benchmark-openmessaging-shards.mjs plan|merge ...');
+    throw new Error('usage: benchmark-openmessaging-shards.mjs plan|merge|split ...');
   }
 }

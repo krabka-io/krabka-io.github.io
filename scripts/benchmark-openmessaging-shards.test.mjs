@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OMB_WORKLOADS } from './benchmark-openmessaging.mjs';
-import { lanes, merge, plan } from './benchmark-openmessaging-shards.mjs';
+import { lanes, merge, plan, split } from './benchmark-openmessaging-shards.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
 const config = { topics: 1, partitionsPerTopic: 1, messageSize: 1024, testDurationMinutes: 1, producerRate: 5000, consumerBacklogSizeGB: 0 };
@@ -23,7 +23,8 @@ async function shard(root, { workload, rf, repetitions = 1, status = 'complete',
     started_at: `2026-10-09T0${rf}:00:00Z`, completed_at: `2026-10-09T0${rf}:30:00Z`,
     images, cases: [{ id: workload, upstream_file: `workloads/${workload}.yaml`, config }],
     workload_source: { commit: '5b1fa709' }, contract: { broker_cpus: 4 }, client_jars: { a: '1' }, client_java: '17',
-    openmessaging: { jars: { j: '2' } }, replication_factors: [rf], host: { name: host }, runner: { label: host }, cpu_sets: {},
+    openmessaging: { commit: '5b1fa709', patches: { p: '3' }, build_image_id: 'sha256:ee',
+      jars: { '/m2/dep.jar': '2', '/src/driver-kafka/target/driver-kafka.jar': host } }, replication_factors: [rf], host: { name: host }, runner: { label: host }, cpu_sets: {},
     ...overrides };
   await fs.writeFile(path.join(directory, 'provenance.json'), JSON.stringify(provenance));
   for (const vendor of VENDORS) for (let repetition = 1; repetition <= repetitions; repetition++) {
@@ -114,6 +115,10 @@ test('merging refuses shards that do not form one complete comparison', async ()
     ['a different image', [{ workload: 'simple-workload', rf: 1 },
       { workload: 'simple-workload', rf: 3, overrides: { images: { ...images, krabka: { ...images.krabka, reference: 'other@sha256:dd' } } } }], /different krabka image/],
     ['different rounds', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3, repetitions: 2 }], /differs in repetitions/],
+    ['a different dependency jar', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3,
+      overrides: { openmessaging: { commit: '5b1fa709', patches: { p: '3' }, build_image_id: 'sha256:ee', jars: { '/m2/dep.jar': '9' } } } }], /differs in the OMB build/],
+    ['a different OMB patch', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3,
+      overrides: { openmessaging: { commit: '5b1fa709', patches: { p: '4' }, build_image_id: 'sha256:ee', jars: { '/m2/dep.jar': '2' } } } }], /differs in the OMB build/],
     ['a smoke shard among full ones', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3, overrides: { mode: 'smoke' } }], /differs in mode/],
   ];
   for (const [label, specs, error] of cases) {
@@ -123,4 +128,51 @@ test('merging refuses shards that do not form one complete comparison', async ()
     const out = path.join(root, 'merged');
     await assert.rejects(merge(shards, out), error, label);
   }
+});
+
+// A run interrupted part-way through RF3: every RF1 trial completed, RF3 has
+// one completed trial and one failure.
+async function interrupted(root, { omit = null, fail = null } = {}) {
+  const directory = await shard(root, { workload: 'simple-workload', rf: 1, status: 'running',
+    overrides: { run_id: 'killed-run', replication_factors: [1, 3] } });
+  const rf3 = path.join(directory, 'rf3-krabka-1-simple-workload');
+  await fs.mkdir(rf3);
+  await fs.writeFile(path.join(rf3, 'failure.json'), '{}');
+  if (omit) await fs.rm(path.join(directory, omit), { recursive: true });
+  if (fail) await fs.writeFile(path.join(directory, fail, 'failure.json'), '{}');
+  return directory;
+}
+
+test('a completed replication factor of an interrupted run splits into a mergeable shard', async () => {
+  const root = await scratch();
+  const source = await interrupted(root);
+  const out = path.join(root, 'rf1-shard');
+  const shard1 = await split(source, 1, out, 'runner killed during RF3');
+  assert.equal(shard1.trials.length, 3);
+  assert.deepEqual([shard1.provenance.run_id, shard1.provenance.status, shard1.provenance.replication_factors],
+    ['killed-run-rf1', 'complete', [1]]);
+  assert.deepEqual(shard1.provenance.derived_from,
+    { run_id: 'killed-run', status: 'running', replication_factor: 1, reason: 'runner killed during RF3' });
+  await assert.rejects(fs.access(path.join(out, 'rf3-krabka-1-simple-workload')));
+  const rf3 = await shard(root, { workload: 'simple-workload', rf: 3, host: 'vm-rerun' });
+  const merged = path.join(root, 'merged');
+  assert.deepEqual(await merge([out, rf3], merged), { run_id: 'merged', shards: 2, trials: 6 });
+  const provenance = JSON.parse(await fs.readFile(path.join(merged, 'provenance.json'), 'utf8'));
+  assert.deepEqual(provenance.shards.map(s => s.derived_from?.run_id ?? null), ['killed-run', null]);
+});
+
+test('splitting refuses a replication factor with a missing or failed trial', async () => {
+  const cases = [
+    ['the incomplete RF', {}, 3, /failed in run killed-run/],
+    ['a missing trial', { omit: 'rf1-kafka-1-simple-workload' }, 1, /has no completed rf1-kafka-1-simple-workload/],
+    ['a failed trial', { fail: 'rf1-redpanda-1-simple-workload' }, 1, /rf1-redpanda-1-simple-workload failed/],
+  ];
+  for (const [label, damage, rf, error] of cases) {
+    const root = await scratch();
+    const source = await interrupted(root, damage);
+    await assert.rejects(split(source, rf, path.join(root, 'out'), 'test'), error, label);
+  }
+  const root = await scratch();
+  const complete = await shard(root, { workload: 'simple-workload', rf: 1 });
+  await assert.rejects(split(complete, 1, path.join(root, 'out'), 'test'), /is complete/);
 });
