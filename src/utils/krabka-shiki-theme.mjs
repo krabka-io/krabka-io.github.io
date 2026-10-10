@@ -4,20 +4,22 @@
 // The palette is the one the rustdoc theme in krabka-io/tooling gives the API
 // reference (vermilion keywords, blue callables, green literals, violet
 // macros), so a snippet reads the same in a guide and in the docs it links to.
-// Every foreground clears 4.5:1 on the #050811 code background.
 
+// CSS variables let the same pre-rendered tokens follow the active site theme.
+// The light-mode values are defined in theme-light.css, so switching themes
+// does not require re-highlighting the page in JavaScript.
 const c = {
-  fg: '#e5e7eb',
-  dim: '#9ca3af',
-  comment: '#8b949e',
-  keyword: '#ff8466',
-  call: '#93c5fd',
-  type: '#fcd9a8',
-  string: '#86efac',
-  number: '#fdba74',
-  constant: '#ffb39e',
-  macro: '#c4b5fd',
-  invalid: '#fca5a5',
+  fg: 'var(--code-fg)',
+  dim: 'var(--code-dim)',
+  comment: 'var(--code-comment)',
+  keyword: 'var(--code-keyword)',
+  call: 'var(--code-call)',
+  type: 'var(--code-type)',
+  string: 'var(--code-string)',
+  number: 'var(--code-number)',
+  constant: 'var(--code-constant)',
+  macro: 'var(--code-macro)',
+  invalid: 'var(--code-invalid)',
 };
 
 const rule = (scope, foreground, fontStyle) => ({
@@ -29,7 +31,7 @@ export default {
   name: 'krabka-dark',
   type: 'dark',
   colors: {
-    'editor.background': '#050811',
+    'editor.background': 'var(--code-bg)',
     'editor.foreground': c.fg,
   },
   tokenColors: [
