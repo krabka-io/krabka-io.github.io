@@ -2,6 +2,8 @@
 
 # Krabka, Kafka 4.3.1, and Redpanda — local benchmark
 
+> **Krabka version:** these results are from krabka-broker 0.7.0. They have not been re-run for 1.0.0; a 1.0.0 run needs the dedicated benchmark host.
+
 Run: 2026-10-03T21-05-54Z-d06d64d6. Completed: 2026-10-03T21:55:43.496Z.
 
 These are buffered-write, local end-to-end throughput measurements. Each row reports the median of three independent repetitions, followed by the observed minimum–maximum range. Comparisons apply only to these images, this host, and this workload.

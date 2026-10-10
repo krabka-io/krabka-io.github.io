@@ -2,7 +2,7 @@
 
 `npm run benchmark` compares published Krabka, Kafka **4.3.1**, and Redpanda containers on the local host. It runs six producer/consumer cases at RF1 and RF3, with three independent repetitions and a rotating vendor order. A complete run writes dated machine-readable results and a Markdown report under `results/`, then replaces `latest.md`. Results are local measurements, not production qualification.
 
-The latest Krabka **0.7.0** collections passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
+The checked-in local collections are from Krabka **0.7.0** and have not been re-run for 1.0.0. They passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
 
 ```sh
 # Check prerequisites and resolve immutable image references without starting containers
@@ -184,8 +184,14 @@ logged client/consumer errors and missing resource counters fail the run,
 including when upstream exits zero after
 catching a workload exception. Failed trials are recorded and the remaining matrix
 is attempted; failed matrices do not produce a successful summary. Artifacts stay
-under `.benchmarks/<run-id>/`; this suite never rewrites `latest.md`, commits, pushes,
-or publishes website performance claims.
+under `.benchmarks/<run-id>/`; the runner never rewrites `latest.md`, commits or pushes.
+
+To publish a complete full-mode run on the website, download its `openmessaging-<run>-<attempt>`
+artifact and run `node scripts/publish-openmessaging.mjs <artifact>/<run-id>`. The script
+rejects smoke, failed and incomplete matrices, re-validates every trial, and writes
+`benchmarks/openmessaging/<run-id>/` (provenance, summary and a compact `trials.json` without raw
+time series) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
+and commit those files; the raw artifact stays in Actions for 30 days.
 
 ## Local runner prerequisites
 
@@ -241,8 +247,6 @@ Rate-limited records carry their **scheduled send timestamp**, so acknowledgment
 Recovery pauses the actual leader of partition 0 after 15 measured seconds for at least ten seconds, then resumes the same container and storage. Smoke pauses after four measured seconds for at least five seconds. `events` records actual pause/unpause completion times, UTC timestamps, container/broker identity, and affected leader partitions on the workload clock. Resource sampling continues while the process is paused; counters remain comparable across resume. The run requires exact final acknowledged/consumed counts, no duplicates/errors, and all replicas back in ISR afterward. Recovery time is the first three consecutive post-resume intervals with at least 90% of offered acknowledgment throughput and at most 100 ms worth of acknowledged backlog; it is `null` when recovery under that definition is not observed. This tests a process stall on a shared host, not a machine failure, restart, or disk durability.
 
 Complete full runs retain all trial JSON and a `charts.json` containing `latency_vs_offered_throughput`, `throughput_vs_memory_budget`, and recovery timelines/events, ready for later website rendering. The new summary is `latest-curves.md`; the existing `latest.md` remains the original throughput suite. Publication rejects incomplete matrices, altered budgets, missing telemetry/fault events, counter inconsistencies, delivery errors, and missing replica recovery. Diagnostics from failed/smoke runs stay under `.benchmarks/`.
-
-The [archived 72-trial collection](diagnostics/2026-10-03T07-52-36Z-230b0a75/summary.md) contains 71 passing trials and one failed Krabka recovery trial with 59 duplicate sequences. Its compressed JSON captures and failed-trial logs are retained under `diagnostics/`, with checksums, separately from published results. Use `gzip -dc FILE` to read the JSON/JSONL files. The failed trial remains explicitly marked in the chart data; this collection does not update a latest report.
 
 ## Measurements and publication
 
