@@ -2,7 +2,7 @@
 
 `npm run benchmark` compares published Krabka, Kafka **4.3.1**, and Redpanda containers on the local host. It runs six producer/consumer cases at RF1 and RF3, with three independent repetitions and a rotating vendor order. A complete run writes dated machine-readable results and a Markdown report under `results/`, then replaces `latest.md`. Results are local measurements, not production qualification.
 
-The checked-in local collections are from Krabka **0.7.0** and have not been re-run for 1.0.0. They passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
+The checked-in local collections are from Krabka **1.0.1** (the signed `v1.0.1` release image). They passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
 
 ```sh
 # Check prerequisites and resolve immutable image references without starting containers
