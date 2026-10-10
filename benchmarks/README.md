@@ -2,7 +2,7 @@
 
 `npm run benchmark` compares published Krabka, Kafka **4.3.1**, and Redpanda containers on the local host. It runs six producer/consumer cases at RF1 and RF3, with three independent repetitions and a rotating vendor order. A complete run writes dated machine-readable results and a Markdown report under `results/`, then replaces `latest.md`. Results are local measurements, not production qualification.
 
-The latest Krabka **0.7.0** collections passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
+The checked-in local collections are from Krabka **1.0.1** (the signed `v1.0.1` release image). They passed all 108 [throughput trials](latest.md) and all 72 [latency, memory, and recovery trials](latest-curves.md). Both reports link to dated provenance and per-trial time series; the curve collection also includes `charts.json` for later website rendering.
 
 ```sh
 # Check prerequisites and resolve immutable image references without starting containers
@@ -21,7 +21,7 @@ npm run benchmark -- --suite curves --smoke
 npm run benchmark -- --suite curves
 
 # Compare a different published Krabka or Redpanda image (tag or registry digest)
-npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v0.7.0 \
+npm run benchmark -- --krabka-image ghcr.io/krabka-io/krabka-broker:v1.0.1 \
   --redpanda-image docker.redpanda.com/redpandadata/redpanda:v26.2.2
 
 # Focused measurement and publication checks, without Docker
@@ -76,7 +76,7 @@ default five-minute poll interval and causing it to leave the group. Full backlo
 trials set `max.poll.interval.ms` to the workload's complete timeout, identically
 for all vendors, to allow that intentional pause. The effective driver YAML and
 `timeout_ms` are retained in artifacts; client errors still fail validation. Backlog
-size, offered rate, warm-up, post-drain duration and upstream driver code are preserved.
+size, offered rate, warm-up and post-drain duration are preserved.
 
 Set `krabka_comparison_image` to a control image and `krabka_image` to a candidate
 to compare them on the same worker in control/candidate/candidate/control order.
@@ -95,7 +95,21 @@ gh workflow run openmessaging.yml -f mode=full \
 The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
 with an immutable Maven/JDK 17 image. It runs the upstream Kafka driver and its
 **Kafka 3.6.1 client against every broker**, including the Kafka **4.3.1 server**.
-The driver code is unmodified. The common configuration follows upstream
+One driver change is applied, [`omb-kafka-coalesce-commits.patch`](omb-kafka-coalesce-commits.patch),
+identically for every broker. Upstream's consumer sends an async offset commit after
+every poll without waiting for the previous one. A fast drain then queues thousands
+of commits per second in the client until they expire with "Failed to send request
+after 30000 ms", which failed RF3 backlog and maximum-rate trials for Kafka and Krabka
+alike ([openmessaging/benchmark#270](https://github.com/openmessaging/benchmark/issues/270)
+reports the same). The patch keeps at most one commit in flight and folds offsets
+polled meanwhile into the next one, as Redpanda's fork does
+([redpanda-data/openmessaging-benchmark#37](https://github.com/redpanda-data/openmessaging-benchmark/pull/37)).
+A retriable commit failure, such as one caused by a leader or coordinator move, is
+counted in the trial's `retriable_commit_failures` and does not fail it, because the
+consumer puts the offsets back and the next commit carries them; Redpanda's fork logs
+these as warnings. A non-retriable commit failure, like every other client error,
+still fails the trial. The patch's
+SHA-256 is in provenance. The common configuration follows upstream
 `kafka-exactly-once.yaml`: idempotence, `acks=all`, one in-flight request, 1 MiB
 batches and 1 ms linger, with no compression. This means idempotent production,
 not transactional exactly-once application processing. Topic retention is unlimited,
@@ -162,6 +176,17 @@ top-level host fields are the first shard's. A failed, cancelled or incomplete s
 fails the merge. A `krabka_comparison_image` series keeps its four reports per shard
 and is not merged.
 
+"Same OMB build" means the same OMB commit, patch hashes, build image and
+dependency jars under `/m2`. Each runner builds OMB itself, and Maven stamps the
+jars it builds from `/src` with the build time, so those hashes differ between
+builds of the same source and are recorded but not compared.
+
+`split --rf N --reason TEXT --out DIR RUN_DIR` turns one replication factor of a
+run that did not finish into a complete shard. Every vendor, round and workload
+at that RF must have a result and no failure. The shard's provenance, and the
+merged run's `shards` entry for it, record the source run, its status and the
+reason under `derived_from`.
+
 Actions retains `provenance.json`, effective/upstream YAML, immutable image and
 source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
 250 ms CPU/memory time series, and failure diagnostics for 30 days. A complete
@@ -174,8 +199,37 @@ logged client/consumer errors and missing resource counters fail the run,
 including when upstream exits zero after
 catching a workload exception. Failed trials are recorded and the remaining matrix
 is attempted; failed matrices do not produce a successful summary. Artifacts stay
-under `.benchmarks/<run-id>/`; this suite never rewrites `latest.md`, commits, pushes,
-or publishes website performance claims.
+under `.benchmarks/<run-id>/`; the runner never rewrites `latest.md`, commits or pushes.
+
+To publish a complete full-mode run on the website, download its `openmessaging-<run>-<attempt>`
+artifact and run `node scripts/publish-openmessaging.mjs <artifact>/<run-id>`. The script
+rejects smoke, failed and incomplete matrices, re-validates every trial, and writes
+`benchmarks/openmessaging/<run-id>/` (provenance, summary and a compact `trials.json` without raw
+time series) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
+and commit those files; the raw artifact stays in Actions for 30 days.
+
+## Write path and latency
+
+The brokers do not write to disk the same way, and on the benchmark host that
+difference sets most of the latency gap. Redpanda opens its log segments with
+`O_DIRECT` and keeps its own cache, so its writes bypass the Linux page cache.
+Krabka and Kafka write segments through the page cache. On 2026-10-10 this was
+checked on the host itself: Redpanda's open segment descriptors carry `O_DIRECT`,
+and krabka's writer threads were sampled blocked in `ext4_buffered_write_iter`
+and the ext4 journal.
+
+The host's data volume is ext4 on an md RAID1 of two NVMe drives. A buffered
+write that updates a file's timestamps waits for the running ext4 journal
+commit, and commits wait for the md write-intent bitmap. Under sustained load,
+krabka's writers therefore stall for hundreds of milliseconds every few seconds.
+Those stalls set most of krabka's p99 and p99.9 latency in these results, and
+Kafka's latency tails match krabka's in the same cases. Redpanda's direct writes
+avoid them. Throughput and median latency are much less affected. On a different
+filesystem or storage layout the gap could be smaller or larger.
+
+Direct I/O for krabka's log is a possible future direction, not a current
+feature ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/issues/1333)).
+These results compare the brokers as they ship.
 
 ## Local runner prerequisites
 
@@ -185,7 +239,7 @@ or publishes website performance claims.
 - The **curves suite** requires the same CPUs but only **20 GiB available RAM**: at most 12 GiB of brokers plus the 4 GiB client and 4 GiB host headroom. It requires 150 GiB free disk for full runs or 24 GiB for smoke. This fits the current 16-logical-CPU host with about 61 GiB total RAM. Only one vendor/cluster runs at a time; each case gets fresh storage, which is removed before the next case. Other containers are left running.
 - At least **150 GiB free disk** for a full run, or **4 GiB** for smoke, both at the checkout and Docker storage. Data uses Docker volumes and is deleted after each cluster repetition; measurements and logs remain.
 - At least **24,728 available Linux AIO slots** (`fs.aio-max-nr - fs.aio-nr`). Redpanda networking AIO is explicitly limited to 1,024 control blocks per shard so three nodes fit the usual 65,536-slot host limit consistently. This setting and the host limit are recorded; no sysctl is changed.
-- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to `raw.githubusercontent.com` for the pinned Java workload. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v0.7.0, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
+- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to `raw.githubusercontent.com` for the pinned Java workload. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v1.0.1, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
 
 The runner owns only its uniquely named and labeled containers, volumes, and networks. It does not change host settings, stop other containers, commit, push, or deploy. Avoid other heavy work while measuring. Concurrent invocations in the same checkout fail; a hard-killed process can leave `.benchmarks/runner.lock`, which contains its PID and run ID. Inspect that process and its labeled Docker resources before manually removing a stale lock.
 
@@ -231,8 +285,6 @@ Rate-limited records carry their **scheduled send timestamp**, so acknowledgment
 Recovery pauses the actual leader of partition 0 after 15 measured seconds for at least ten seconds, then resumes the same container and storage. Smoke pauses after four measured seconds for at least five seconds. `events` records actual pause/unpause completion times, UTC timestamps, container/broker identity, and affected leader partitions on the workload clock. Resource sampling continues while the process is paused; counters remain comparable across resume. The run requires exact final acknowledged/consumed counts, no duplicates/errors, and all replicas back in ISR afterward. Recovery time is the first three consecutive post-resume intervals with at least 90% of offered acknowledgment throughput and at most 100 ms worth of acknowledged backlog; it is `null` when recovery under that definition is not observed. This tests a process stall on a shared host, not a machine failure, restart, or disk durability.
 
 Complete full runs retain all trial JSON and a `charts.json` containing `latency_vs_offered_throughput`, `throughput_vs_memory_budget`, and recovery timelines/events, ready for later website rendering. The new summary is `latest-curves.md`; the existing `latest.md` remains the original throughput suite. Publication rejects incomplete matrices, altered budgets, missing telemetry/fault events, counter inconsistencies, delivery errors, and missing replica recovery. Diagnostics from failed/smoke runs stay under `.benchmarks/`.
-
-The [archived 72-trial collection](diagnostics/2026-10-03T07-52-36Z-230b0a75/summary.md) contains 71 passing trials and one failed Krabka recovery trial with 59 duplicate sequences. Its compressed JSON captures and failed-trial logs are retained under `diagnostics/`, with checksums, separately from published results. Use `gzip -dc FILE` to read the JSON/JSONL files. The failed trial remains explicitly marked in the chart data; this collection does not update a latest report.
 
 ## Measurements and publication
 

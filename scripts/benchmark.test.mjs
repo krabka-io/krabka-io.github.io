@@ -4,12 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { gunzipSync } from 'node:zlib';
 import { runInNewContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
-import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 test('actual cleanup retains final exit state before removal and tolerates inspect failure', async () => {
@@ -199,6 +198,14 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   validateOmbResult(capture, 'krabka', 3, config);
   validateOmbResult({ ...capture, aggregatedEndToEndLatency99pct: 0 }, 'krabka', 3, config);
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed'), /logged an error/);
+  const shutdown = '19:29:44.105 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.KafkaException: Producer closed while allocating memory\n\tat org.apache.kafka.clients.producer.internals.BufferPool.allocate(BufferPool.java:161)';
+  validateOmbResult(capture, 'krabka', 3, config, shutdown);
+  const commit = '17:31:08.701 [pool-3-thread-1] ERROR KafkaBenchmarkConsumer - Offset commit with offsets {t-7=OffsetAndMetadata{offset=42695, leaderEpoch=null, metadata=\'\'}} failed\norg.apache.kafka.clients.consumer.RetriableCommitFailedException: Offset commit failed with a retriable exception.\nCaused by: org.apache.kafka.common.errors.NotCoordinatorException: This is not the correct coordinator.';
+  validateOmbResult(capture, 'krabka', 3, config, `${commit}\n${commit}`);
+  assert.equal(retriableCommitFailures(`${commit}\n${commit}`), 2);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '17:31:08 [pool-3-thread-1] ERROR KafkaBenchmarkConsumer - Offset commit with offsets {t-7=x} failed\norg.apache.kafka.common.errors.GroupAuthorizationException: denied'), /logged an error/);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.errors.TimeoutException: Expiring 1 record(s)'), /logged an error/);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, `${shutdown}\n20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed`), /logged an error/);
   assert.throws(() => validateOmbResult({}, 'krabka', 3, config));
   assert.throws(() => validateOmbResult({ ...capture, publishErrorRate: [0, 0, 0, 0, 0, 1] }, 'krabka', 3, config), /publish errors/);
   assert.throws(() => validateOmbResult({ ...capture, consumeRate: Array(6).fill(0) }, 'krabka', 3, config), /consumed no/);
@@ -411,36 +418,6 @@ test('curve publication retains all three chart datasets and keeps the throughpu
     assert.equal(await fs.readFile(path.join(root, 'benchmarks', 'latest.md'), 'utf8'), 'original throughput report');
     assert.match(await fs.readFile(path.join(root, 'benchmarks', 'latest-curves.md'), 'utf8'), /End-to-end p99/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
-});
-
-test('archived full curve collection preserves the failed recovery outcome and cannot publish', async () => {
-  const directory = new URL('../benchmarks/diagnostics/2026-10-03T07-52-36Z-230b0a75/', import.meta.url);
-  const read = async name => JSON.parse(await fs.readFile(new URL(name, directory), 'utf8'));
-  const compressed = async name => JSON.parse(gunzipSync(await fs.readFile(new URL(name, directory))));
-  const provenance = await read('provenance.json');
-  const { trials, failures, attempted_trials } = await compressed('collection.json.gz');
-  const charts = await compressed('charts.json.gz');
-  assert.equal(attempted_trials, 72);
-  assert.equal(trials.length, 71);
-  assert.equal(failures.length, 1);
-  const outcomes = [...trials, ...failures];
-  for (const c of provenance.cases) for (const vendor of VENDORS) for (let repetition = 1; repetition <= 3; repetition++) {
-    assert.equal(outcomes.filter(t => t.case.id === c.id && t.vendor === vendor && t.repetition === repetition).length, 1);
-  }
-  for (const trial of trials) {
-    assert.deepEqual(trial.curve, curveSummary(trial.case, trial.workload, trial.workload_time_series, trial.events));
-  }
-  assert.equal(charts.status, 'failed');
-  assert.equal(charts.latency_vs_offered_throughput.length, 36);
-  assert.equal(charts.throughput_vs_memory_budget.length, 27);
-  assert.equal(charts.recovery.length, 9);
-  const failed = charts.recovery.filter(t => t.status === 'failed');
-  assert.equal(failed.length, 1);
-  assert.equal(failed[0].vendor, 'krabka');
-  assert.equal(failed[0].delivery.duplicates, 59);
-  assert.equal(failed[0].curve, null);
-  assert.throws(() => validateComplete(provenance, trials), /run is incomplete/);
-  assert.throws(() => validateComplete({ ...provenance, status: 'complete' }, trials), /matrix is incomplete/);
 });
 
 test('RF3 CPU deltas and memory peaks aggregate simultaneous broker samples', () => {

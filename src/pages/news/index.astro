@@ -1,0 +1,44 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getPath } from '../../utils/paths';
+
+// Announcements written for this site, newest first. Per-repository release
+// notes come from GitHub and live on /releases.
+const posts = [
+  {
+    href: getPath('/news/krabka-1-0-0'),
+    title: 'Krabka 1.0.0',
+    date: '2026-10-07',
+    summary: 'The first krabka-broker release with a compatibility promise: every 1.x broker reads the on-disk formats an earlier 1.x broker wrote. Coordinator records match Kafka 4.3.1, and the krabka crates are on crates.io.',
+  },
+];
+---
+
+<BaseLayout
+  title="News and announcements | krabka"
+  description="Announcements from the krabka project, newest first. Per-repository release notes are on the release notes page."
+>
+  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
+    <div class="border-b border-white/10 pb-6">
+      <h1 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">News</h1>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-gray-400">
+        Announcements from the krabka project, newest first. The
+        <a href={getPath('/releases')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">release notes</a>
+        list every tagged release across the krabka repositories.
+      </p>
+    </div>
+    <ol class="divide-y divide-white/10">
+      {posts.map((post) => (
+        <li class="py-5">
+          <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 class="text-base font-semibold text-white">
+              <a href={post.href} class="hover:text-krab-400">{post.title}</a>
+            </h2>
+            <time datetime={post.date} class="font-mono text-xs text-gray-400">{post.date}</time>
+          </div>
+          <p class="mt-2 text-sm leading-relaxed text-gray-400">{post.summary}</p>
+        </li>
+      ))}
+    </ol>
+  </div>
+</BaseLayout>

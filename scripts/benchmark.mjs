@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
-import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -23,7 +23,7 @@ const WORKLOAD = {
   license: 'Apache-2.0',
 };
 const DEFAULT_IMAGES = {
-  krabka: 'ghcr.io/krabka-io/krabka-broker:v0.7.0',
+  krabka: 'ghcr.io/krabka-io/krabka-broker:v1.0.1',
   kafka: 'apache/kafka:4.3.1',
   redpanda: 'docker.redpanda.com/redpandadata/redpanda:v26.2.2',
 };
@@ -285,7 +285,7 @@ async function main() {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
         'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
-        'benchmarks/OpenMessagingMain.java',
+        'benchmarks/OpenMessagingMain.java', 'benchmarks/omb-kafka-coalesce-commits.patch',
         'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
@@ -665,7 +665,8 @@ rpk:
             const metrics = { cpu_seconds: timeline.samples.at(-1).cluster.cpu_seconds,
               rss_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.rss_bytes)),
               working_set_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.working_set_bytes)) };
-            const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline };
+            const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline,
+              retriable_commit_failures: retriableCommitFailures(logs.join('\n')) };
             await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(trial, null, 2)}\n`);
             trials.push(trial);
             console.log(`OMB passed ${vendor} RF${rf} ${workload.id}: ${result.aggregatedEndToEndLatency99pct.toFixed(2)} ms end-to-end p99`);
