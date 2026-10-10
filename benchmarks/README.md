@@ -193,6 +193,28 @@ rejects smoke, failed and incomplete matrices, re-validates every trial, and wri
 time series) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
 and commit those files; the raw artifact stays in Actions for 30 days.
 
+## Write path and latency
+
+The brokers do not write to disk the same way, and on the benchmark host that
+difference sets most of the latency gap. Redpanda opens its log segments with
+`O_DIRECT` and keeps its own cache, so its writes bypass the Linux page cache.
+Krabka and Kafka write segments through the page cache. On 2026-10-10 this was
+checked on the host itself: Redpanda's open segment descriptors carry `O_DIRECT`,
+and krabka's writer threads were sampled blocked in `ext4_buffered_write_iter`
+and the ext4 journal.
+
+The host's data volume is ext4 on an md RAID1 of two NVMe drives. A buffered
+write that updates a file's timestamps waits for the running ext4 journal
+commit, and commits wait for the md write-intent bitmap. Under sustained load,
+krabka's writers therefore stall for hundreds of milliseconds every few seconds.
+Those stalls set most of krabka's p99 and p99.9 latency in these results, and
+Kafka's latency tails match krabka's in the same cases. Redpanda's direct writes
+avoid them. Throughput and median latency are much less affected. On a different
+filesystem or storage layout the gap could be smaller or larger.
+
+Direct I/O for krabka's log is a possible future direction, not a current
+feature. These results compare the brokers as they ship.
+
 ## Local runner prerequisites
 
 - Node >=22.12 and JDK >=17 (`java` and `javac`). No Bazel build, sibling checkout, npm dependencies, or Docker Compose is needed.

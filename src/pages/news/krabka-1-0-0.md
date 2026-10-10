@@ -69,6 +69,8 @@ OpenMessaging Benchmark results for krabka 1.0.1 against Apache Kafka 4.3.1 and 
 
 The local throughput and latency/memory/recovery results on the [benchmarks page](/benchmarks) are from krabka 1.0.1, the first patch release, on the dedicated benchmark host. They measure buffered writes on one shared host with specific resource limits. They do not establish equal crash durability or production readiness, and they apply only to those images, host settings and workloads. The [methodology](https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md) lists the full contract and caveats.
 
+Redpanda writes its log with direct I/O, bypassing the Linux page cache; krabka, like Kafka, writes through it. On the benchmark host, buffered writers stall on ext4 journal commits under sustained load, and that sets most of the p99 latency gap between krabka and Redpanda in these results. Throughput is much less affected. Direct I/O for krabka's log is a direction we are considering, not something 1.0 does.
+
 ## Links
 
 - [GitHub release v1.0.0](https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.0)
