@@ -10,9 +10,9 @@
     "bounds": "Three brokers, one partition, and at most three leader epochs, with log length 4 (data_clean, data_unclean) or 3 (data_elr).",
     "properties": ["committed_durable", "no_loss_when_clean", "unclean_loss", "elr_holds_every_committed_record", "elr_election_keeps_every_committed_record", "hwm_held_by_min_isr"],
     "pinned_states": [
-      { "config": "data_clean", "count": 521626 },
-      { "config": "data_unclean", "count": 1255681 },
-      { "config": "data_elr", "count": 2795492 },
+      { "config": "data_clean", "count": 762237 },
+      { "config": "data_unclean", "count": 1471603 },
+      { "config": "data_elr", "count": 898023 },
       { "config": "data_diskless", "count": 450 }
     ],
     "outside": "Record payloads, transactions, remote storage, multiple partitions, and the last-known-ELR half of KIP-966 remain outside the model.",
@@ -204,8 +204,8 @@
     "bounds": "The basic config has two members, one instance ID, and a clock through 4; the wide config three members, two instance IDs, and a clock through 5.",
     "properties": [],
     "pinned_states": [
-      { "config": "basic", "count": 1957 },
-      { "config": "wide", "count": 106470 }
+      { "config": "basic", "count": 3853 },
+      { "config": "wide", "count": 482874 }
     ],
     "outside": "Wire decoding, the offsets log, and the actor mailbox remain outside the model.",
     "summary": "Wraps the production ClassicGroup and explores every interleaving of dynamic, static, and fenced joins, heartbeats, leaves, rebalance completion, sync, and session-timeout expiry over a logical clock. It requires a coherent static-member index, one live owner per group.instance.id, only current members in the round, an empty member set exactly in the Empty state, and expiry exactly when a member is past its session timeout."
@@ -221,8 +221,8 @@
     "bounds": "The basic config has two members, two partitions, and epochs through 6; the wide config three members, two partitions, and epochs through 5.",
     "properties": [],
     "pinned_states": [
-      { "config": "basic", "count": 5986 },
-      { "config": "wide", "count": 30421 }
+      { "config": "basic", "count": 6328 },
+      { "config": "wide", "count": 29647 }
     ],
     "outside": "Plain consumer groups deliver at least once, so no-duplicate and no-gap delivery are deliberately not checked; __consumer_offsets persistence and the classic protocol are out of scope.",
     "summary": "Reuses the reconciliation model's driving of step_heartbeat and composes it with the production OffsetCommit epoch fence, cross-checking every commit against an independent oracle of the expected epoch comparison and error code. It requires that no two members own one partition and that no member is advertised a partition another member still owns."
@@ -238,8 +238,8 @@
     "bounds": "The basic config has two members, two partitions, and epochs through 8; the wide config three members, two partitions, and epochs through 6.",
     "properties": [],
     "pinned_states": [
-      { "config": "basic", "count": 477 },
-      { "config": "wide", "count": 3940 }
+      { "config": "basic", "count": 552 },
+      { "config": "wide", "count": 3813 }
     ],
     "outside": "Offset commits, the offsets log, and the wire protocol remain outside the model.",
     "summary": "Drives the production heartbeat step and the default uniform assignor over join, leave, and heartbeat actions with a faithful client that revokes before it adds and makes no cross-member check, so exclusivity must come from the coordinator's withholding alone. It requires that no two members own one partition at the same time and that no member is advertised a partition another member still owns."
@@ -255,7 +255,7 @@
     "bounds": "One group, two members, every group, member, assignment, topology, partition-metadata, and share-state record class, epochs -1, 0, 1, and i32::MAX, exact retries, mismatched value kinds, and every reachable log ordering through depth 16.",
     "properties": [],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES", "count": 46672 }
+      { "config": "PINNED_UNIQUE_STATES", "count": 6376 }
     ],
     "outside": "Key parsing, schema decoding, transaction-marker interpretation, log reads, compaction, cache allocation, actor seeding, and process-crash atomicity remain host or I/O assumptions.",
     "summary": "Drives the production replay decisions shared by the consumer, share, and streams adapters. It requires key/value kind agreement, parent-before-child application, nonnegative monotonic epochs, assignment ownership by a present member, and whole-group tombstone dominance until a later group-metadata write, with witnesses for malformed type binding, orphan suppression, stale-epoch suppression, and i32::MAX."
@@ -271,7 +271,7 @@
     "bounds": "Two member IDs, one subtopology with one or two tasks, three logical timeout ticks, topology epochs through two, group epochs through five, and one crash/replay in every reachable ordering.",
     "properties": [],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES", "count": 37688 }
+      { "config": "PINNED_UNIQUE_STATES", "count": 37960 }
     ],
     "outside": "Request decoding, actor mailbox delivery, offsets-log append durability, cache publication, wall-clock scheduling, metadata-source snapshots, and internal-topic I/O remain outside the model.",
     "summary": "Drives the production streams group membership, timeout, target-installation, and cooperative active-task transitions together with the port of Kafka's CurrentAssignmentBuilder and the replay adapters. A task pending revocation counts as still owned, so the properties require exclusive current and target active-task ownership, topology-valid assignments, nonnegative fenced epochs, coherent group phases, and exact durable replay projection."
@@ -336,7 +336,7 @@
     "bounds": "Two member IDs, one topic with one or two partitions, four logical timeout ticks, epochs through five, and one crash/replay in every reachable ordering.",
     "properties": [],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES", "count": 54304 }
+      { "config": "PINNED_UNIQUE_STATES", "count": 54860 }
     ],
     "outside": "Request decoding, actor mailbox delivery, offsets-log append durability, cache publication, wall-clock scheduling, metadata snapshot consistency, and share-state persister I/O remain outside the model.",
     "summary": "Drives the production share group join, leave, and timeout transitions, the assignment reconciler and share assignor, the member-epoch fence, and the replay adapters. It requires unique (member, topic, partition) coordinates, bounded assignments for members at the target epoch, nonnegative fenced epochs, and exact durable replay projection; cross-member partition overlap remains intentional KIP-932 behavior when members outnumber partitions."
@@ -352,12 +352,12 @@
     "bounds": "Two-member concurrency over three offsets with an in-flight limit of 3 or 1, plus failover with reload, deferral over the failover window, one-member deferral over three offsets, and log-start advance with reload.",
     "properties": [],
     "pinned_states": [
-      { "config": "two members, three offsets, in-flight limit 3", "count": 9736 },
-      { "config": "two members, three offsets, in-flight limit 1", "count": 9694 },
-      { "config": "failover with reload", "count": 689 },
-      { "config": "deferral over the failover window", "count": 1166 },
-      { "config": "one-member deferral over three offsets", "count": 7964 },
-      { "config": "log-start advance with reload", "count": 8158 }
+      { "config": "two members, three offsets, in-flight limit 3", "count": 7969 },
+      { "config": "two members, three offsets, record lock limit 2", "count": 1521 },
+      { "config": "failover with reload", "count": 623 },
+      { "config": "deferral over the failover window", "count": 1118 },
+      { "config": "one-member deferral over three offsets", "count": 5012 },
+      { "config": "log-start advance with reload", "count": 6477 }
     ],
     "outside": "The share-state persister, the fetch path, and wall-clock time remain outside the model.",
     "summary": "Holds the production KIP-932 acquisition state and drives it over every interleaving of consumer operations, time advance, KFC-1 deferral, a leader reload through the persisted batches, and a log-start advance. It requires a sorted, gap-free window covering exactly [start_offset, end_offset), exactly one owner for every acquired batch, lock bookkeeping matching the delivery state, a bounded delivery count, and a nondecreasing start offset."
@@ -441,11 +441,11 @@
     "bounds": "three_voters_append checks three voters, one client append, leader epochs through two, at most two in-flight messages, and at most one crashed node at a time; other configs cover election safety, two-voter linearizability, message loss and duplication, and stateless appenders.",
     "properties": ["leader_completeness", "divergent_log_truncated", "stale_candidate_refused"],
     "pinned_states": [
-      { "config": "three_voters_append", "count": 457067 },
-      { "config": "three_voters_election_safety", "count": 10834 },
-      { "config": "two_voters_linearizable", "count": 43811 },
-      { "config": "three_voters_faults", "count": 777338 },
-      { "config": "two_voters_append_via_linearizable", "count": 230591 }
+      { "config": "three_voters_append", "count": 839339 },
+      { "config": "three_voters_election_safety", "count": 10750 },
+      { "config": "two_voters_linearizable", "count": 46521 },
+      { "config": "three_voters_faults", "count": 1128704 },
+      { "config": "two_voters_append_via_linearizable", "count": 256973 }
     ],
     "outside": "Wire encoding, disk durability, wall-clock timing, volatile-state loss on restart, and behavior beyond the stated bounds remain outside the model.",
     "summary": "Runs the production quorum state machine for every node over an unordered network, with replication as the one abstracted exchange. It requires every node that believes it leads epoch e to hold each entry committed in an epoch at or below e, and its stale_candidate_refused witness requires a vote refused for log recency alone; removing the log-recency conjunct from handle_vote_request makes the config fail."
