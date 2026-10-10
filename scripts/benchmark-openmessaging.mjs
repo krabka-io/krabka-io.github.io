@@ -138,6 +138,16 @@ export async function prepareOmb(directory, command, oneShot) {
     provenance: { ...OMB, patches, build_image_id: image.Id, jars } };
 }
 
+// A retriable offset-commit failure from the patched consumer (see
+// omb-kafka-coalesce-commits.patch): a leader or coordinator move fails one
+// commit, the consumer puts its offsets back and the next commit carries them.
+// Redpanda's fork logs these as warnings. They are counted, not failed.
+const RETRIABLE_COMMIT_FAILURE = /\]\s+ERROR\s+KafkaBenchmarkConsumer - Offset commit with offsets \{[^\n]*\} failed\r?\norg\.apache\.kafka\.clients\.consumer\.RetriableCommitFailedException\b/g;
+
+export function retriableCommitFailures(logs = '') {
+  return (logs.match(RETRIABLE_COMMIT_FAILURE) ?? []).length;
+}
+
 export function validateOmbResult(result, vendor, rf, config, logs = '') {
   // Upstream catches workload exceptions and can exit zero without a result.
   // A process exit status alone is never enough to mark a trial successful.
@@ -145,7 +155,8 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
   // producer while its send loop is still blocked waiting for buffer memory,
   // and LocalWorker logs the resulting KafkaException. It follows the final
   // aggregated results, so it says nothing about the measurement.
-  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\norg\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory\b/g, '');
+  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\norg\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory\b/g, '')
+    .replace(RETRIABLE_COMMIT_FAILURE, '');
   assert.ok(!/\]\s+ERROR\s/.test(errors), 'OMB logged an error; inspect workload logs');
   assert.equal(result.driver, `${vendor}-rf${rf}`, 'wrong OMB driver');
   for (const [key, expected] of [['topics', config.topics], ['partitions', config.partitionsPerTopic], ['messageSize', config.messageSize]]) {
