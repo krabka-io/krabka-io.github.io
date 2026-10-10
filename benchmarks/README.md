@@ -213,7 +213,8 @@ avoid them. Throughput and median latency are much less affected. On a different
 filesystem or storage layout the gap could be smaller or larger.
 
 Direct I/O for krabka's log is a possible future direction, not a current
-feature. These results compare the brokers as they ship.
+feature ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/issues/1333)).
+These results compare the brokers as they ship.
 
 ## Local runner prerequisites
 
