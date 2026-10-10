@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
-import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -665,7 +665,8 @@ rpk:
             const metrics = { cpu_seconds: timeline.samples.at(-1).cluster.cpu_seconds,
               rss_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.rss_bytes)),
               working_set_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.working_set_bytes)) };
-            const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline };
+            const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline,
+              retriable_commit_failures: retriableCommitFailures(logs.join('\n')) };
             await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(trial, null, 2)}\n`);
             trials.push(trial);
             console.log(`OMB passed ${vendor} RF${rf} ${workload.id}: ${result.aggregatedEndToEndLatency99pct.toFixed(2)} ms end-to-end p99`);

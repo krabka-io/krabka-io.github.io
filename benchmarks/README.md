@@ -104,7 +104,11 @@ alike ([openmessaging/benchmark#270](https://github.com/openmessaging/benchmark/
 reports the same). The patch keeps at most one commit in flight and folds offsets
 polled meanwhile into the next one, as Redpanda's fork does
 ([redpanda-data/openmessaging-benchmark#37](https://github.com/redpanda-data/openmessaging-benchmark/pull/37)).
-A commit that still fails is logged as an error and fails the trial. The patch's
+A retriable commit failure, such as one caused by a leader or coordinator move, is
+counted in the trial's `retriable_commit_failures` and does not fail it, because the
+consumer puts the offsets back and the next commit carries them; Redpanda's fork logs
+these as warnings. A non-retriable commit failure, like every other client error,
+still fails the trial. The patch's
 SHA-256 is in provenance. The common configuration follows upstream
 `kafka-exactly-once.yaml`: idempotence, `acks=all`, one in-flight request, 1 MiB
 batches and 1 ms linger, with no compression. This means idempotent production,

@@ -8,7 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CASES, VENDORS, median, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, validateComplete, publishResults } from './benchmark-results.mjs';
 import { curveCases, curveBudget, curveSummary, validateTimeline } from './benchmark-curves.mjs';
-import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 test('actual cleanup retains final exit state before removal and tolerates inspect failure', async () => {
@@ -200,6 +200,10 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed'), /logged an error/);
   const shutdown = '19:29:44.105 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.KafkaException: Producer closed while allocating memory\n\tat org.apache.kafka.clients.producer.internals.BufferPool.allocate(BufferPool.java:161)';
   validateOmbResult(capture, 'krabka', 3, config, shutdown);
+  const commit = '17:31:08.701 [pool-3-thread-1] ERROR KafkaBenchmarkConsumer - Offset commit with offsets {t-7=OffsetAndMetadata{offset=42695, leaderEpoch=null, metadata=\'\'}} failed\norg.apache.kafka.clients.consumer.RetriableCommitFailedException: Offset commit failed with a retriable exception.\nCaused by: org.apache.kafka.common.errors.NotCoordinatorException: This is not the correct coordinator.';
+  validateOmbResult(capture, 'krabka', 3, config, `${commit}\n${commit}`);
+  assert.equal(retriableCommitFailures(`${commit}\n${commit}`), 2);
+  assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '17:31:08 [pool-3-thread-1] ERROR KafkaBenchmarkConsumer - Offset commit with offsets {t-7=x} failed\norg.apache.kafka.common.errors.GroupAuthorizationException: denied'), /logged an error/);
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.errors.TimeoutException: Expiring 1 record(s)'), /logged an error/);
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, `${shutdown}\n20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed`), /logged an error/);
   assert.throws(() => validateOmbResult({}, 'krabka', 3, config));
