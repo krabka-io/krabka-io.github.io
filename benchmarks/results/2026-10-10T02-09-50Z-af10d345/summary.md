@@ -1,5 +1,3 @@
-[Dated report and per-trial results](results/2026-10-10T02-09-50Z-af10d345/summary.md)
-
 # Local latency, memory, and recovery curves
 
 Run: 2026-10-10T02-09-50Z-af10d345. Completed: 2026-10-10T03:04:37.720Z.

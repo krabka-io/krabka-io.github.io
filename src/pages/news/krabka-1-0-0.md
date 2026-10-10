@@ -65,9 +65,9 @@ The krabka crates are published to crates.io under the `krabka-*` names. The old
 
 ## Benchmarks
 
-OpenMessaging Benchmark results for 1.0.0 against Apache Kafka 4.3.1 and Redpanda 26.2.2, on a Google Cloud runner, have not been measured yet. They will be added here and on the [benchmarks page](/benchmarks) after a complete run.
+OpenMessaging Benchmark results for krabka 1.0.1 against Apache Kafka 4.3.1 and Redpanda 26.2.2 are being measured on the dedicated benchmark host. They will be added here and on the [benchmarks page](/benchmarks) after a complete run.
 
-The local throughput and latency/memory/recovery results on the [benchmarks page](/benchmarks) are from krabka 0.7.0 on the dedicated benchmark host. They have not been re-run for 1.0.0. They measure buffered writes on one shared host with specific resource limits. They do not establish equal crash durability or production readiness, and they apply only to those images, host settings and workloads. The [methodology](https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md) lists the full contract and caveats.
+The local throughput and latency/memory/recovery results on the [benchmarks page](/benchmarks) are from krabka 1.0.1, the first patch release, on the dedicated benchmark host. They measure buffered writes on one shared host with specific resource limits. They do not establish equal crash durability or production readiness, and they apply only to those images, host settings and workloads. The [methodology](https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md) lists the full contract and caveats.
 
 ## Links
 

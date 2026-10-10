@@ -30,10 +30,12 @@ npm run benchmark -- --suite curves`;
         Follow delivery, latency, backlog, CPU, and memory through a leader pause, or compare load and memory limits.
       </p>
       <p class="mt-4 text-sm text-gray-300 [overflow-wrap:anywhere]">
-        These local results are from krabka {curveVendors.find(v => v.id === 'krabka').version}. The current broker release is {versions.broker.version}; the local suites have not been re-run for it yet.
+        {curveVendors.find(v => v.id === 'krabka').version === versions.broker.version
+          ? <>These local results are from krabka {versions.broker.version}, the current broker release.</>
+          : <>These local results are from krabka {curveVendors.find(v => v.id === 'krabka').version}. The current broker release is {versions.broker.version}; the local suites have not been re-run for it yet.</>}
         {openmessaging
-          ? <>The <a href="#openmessaging" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging results below</a> were measured on Google Cloud with {openmessaging.images[0].label}.</>
-          : <>OpenMessaging results for {versions.broker.version} on Google Cloud are pending.</>} See the <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">1.0.0 announcement</a>.
+          ? <>The <a href="#openmessaging" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging results below</a> were measured on the same host with {openmessaging.images[0].label}.</>
+          : <>OpenMessaging results for {versions.broker.version} are pending.</>} See the <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">1.0.0 announcement</a>.
       </p>
       <p class="mt-4 text-sm text-gray-400">Curves completed <time datetime={completed}>{completed.slice(0, 10)} at {completed.slice(11, 16)} UTC</time> · {curveProvenance.repetitions} repetitions per case · 72 curve trials and 108 throughput trials</p>
       <div class="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold">
