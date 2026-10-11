@@ -1,0 +1,88 @@
+---
+import { openmessaging, format } from '../utils/benchmarks.mjs';
+
+const groups = openmessaging?.rows ?? [];
+const first = groups[0];
+const initial = first?.cases.find(c => c.id === 'max-rate-1-topic-16-partitions-1kb') ?? first?.cases[0];
+const workloads = [...new Set(groups.flatMap(group => group.cases.map(c => c.id)))];
+const metrics = [
+  { key: 'publish_rate', title: 'Publish rate', unit: 'messages/s', direction: 'Higher is better', digits: 0 },
+  { key: 'publish_p99_ms', title: 'Publish p99 latency', unit: 'ms', direction: 'Lower is better', digits: 2 },
+  { key: 'end_to_end_p99_ms', title: 'End-to-end p99 latency', unit: 'ms', direction: 'Lower is better', digits: 2 },
+];
+const colors = { krabka: 'bg-krab-500', kafka: 'bg-sky-400', redpanda: 'bg-violet-400' };
+---
+
+{openmessaging && <section id="charts" aria-labelledby="omb-charts-heading" data-omb-charts class="mt-10 scroll-mt-24">
+  <h3 id="omb-charts-heading" class="text-xl font-bold text-white">Compare the results</h3>
+  <p class="mt-3 max-w-4xl text-sm text-gray-300 leading-relaxed">Each chart compares the three brokers on one OMB workload. Bars start at zero and use a separate linear scale for each metric. {openmessaging.provenance.repetitions === 1 ? 'Values are from one measured round.' : `Values are medians of ${openmessaging.provenance.repetitions} rounds.`}</p>
+  <div class="mt-5 flex flex-wrap gap-4" data-chart-controls hidden>
+    <label class="flex min-w-0 flex-1 flex-col gap-2 text-sm font-semibold text-gray-200">
+      Workload
+      <select data-chart-workload class="w-full min-w-0 rounded-lg border border-white/20 bg-ocean-950 px-3 py-3 text-sm text-white focus-visible:outline-2 focus-visible:outline-krab-400">
+        {workloads.map(id => <option value={id} selected={id === initial?.id}>{id}</option>)}
+      </select>
+    </label>
+    <label class="flex flex-col gap-2 text-sm font-semibold text-gray-200">
+      Replication factor
+      <select data-chart-rf class="rounded-lg border border-white/20 bg-ocean-950 px-3 py-3 text-sm text-white focus-visible:outline-2 focus-visible:outline-krab-400">
+        {groups.map(group => <option value={group.rf} selected={group.rf === first?.rf}>RF{group.rf}</option>)}
+      </select>
+    </label>
+  </div>
+  <p data-chart-status role="status" class="sr-only"></p>
+  {groups.flatMap(group => group.cases.map(workload => (
+    <div data-chart-panel data-workload={workload.id} data-rf={group.rf} hidden={group.rf !== first?.rf || workload.id !== initial?.id}>
+      <p class="mt-5 text-sm text-gray-300 [overflow-wrap:anywhere]" data-chart-description>
+        <strong class="text-white">{workload.id} · RF{group.rf}</strong><br />
+        {workload.config.topics} {workload.config.topics === 1 ? 'topic' : 'topics'} · {workload.config.partitionsPerTopic} partitions per topic · {format(workload.config.messageSize)}-byte messages · {workload.config.producerRate > 0 ? `${format(workload.config.producerRate)} messages/s offered` : 'Maximum sustainable rate (probed)'} · {workload.config.testDurationMinutes}-minute measurement
+        {workload.config.consumerBacklogSizeGB > 0 && <><br />{workload.config.consumerBacklogSizeGB} GB backlog: end-to-end latency includes the wait before consumers drain it.</>}
+      </p>
+      <div class="mt-5 grid gap-5 lg:grid-cols-3">
+        {metrics.map(metric => {
+          const maximum = Math.max(...workload.vendors.map(vendor => vendor[metric.key]));
+          return <figure class="frosted-card min-w-0 rounded-2xl p-5" aria-label={`${metric.title}, ${workload.id}, RF${group.rf}`}>
+            <figcaption class="text-base font-semibold text-white">{metric.title}<span class="mt-1 block text-xs font-normal text-gray-400">{metric.direction} · {metric.unit}</span></figcaption>
+            <dl class="mt-6 space-y-5">
+              {workload.vendors.map(vendor => <div>
+                <dt class="text-sm text-gray-200">{vendor.name}</dt>
+                <dd class="mt-1 text-base font-semibold tabular-nums text-white" data-chart-value={vendor[metric.key]}>{format(vendor[metric.key], metric.digits)} <span class="text-xs font-normal text-gray-400">{metric.unit}</span></dd>
+                <div class="mt-2 h-3 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                  <div class={`h-full rounded-full ${colors[vendor.id]}`} style={`width: ${maximum > 0 ? vendor[metric.key] / maximum * 100 : 0}%`}></div>
+                </div>
+              </div>)}
+            </dl>
+            <p class="mt-5 flex justify-between text-xs tabular-nums text-gray-400" aria-hidden="true"><span>0</span><span>{format(maximum, metric.digits)} {metric.unit}</span></p>
+          </figure>;
+        })}
+      </div>
+    </div>
+  )))}
+  <p class="mt-4 text-sm text-gray-400">Read the <a href={openmessaging.summaryURL} class="text-krab-400 underline underline-offset-4">source report</a> or the full tables below. These charts compare aggregate results. {(openmessaging.intervalsURL || openmessaging.archiveURL) ? <><a href={openmessaging.intervalsURL || openmessaging.archiveURL} class="text-krab-400 underline underline-offset-4">Raw OMB interval data</a> is also retained for this run.</> : <>This older published capture does not include raw interval data.</>}</p>
+  <noscript><p class="mt-3 text-sm text-gray-300">The initial comparison is shown above. All workloads and replication factors are available in the tables below.</p></noscript>
+</section>}
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-omb-charts]');
+  if (root) {
+    const workload = root.querySelector<HTMLSelectElement>('[data-chart-workload]')!;
+    const rf = root.querySelector<HTMLSelectElement>('[data-chart-rf]')!;
+    const panels = [...root.querySelectorAll<HTMLElement>('[data-chart-panel]')];
+    const update = () => {
+      for (const panel of panels) {
+        panel.hidden = panel.dataset.workload !== workload.value || panel.dataset.rf !== rf.value;
+      }
+      const selected = panels.find(panel => !panel.hidden);
+      root.querySelector<HTMLElement>('[data-chart-status]')!.textContent = selected
+        ? `Showing ${workload.value}, RF${rf.value}.` : 'No published comparison for this selection.';
+    };
+    root.querySelector<HTMLElement>('[data-chart-controls]')!.hidden = false;
+    workload.addEventListener('change', update);
+    rf.addEventListener('change', update);
+    update();
+  }
+</script>
+
+<style>
+  [data-chart-controls][hidden], [data-chart-panel][hidden] { display: none !important; }
+</style>

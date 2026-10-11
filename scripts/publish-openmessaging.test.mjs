@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { publish } from './publish-openmessaging.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
@@ -55,4 +57,35 @@ test('smoke and incomplete runs are refused', async () => {
   const { root, run } = await fakeRun();
   await fs.rm(path.join(run, 'rf1-redpanda-1-simple-workload'), { recursive: true });
   await assert.rejects(publish(run, root));
+});
+
+
+test('publication preserves every raw OMB field and interval in compressed results with verified checksums', async () => {
+  const { root, run } = await fakeRun();
+  const source = path.join(run, 'rf1-krabka-1-simple-workload', 'trial.json');
+  const trial = JSON.parse(await fs.readFile(source, 'utf8'));
+  // Deliberately uneven samples and upstream fields the compact view does not use.
+  trial.omb.publishRate = [1000, 3000, 8000, 5000, 7000, 6000];
+  trial.omb.publishLatency99pct = [1, 2, 30, 4, 50, 6];
+  trial.omb.endToEndLatency99pct = [2, 4, 60, 8, 100, 12];
+  trial.omb.aggregatedPublishLatencyBuckets = { '1.25': 3, '50.5': 17 };
+  trial.omb.futureUpstreamField = { samples: [0, null, 1.23456789] };
+  await fs.writeFile(source, JSON.stringify(trial));
+  await publish(run, root);
+  const published = path.join(root, 'benchmarks/openmessaging/run-1');
+  const index = JSON.parse(await fs.readFile(path.join(published, 'intervals.json'), 'utf8'));
+  assert.equal(index.schema_version, 1);
+  assert.equal(index.run_id, 'run-1');
+  assert.equal(index.trials.length, 3);
+  for (const entry of index.trials) {
+    const original = JSON.parse(await fs.readFile(path.join(run, `rf${entry.rf}-${entry.vendor}-${entry.repetition}-${entry.workload}/trial.json`), 'utf8'));
+    const compressed = await fs.readFile(path.join(published, entry.file));
+    assert.equal(createHash('sha256').update(compressed).digest('hex'), entry.sha256);
+    assert.deepEqual(JSON.parse(gunzipSync(compressed)), original.omb);
+    assert.equal(entry.samples, original.omb.publishRate.length);
+  }
+  const compact = JSON.parse(await fs.readFile(path.join(published, 'trials.json'), 'utf8'));
+  assert.equal(compact[0].publish_rate, trial.omb.publishRate.reduce((a, b) => a + b) / 6);
+  assert.equal('omb' in compact[0], false);
+  await fs.rm(root, { recursive: true, force: true });
 });

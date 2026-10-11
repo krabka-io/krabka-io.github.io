@@ -8,20 +8,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { CASES, VENDORS, aggregateSample, resourceSummary, resourceTimeSeries, validateDelivery, publishResults } from './benchmark-results.mjs';
-import { curveCases, curveBudget, curveSummary } from './benchmark-curves.mjs';
+import { VENDORS, aggregateSample, resourceTimeSeries } from './benchmark-results.mjs';
 import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
-// Apache-2.0, Copyright The Krabka Authors. Download an unmodified, immutable
-// upstream workload rather than maintaining another producer/consumer driver.
-const WORKLOAD = {
-  url: 'https://raw.githubusercontent.com/krabka-io/krabka-broker/c27ed4f7e2c9ba4bf48376ed674bc26b166353f4/packaging/performance/BrokerPerformanceWorkload.java',
-  sha256: '159c33cc5be5dcceb233a71250437469a23c82e408f5077f2c5452cc86ea8e89',
-  license: 'Apache-2.0',
-};
 const DEFAULT_IMAGES = {
   krabka: 'ghcr.io/krabka-io/krabka-broker:v1.0.1',
   kafka: 'apache/kafka:4.3.1',
@@ -30,7 +22,7 @@ const DEFAULT_IMAGES = {
 const { values: options } = parseArgs({ options: {
   'krabka-image': { type: 'string', default: DEFAULT_IMAGES.krabka },
   'redpanda-image': { type: 'string', default: DEFAULT_IMAGES.redpanda },
-  'suite': { type: 'string', default: 'throughput' },
+  'suite': { type: 'string', default: 'openmessaging' },
   'workloads': { type: 'string', default: 'all' },
   'replication-factors': { type: 'string', default: '1,3' },
   'repetitions': { type: 'string' },
@@ -39,30 +31,23 @@ const { values: options } = parseArgs({ options: {
   'help': { type: 'boolean', short: 'h' },
 } });
 if (options.help) {
-  console.log(`Usage: npm run benchmark -- [--suite throughput|curves|openmessaging] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
-Full: 108 measured trials, three repetitions, RF1/RF3, all three vendors.
-Curves: 72 trials; RF1 load/memory sweeps and RF3 leader pause/resume; max 16 GiB RAM including client.
+  console.log(`Usage: npm run benchmark -- [--suite openmessaging] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
 OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --replication-factors 1,3; --repetitions 1..3.
-Smoke: all cases once, short durations/counts; never publishes.
-Dry run: validates the host and resolves images; starts no containers and publishes nothing.
+Smoke: shortened workloads; never publishes.
+Dry run: validates the host and resolves images; starts no containers.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
-14 available logical CPUs and 150 GiB free disk for full runs.
-Throughput: 34 GiB available RAM, 4 GiB free disk for smoke.
-Curves: 20 GiB available RAM, 24 GiB free disk for smoke.
+14 available logical CPUs, 34 GiB available RAM, and 150 GiB free disk
+(540 GiB with backlog workloads; 4 GiB for smoke).
 See benchmarks/README.md for methodology and retained artifacts.`);
 } else {
   await main().catch(error => { console.error(`benchmark: ${error.message}`); process.exitCode = 1; });
 }
 
 async function main() {
-  assert.ok(['throughput', 'curves', 'openmessaging'].includes(options.suite), 'suite must be throughput, curves, or openmessaging');
-  const omb = options.suite === 'openmessaging';
-  assert.ok(omb || (options.workloads === 'all' && options['replication-factors'] === '1,3' && options.repetitions === undefined),
-    '--workloads, --replication-factors and --repetitions require --suite openmessaging');
+  assert.equal(options.suite, 'openmessaging', 'only the OpenMessaging suite is supported');
   const replicationFactors = options['replication-factors'].split(',').map(Number);
   assert.ok(replicationFactors.length && new Set(replicationFactors).size === replicationFactors.length
     && replicationFactors.every(rf => [1, 3].includes(rf)), 'replication-factors must be 1, 3, or 1,3');
-  const curves = options.suite === 'curves';
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')}-${randomUUID().slice(0, 8)}`;
   const artifacts = path.join(ROOT, '.benchmarks', runId);
   await fs.mkdir(artifacts, { recursive: true });
@@ -80,53 +65,31 @@ async function main() {
   let resourceCreationStarted = false;
   const trials = [];
   const failures = [];
-  const repetitions = options.smoke ? 1 : Number(options.repetitions ?? (omb ? 1 : 3));
+  const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
-  const cases = omb ? ombCases(options.workloads) : curves ? curveCases(options.smoke)
-    : CASES.map(c => options.smoke ? { ...c, records: c.bytes > 1024 ? 200 : 2000 } : { ...c });
+  const cases = ombCases(options.workloads);
   const provenance = {
     schema_version: 1, suite: options.suite, run_id: runId, started_at: new Date().toISOString(),
     mode: options.smoke ? 'smoke' : 'full', status: 'running', repetitions,
-    images: {}, cases, workload_source: WORKLOAD,
-    contract: { partitions: 12, acks: 'all', idempotence: true, batch_bytes: 65536, linger_ms: 5,
+    images: {}, cases, workload_source: OMB,
+    contract: { partitions: 'from upstream workload', acks: 'all', idempotence: true, batch_bytes: 1048576, linger_ms: 1,
       broker_cpus: 4, broker_memory_bytes: 10 * GIB, swap_bytes: 0, nofile: 131072,
       kafka_heap_bytes: GIB, redpanda_shards: 4, redpanda_memory_bytes: 8 * GIB,
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
-      warmup_records: options.smoke ? { 1: 2000, 3: 2000 } : { 1: 3_000_000, 3: 1_000_000 },
-      resource_sampling_ms: 250, workload_timeout_seconds: 900,
+      resource_sampling_ms: 250,
       durability: 'buffered writes; no identical crash-durability claim',
     },
   };
-  if (omb) {
-    provenance.workload_source = OMB;
-    provenance.replication_factors = replicationFactors;
-    Object.assign(provenance.contract, { partitions: 'from upstream workload', batch_bytes: 1048576, linger_ms: 1,
-      compression: 'none', max_in_flight_requests: 1, client_heap_bytes: 2 * GIB,
-      retention: { default: 'unlimited', backlog_topics: `${OMB_BACKLOG_RETENTION_RATIO}x the backlog, split across partitions` },
-      delivery_verification: 'OMB rates/latencies only; no sequence or exact delivery check',
-      warmup_minutes: options.smoke ? 0 : 1, smoke_overrides: options.smoke ? { minutes: 1, rate: 5000, backlog_gb: 0 } : null });
-    delete provenance.contract.warmup_records;
-    delete provenance.contract.workload_timeout_seconds;
-  }
-  if (curves) {
-    provenance.workload_source = { path: 'benchmarks/BenchmarkTimeline.java', license: 'Apache-2.0',
-      sha256: createHash('sha256').update(await fs.readFile(path.join(ROOT, 'benchmarks/BenchmarkTimeline.java'))).digest('hex') };
-    delete provenance.contract.warmup_records;
-    delete provenance.contract.workload_timeout_seconds;
-    Object.assign(provenance.contract, { broker_memory_bytes: 4 * GIB,
-      redpanda_memory_bytes: 3 * GIB, redpanda_reserve_bytes: GIB / 2,
-      required_available_memory_bytes: 20 * GIB, maximum_cluster_and_client_memory_bytes: 16 * GIB,
-      workload_sampling_ms: 1000, workload_max_records: options.smoke ? 16_000_000 : 64_000_000,
-      warmup_seconds: options.smoke ? 2 : 5, drain_timeout_seconds: 60, workload_deadline_extra_seconds: 120,
-      producer_max_block_ms: 30000, producer_request_timeout_ms: 10000, producer_delivery_timeout_ms: 45000,
-      budget_source: 'per-trial budget overrides base broker allocations',
-      lag_definition: 'max(0, acknowledged - consumed); offered backlog includes unsent scheduled records',
-      fault: 'pause/resume broker leading partition 0; same containers and volumes',
-      latency: 'HDR 3 significant digits, microseconds; scheduled send to ack/consume; measured cohort includes drain',
-    });
-  }
+  provenance.replication_factors = replicationFactors;
+  Object.assign(provenance.contract, {
+    compression: 'none', max_in_flight_requests: 1,
+    retention: { default: 'unlimited', backlog_topics: `${OMB_BACKLOG_RETENTION_RATIO}x the backlog, split across partitions` },
+    delivery_verification: 'OMB rates/latencies only; no sequence or exact delivery check',
+    warmup_minutes: options.smoke ? 0 : 1,
+    smoke_overrides: options.smoke ? { minutes: 1, rate: 5000, backlog_gb: 0 } : null,
+  });
   const save = () => fs.writeFile(path.join(artifacts, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
 
   async function command(executable, args, { timeout = 120_000, output, streamOutput = false, ignoreAbort = false } = {}) {
@@ -238,15 +201,15 @@ async function main() {
     assert.ok(aioMax - aioUsed >= 3 * 4 * 2050 + 128, 'insufficient available Linux AIO slots for Redpanda RF3');
     const meminfo = await fs.readFile('/proc/meminfo', 'utf8');
     const memoryAvailable = Number(meminfo.match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-    const requiredMemory = (curves ? 20 : 34) * GIB;
+    const requiredMemory = 34 * GIB;
     assert.ok(memoryAvailable >= requiredMemory, `need ${requiredMemory / GIB} GiB available RAM; found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
     const disk = await fs.statfs(ROOT);
     const freeDisk = disk.bavail * disk.bsize;
     // OMB backlog topics retain 120 GiB, three times over at RF3. Allow up to
     // five minutes of writes between retention checks (about 84 GiB at RF3),
     // segment granularity, record overhead and the 20 GiB abort reserve.
-    const ombBacklog = omb && cases.some(c => c.id.startsWith('backlog-'));
-    const requiredDisk = (options.smoke ? (curves ? 24 : 4) : ombBacklog ? 540 : 150) * GIB;
+    const ombBacklog = cases.some(c => c.id.startsWith('backlog-'));
+    const requiredDisk = (options.smoke ? 4 : ombBacklog ? 540 : 150) * GIB;
     assert.ok(freeDisk >= requiredDisk, `insufficient disk: ${(freeDisk / GIB).toFixed(1)} GiB free`);
     const dockerDisk = await fs.statfs(info.DockerRootDir);
     const dockerFreeDisk = dockerDisk.bavail * dockerDisk.bsize;
@@ -284,9 +247,9 @@ async function main() {
     provenance.runner = {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
-        'scripts/benchmark-curves.mjs', 'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
+        'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
         'benchmarks/OpenMessagingMain.java', 'benchmarks/omb-kafka-coalesce-commits.patch',
-        'benchmarks/BenchmarkAdmin.java', 'benchmarks/BenchmarkTimeline.java'].map(async name =>
+        'benchmarks/BenchmarkAdmin.java'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
     console.log(`benchmark ${runId}: ${provenance.mode}; artifacts ${artifacts}`);
@@ -313,13 +276,7 @@ async function main() {
       return;
     }
 
-    const sourceResponse = await fetch(WORKLOAD.url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
-    assert.ok(sourceResponse.ok, `workload download failed: HTTP ${sourceResponse.status}`);
-    const source = Buffer.from(await sourceResponse.arrayBuffer());
-    assert.equal(createHash('sha256').update(source).digest('hex'), WORKLOAD.sha256, 'upstream workload hash differs');
-    await fs.writeFile(path.join(artifacts, 'BrokerPerformanceWorkload.java'), source);
     await fs.copyFile(path.join(ROOT, 'benchmarks', 'BenchmarkAdmin.java'), path.join(artifacts, 'BenchmarkAdmin.java'));
-    await fs.copyFile(path.join(ROOT, 'benchmarks', 'BenchmarkTimeline.java'), path.join(artifacts, 'BenchmarkTimeline.java'));
     const kafkaImage = provenance.images.kafka.reference;
     const jarContainer = await createContainer([kafkaImage], 'client-jars');
     await docker(['cp', `${jarContainer}:/opt/kafka/libs`, path.join(artifacts, 'libs')]);
@@ -327,7 +284,7 @@ async function main() {
     const classes = path.join(artifacts, 'classes');
     await fs.mkdir(classes);
     await command('javac', ['--release', '17', '-cp', `${artifacts}/libs/*`, '-d', classes,
-      `${artifacts}/BrokerPerformanceWorkload.java`, `${artifacts}/BenchmarkAdmin.java`, `${artifacts}/BenchmarkTimeline.java`],
+      `${artifacts}/BenchmarkAdmin.java`],
     { output: path.join(artifacts, 'compile') });
     const jars = (await fs.readdir(path.join(artifacts, 'libs'))).filter(f => f.endsWith('.jar')).sort();
     provenance.client_jars = Object.fromEntries(await Promise.all(jars.map(async name =>
@@ -336,7 +293,7 @@ async function main() {
     await save();
 
     let ombRuntime;
-    if (omb) {
+    {
       console.log(`Building OpenMessaging ${OMB.commit}`);
       ombRuntime = await prepareOmb(artifacts, command, oneShot);
       provenance.openmessaging = ombRuntime.provenance;
@@ -364,7 +321,7 @@ async function main() {
       redpanda_reserve_bytes: GIB,
     }) {
       const available = Number((await fs.readFile('/proc/meminfo', 'utf8')).match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-      const needed = rf * budget.broker_memory_bytes + 4 * GIB + (curves ? 4 * GIB : 0);
+      const needed = rf * budget.broker_memory_bytes + 4 * GIB;
       assert.ok(available >= needed, `RF${rf} needs ${needed / GIB} GiB available RAM before cluster startup`);
       resourceCreationStarted = true;
       network = await docker(['network', 'create', '--label', `krabka.benchmark=${runId}`, `krabka-bench-${runId}-${vendor}-rf${rf}-${repetition}`]);
@@ -529,100 +486,8 @@ rpk:
       return { output, samples, startedAt };
     }
 
-    async function trial(vendor, rf, repetition, workload, brokers, directory, warmup = false) {
-      controller.signal.throwIfAborted();
-      const prefix = warmup ? 'warmup' : workload.id;
-      const topic = `bench-${prefix}`;
-      const topicSettings = await runClient(['BenchmarkAdmin', 'topic', 'broker-0:9092', topic, String(rf),
-        String(rf === 1 ? 1 : 2), vendor], 'topic', path.join(directory, `${prefix}.topic`));
-      await fs.writeFile(path.join(directory, `${prefix}.topic.json`), `${topicSettings}\n`);
-      const { output, samples, startedAt } = await measureResources(brokers,
-        path.join(directory, `${prefix}.resources.jsonl`), () => runClient([
-          'BrokerPerformanceWorkload', 'broker-0:9092', topic, `${topic}-group`,
-          String(workload.records), String(workload.bytes), String(workload.rate), '900',
-          workload.compression, workload.payload], 'workload', path.join(directory, `${prefix}.workload`), 960_000));
-      const measured = JSON.parse(output);
-      validateDelivery(measured, workload.records);
-      const metrics = { ...measured, ...resourceSummary(samples, measured.sent) };
-      const result = { vendor, rf, min_isr: vendor === 'redpanda' ? null : (rf === 1 ? 1 : 2),
-        acknowledgment: vendor === 'redpanda' ? `Raft majority (${rf === 1 ? 1 : 2})` : 'all in-sync replicas', repetition, case: workload,
-        workload: measured, metrics, topic: JSON.parse(topicSettings),
-        time_series: resourceTimeSeries(samples, startedAt) };
-      await fs.writeFile(path.join(directory, `${prefix}.json`), `${JSON.stringify(result, null, 2)}\n`);
-      if (!warmup) trials.push(result);
-      console.log(`${warmup ? 'Warm-up' : `Trial ${trials.length}`}: RF${rf} ${vendor} round ${repetition} ${prefix}: ${measured.records_per_second.toFixed(0)} records/s, ${metrics.cpu_us_per_record.toFixed(2)} CPU µs/record`);
-    }
-
-    async function curveTrial(vendor, repetition, workload, brokers, directory, budget) {
-      const rf = workload.rf;
-      const topic = `bench-${workload.id}`;
-      const bootstrap = brokers.map(b => `${b.name}:9092`).join(',');
-      const topicSettings = JSON.parse(await runClient(['BenchmarkAdmin', 'topic', bootstrap, topic,
-        String(rf), String(rf === 1 ? 1 : 2), vendor], 'topic', path.join(directory, 'topic')));
-      let leader;
-      if (workload.kind === 'recovery') {
-        leader = JSON.parse(await runClient(['BenchmarkAdmin', 'leader', bootstrap, topic], 'leader', path.join(directory, 'leader')));
-        assert.ok(brokers[leader.broker_id], 'leader is outside this run');
-      }
-      const events = [];
-      let workloadStart;
-      let paused = false;
-      const event = async action => {
-        const broker = brokers[leader.broker_id];
-        await docker([action, broker.id]);
-        paused = action === 'pause';
-        events.push({ action, broker_id: leader.broker_id, container_id: broker.id,
-          led_partitions: leader.led_partitions, at: new Date().toISOString(),
-          elapsed_ms: performance.now() - workloadStart });
-        await fs.writeFile(path.join(directory, 'events.json'), `${JSON.stringify(events, null, 2)}\n`);
-      };
-      const poll = async () => {
-        if (!leader) return;
-        if (workloadStart === undefined) {
-          const header = await fs.readFile(path.join(directory, 'started.json'), 'utf8').catch(error => {
-            if (error.code === 'ENOENT') return null;
-            throw error;
-          });
-          if (!header) return;
-          workloadStart = performance.now() - (Date.now() - Date.parse(JSON.parse(header).started_at));
-        }
-        const elapsed = performance.now() - workloadStart;
-        if (events.length === 0 && elapsed >= (workload.warmup_seconds + workload.pause_after_seconds) * 1000) {
-          await event('pause');
-        } else if (paused && elapsed >= events[0].elapsed_ms + workload.pause_seconds * 1000) {
-          await event('unpause');
-        }
-      };
-      let measurement;
-      try {
-        measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
-          () => oneShot([...clientArgs(['--user', String(process.getuid()), '--volume', `${directory}:/bench/output`]),
-            'BenchmarkTimeline', bootstrap, topic, String(workload.rate), String(workload.warmup_seconds),
-            String(workload.seconds), '/bench/output', String(provenance.contract.workload_max_records)], 'timeline',
-          { output: path.join(directory, 'workload'), timeout: (workload.warmup_seconds + workload.seconds + 120) * 1000 }), poll);
-      } finally {
-        if (paused) await docker(['unpause', brokers[leader.broker_id].id], { ignoreAbort: true, timeout: 30_000 });
-      }
-      const measured = JSON.parse(measurement.output);
-      const workloadTimeline = { schema_version: 1,
-        ...JSON.parse(await fs.readFile(path.join(directory, 'started.json'), 'utf8')),
-        sampling_interval_ms: 1000,
-        samples: (await fs.readFile(path.join(directory, 'workload.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse) };
-      const result = { vendor, rf, repetition, case: workload, budget, topic: topicSettings,
-        workload: measured, workload_time_series: workloadTimeline, events,
-        time_series: resourceTimeSeries(measurement.samples, measurement.startedAt),
-        metrics: resourceSummary(measurement.samples, measured.sent),
-        curve: curveSummary(workload, measured, workloadTimeline, events) };
-      if (leader) {
-        result.recovered_topic = JSON.parse(await runClient(['BenchmarkAdmin', 'isr', bootstrap, topic,
-          String(rf), '2', vendor], 'recovered-isr', path.join(directory, 'recovered-isr')));
-      }
-      await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(result, null, 2)}\n`);
-      trials.push(result);
-      console.log(`Curve ${trials.length}: ${vendor} ${workload.id}, ${workload.memory_gib} GiB/broker: ${result.curve.records_per_second.toFixed(0)} ack records/s, ${result.curve.latency_ms_p99.toFixed(2)} ms p99`);
-    }
-
-    if (omb) {
+    // Run each OMB workload on fresh clusters.
+    {
       for (const rf of replicationFactors) for (let repetition = 1; repetition <= repetitions; repetition++) {
         const offset = (repetition - 1) % VENDORS.length;
         const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
@@ -683,49 +548,6 @@ rpk:
           await save();
         }
       }
-    } else if (curves) {
-      for (let repetition = 1; repetition <= repetitions; repetition++) {
-        const offset = (repetition - 1) % VENDORS.length;
-        const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
-        for (const workload of cases) for (const vendor of order) {
-          const directory = path.join(artifacts, `rf${workload.rf}-${vendor}-${repetition}-${workload.id}`);
-          await fs.mkdir(directory);
-          const budget = curveBudget(workload, vendor);
-          console.log(`Starting ${vendor} ${workload.id} round ${repetition}/${repetitions}`);
-          try {
-            const brokers = await launchCluster(vendor, workload.rf, repetition, directory, budget);
-            await curveTrial(vendor, repetition, workload, brokers, directory, budget);
-          } catch (error) {
-            controller.signal.throwIfAborted();
-            const failure = { vendor, rf: workload.rf, repetition, case: workload, budget,
-              status: 'failed', error: error.message, artifacts: path.basename(directory) };
-            await fs.writeFile(path.join(directory, 'failure.json'), `${JSON.stringify(failure, null, 2)}\n`);
-            failures.push(failure);
-            console.error(`Failed curve ${vendor} ${workload.id} round ${repetition}: ${error.message}`);
-          }
-          await cleanup();
-          provenance.completed_trials = trials.length;
-          provenance.attempted_trials = trials.length + failures.length;
-          provenance.failed_trials = failures.length;
-          await save();
-        }
-      }
-    } else for (const rf of [1, 3]) {
-      for (let repetition = 1; repetition <= repetitions; repetition++) {
-        const offset = (repetition - 1) % VENDORS.length;
-        const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
-        for (const vendor of order) {
-          const directory = path.join(artifacts, `rf${rf}-${vendor}-${repetition}`);
-          await fs.mkdir(directory);
-          console.log(`Starting RF${rf} ${vendor} round ${repetition}/${repetitions}`);
-          const brokers = await launchCluster(vendor, rf, repetition, directory);
-          await trial(vendor, rf, repetition, { ...CASES[0], records: provenance.contract.warmup_records[rf] }, brokers, directory, true);
-          for (const workload of cases) await trial(vendor, rf, repetition, workload, brokers, directory);
-          await cleanup();
-          provenance.completed_trials = trials.length;
-          await save();
-        }
-      }
     }
     controller.signal.throwIfAborted();
     if (failures.length) {
@@ -738,14 +560,8 @@ rpk:
     provenance.completed_at = new Date().toISOString();
     provenance.host.load_average_at_end = os.loadavg();
     await save();
-    if (omb) {
-      await writeOmbReport(artifacts, provenance, trials);
-      console.log(`OpenMessaging passed: ${trials.length} trials; ${artifacts}/summary.md`);
-    } else if (options.smoke) console.log(`Smoke passed: ${trials.length} trials. Results retained only in ${artifacts}`);
-    else {
-      await publishResults(ROOT, provenance, trials, controller.signal);
-      console.log(`Published ${trials.length} trials to benchmarks/results/${runId}/ and benchmarks/latest${curves ? '-curves' : ''}.md`);
-    }
+    await writeOmbReport(artifacts, provenance, trials);
+    console.log(`OpenMessaging passed: ${trials.length} trials; ${artifacts}/summary.md`);
   } catch (error) {
     provenance.status = interrupted ? 'interrupted' : 'failed';
     provenance.error = error.message;
