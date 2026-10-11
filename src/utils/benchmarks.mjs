@@ -56,6 +56,8 @@ function loadOpenMessaging() {
     })),
   }));
   return { provenance, images, rows, trials, sourceURL,
+    archiveURL: fs.existsSync(path.join(root, 'archive', provenance.run_id + '.tar.gz'))
+      ? 'https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md' : null,
     intervalsURL: fs.existsSync(path.join(directory, 'intervals.json'))
       ? sourceURL.replace('/tree/', '/blob/') + '/intervals.json' : null,
     summaryURL: sourceURL.replace('/tree/', '/blob/') + '/summary.md',

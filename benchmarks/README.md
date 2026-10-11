@@ -193,8 +193,10 @@ other upstream fields keep their original values, sample order and units. No
 samples are averaged, resampled or assigned invented wall-clock timestamps.
 The compact figures still come from the same validated capture. Broker resource
 telemetry and logs remain in the diagnostic artifact. Older published runs without
-an interval index continue to supply aggregate charts; their timelines cannot be
-reconstructed from averages.
+an interval index continue to supply aggregate charts. The original raw results
+for `omb-local-2026-10-11` are preserved in the [Git LFS archive](archive/README.md),
+including OMB’s 10-second intervals. Other timelines require the original captures
+and cannot be reconstructed from averages.
 
 ## Write path and latency
 
