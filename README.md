@@ -55,7 +55,7 @@ npm run check-seo
 npm run check-snippets
 npm run test:snippets
 
-# Compare published Krabka, Kafka 4.3.1, and Redpanda; update dated repo results
+# Run upstream OpenMessaging workloads against Krabka, Kafka 4.3.1, and Redpanda
 # Native Linux/amd64 Docker, JDK 17+, 14 logical CPUs, 34 GiB available RAM
 npm run benchmark -- --dry-run
 npm run benchmark -- --smoke
@@ -163,9 +163,9 @@ npm run preview
 ### 6. Correctness & Verification (`/verification`)
 - **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
 - **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`. `src/utils/verification-catalog.ts` parses that file at build time and `src/utils/verification-data.ts` joins it with the site's data files; the counts on the homepage and the verification page come from that parse, so they follow the broker's catalog rather than hand-maintained copy.
-- The site makes no benchmark or performance claims. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
+- Website performance figures come only from published full OpenMessaging Benchmark runs. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
 
-Local broker benchmark tasks are documented in [benchmarks/README.md](benchmarks/README.md). `npm run benchmark` runs the RF1/RF3 three-way comparison and updates repository reports after the full matrix passes. These reports are separate from the website's performance claims.
+OpenMessaging benchmark tasks are documented in [benchmarks/README.md](benchmarks/README.md). `npm run benchmark` runs the upstream OMB catalog at RF1/RF3. Publish a validated full run with `node scripts/publish-openmessaging.mjs RUN_DIR`; both the homepage and benchmark page follow `benchmarks/latest-openmessaging.md`.
 
 The manual **OpenMessaging broker benchmarks** workflow runs the upstream Kafka workload catalog against Krabka, Kafka 4.3.1, and Redpanda on the organization's Google Cloud runners. It retains results and diagnostics as Actions artifacts; see [the benchmark instructions](benchmarks/README.md#openmessaging-on-google-cloud).
 
