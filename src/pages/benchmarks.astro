@@ -10,6 +10,10 @@ const completed = new Date(curveProvenance.completed_at).toISOString();
 const curveVendors = vendors.map(v => ({ ...v, ...curveProvenance.images[v.id], version: curveProvenance.images[v.id].requested.split(':').at(-1).replace(/^v/, '') }));
 const latency = (ms: number | null) => ms === null ? '—' : ms >= 1000 ? format(ms / 1000, 1) + ' s' : format(ms, ms < 10 ? 1 : 0) + ' ms';
 const offered = (rate: number) => rate > 0 ? format(rate) + '/s' : 'max (probed)';
+const ombShards = openmessaging?.provenance.shards ?? [];
+const ombSameHost = !ombShards.length || new Set(ombShards.map(s => JSON.stringify([s.host?.cpu_model, s.host?.memory_total_bytes]))).size === 1;
+const ombDerived = ombShards.filter(s => s.derived_from);
+const ombRetriable = (openmessaging?.trials ?? []).reduce((sum, t) => sum + (t.retriable_commit_failures ?? 0), 0);
 const ombCompleted = openmessaging ? new Date(openmessaging.provenance.completed_at).toISOString() : null;
 const repeat = `# Resolve and check the pinned images and local prerequisites
 npm run benchmark -- --suite curves --dry-run
@@ -65,12 +69,20 @@ npm run benchmark -- --suite curves`;
 
     {openmessaging && (
       <section id="openmessaging" aria-labelledby="openmessaging-heading" class="mt-16 scroll-mt-24">
-        <h2 id="openmessaging-heading" class="text-2xl font-bold text-white sm:text-3xl">OpenMessaging on Google Cloud</h2>
+        <h2 id="openmessaging-heading" class="text-2xl font-bold text-white sm:text-3xl">OpenMessaging Benchmark</h2>
         <div class="mt-4 max-w-4xl space-y-3 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
           <p>
-            The upstream <a href="https://openmessaging.cloud/docs/benchmarks/" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging Benchmark</a> workloads, run by its unmodified Kafka driver and Kafka {openmessaging.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against every broker:
+            The upstream <a href="https://openmessaging.cloud/docs/benchmarks/" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">OpenMessaging Benchmark</a> workloads, run by its Kafka driver and Kafka {openmessaging.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against every broker:
             {openmessaging.images.map((image, i) => <>{i ? (i === openmessaging.images.length - 1 ? ', and ' : ', ') : ' '}{image.label}</>)}.
-            One ephemeral {openmessaging.provenance.host.logical_cpus}-vCPU Google Cloud VM ran the brokers one vendor at a time, with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
+            {(openmessaging.provenance.openmessaging?.patches && Object.keys(openmessaging.provenance.openmessaging.patches).length)
+              ? <>The driver carries one patch, applied identically to every broker, that keeps at most one offset commit in flight, as Redpanda's fork of the benchmark does. </>
+              : null}
+            {ombSameHost
+              ? <>All trials ran on one {openmessaging.provenance.host.cpu_model} host with {openmessaging.provenance.host.logical_cpus} logical CPUs, the brokers one at a time,</>
+              : <>Each workload and replication factor ran on its own {openmessaging.provenance.host.logical_cpus}-vCPU machine ({openmessaging.provenance.shards.length} in all), the brokers one at a time on that machine,</>}
+            with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
+            {ombDerived.length > 0 && <>The run merges {openmessaging.provenance.shards.length} invocations; {ombDerived.map(s => `RF${s.derived_from.replication_factor}${s.derived_from.workloads ? ` (${s.derived_from.workloads.length} workloads)` : ''}`).join(' and ')} came from {ombDerived.length === 1 ? 'an invocation' : 'invocations'} that did not finish cleanly, keeping only workloads whose trials had all completed and passed; anything left out was rerun for all three brokers. Each shard's source run and reason are in the provenance. </>}
+            {ombRetriable > 0 && <>{ombRetriable} offset {ombRetriable === 1 ? 'commit' : 'commits'} failed with a retriable error after a leader or coordinator move and {ombRetriable === 1 ? 'was' : 'were'} superseded by the next commit; these are counted, not failed. </>}
             Run {openmessaging.provenance.run_id}, completed <time datetime={ombCompleted}>{ombCompleted.slice(0, 10)}</time>; {openmessaging.provenance.repetitions === 1 ? 'one round' : openmessaging.provenance.repetitions + ' rounds (medians shown)'} per workload.
           </p>
           <p>

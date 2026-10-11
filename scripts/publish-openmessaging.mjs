@@ -33,6 +33,9 @@ export function compactTrial(trial) {
     cpu_seconds: trial.metrics.cpu_seconds,
     rss_peak_bytes: trial.metrics.rss_peak_bytes,
     working_set_peak_bytes: trial.metrics.working_set_peak_bytes,
+    // Counted by the runner; a trial from before it counted them ran when any
+    // commit failure failed the trial, so it had none.
+    retriable_commit_failures: trial.retriable_commit_failures ?? 0,
   };
 }
 

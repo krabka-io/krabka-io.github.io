@@ -111,8 +111,9 @@ export function format(value, digits = 0) { return value.toLocaleString('en-US',
   maximumFractionDigits: digits,
 }); }
 
-// OpenMessaging on Google Cloud, published from a complete workflow artifact by
-// scripts/publish-openmessaging.mjs. Absent until a run is published.
+// The latest complete OpenMessaging run, published by
+// scripts/publish-openmessaging.mjs from a workflow artifact or a local run.
+// Absent until a run is published.
 const ombImageLabels = {
   'sha256:117df778e3e8af143d8bc3681233c0151dc97d51cfafd3844c4daa09afaf9690': 'krabka-broker 1.0.0 (ada8e3ad, CI delivery image)',
   // The signed v1.0.1 release index and its amd64 image, which the runner pulls.
@@ -155,7 +156,7 @@ function loadOpenMessaging() {
       }),
     })),
   }));
-  return { provenance, images, rows, sourceURL,
+  return { provenance, images, rows, trials, sourceURL,
     summaryURL: sourceURL.replace('/tree/', '/blob/') + '/summary.md',
     provenanceURL: sourceURL.replace('/tree/', '/blob/') + '/provenance.json' };
 }
