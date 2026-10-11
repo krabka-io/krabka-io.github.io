@@ -15,7 +15,7 @@ The site also publishes two things the rest of the organization depends on: the 
 - **npm**: the version that ships with Node
 - **Rust toolchain**: 1.99.0 or newer (the `rust-version` of `playground` and `playground/broker-wasi`, and the toolchain krabka-broker pins), with the `wasm32-unknown-unknown` target and `bash` and `curl` on the path. `npm run build` needs it, because it compiles the WebAssembly playground and Cluster Lab. `playground/build.sh` adds the target through `rustup` and downloads the matching `wasm-bindgen` CLI.
 - **`git`** and, for release tags, an authenticated **`gh`**: `npm run sync-docs` and `npm run sync-proofs` read the sibling repositories from `..` when they sit beside this one, and clone them from GitHub otherwise.
-- **Real broker for the Cluster Lab** (`npm run build:broker`): the `wasm32-wasip1` target, `clang` and `llvm-ar`, and a WASI sysroot (the script downloads wasi-sdk 25 when `WASI_SYSROOT` is unset). Every broker of the lab is this module, so without it the lab still loads but each broker node reports "no build on this site" and refuses connections; `check-lab-clusters` and `check-real-broker` need it too
+- **Real broker for the Cluster Lab** (`npm run build:broker`): the `wasm32-wasip1` target and wasi-sdk 34, whose clang, llvm-ar and WASI sysroot compile the broker's C code (the script downloads it into `playground/broker-wasi/.tools/` when `WASI_SDK_PATH` is unset). Every broker of the lab is this module, so without it the lab still loads but each broker node reports "no build on this site" and refuses connections; `check-lab-clusters` and `check-real-broker` need it too
 
 ### Commands
 

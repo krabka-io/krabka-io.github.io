@@ -60,7 +60,7 @@ jobs:
   # workspace, on the broker's revision. Its unit tests (the process
   # contract, the configuration profile, the dialer protocol) run natively;
   # clippy covers both the native build and wasm32-wasip1, the target the lab
-  # runs, whose C code compiles against the WASI sysroot of wasi-sdk.
+  # runs, whose C code compiles with the clang and WASI sysroot of wasi-sdk.
   # `.cargo/config.toml` gives that target `--cfg tokio_unstable`, which a
   # `RUSTFLAGS` variable would replace, so the job sets none.
   broker-wasi:
@@ -88,34 +88,26 @@ jobs:
           workspaces: playground/broker-wasi
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the WASI sysroot
+      # The C code in the broker's graph (ring, zstd and LZ4) compiles with
+      # the clang, llvm-ar and WASI sysroot of wasi-sdk 34, which are built
+      # together, rather than with whichever clang the runner image carries.
+      - name: Install wasi-sdk
         env:
-          WASI_SYSROOT_URL: https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sysroot-25.0.tar.gz
+          WASI_SDK_URL: https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
         run: |
           set -euo pipefail
           curl -LsSf --retry 5 --retry-all-errors \
-            --output "${RUNNER_TEMP}/wasi-sysroot.tar.gz" "${WASI_SYSROOT_URL}"
-          tar -xzf "${RUNNER_TEMP}/wasi-sysroot.tar.gz" -C "${RUNNER_TEMP}"
-          sysroot="${RUNNER_TEMP}/wasi-sysroot-25.0"
-          test -d "${sysroot}/include"
+            --output "${RUNNER_TEMP}/wasi-sdk.tar.gz" "${WASI_SDK_URL}"
+          tar -xzf "${RUNNER_TEMP}/wasi-sdk.tar.gz" -C "${RUNNER_TEMP}"
+          sdk="${RUNNER_TEMP}/wasi-sdk-34.0-x86_64-linux"
+          "${sdk}/bin/clang" --version
+          test -d "${sdk}/share/wasi-sysroot/include"
           {
-            echo "CC_wasm32_wasip1=clang"
-            echo "CFLAGS_wasm32_wasip1=--sysroot=${sysroot}"
+            echo "WASI_SDK_PATH=${sdk}"
+            echo "CC_wasm32_wasip1=${sdk}/bin/clang"
+            echo "AR_wasm32_wasip1=${sdk}/bin/llvm-ar"
+            echo "CFLAGS_wasm32_wasip1=--sysroot=${sdk}/share/wasi-sysroot"
           } >> "${GITHUB_ENV}"
-
-      # `clang -print-prog-name` gives the path of the archiver that clang
-      # finds for itself, or only the bare name when it finds none. For a bare
-      # name, take the `llvm-ar` of the newest LLVM on the runner.
-      - name: Find the LLVM archiver
-        run: |
-          set -euo pipefail
-          command -v clang
-          ar="$(clang -print-prog-name=llvm-ar)"
-          if ! command -v "${ar}" >/dev/null 2>&1; then
-            ar="$(ls /usr/lib/llvm-*/bin/llvm-ar | sort -V | tail -n 1)"
-          fi
-          "${ar}" --version
-          echo "AR_wasm32_wasip1=${ar}" >> "${GITHUB_ENV}"
 
       - name: Check the formatting
         run: cargo fmt --check
