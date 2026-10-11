@@ -181,9 +181,11 @@ dependency jars under `/m2`. Each runner builds OMB itself, and Maven stamps the
 jars it builds from `/src` with the build time, so those hashes differ between
 builds of the same source and are recorded but not compared.
 
-`split --rf N --reason TEXT --out DIR RUN_DIR` turns one replication factor of a
-run that did not finish into a complete shard. Every vendor, round and workload
-at that RF must have a result and no failure. The shard's provenance, and the
+`split --rf N [--workloads A,B] --reason TEXT --out DIR RUN_DIR` turns one
+replication factor of a run that did not finish into a complete shard. Every
+vendor, round and selected workload at that RF must have a result and no
+failure; `--workloads` leaves out a workload with a failed trial so it can be
+rerun, for all three brokers, as its own shard. The shard's provenance, and the
 merged run's `shards` entry for it, record the source run, its status and the
 reason under `derived_from`.
 

@@ -152,10 +152,12 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
   // Upstream catches workload exceptions and can exit zero without a result.
   // A process exit status alone is never enough to mark a trial successful.
   // One exception: at the end of a maximum-rate run, upstream closes the
-  // producer while its send loop is still blocked waiting for buffer memory,
-  // and LocalWorker logs the resulting KafkaException. It follows the final
-  // aggregated results, so it says nothing about the measurement.
-  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\norg\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory\b/g, '')
+  // producer while its send loop is still running. A send blocked waiting for
+  // buffer memory fails with a KafkaException, and one that starts after the
+  // close fails with an IllegalStateException; LocalWorker logs either. Both
+  // follow the final aggregated results, so they say nothing about the
+  // measurement.
+  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\n(?:org\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory|java\.lang\.IllegalStateException: Cannot perform operation after producer has been closed)\b/g, '')
     .replace(RETRIABLE_COMMIT_FAILURE, '');
   assert.ok(!/\]\s+ERROR\s/.test(errors), 'OMB logged an error; inspect workload logs');
   assert.equal(result.driver, `${vendor}-rf${rf}`, 'wrong OMB driver');

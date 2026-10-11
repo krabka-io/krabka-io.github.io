@@ -2,7 +2,7 @@
 //
 //   node scripts/benchmark-openmessaging-shards.mjs plan --workloads all --replication-factors 1,3 [--lanes 4]
 //   node scripts/benchmark-openmessaging-shards.mjs merge --out DIR SHARD_RUN_DIR...
-//   node scripts/benchmark-openmessaging-shards.mjs split --rf N --reason TEXT --out DIR RUN_DIR
+//   node scripts/benchmark-openmessaging-shards.mjs split --rf N [--workloads A,B] --reason TEXT --out DIR RUN_DIR
 //
 // A shard is one workload at one replication factor, so all three brokers for
 // that pair, and every round of them, run on the same machine. The merge
@@ -94,16 +94,22 @@ export async function loadShard(directory) {
 // have a trial.json and no failure.json, so nothing at the RF was skipped or
 // failed. The shard records the source run, its status and the reason under
 // derived_from, and the merged provenance keeps that record per shard.
-export async function split(directory, rf, out, reason) {
+// `workloads` narrows the shard to some of the run's workloads, so a workload
+// with a failed trial can be rerun as its own shard; by default it takes all.
+export async function split(directory, rf, out, reason, workloads) {
   assert.ok(typeof reason === 'string' && reason.trim(), 'split needs a reason');
   const source = JSON.parse(await fs.readFile(path.join(directory, 'provenance.json'), 'utf8'));
   assert.equal(source.suite, 'openmessaging', `${directory} is not an OpenMessaging run`);
   assert.notEqual(source.status, 'complete', `run ${source.run_id} is complete; merge it as it is`);
   assert.ok(source.replication_factors.includes(rf), `run ${source.run_id} did not include RF${rf}`);
+  const cases = workloads ? source.cases.filter(c => workloads.includes(c.id)) : source.cases;
+  if (workloads) {
+    for (const id of workloads) assert.ok(cases.some(c => c.id === id), `run ${source.run_id} did not run ${id}`);
+  }
   const names = [];
   let completed = 0;
   for (const vendor of VENDORS) for (let repetition = 1; repetition <= source.repetitions; repetition++) {
-    for (const workload of source.cases) {
+    for (const workload of cases) {
       const name = `rf${rf}-${vendor}-${repetition}-${workload.id}`;
       await assert.rejects(fs.access(path.join(directory, name, 'failure.json')), undefined,
         `${name} failed in run ${source.run_id}`);
@@ -115,9 +121,10 @@ export async function split(directory, rf, out, reason) {
     }
   }
   const provenance = { ...source, run_id: `${source.run_id}-rf${rf}`, status: 'complete',
-    replication_factors: [rf], completed_trials: names.length, failed_trials: 0,
+    cases, replication_factors: [rf], completed_trials: names.length, failed_trials: 0,
     completed_at: new Date(completed).toISOString(),
-    derived_from: { run_id: source.run_id, status: source.status, replication_factor: rf, reason } };
+    derived_from: { run_id: source.run_id, status: source.status, replication_factor: rf,
+      ...(workloads ? { workloads: cases.map(c => c.id) } : {}), reason } };
   await fs.mkdir(out, { recursive: false });
   for (const name of names) {
     await fs.cp(path.join(directory, name), path.join(out, name), { recursive: true, errorOnExist: true, force: false });
@@ -214,10 +221,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`Merged ${result.shards} shards into ${result.run_id}: ${result.trials} trials.`);
   } else if (command === 'split') {
     const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
-      options: { out: { type: 'string' }, rf: { type: 'string' }, reason: { type: 'string' } } });
+      options: { out: { type: 'string' }, rf: { type: 'string' }, reason: { type: 'string' }, workloads: { type: 'string' } } });
     assert.ok(values.out && values.rf && values.reason && positionals.length === 1,
-      'usage: split --rf N --reason TEXT --out DIR RUN_DIR');
-    const shard = await split(path.resolve(positionals[0]), Number(values.rf), path.resolve(values.out), values.reason);
+      'usage: split --rf N [--workloads A,B] --reason TEXT --out DIR RUN_DIR');
+    const shard = await split(path.resolve(positionals[0]), Number(values.rf), path.resolve(values.out), values.reason,
+      values.workloads?.split(','));
     console.log(`Split ${shard.trials.length} RF${values.rf} trials into ${shard.provenance.run_id}.`);
   } else {
     throw new Error('usage: benchmark-openmessaging-shards.mjs plan|merge|split ...');

@@ -200,6 +200,7 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   assert.throws(() => validateOmbResult(capture, 'krabka', 3, config, '20:00:00 [consumer] ERROR ConsumerCoordinator - Offset commit failed'), /logged an error/);
   const shutdown = '19:29:44.105 [local-worker-1-1] ERROR LocalWorker - Got error\norg.apache.kafka.common.KafkaException: Producer closed while allocating memory\n\tat org.apache.kafka.clients.producer.internals.BufferPool.allocate(BufferPool.java:161)';
   validateOmbResult(capture, 'krabka', 3, config, shutdown);
+  validateOmbResult(capture, 'krabka', 3, config, '01:44:14.136 [local-worker-1-1] ERROR LocalWorker - Got error\njava.lang.IllegalStateException: Cannot perform operation after producer has been closed\n\tat org.apache.kafka.clients.producer.KafkaProducer.throwIfProducerClosed(KafkaProducer.java:954)');
   const commit = '17:31:08.701 [pool-3-thread-1] ERROR KafkaBenchmarkConsumer - Offset commit with offsets {t-7=OffsetAndMetadata{offset=42695, leaderEpoch=null, metadata=\'\'}} failed\norg.apache.kafka.clients.consumer.RetriableCommitFailedException: Offset commit failed with a retriable exception.\nCaused by: org.apache.kafka.common.errors.NotCoordinatorException: This is not the correct coordinator.';
   validateOmbResult(capture, 'krabka', 3, config, `${commit}\n${commit}`);
   assert.equal(retriableCommitFailures(`${commit}\n${commit}`), 2);

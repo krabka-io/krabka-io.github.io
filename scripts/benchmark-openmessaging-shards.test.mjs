@@ -176,3 +176,22 @@ test('splitting refuses a replication factor with a missing or failed trial', as
   const complete = await shard(root, { workload: 'simple-workload', rf: 1 });
   await assert.rejects(split(complete, 1, path.join(root, 'out'), 'test'), /is complete/);
 });
+
+test('a split can take only the workloads whose trials all completed', async () => {
+  const root = await scratch();
+  const source = await shard(root, { workload: 'simple-workload', rf: 3, status: 'failed',
+    overrides: { run_id: 'rf3-run', cases: [
+      { id: 'simple-workload', upstream_file: 'workloads/simple-workload.yaml', config },
+      { id: '1-topic-1-partition-1kb', upstream_file: 'workloads/1-topic-1-partition-1kb.yaml', config }] } });
+  const failed = path.join(source, 'rf3-krabka-1-1-topic-1-partition-1kb');
+  await fs.mkdir(failed);
+  await fs.writeFile(path.join(failed, 'failure.json'), '{}');
+  await assert.rejects(split(source, 3, path.join(root, 'all'), 'test'), /failed in run rf3-run/);
+  const out = path.join(root, 'subset');
+  const subset = await split(source, 3, out, 'one workload rerun separately', ['simple-workload']);
+  assert.deepEqual([subset.trials.length, subset.provenance.cases.map(c => c.id)], [3, ['simple-workload']]);
+  assert.deepEqual(subset.provenance.derived_from.workloads, ['simple-workload']);
+  await assert.rejects(split(source, 3, path.join(root, 'x'), 'test', ['max-rate-1-topic-16-partitions-1kb']), /did not run/);
+  const rerun = await shard(root, { workload: '1-topic-1-partition-1kb', rf: 3, host: 'vm-rerun' });
+  assert.deepEqual(await merge([out, rerun], path.join(root, 'merged')), { run_id: 'merged', shards: 2, trials: 6 });
+});
