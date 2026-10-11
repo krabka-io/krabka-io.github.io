@@ -23,6 +23,10 @@ The site also publishes two things the rest of the organization depends on: the 
 # Install dependencies
 npm install
 
+# Fetch the raw benchmark capture used by the data explorer
+git lfs install
+git lfs pull --include "benchmarks/archive/*.tar.gz"
+
 # Sync docs and proof sessions from sibling repos, then start the dev server
 npm run dev
 
@@ -61,6 +65,9 @@ npm run benchmark -- --dry-run
 npm run benchmark -- --smoke
 npm run benchmark
 npm run test:benchmark
+
+# Check the captured-data explorer in a browser (after build:site)
+npm run check:benchmark-viewer
 
 # Execute an integration suite; run these sequentially, with port 9092 free.
 # Docker is required. Rust, Go, Java, Python, and Node.js use their native tools;

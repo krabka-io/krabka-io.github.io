@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -38,6 +40,9 @@ jobs:
 
       - name: Check website validation and sync guards
         run: npm run test:website
+
+      - name: Check benchmark data and archive transformations
+        run: npm run prepare:benchmark-archive && npm run test:benchmark
 
       # Two Rust crates compile to WebAssembly here. The consensus playground
       # and the Cluster Lab (/docs/playground, /docs/lab) are `playground/`,
@@ -134,6 +139,7 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           npm run check-site
+          npm run check:benchmark-viewer
           npm run check-component-docs
           npm run check-proof-smt
 
@@ -142,7 +148,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: website-checks
-          path: artifacts/site-check
+          path: |
+            artifacts/site-check
+            artifacts/benchmark-viewer
           retention-days: 14
 
       # The verification pages render the broker's synced docs/verification.md
