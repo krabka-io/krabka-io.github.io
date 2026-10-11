@@ -7,17 +7,17 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro dev",
-    "start": "astro dev",
+    "dev": "npm run prepare:benchmark-archive && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro dev",
+    "start": "npm run prepare:benchmark-archive && astro dev",
     "sync-docs": "node scripts/sync-docs.mjs",
     "sync-proofs": "node --experimental-strip-types scripts/sync-proofs.mjs",
     "benchmark": "node scripts/benchmark.mjs",
-    "test:benchmark": "node --test scripts/benchmark.test.mjs scripts/benchmark-openmessaging-shards.test.mjs scripts/publish-openmessaging.test.mjs scripts/benchmark-website.test.mjs",
+    "test:benchmark": "node --test scripts/benchmark.test.mjs scripts/benchmark-openmessaging-shards.test.mjs scripts/publish-openmessaging.test.mjs scripts/benchmark-website.test.mjs scripts/benchmark-archive.test.mjs",
     "build:playground": "bash playground/build.sh",
     "build:why3-web": "bash why3-web/install.sh",
     "build:broker": "bash playground/broker-wasi/build.sh",
-    "build:site": "astro build && pagefind --site dist",
-    "build": "npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && pagefind --site dist",
+    "build:site": "npm run prepare:benchmark-archive && astro build && pagefind --site dist",
+    "build": "npm run prepare:benchmark-archive && npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && pagefind --site dist",
     "check-links": "node scripts/check-links.mjs",
     "check-catalog": "node --experimental-strip-types scripts/check-catalog.mjs",
     "check-seo": "node scripts/check-seo.mjs",
@@ -50,7 +50,9 @@
     "preview": "astro preview",
     "astro": "astro",
     "check-snippets": "node scripts/check-snippets.mjs",
-    "test:snippets": "node --test scripts/snippets/extract.test.mjs"
+    "test:snippets": "node --test scripts/snippets/extract.test.mjs",
+    "prepare:benchmark-archive": "node scripts/prepare-benchmark-archive.mjs",
+    "check:benchmark-viewer": "node scripts/check-benchmark-viewer.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "0.4.3",

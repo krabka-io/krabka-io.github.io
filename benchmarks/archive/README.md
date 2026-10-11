@@ -21,6 +21,16 @@ Results only:
 
 Left out: the test setup and build. That means the Java sources and compiled classes, the OpenMessaging checkout, the Maven cache and jars, driver and workload YAML, image pull and compile logs, container inspections, broker logs, and the readiness, format and topic-creation probes. `provenance.json` still records the image digests, the OMB commit, the patch hash and every jar hash.
 
+## Interactive viewer
+
+The website's [benchmark data explorer](https://krabka.io/benchmarks/explorer/) covers all 78 trials. Select a workload, replication factor and round to compare brokers across every OMB rate and latency series, backlog, or broker CPU and memory metric. Resource views support cluster totals and individual brokers. Zoom the time window, inspect exact samples, export a CSV, and compare aggregate latency quantiles and the full upstream cumulative distributions.
+
+The trial catalog supports search and sorting. Trial drilldown exposes every original file listed above, including the complete runner trial, resource metadata, client stdout/stderr, run provenance and summary. JSON arrays expand in pages; logs retain their original line numbers. Original files can be downloaded individually. The view's URL preserves workload, broker selection, chart metric, scope, scale and window.
+
+OMB intervals use nominal 10-second interval ends relative to measurement; the source result has no absolute timestamps. Resources use their recorded `elapsed_ms` and the metadata's clock anchor, covering startup, warm-up, probing, measurement and shutdown. The two timelines are intentionally separate. CPU rates use the actual gap between samples, and memory is shown in MiB. Drawing retains extrema; tables, exports and source files keep all original samples.
+
+To develop locally, pull the LFS archive using the command below, then run `npm run start` or `npm run build:site`. Both run `npm run prepare:benchmark-archive`, which verifies the documented archive checksum and stages lossless gzip files plus a compact index. Generated files are ignored by Git. The browser fetches selected trials on demand and verifies each original file's size and SHA-256 when Web Crypto is available. Run `npm run test:benchmark` for transformation checks and, after building, `npm run check:benchmark-viewer` for browser coverage of the full matrix and drilldown.
+
 ## Checksum
 
 ```

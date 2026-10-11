@@ -1,0 +1,130 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import archive from '../../data/benchmark-archive.json';
+const trialCount = archive.runs.reduce((sum, run) => sum + run.trials.length, 0);
+const resourceCount = archive.runs.flatMap(run => run.trials).reduce((sum, trial) => sum + trial.resource_samples, 0);
+---
+<BaseLayout title="Benchmark data explorer | krabka" description="Explore every captured OpenMessaging interval, latency distribution, broker CPU and memory sample, client log, and provenance record.">
+  <div class="explorer-shell mx-auto max-w-[96rem] px-4 py-10 sm:px-6 lg:px-8">
+    <header class="mb-8">
+      <a href="/benchmarks/" class="text-sm font-semibold text-krab-400 hover:underline">← Broker benchmarks</a>
+      <p class="mt-6 text-xs font-bold uppercase tracking-[.18em] text-krab-400">OpenMessaging / Captured data</p>
+      <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-white sm:text-5xl">Benchmark data explorer</h1>
+      <p class="mt-4 max-w-3xl text-gray-300">Follow throughput and latency over time, inspect broker resources, and drill into the source behind every trial.</p>
+      <div class="archive-stats mt-6"><span><strong>{trialCount}</strong> trials</span><span><strong>{resourceCount.toLocaleString('en-US')}</strong> resource samples</span><span><strong>10 s</strong> OMB intervals</span><span><strong>250 ms</strong> target resource cadence</span></div>
+    </header>
+    <script type="application/json" id="archive-index" set:html={JSON.stringify(archive).replaceAll('<', '\\u003c')} />
+    <div data-explorer class="explorer">
+      <aside class="explorer-sidebar panel">
+        <h2>Capture selection</h2>
+        <label>Run<select id="run-select">{archive.runs.map(run => <option value={run.id}>{run.id}</option>)}</select></label>
+        <label>Find a workload<input id="workload-search" type="search" placeholder="Rate, backlog, partitions…" /></label>
+        <label>Workload<select id="workload-select"></select></label>
+        <div class="control-pair"><label>Replication<select id="rf-select"></select></label><label>Round<select id="round-select"></select></label></div>
+        <fieldset><legend>Compare brokers</legend><div class="vendor-options">{[['krabka', 'krabka'], ['kafka', 'Apache Kafka'], ['redpanda', 'Redpanda']].map(([id, name]) => <label><input type="checkbox" name="vendor" value={id} checked /><span class={`vendor-dot ${id}`}></span>{name}</label>)}</div></fieldset>
+        <div id="workload-config" class="config"></div>
+        <p class="context-note">Trials ran sequentially. Comparison lines share elapsed time, not wall-clock time. These are single-run measurements, not confidence intervals.</p>
+        <a href="#trial-catalog" class="subtle-link">Browse all {trialCount} trials ↓</a>
+      </aside>
+      <div class="explorer-main">
+        <div class="selection-heading"><div><p id="selection-eyebrow" class="eyebrow"></p><h2 id="selection-title"></h2></div><button id="share-selection" type="button">Copy view link</button></div>
+        <p id="explorer-status" role="status" aria-live="polite">Loading captured data…</p>
+        <button id="retry-load" type="button" hidden>Retry loading</button>
+        <div id="summary-cards" class="summary-cards"></div>
+        <section class="panel chart-panel" aria-labelledby="temporal-heading">
+          <div class="section-heading"><h2 id="temporal-heading">Temporal comparison</h2><span id="sample-badge" class="badge"></span></div>
+          <div class="chart-controls">
+            <label>Timeline<select id="source-select"><option value="omb">OMB measurement · 10 s intervals</option><option value="resources">Broker resources · full capture</option></select></label>
+            <label>Metric<select id="metric-select"></select></label>
+            <label id="scope-control" hidden>Resource scope<select id="scope-select"><option value="cluster">Cluster total</option></select></label>
+            <label>Y scale<select id="scale-select"><option value="linear">Linear · zero baseline</option><option value="log">Logarithmic · log(1 + value)</option></select></label>
+          </div>
+          <p id="timeline-note" class="context-note"></p>
+          <div id="chart-legend" class="chart-legend"></div>
+          <figure class="temporal-figure"><svg id="temporal-chart" viewBox="0 0 1000 330" role="img" aria-labelledby="chart-title chart-description"><title id="chart-title">Temporal benchmark chart</title><desc id="chart-description">Select a workload and metric. Exact values are available in the sample table.</desc></svg><figcaption id="chart-caption"></figcaption></figure>
+          <div class="zoom-controls"><label for="window-start">Window start <output id="window-start-label">0%</output><input id="window-start" type="range" min="0" max="99" value="0" /></label><label for="window-end">Window end <output id="window-end-label">100%</output><input id="window-end" type="range" min="1" max="100" value="100" /></label><button id="reset-window" type="button">Full window</button></div>
+          <label class="cursor-label" for="time-cursor">Inspect time <output id="cursor-time"></output><input id="time-cursor" type="range" min="0" max="1000" value="500" /></label>
+          <div id="cursor-values" class="cursor-values"></div>
+          <details id="sample-details"><summary>Exact samples and CSV export</summary><div class="sample-toolbar"><p id="sample-count"></p><button id="export-samples" type="button">Export visible samples CSV</button></div><div class="table-scroll"><table id="sample-table"></table></div><div class="pagination"><button id="sample-prev" type="button">Previous</button><span id="sample-page"></span><button id="sample-next" type="button">Next</button></div></details>
+        </section>
+        <section class="panel" aria-labelledby="distribution-heading">
+          <div class="section-heading"><h2 id="distribution-heading">Latency distribution</h2><label>Latency family<select id="latency-family"><option value="PublishLatency">Publish · ms</option><option value="EndToEndLatency">End-to-end · ms</option><option value="PublishDelayLatency">Publish delay · µs</option></select></label></div>
+          <p class="context-note">Aggregate quantiles are recorded by OMB across the measurement. They are not averages of interval percentiles.</p>
+          <div class="table-scroll"><table id="latency-table"></table></div>
+          <details id="distribution-details"><summary>Full upstream cumulative distribution</summary><div id="distribution-legend" class="chart-legend"></div><svg id="distribution-chart" viewBox="0 0 1000 300" role="img" aria-label="Cumulative latency distribution, latency on a log(1 + value) axis and percentile on a linear axis"></svg><p class="context-note">Latency uses log(1 + value). The vertical axis is the percentile at or below that latency. Every upstream quantile is preserved in result.json.</p></details>
+        </section>
+        <section class="panel" aria-labelledby="raw-heading">
+          <div class="section-heading"><h2 id="raw-heading">Trial drilldown</h2><label>Trial<select id="detail-trial"></select></label></div>
+          <div id="trial-details"></div>
+          <div class="raw-controls"><label>Captured file<select id="raw-file"><option value="result.json">OMB result</option><option value="trial.json">Runner trial</option><option value="resources.jsonl">Resource samples</option><option value="resources.jsonl.metadata.json">Resource metadata</option><option value="workload.stdout">Client stdout</option><option value="workload.stderr">Client stderr</option><option value="provenance.json">Run provenance</option><option value="summary.md">Run summary</option></select></label><label>Find a field or log line<input id="raw-search" type="search" placeholder="p99, hash, WARN…" /></label><button id="open-file" type="button">Inspect file</button></div>
+          <div class="raw-toolbar"><p id="raw-status" role="status"></p><button id="download-file" type="button">Download original file</button></div>
+          <div id="raw-content" class="raw-content"><p>Choose a captured file and select Inspect file to browse its fields or lines.</p></div>
+          <div id="raw-pagination" class="pagination" hidden><button id="raw-prev" type="button">Previous</button><span id="raw-page"></span><button id="raw-next" type="button">Next</button></div>
+        </section>
+      </div>
+    </div>
+    <section id="trial-catalog" class="panel mt-8 scroll-mt-24" aria-labelledby="catalog-heading">
+      <div class="section-heading"><div><p class="eyebrow">Complete capture</p><h2 id="catalog-heading">Trial catalog</h2></div><label>Sort trials<select id="catalog-sort"><option value="capture">Capture order</option><option value="rate">Publish rate · highest first</option><option value="latency">End-to-end p99 · lowest first</option><option value="cpu">CPU time · lowest first</option><option value="memory">Peak RSS · lowest first</option></select></label><label>Filter trials<input id="catalog-search" type="search" placeholder="Broker, workload, RF…" /></label></div>
+      <p id="catalog-count" class="context-note"></p><div class="table-scroll"><table id="catalog-table"></table></div>
+    </section>
+    <details class="panel mt-8"><summary>Archive integrity and provenance</summary><div id="archive-provenance"></div><p class="context-note">The downloadable files are lossless copies from the checksum-verified Git LFS archive. Setup files, broker logs, and container inspections were excluded from the source archive.</p><a class="subtle-link" href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md">Archive documentation and verification instructions ↗</a></details>
+    <noscript><p class="panel mt-8">This explorer requires JavaScript. The <a href="/benchmarks/">benchmark report and tables</a> and <a href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md">complete source archive</a> remain available without it.</p></noscript>
+  </div>
+</BaseLayout>
+<script>import '../../scripts/benchmark-explorer';</script>
+<style is:global>
+  .explorer-shell { --explorer-border: color-mix(in srgb, var(--color-gray-400) 22%, transparent); --explorer-bg: color-mix(in srgb, var(--color-gray-950) 75%, transparent); color: var(--color-gray-200); }
+  .explorer-shell [hidden] { display: none !important; }
+  .explorer-shell h2 { font-size: 1.15rem; font-weight: 700; color: var(--color-white); overflow-wrap: anywhere; }
+  .explorer-shell .panel { border: 1px solid var(--explorer-border); background: var(--explorer-bg); border-radius: 16px; padding: 24px; min-width: 0; }
+  .explorer-shell label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 600; min-width: 0; }
+  .explorer-shell select, .explorer-shell input[type='search'] { width: 100%; min-width: 0; padding: 10px 12px; color: var(--color-gray-100); background: var(--color-gray-950); border: 1px solid var(--explorer-border); border-radius: 8px; font-size: 13px; }
+  .explorer-shell button { border: 1px solid var(--explorer-border); border-radius: 8px; padding: 9px 13px; color: var(--color-gray-100); background: var(--color-gray-900); font-size: 12px; font-weight: 600; cursor: pointer; }
+  .explorer-shell button:hover { border-color: var(--color-krab-400); }
+  .explorer-shell button:disabled { opacity: .45; cursor: default; }
+  .explorer-shell :is(button, input, select, summary, a):focus-visible { outline: 2px solid var(--color-krab-400); outline-offset: 4px; }
+  .explorer-shell input[type='range'], .explorer-shell input[type='checkbox'] { accent-color: #ff8466; }
+  .archive-stats { display: flex; gap: 12px 30px; flex-wrap: wrap; font-size: 12px; color: var(--color-gray-400); }
+  .archive-stats strong { font-size: 16px; color: var(--color-gray-100); margin-right: 5px; font-variant-numeric: tabular-nums; }
+  .explorer { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 24px; align-items: start; }
+  .explorer-sidebar { position: sticky; top: 90px; display: grid; gap: 20px; }
+  .explorer-sidebar h2 { font-size: 15px; }
+  .control-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .vendor-options { display: grid; gap: 12px; margin-top: 12px; }
+  .vendor-options label { flex-direction: row; align-items: center; font-size: 13px; }
+  .vendor-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dot); }
+  .vendor-dot.krabka { --dot: #ff8466; }.vendor-dot.kafka { --dot: #38bdf8; }.vendor-dot.redpanda { --dot: #c4b5fd; }
+  .explorer-shell legend { font-size: 12px; font-weight: 600; }
+  .config { border-top: 1px solid var(--explorer-border); padding-top: 14px; font-size: 12px; line-height: 1.8; }
+  .config dl div { display: flex; justify-content: space-between; gap: 12px; }.config dt { color: var(--color-gray-400); }.config dd { text-align: right; }
+  .context-note { color: var(--color-gray-400); font-size: 12px; line-height: 1.7; margin: 12px 0; overflow-wrap: anywhere; }
+  .subtle-link { color: var(--color-krab-400); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+  .explorer-main { display: grid; gap: 20px; min-width: 0; }
+  .selection-heading, .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .section-heading label { min-width: 180px; }
+  .eyebrow { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--color-gray-400); margin-bottom: 6px; }
+  #explorer-status { font-size: 12px; color: var(--color-gray-400); min-height: 18px; }
+  #explorer-status[data-error] { color: var(--color-krab-400); }
+  .summary-cards { display: grid; grid-template-columns: repeat(var(--summary-columns, 3), minmax(0, 1fr)); gap: 12px; }
+  .summary-card { border: 1px solid var(--explorer-border); border-top: 2px solid var(--dot); border-radius: 12px; padding: 18px; min-width: 0; }
+  .summary-card h3 { font-size: 12px; font-weight: 700; margin-bottom: 12px; }.summary-card strong { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--color-gray-100); }.summary-card p { font-size: 11px; color: var(--color-gray-400); }.summary-card dl { display: grid; grid-template-columns: 1fr auto; gap: 7px; font-size: 11px; margin-top: 15px; }.summary-card dt { color: var(--color-gray-400); }.summary-card dd { text-align: right; font-variant-numeric: tabular-nums; }
+  .chart-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }.chart-controls label { flex: 1 1 160px; }
+  .badge { background: var(--color-gray-900); color: var(--color-gray-300); padding: 5px 8px; border-radius: 5px; font-size: 10px; white-space: nowrap; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 20px; font-size: 11px; margin: 18px 0 4px; }.chart-legend span { display: inline-flex; gap: 7px; align-items: center; }
+  .explorer-shell svg { width: 100%; display: block; overflow: visible; color: var(--color-gray-400); touch-action: pan-y; }.explorer-shell svg text { fill: currentColor; font-size: 12px; font-family: inherit; }.explorer-shell .chart-grid { stroke: var(--explorer-border); }.explorer-shell .chart-line { fill: none; stroke-width: 1.7; vector-effect: non-scaling-stroke; }.explorer-shell .chart-cursor { stroke: var(--color-gray-400); stroke-dasharray: 4 4; }
+  .temporal-figure figcaption { font-size: 11px; color: var(--color-gray-400); margin: 10px 0 18px; }
+  .zoom-controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; border-top: 1px solid var(--explorer-border); padding-top: 18px; }.zoom-controls label { flex: 1 1 120px; }.zoom-controls output { float: right; }.cursor-label { margin-top: 18px; }.cursor-values { display: flex; flex-wrap: wrap; gap: 12px 24px; font-size: 12px; padding: 12px 0; font-variant-numeric: tabular-nums; }
+  .explorer-shell summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 12px 0; }.explorer-shell details { border-top: 1px solid var(--explorer-border); margin-top: 12px; }
+  .table-scroll { overflow-x: auto; margin-top: 16px; }.explorer-shell table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; text-align: left; }.explorer-shell th { font-weight: 600; color: var(--color-gray-400); }.explorer-shell :is(th, td) { padding: 10px 12px; border-bottom: 1px solid var(--explorer-border); white-space: nowrap; }.explorer-shell td { color: var(--color-gray-200); }.explorer-shell th[scope='row'] { color: var(--color-gray-100); }
+  .sample-toolbar, .pagination, .raw-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 11px; color: var(--color-gray-400); }.raw-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 20px; }.raw-controls label { flex: 1 1 170px; }.raw-content { margin-top: 16px; max-height: 500px; overflow: auto; font-size: 12px; background: var(--color-gray-950); padding: 14px; border-radius: 8px; }.raw-content pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; font-family: var(--font-mono, monospace); }.raw-content details { margin: 0 0 0 12px; border-top: none; }.raw-content summary { padding: 4px 0; font-family: monospace; font-size: 11px; }.raw-content .json-value { padding: 3px 0; overflow-wrap: anywhere; font-family: monospace; }.raw-content .json-key { color: var(--color-krab-400); }.raw-content .json-page { font-size: 10px; margin: 8px; }
+  #trial-catalog .table-scroll { max-height: 36rem; } #trial-catalog thead { position: sticky; top: 0; background: var(--color-gray-950); z-index: 1; }
+  :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="krabka"] { stroke: #c2410c; }
+  :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="kafka"] { stroke: #0369a1; }
+  :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="redpanda"] { stroke: #6d28d9; }
+  :root[data-theme="light"] .explorer-shell .vendor-dot.krabka { --dot: #c2410c; }
+  :root[data-theme="light"] .explorer-shell .vendor-dot.kafka { --dot: #0369a1; }
+  :root[data-theme="light"] .explorer-shell .vendor-dot.redpanda { --dot: #6d28d9; }
+  #trial-details, #archive-provenance { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; margin-top: 16px; } #archive-provenance code { font-size: 11px; } #trial-details code { font-size: 10px; }
+  @media (max-width: 1000px) { .explorer { grid-template-columns: 1fr; }.explorer-sidebar { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }.explorer-sidebar h2, .explorer-sidebar .context-note, .explorer-sidebar .subtle-link { grid-column: 1 / -1; }.summary-cards { grid-template-columns: repeat(var(--summary-columns, 3), minmax(0, 1fr)); } }
+  @media (max-width: 600px) { .explorer-shell .panel { padding: 16px; }.explorer-sidebar { grid-template-columns: 1fr; }.summary-cards { grid-template-columns: 1fr; }.summary-card dl { grid-template-columns: 1fr auto; }.summary-card { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.summary-card h3 { grid-column: 1/-1; margin: 0; }.summary-card dl { margin: 0; }.section-heading, .selection-heading { align-items: start; flex-direction: column; }.section-heading label { width: 100%; }.chart-panel { overflow: hidden; }.badge { white-space: normal; }.explorer-shell svg text { font-size: 16px; } }
+</style>
