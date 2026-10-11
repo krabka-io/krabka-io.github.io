@@ -7,21 +7,20 @@
 # staged module is git-ignored; `npm run build:broker` regenerates it, locally
 # and in the deploy workflow, which runs it before the site build.
 #
-# The C code in the broker's graph (ring, zstd and LZ4) compiles with clang
-# against the WASI sysroot of wasi-sdk 25. The script keeps
-# `CC_wasm32_wasip1`, `AR_wasm32_wasip1` and `CFLAGS_wasm32_wasip1` when they
-# are set, as the workflows set them. Otherwise it takes `clang`, the
-# `llvm-ar` that clang finds (or the newest `/usr/lib/llvm-*/bin/llvm-ar`), and
-# the sysroot at `$WASI_SYSROOT`, which it downloads into `.tools/` when that
-# variable is unset.
+# The C code in the broker's graph (ring, zstd and LZ4) compiles with the
+# clang, llvm-ar and WASI sysroot of wasi-sdk 34, which are built together. The
+# script keeps `CC_wasm32_wasip1`, `AR_wasm32_wasip1` and
+# `CFLAGS_wasm32_wasip1` when they are set. Otherwise it takes the toolchain
+# from the wasi-sdk at `$WASI_SDK_PATH`, which it downloads into `.tools/` for
+# the host's OS and architecture when that variable is unset.
 set -euo pipefail
 
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${crate_dir}/../.." && pwd)"
 out_dir="${repo_root}/public/playground/broker"
 tools_dir="${crate_dir}/.tools"
-sysroot_release="wasi-sdk-25"
-sysroot_name="wasi-sysroot-25.0"
+sdk_release="wasi-sdk-34"
+sdk_version="34.0"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "error: cargo is not on PATH." >&2
@@ -35,38 +34,31 @@ if command -v rustup >/dev/null 2>&1; then
 fi
 
 echo "==> C toolchain for wasm32-wasip1"
-if [[ -z "${CC_wasm32_wasip1:-}" ]]; then
-  if ! command -v clang >/dev/null 2>&1; then
-    echo "error: clang is not on PATH; the C code of ring, zstd and LZ4 needs it." >&2
-    exit 1
-  fi
-  export CC_wasm32_wasip1=clang
-fi
-if [[ -z "${AR_wasm32_wasip1:-}" ]]; then
-  # `clang -print-prog-name` gives the archiver clang finds for itself, or
-  # only the bare name when it finds none; then take the newest LLVM's.
-  ar="$(clang -print-prog-name=llvm-ar 2>/dev/null || true)"
-  if [[ -z "${ar}" ]] || ! command -v "${ar}" >/dev/null 2>&1; then
-    ar="$(ls /usr/lib/llvm-*/bin/llvm-ar 2>/dev/null | sort -V | tail -n 1 || true)"
-  fi
-  if [[ -z "${ar}" ]]; then
-    echo "error: no llvm-ar found; set AR_wasm32_wasip1." >&2
-    exit 1
-  fi
-  export AR_wasm32_wasip1="${ar}"
-fi
-if [[ -z "${CFLAGS_wasm32_wasip1:-}" ]]; then
-  sysroot="${WASI_SYSROOT:-}"
-  if [[ -z "${sysroot}" ]]; then
-    sysroot="${tools_dir}/${sysroot_name}"
-    if [[ ! -d "${sysroot}/include" ]]; then
-      url="https://github.com/WebAssembly/wasi-sdk/releases/download/${sysroot_release}/${sysroot_name}.tar.gz"
+if [[ -z "${CC_wasm32_wasip1:-}" || -z "${AR_wasm32_wasip1:-}" || -z "${CFLAGS_wasm32_wasip1:-}" ]]; then
+  sdk="${WASI_SDK_PATH:-}"
+  if [[ -z "${sdk}" ]]; then
+    case "$(uname -s)" in
+      Linux) os=linux ;;
+      Darwin) os=macos ;;
+      *) echo "error: no wasi-sdk build for $(uname -s); set WASI_SDK_PATH." >&2; exit 1 ;;
+    esac
+    case "$(uname -m)" in
+      x86_64 | amd64) arch=x86_64 ;;
+      aarch64 | arm64) arch=arm64 ;;
+      *) echo "error: no wasi-sdk build for $(uname -m); set WASI_SDK_PATH." >&2; exit 1 ;;
+    esac
+    sdk_name="wasi-sdk-${sdk_version}-${arch}-${os}"
+    sdk="${tools_dir}/${sdk_name}"
+    if [[ ! -x "${sdk}/bin/clang" ]]; then
+      url="https://github.com/WebAssembly/wasi-sdk/releases/download/${sdk_release}/${sdk_name}.tar.gz"
       echo "    downloading ${url}"
       mkdir -p "${tools_dir}"
       curl -LsSf --retry 5 --retry-all-errors "${url}" | tar xz -C "${tools_dir}"
     fi
   fi
-  export CFLAGS_wasm32_wasip1="--sysroot=${sysroot}"
+  export CC_wasm32_wasip1="${CC_wasm32_wasip1:-${sdk}/bin/clang}"
+  export AR_wasm32_wasip1="${AR_wasm32_wasip1:-${sdk}/bin/llvm-ar}"
+  export CFLAGS_wasm32_wasip1="${CFLAGS_wasm32_wasip1:---sysroot=${sdk}/share/wasi-sysroot}"
 fi
 echo "    CC=${CC_wasm32_wasip1} AR=${AR_wasm32_wasip1} CFLAGS=${CFLAGS_wasm32_wasip1}"
 
