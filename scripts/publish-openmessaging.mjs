@@ -6,12 +6,14 @@
 // directory from a downloaded `openmessaging-<run>-<attempt>` artifact,
 // rejects anything but a complete full-mode matrix, and writes
 // benchmarks/openmessaging/<run-id>/ (provenance.json, summary.md and a
-// compact trials.json without the raw time series) plus
+// compact trials.json, intervals.json and gzip-compressed raw OMB results) plus
 // benchmarks/latest-openmessaging.md, which the website follows.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { validateOmbResult } from './benchmark-openmessaging.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
@@ -46,6 +48,7 @@ export async function loadRun(directory) {
   assert.equal(provenance.status, 'complete', 'run is not complete');
   await fs.access(path.join(directory, 'summary.md'));
   const trials = [];
+  const rawResults = [];
   for (const rf of provenance.replication_factors) for (const vendor of VENDORS) {
     for (let repetition = 1; repetition <= provenance.repetitions; repetition++) for (const workload of provenance.cases) {
       const file = path.join(directory, `rf${rf}-${vendor}-${repetition}-${workload.id}`, 'trial.json');
@@ -53,16 +56,31 @@ export async function loadRun(directory) {
       assert.deepEqual([trial.vendor, trial.rf, trial.repetition, trial.case.id], [vendor, rf, repetition, workload.id], `mismatched ${file}`);
       validateOmbResult(trial.omb, vendor, rf, trial.case.config);
       trials.push(compactTrial(trial));
+      // Keep the complete OMB object: interval rates, backlog, all latency
+      // percentiles/histograms and any future upstream fields. No resampling
+      // or reconstructed timestamps. Cgroup telemetry stays in the artifact.
+      const filename = `omb-results/rf${rf}-${vendor}-${repetition}-${workload.id}.json.gz`;
+      const contents = gzipSync(Buffer.from(`${JSON.stringify(trial.omb)}\n`));
+      rawResults.push({ vendor, rf, repetition, workload: workload.id,
+        file: filename, samples: trial.omb.publishRate.length,
+        sha256: createHash('sha256').update(contents).digest('hex'), contents });
     }
   }
-  return { provenance, trials };
+  return { provenance, trials, rawResults };
 }
 
 export async function publish(directory, root = process.cwd()) {
-  const { provenance, trials } = await loadRun(directory);
+  const { provenance, trials, rawResults } = await loadRun(directory);
   const destination = path.join(root, 'benchmarks', 'openmessaging', provenance.run_id);
   assert.equal(await fs.stat(destination).then(() => true, () => false), false, 'run already published');
   await fs.mkdir(destination, { recursive: true });
+  await fs.mkdir(path.join(destination, 'omb-results'));
+  for (const result of rawResults) await fs.writeFile(path.join(destination, result.file), result.contents);
+  await fs.writeFile(path.join(destination, 'intervals.json'), `${JSON.stringify({
+    schema_version: 1, run_id: provenance.run_id,
+    format: 'gzip-compressed upstream OMB result JSON; samples retain upstream order and units',
+    trials: rawResults.map(({ contents, ...metadata }) => metadata),
+  }, null, 2)}\n`);
   await fs.copyFile(path.join(directory, 'provenance.json'), path.join(destination, 'provenance.json'));
   const summary = await fs.readFile(path.join(directory, 'summary.md'), 'utf8');
   await fs.writeFile(path.join(destination, 'summary.md'), summary);

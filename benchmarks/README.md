@@ -180,9 +180,21 @@ under `.benchmarks/<run-id>/`; the runner never publishes, commits or pushes.
 To publish a complete full-mode run on the website, download its `openmessaging-<run>-<attempt>`
 artifact and run `node scripts/publish-openmessaging.mjs <artifact>/<run-id>`. The script
 rejects smoke, failed and incomplete matrices, re-validates every trial, and writes
-`benchmarks/openmessaging/<run-id>/` (provenance, summary and a compact `trials.json` without raw
-time series) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
-and commit those files; the raw artifact stays in Actions for 30 days.
+`benchmarks/openmessaging/<run-id>/` (provenance, summary, compact `trials.json`,
+`intervals.json`, and `omb-results/*.json.gz`) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
+and commit those files; the full diagnostic artifact stays in Actions for 30 days.
+
+New publications retain the complete upstream OMB result object for every trial as
+`omb-results/rf<RF>-<vendor>-<round>-<workload>.json.gz`. `intervals.json` indexes
+these files by workload, RF, vendor and repetition, with sample counts and SHA-256
+checksums of the compressed files. Decompress with `gzip -dc FILE.json.gz`.
+Publish/consume/error rates, backlog, latency interval arrays, histograms and all
+other upstream fields keep their original values, sample order and units. No
+samples are averaged, resampled or assigned invented wall-clock timestamps.
+The compact figures still come from the same validated capture. Broker resource
+telemetry and logs remain in the diagnostic artifact. Older published runs without
+an interval index continue to supply aggregate charts; their timelines cannot be
+reconstructed from averages.
 
 ## Write path and latency
 

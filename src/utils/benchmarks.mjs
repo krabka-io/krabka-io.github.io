@@ -56,6 +56,8 @@ function loadOpenMessaging() {
     })),
   }));
   return { provenance, images, rows, trials, sourceURL,
+    intervalsURL: fs.existsSync(path.join(directory, 'intervals.json'))
+      ? sourceURL.replace('/tree/', '/blob/') + '/intervals.json' : null,
     summaryURL: sourceURL.replace('/tree/', '/blob/') + '/summary.md',
     provenanceURL: sourceURL.replace('/tree/', '/blob/') + '/provenance.json' };
 }
