@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/ProseLayout.astro
 title: krabka 1.0.3
-description: "krabka-broker 1.0.3: faster cold backlog reads, controller admission and storage safety fixes, and OpenMessaging results against 1.0.1, Kafka 4.3.1 and Redpanda 26.2.2."
+description: "krabka-broker 1.0.3: faster cold backlog reads and controller admission and storage safety fixes. Also covers 1.0.2, including opt-in direct I/O."
 lead: "krabka-broker 1.0.3 was tagged on 2026-10-12. It changes no on-disk format, so it upgrades from any 1.x release in place."
 ---
 
@@ -36,7 +36,7 @@ There was no announcement for 1.0.2, so this one covers both releases. The [CHAN
 
 ## Benchmarks
 
-BENCHMARK_SECTION
+The OpenMessaging Benchmark run for 1.0.3 against Apache Kafka 4.3.1 and Redpanda 26.2.2 is still in progress on the dedicated benchmark host. Its results will be published on the [benchmarks page](/benchmarks#openmessaging) once every trial has finished and been checked. Until then, the page shows the 1.0.1 results.
 
 ## Links
 
