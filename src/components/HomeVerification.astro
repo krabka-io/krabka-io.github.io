@@ -57,7 +57,9 @@ const methods: Method[] = [
     <ul class="mt-8 grid max-w-5xl gap-8 md:grid-cols-3">
       {methods.map((m) => (
         <li>
-          <p class:list={['leading-tight text-white', m.mono ? 'font-mono text-xl font-semibold sm:text-2xl' : 'text-4xl font-extrabold tabular-nums']} title={m.title}>{m.figure}</p>
+          <!-- A fixed-height row, bottom-aligned, so the monospace figure sits on the same
+               baseline as the numbers and every column's text starts at the same height. -->
+          <p class:list={['flex h-11 items-end leading-none text-white', m.mono ? 'font-mono text-xl font-semibold sm:text-2xl' : 'text-4xl font-extrabold tabular-nums']} title={m.title}>{m.figure}</p>
           <p class="mt-1 text-sm text-gray-400">{m.label}</p>
           <p class="mt-4 text-base leading-relaxed text-gray-300">
             <a href={getPath(m.href)} class="font-semibold text-white underline decoration-white/20 underline-offset-4 hover:decoration-krab-400">{m.name}</a>{' '}{m.text}
