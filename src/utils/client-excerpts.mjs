@@ -36,7 +36,8 @@ export const clientExcerpts = [
   {
     id: 'cli', label: 'CLI', lang: 'bash',
     library: (code) => code.match(/apache\/kafka/) && 'Apache Kafka tools',
-    segments: [{ from: /kafka-console-producer\.sh/ }, { from: /kafka-console-consumer\.sh/, to: /--from-beginning/ }],
+    // One command, so the CLI tab also highlights exactly one line.
+    segments: [{ from: /kafka-console-producer\.sh/ }],
     // The tested commands run the tools in a container; the excerpt shows the tool itself.
     transform: (line) => line.replace(/^.*?\/opt\/kafka\/bin\//, ''),
     address: /--bootstrap-server/,
