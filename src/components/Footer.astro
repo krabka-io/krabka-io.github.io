@@ -1,98 +1,87 @@
 ---
 import Logo from './Logo.astro';
 import { getPath } from '../utils/paths';
+
+// Four short columns. Pages already in the top nav (Features, Versions,
+// Verification, Benchmarks, News, Docs, API, GitHub) are not repeated here,
+// except Get started and Documentation as the usual next steps. The full,
+// grouped repository list is the GitHub organization README, so the footer
+// cannot drift from it.
+const external = { target: '_blank', rel: 'noopener noreferrer' };
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { label: 'Get started', href: getPath('/get-started') },
+      { label: 'Migrate from Kafka', href: getPath('/docs/migration') },
+      { label: 'Operate a cluster', href: getPath('/docs/operations') },
+      { label: 'Kafka compatibility', href: getPath('/docs/kip-matrix') },
+      { label: 'Documentation', href: getPath('/docs') },
+    ],
+  },
+  {
+    title: 'Try it',
+    links: [
+      { label: 'All browser tools', href: getPath('/docs/browser-tools') },
+      { label: 'Cluster Lab', href: getPath('/docs/lab') },
+      { label: 'Consensus playground', href: getPath('/docs/playground') },
+      { label: 'Proof explorer', href: getPath('/docs/proof-explorer') },
+    ],
+  },
+  {
+    title: 'Repositories',
+    links: [
+      { label: 'krabka-broker', href: 'https://github.com/krabka-io/krabka-broker', external: true },
+      { label: 'krabka-operator', href: 'https://github.com/krabka-io/krabka-operator', external: true },
+      { label: 'krabka-client-rs', href: 'https://github.com/krabka-io/krabka-client-rs', external: true },
+      { label: 'Streams libraries', href: getPath('/features/streams') },
+      { label: 'All repositories', href: 'https://github.com/krabka-io', external: true },
+    ],
+  },
+  {
+    title: 'Community',
+    links: [
+      { label: 'Report an issue', href: 'https://github.com/krabka-io/krabka-broker/issues', external: true },
+      { label: 'Contributing', href: 'https://github.com/krabka-io/krabka-broker/blob/main/CONTRIBUTING.md', external: true },
+      { label: 'Security policy', href: 'https://github.com/krabka-io/krabka-broker/blob/main/SECURITY.md', external: true },
+      { label: 'Release feed (RSS)', href: getPath('/releases.xml') },
+      { label: 'Brand assets', href: getPath('/brand') },
+    ],
+  },
+];
 ---
 
-<footer class="border-t border-white/10 bg-ocean-950/80 pt-16 pb-12">
+<footer class="border-t border-white/10 bg-ocean-950/80 pt-14 pb-10">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-white/10">
-      
-      <!-- Column 1: Brand & Origin -->
-      <div class="sm:col-span-2 lg:col-span-1 space-y-4">
+    <div class="grid grid-cols-2 gap-x-8 gap-y-10 border-b border-white/10 pb-10 lg:grid-cols-[1.5fr_repeat(4,1fr)]">
+      <div class="col-span-2 space-y-4 lg:col-span-1 lg:pr-6">
         <div class="flex items-center gap-3">
           <Logo className="w-8 h-8" />
           <span class="text-xl font-bold tracking-tight text-white">krabka</span>
         </div>
-        <p class="text-sm text-gray-400 leading-relaxed">
-          Apache Kafka-compatible broker and KRaft consensus quorum in safe Rust, with <a href="https://creusot.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Creusot</a>-proved kernels and <a href="https://www.stateright.rs/" target="_blank" rel="noopener noreferrer" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Stateright</a>-checked models.
+        <p class="max-w-md text-sm leading-relaxed text-gray-400">
+          An open-source broker compatible with the Kafka protocol, written in safe Rust with its own KRaft quorum. Key consensus and replication decisions are proved with Creusot and model-checked with Stateright.
         </p>
       </div>
 
-      <!-- Column 2: Navigation -->
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-wider text-gray-300 mb-4">Platform</p>
-        <ul class="space-y-2.5 text-sm text-gray-400">
-          <li><a href={getPath('/get-started')} class="hover:text-krab-400 transition-colors">Get Started</a></li>
-          <li><a href={getPath('/features')} class="hover:text-krab-400 transition-colors">Features & Architecture</a></li>
-          <li><a href={getPath('/versions')} class="hover:text-krab-400 transition-colors">Versions & Matrix</a></li>
-          <li><a href={getPath('/verification')} class="hover:text-krab-400 transition-colors">Correctness & Verification</a></li>
-          <li><a href={getPath('/benchmarks')} class="hover:text-krab-400 transition-colors">Broker Benchmarks</a></li>
-          <li><a href={getPath('/releases')} class="hover:text-krab-400 transition-colors">Release Notes</a></li>
-          <li><a href={getPath('/news')} class="hover:text-krab-400 transition-colors">News</a></li>
-          <li><a href={getPath('/docs/migration')} class="hover:text-krab-400 transition-colors">Migrating from Kafka</a></li>
-          <li><a href={getPath('/docs')} class="hover:text-krab-400 transition-colors">Documentation</a></li>
-          <li><a href={getPath('/docs/operations')} class="hover:text-krab-400 transition-colors">Operate a cluster</a></li>
-          <li><a href={getPath('/api')} class="hover:text-krab-400 transition-colors">API Reference Directory</a></li>
-          <li><a href={getPath('/docs/browser-tools')} class="hover:text-krab-400 transition-colors">Browser tools</a></li>
-          <li><a href={getPath('/docs/lab')} class="hover:text-krab-400 transition-colors">Cluster Lab</a></li>
-          <li><a href={getPath('/docs/playground')} class="hover:text-krab-400 transition-colors">Consensus Playground</a></li>
-          <li><a href={getPath('/docs/verification-playground')} class="hover:text-krab-400 transition-colors">Verification Playground</a></li>
-          <li><a href={getPath('/docs/proof-explorer')} class="hover:text-krab-400 transition-colors">Proof Explorer</a></li>
-        </ul>
-      </div>
-
-      <!-- Column 3: Kafka ecosystem and the broader krabka ecosystem -->
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-wider text-gray-300 mb-4">Kafka Ecosystem</p>
-        <ul class="space-y-2.5 text-sm text-gray-400">
-          <li><a href="https://github.com/krabka-io/krabka-broker" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-broker</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-protocol" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-protocol</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-client-rs" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-client-rs</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-streams-java" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-streams-java (JVM & Arrow)</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-streams-go" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-streams-go (Arrow)</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-schema-registry" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-schema-registry</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-operator" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-operator (K8s)</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-connect" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-connect (CDC)</a></li>
-        </ul>
-        <p class="text-xs font-semibold uppercase tracking-wider text-gray-300 mb-3 mt-6">Broader krabka Ecosystem</p>
-        <ul class="space-y-2.5 text-sm text-gray-400">
-          <li><a href="https://krabka.io/krabka-o11y/" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">krabka-o11y (observability)</a></li>
-          <li><a href="https://github.com/krabka-io/gres" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">gres (Postgres on krabka)</a></li>
-        </ul>
-      </div>
-
-      <!-- Column 4: Community & License -->
-      <div>
-        <p class="text-xs font-semibold uppercase tracking-wider text-gray-300 mb-4">Community</p>
-        <ul class="space-y-2.5 text-sm text-gray-400">
-          <li>
-            <a href="https://github.com/krabka-io" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors flex items-center gap-2">
-              <span>GitHub Organization</span>
-              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          </li>
-          <li><a href="https://github.com/krabka-io/krabka-broker/issues" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">Report a Bug or Ask a Question</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-broker/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">Contributing Guide</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-broker/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">Security Policy</a></li>
-          <li><a href={getPath('/releases.xml')} class="hover:text-krab-400 transition-colors">Release Feed (RSS)</a></li>
-          <li><a href={getPath('/docs/helm-charts')} class="hover:text-krab-400 transition-colors">Helm Chart Repository</a></li>
-          <li><a href={getPath('/brand')} class="hover:text-krab-400 transition-colors">Brand Assets</a></li>
-          <li><a href={getPath('/versions#slsa')} class="hover:text-krab-400 transition-colors">SLSA Build Provenance</a></li>
-          <li><a href="https://github.com/krabka-io/krabka-broker/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" class="hover:text-krab-400 transition-colors">Apache License 2.0</a></li>
-        </ul>
-      </div>
-
+      {columns.map((column) => (
+        <nav aria-label={column.title}>
+          <!-- As tall as the logo row on wide screens, so headings and logo share a centre line. -->
+          <p class="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-gray-300 lg:h-8">{column.title}</p>
+          <ul class="space-y-2.5 text-sm text-gray-400">
+            {column.links.map((link) => (
+              <li>
+                <a href={link.href} {...(link.external ? external : {})} class="inline-block py-0.5 transition-colors hover:text-krab-400">{link.label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))}
     </div>
 
-    <div class="flex flex-col sm:flex-row items-center justify-between pt-8 text-xs text-gray-400 gap-4">
-      <div class="text-center sm:text-left">
-        &copy; {new Date().getFullYear()} The krabka Authors. Released under the Apache License 2.0.
-      </div>
-      <div>
-        Hosted at <a href="https://krabka.io" class="text-gray-400 hover:text-krab-400 font-medium">krabka.io</a>
-      </div>
-    </div>
+    <p class="pt-8 text-xs text-gray-400">
+      &copy; {new Date().getFullYear()} The krabka Authors. Released under the
+      <a href="https://github.com/krabka-io/krabka-broker/blob/main/LICENSE" {...external} class="underline underline-offset-2 hover:text-krab-400">Apache License 2.0</a>.
+    </p>
   </div>
 </footer>

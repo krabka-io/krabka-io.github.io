@@ -107,8 +107,10 @@
   --color-krab-300: #a4210b;
   --color-krab-400: #c82408;
   --color-krab-500: #e0300f;
-  --color-krab-600: #ff8466;
-  --color-krab-700: #ff4d2e;
+  /* 600 and 700 are only fills (buttons, selected tabs). They stay brand red
+   * with white text in the light theme, rather than inverting to salmon. */
+  --color-krab-600: #e0300f;
+  --color-krab-700: #c82408;
   --color-krab-800: #ffb39e;
   --color-krab-900: #ffd4c7;
   --color-krab-950: #fff5f2;
@@ -264,4 +266,32 @@
 :root[data-theme='light'] [data-benchmark-viewer] {
   padding: 1.25rem;
   border-radius: 1rem;
+}
+
+/* Single-colour language icons are dark artwork, shown inverted on the dark page.
+ * On the light page they keep their own dark colour. */
+:root:not([data-theme='light']) .lang-icon-mono {
+  filter: invert(1);
+}
+:root:not([data-theme='light']) .lang-icon-mono.brightness-0 {
+  filter: brightness(0) invert(1);
+}
+
+/* Text on a brand-red fill stays white in the light theme. Setting --color-white
+ * on the element keeps its own text-white (even text-white!) white. */
+:root[data-theme='light'] :is(.bg-krab-600, .aria-selected\:bg-krab-600[aria-selected='true'], .focus\:bg-krab-600:focus) {
+  --color-white: #fff;
+  color: #fff;
+}
+
+/* The home page's code panel: a white card with a faint tab strip. */
+:root[data-theme='light'] .home-code-panel {
+  background: #fff;
+}
+:root[data-theme='light'] .home-code-tabs {
+  background: #f1f5f9;
+}
+:root[data-theme='light'] .home-code-panel .code-block {
+  background: transparent;
+  border: 0;
 }

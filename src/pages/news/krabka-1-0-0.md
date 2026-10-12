@@ -1,6 +1,6 @@
 ---
 layout: ../../layouts/ProseLayout.astro
-title: Krabka 1.0.0
+title: krabka 1.0.0
 description: "krabka-broker 1.0.0: on-disk formats stay readable across 1.x, coordinator records match Kafka 4.3.1, and the krabka crates are on crates.io."
 lead: "krabka-broker 1.0.0 was tagged on 2026-10-07. It is the first release with a compatibility promise for the data a broker writes."
 ---

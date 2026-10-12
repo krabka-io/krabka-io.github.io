@@ -217,7 +217,9 @@ const exactly = (href: string) => (currentPath.replace(/\/$/, '') === href ? 'pa
   label();
   themeBtn?.addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = next;
+    const apply = (window as unknown as { krabkaApplyTheme?: (theme: string) => void }).krabkaApplyTheme;
+    if (apply) apply(next);
+    else document.documentElement.dataset.theme = next;
     try { localStorage.setItem('theme', next); } catch { /* storage blocked: the choice lasts this page */ }
     label();
   });

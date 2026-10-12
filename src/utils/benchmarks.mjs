@@ -51,7 +51,9 @@ function loadOpenMessaging() {
         return { id: image.id, name: image.name,
           publish_rate: pick(selected, t => t.publish_rate),
           end_to_end_p99_ms: pick(selected, t => t.end_to_end_latency_ms.p99),
-          publish_p99_ms: pick(selected, t => t.publish_latency_ms.p99) };
+          publish_p99_ms: pick(selected, t => t.publish_latency_ms.p99),
+          rss_peak_bytes: pick(selected, t => t.rss_peak_bytes),
+          cpu_seconds: pick(selected, t => t.cpu_seconds) };
       }),
     })),
   }));

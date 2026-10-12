@@ -1,0 +1,70 @@
+---
+// The home page's verification summary. /verification has the ledger, the
+// model bounds and the details; this names the three methods with one figure
+// each. The kernel count comes from the broker's synced verification catalog;
+// without it, that column shows the crate name instead of a number.
+import { getPath } from '../utils/paths';
+import { loadVerificationData } from '../utils/verification-loader';
+
+const { stats } = loadVerificationData();
+const n = (value: number) => value.toLocaleString('en-US');
+const compact = (value: number) =>
+  value >= 1_000_000 ? `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M` : n(value);
+
+interface Method { figure: string; mono?: boolean; title?: string; label: string; name: string; text: string }
+
+const methods: Method[] = [
+  {
+    figure: 'forbid(unsafe_code)',
+    mono: true,
+    label: 'the lint every workspace crate builds under',
+    name: 'No unsafe Rust.',
+    text: 'The compiler enforces it across the workspace.',
+  },
+  stats.catalogAvailable
+    ? {
+        figure: n(stats.functions),
+        label: 'kernel functions proved',
+        name: 'Creusot proofs.',
+        text: 'Vote admission, quorum size, ISR and leader failover, and other decision kernels are proved against their contracts.',
+      }
+    : {
+        figure: 'krabka-verified',
+        mono: true,
+        label: 'the crate of proved kernels',
+        name: 'Creusot proofs.',
+        text: 'Vote admission, quorum size, ISR and leader failover, and other decision kernels are proved against their contracts.',
+      },
+  {
+    figure: compact(stats.pinnedTotal),
+    title: `${n(stats.pinnedTotal)} pinned states`,
+    label: `states checked across ${n(stats.models)} models`,
+    name: 'Stateright models.',
+    text: 'Consensus, failover, transactions, and group coordination are checked for every reachable state within each model’s bounds.',
+  },
+];
+---
+
+<section aria-labelledby="verification-heading" data-no-anchor class="border-y border-white/5 bg-ocean-950/40 py-12 md:py-16">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <h2 id="verification-heading" class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+      Memory-safe, proved, and model-checked
+    </h2>
+    <ul class="mt-8 grid max-w-5xl gap-8 md:grid-cols-3">
+      {methods.map((m) => (
+        <li>
+          <!-- A fixed-height row, bottom-aligned, so the monospace figure sits on the same
+               baseline as the numbers and every column's text starts at the same height. -->
+          <p class:list={['flex h-11 items-end leading-none text-white', m.mono ? 'font-mono text-xl font-semibold sm:text-2xl' : 'text-4xl font-extrabold tabular-nums']} title={m.title}>{m.figure}</p>
+          <p class="mt-1 text-sm text-gray-400">{m.label}</p>
+          <p class="mt-4 text-base leading-relaxed text-gray-300">
+            <strong class="font-semibold text-white">{m.name}</strong>{' '}{m.text}
+          </p>
+        </li>
+      ))}
+    </ul>
+    <p class="mt-6">
+      <a href={getPath('/verification')} class="text-sm font-semibold text-krab-400 underline underline-offset-4 hover:text-krab-300">Read how krabka is verified</a>
+    </p>
+  </div>
+</section>

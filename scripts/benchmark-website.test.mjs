@@ -19,6 +19,8 @@ test('website figures match the published OMB capture for every workload and RF'
     assert.equal(vendor.publish_rate, median(selected.map(t => t.publish_rate)));
     assert.equal(vendor.publish_p99_ms, median(selected.map(t => t.publish_latency_ms.p99)));
     assert.equal(vendor.end_to_end_p99_ms, median(selected.map(t => t.end_to_end_latency_ms.p99)));
+    assert.equal(vendor.rss_peak_bytes, median(selected.map(t => t.rss_peak_bytes)));
+    assert.equal(vendor.cpu_seconds, median(selected.map(t => t.cpu_seconds)));
   }
   for (const url of [openmessaging.summaryURL, openmessaging.provenanceURL]) {
     assert.ok(fs.existsSync('benchmarks/' + url.split('/benchmarks/')[1]));

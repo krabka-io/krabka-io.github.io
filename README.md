@@ -247,7 +247,7 @@ krabka-io.github.io/
 │   ├── favicon.svg / .ico    # Geometric Dungeness crab icon suite
 │   ├── logo.png / logo.svg   # Chart icon and square mark
 │   ├── robots.txt            # Search engine crawler permissions & sitemap reference
-│   └── og-image.png          # Social preview image
+│   └── og/                   # Social cards, rendered by scripts/og-images.mjs
 ├── scripts/
 │   ├── sync-docs.mjs         # Multi-repo documentation & release asset sync engine
 │   ├── sync-proofs.mjs       # Copies the broker's Why3find sessions and Coma files

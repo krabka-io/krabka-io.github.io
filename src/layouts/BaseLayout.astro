@@ -12,45 +12,63 @@ interface Props {
   description?: string;
   type?: 'website' | 'article';
   image?: string;
+  /** Keep the page out of search results (the 404 page, the search page). */
+  noindex?: boolean;
 }
 
 const {
   title = "krabka | Kafka-compatible broker in safe Rust",
   description = "A Kafka protocol-compatible broker and native KRaft consensus quorum in safe Rust, with Creusot-proved decision kernels and Stateright model checking.",
   type = "website",
-  image = "/og-image.png",
+  image = "/og/home.png",
+  noindex = false,
 } = Astro.props;
 
 const siteUrl = Astro.site || 'https://krabka.io';
 const canonicalURL = new URL(Astro.url.pathname, siteUrl);
 const socialImageURL = new URL(getPath(image), siteUrl);
 // The site-wide card shows the tagline; a section's card shows the page's title.
-const imageAlt = image === '/og-image.png' ? 'krabka: Kafka-compatible broker in safe Rust' : title;
+const imageAlt = image === '/og/home.png' ? 'krabka: Kafka-compatible broker in safe Rust' : title;
 
 // The project-level card goes on the home page only; every other page describes
 // itself, not the software.
 const isHome = Astro.url.pathname === getPath('/');
+const siteRoot = new URL(getPath('/'), siteUrl).href;
 const structuredData = {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "krabka",
-  "operatingSystem": "Linux, macOS, Windows",
-  "applicationCategory": "DeveloperApplication",
-  "description": description,
-  "url": siteUrl.toString(),
-  "softwareVersion": versions.broker.version,
-  "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "sameAs": ["https://github.com/krabka-io/krabka-broker"],
-  "offers": {
-    "@type": "Offer",
-    "price": "0",
-    "priceCurrency": "USD"
-  },
-  "author": {
-    "@type": "Organization",
-    "name": "krabka-io",
-    "url": "https://github.com/krabka-io"
-  }
+  "@graph": [{
+    "@type": "SoftwareApplication",
+    "@id": `${siteRoot}#software`,
+    "name": "krabka",
+    "operatingSystem": "Linux, macOS, Windows",
+    "applicationCategory": "DeveloperApplication",
+    "description": description,
+    "url": siteRoot,
+    "softwareVersion": versions.broker.version,
+    "license": "https://www.apache.org/licenses/LICENSE-2.0",
+    "sameAs": ["https://github.com/krabka-io/krabka-broker"],
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "krabka-io",
+      "url": "https://github.com/krabka-io"
+    }
+  }, {
+    // Lets search engines offer a search box that lands on the site's own search page.
+    "@type": "WebSite",
+    "@id": `${siteRoot}#website`,
+    "name": "krabka",
+    "url": siteRoot,
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": { "@type": "EntryPoint", "urlTemplate": `${new URL(getPath('/search'), siteUrl).href}?q={search_term_string}` },
+      "query-input": "required name=search_term_string"
+    }
+  }]
 };
 ---
 
@@ -59,15 +77,29 @@ const structuredData = {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Theme before first paint: the saved choice, else the system's. -->
+    <!-- The browser chrome colour follows the page theme (set by the script below and the toggle). -->
+    <meta name="theme-color" content="#080d1a" />
+    <!-- Theme before first paint: the saved choice, else the system's. With no
+         saved choice the page also follows the system if it changes while open. -->
     <script is:inline>
       (function () {
-        var theme;
-        try { theme = localStorage.getItem('theme'); } catch (e) {}
-        if (theme !== 'light' && theme !== 'dark') {
-          theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        var root = document.documentElement;
+        var query = window.matchMedia('(prefers-color-scheme: light)');
+        function saved() {
+          var theme;
+          try { theme = localStorage.getItem('theme'); } catch (e) {}
+          return theme === 'light' || theme === 'dark' ? theme : null;
         }
-        document.documentElement.dataset.theme = theme;
+        function apply(theme) {
+          root.dataset.theme = theme;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', theme === 'light' ? '#f8fafc' : '#080d1a');
+        }
+        apply(saved() || (query.matches ? 'light' : 'dark'));
+        query.addEventListener('change', function (e) {
+          if (!saved()) apply(e.matches ? 'light' : 'dark');
+        });
+        window.krabkaApplyTheme = apply;
       })();
     </script>
     
@@ -85,8 +117,7 @@ const structuredData = {
     <!-- Primary Meta Tags -->
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="theme-color" content="#080d1a" />
+    <meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'} />
 
     <!-- Open Graph / Facebook / LinkedIn -->
     <meta property="og:type" content={type} />

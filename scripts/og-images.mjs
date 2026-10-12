@@ -9,9 +9,10 @@ const logo = fs.readFileSync(path.join(root, 'public', 'logo.svg'), 'utf8');
 const font = fs.readFileSync(path.join(root, 'public', 'fonts', 'inter-latin-wght-normal.woff2')).toString('base64');
 
 const cards = [
-  { file: 'docs', kicker: 'Documentation', title: 'Run, operate and build on krabka', subtitle: 'Quickstart, broker configuration, KIP matrix, streams libraries, operator and CLI guides.' },
-  { file: 'benchmarks', kicker: 'Benchmarks', title: 'krabka, Apache Kafka and Redpanda', subtitle: 'OpenMessaging Benchmark publish rates and latency, with results and methodology published.' },
-  { file: 'verification', kicker: 'Correctness & Verification', title: 'Proved kernels. Checked models.', subtitle: 'Safe Rust, Creusot proofs of decision kernels, and Stateright model checks of failure sequences.' },
+  { file: 'home', kicker: 'Kafka-compatible broker', title: 'Keep your Kafka clients and swap the broker.', subtitle: 'Safe Rust, with its own KRaft quorum. Key consensus and replication decisions are proved with Creusot and model-checked with Stateright.' },
+  { file: 'docs', kicker: 'Documentation', title: 'Guides for running and operating krabka', subtitle: 'Quickstart, broker configuration, KIP matrix, streams libraries, operator and CLI guides.' },
+  { file: 'benchmarks', kicker: 'Benchmarks', title: 'krabka, Apache Kafka and Redpanda', subtitle: 'Publish rates and latency from the OpenMessaging Benchmark, with the full results and method.' },
+  { file: 'verification', kicker: 'Verification', title: 'How krabka is verified', subtitle: 'Selected decision kernels are proved with Creusot. Stateright checks failure sequences within each model’s bounds. The code is safe Rust.' },
   { file: 'lab', kicker: 'Cluster Lab', title: 'Real brokers in your browser', subtitle: 'Run krabka brokers, clients and streams apps in WebAssembly. Break the network and read the logs.' },
   { file: 'features', kicker: 'Features', title: 'A Kafka-compatible platform in Rust', subtitle: 'Native KRaft quorum, tiered storage, Postgres CDC, polyglot streams and a Kubernetes operator.' },
 ];
@@ -24,7 +25,7 @@ body { width: 1200px; height: 630px; font-family: Inter, sans-serif; color: #fff
 .brand { display: flex; align-items: center; gap: 16px; font-size: 38px; font-weight: 800; letter-spacing: -0.02em; }
 .brand svg { width: 60px; height: 60px; }
 .kicker { margin-top: 92px; color: #ff8466; font-size: 26px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-h1 { margin-top: 18px; font-size: 64px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; }
+h1 { margin-top: 18px; font-size: 64px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; text-wrap: balance; }
 p { margin-top: 26px; max-width: 960px; color: #94a3b8; font-size: 27px; line-height: 1.4; }
 .url { margin-top: auto; align-self: flex-end; color: #475569; font-size: 24px; font-weight: 700; }
 </style></head><body>
