@@ -34,7 +34,28 @@ const componentLabelMap: Record<string, string> = {
 const baseTitle = entry.data?.title || headings[0]?.text || 'Documentation Guide';
 const label = componentLabelMap[component];
 const title = label ? `${baseTitle} (${label})` : baseTitle;
-const description = entry.data?.description || `krabka ${label || component} technical guide and architectural documentation.`;
+// A synced guide rarely has a description in its frontmatter. Search results
+// show the description, so use the guide's opening paragraph rather than a
+// sentence every guide would share.
+function openingParagraph(markdown: string | undefined): string | undefined {
+  if (!markdown) return undefined;
+  const blocks = markdown.replace(/^---[\s\S]*?\n---\n/, '').replace(/```[\s\S]*?```/g, '').split(/\n\s*\n/);
+  const block = blocks.map((b) => b.trim()).find((b) => b && !/^(#|[-*+] |\d+\. |\||<|>|!\[)/.test(b));
+  if (!block) return undefined;
+  const text = block
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[`*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 40) return undefined;
+  if (text.length <= 160) return text;
+  const cut = text.slice(0, 157);
+  return `${cut.slice(0, cut.lastIndexOf(' '))}…`;
+}
+const description = entry.data?.description
+  || openingParagraph(entry.body)
+  || `${baseTitle}: ${label ? `the krabka ${label} documentation` : 'krabka documentation'}.`;
 
 const repoMap: Record<string, string> = {
   'streams-java': 'krabka-streams-java',

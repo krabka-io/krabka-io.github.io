@@ -119,7 +119,7 @@ function renderConfig() {
 function renderSummary() {
   $('summary-cards').style.setProperty('--summary-columns', String(Math.max(1, selected.filter(t => visibleVendors().includes(t.vendor)).length)));
   $('summary-cards').replaceChildren(...selected.filter(t => visibleVendors().includes(t.vendor)).map(trial => {
-    const card = node('article', '', 'summary-card'); card.style.setProperty('--dot', colors[trial.vendor]);
+    const card = node('article', '', 'summary-card'); card.style.setProperty('--dot', `var(--vendor-${trial.vendor}, ${colors[trial.vendor]})`);
     card.append(node('h3', names[trial.vendor]));
     const rate = node('div'); rate.append(node('strong', fmt(trial.publish_rate, 0)), node('p', 'mean published messages / s')); card.append(rate);
     const dl = node('dl');
@@ -170,7 +170,7 @@ function drawChart(id: string, lines: any[], config: { start: number; end: numbe
       path += `${pen ? 'L' : 'M'}${x(p.x).toFixed(2)},${y(p.y).toFixed(2)}`; pen = true;
     }
     plot.append(svgNode('path', { d: path, stroke: colors[line.trial.vendor], class: 'chart-line', 'data-vendor': line.trial.vendor }));
-    if (visible.length === 1 && Number.isFinite(visible[0].y)) plot.append(svgNode('circle', { cx: x(visible[0].x), cy: y(visible[0].y), r: 3, fill: colors[line.trial.vendor] }));
+    if (visible.length === 1 && Number.isFinite(visible[0].y)) plot.append(svgNode('circle', { cx: x(visible[0].x), cy: y(visible[0].y), r: 3, fill: colors[line.trial.vendor], class: 'chart-point', 'data-vendor': line.trial.vendor }));
   }
   if (!config.distribution) group.append(svgNode('line', { id: 'chart-cursor-line', x1: left, x2: left, y1: top, y2: bottom, class: 'chart-cursor' }));
   svg.append(group);

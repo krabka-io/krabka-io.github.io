@@ -171,6 +171,17 @@ helm repo index "${out}" --url "${repo_url}/"
   pre { margin: 1rem 0; padding: 0.9rem 1rem; overflow-x: auto; background: #050811; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.5rem; color: #e5e7eb; }
   .c { color: #93c5fd; }
   .o { color: #fcd9a8; }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme: light; }
+    body { background: #f8fafc; color: #374151; }
+    h1, h2 { color: #111827; }
+    a { color: #c82408; }
+    a:hover { color: #a4210b; }
+    code { color: #a4210b; }
+    pre { background: #eef2f7; border-color: rgba(15, 23, 42, 0.16); color: #1f2937; }
+    .c { color: #1d4ed8; }
+    .o { color: #92400e; }
+  }
 </style>
 CSS
   echo '<main>'

@@ -30,7 +30,11 @@ export default defineConfig({
     '/api/streams-go/latest': 'https://krabka.io/krabka-streams-go/',
     '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
-  integrations: [sitemap(), headingIds()],
+  integrations: [
+    // The 404 and search pages carry noindex; leave them out of the sitemap too.
+    sitemap({ filter: (page) => !/\/(404|search)\/?$/.test(new URL(page).pathname) }),
+    headingIds(),
+  ],
   markdown: {
     // Astro's default Sätteri pipeline, with one plugin and the site's code
     // theme: synced guides carry wide tables, and each gets its own scroll
