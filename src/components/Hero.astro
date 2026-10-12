@@ -1,66 +1,35 @@
 ---
 import { getPath } from '../utils/paths';
-import versions from '../data/versions.json';
 
-const tasks = [
-  { title: 'Try in your browser', href: '/docs/browser-tools' },
-  { title: 'Run locally', href: '/docs/quickstart' },
-  { title: 'Migrate from Kafka', href: '/docs/migration' },
-  { title: 'Operate a cluster', href: '/docs/operations' },
-  { title: 'Explore verification', href: '/verification' },
-];
+const link = 'text-krab-400 underline underline-offset-2 hover:text-krab-300';
 ---
 
-<section class="relative overflow-hidden pt-12 pb-10 md:pt-20 md:pb-24">
+<section class="relative overflow-hidden pt-12 pb-12 md:pt-20 md:pb-20">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-    <div class="max-w-4xl">
-      <div class="space-y-6 text-left">
-        <a href={getPath('/news/krabka-1-0-0')} class="inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-400/20">
-          <span>broker v{versions.broker.version}</span>
-          <span aria-hidden="true">→</span>
-          <span class="font-normal text-amber-100/80">On-disk formats stay readable across 1.x</span>
-        </a>
-        <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl leading-[1.1]">
-          Kafka-compatible broker. <br />
-          <span class="text-transparent bg-clip-text bg-gradient-to-r from-krab-500 via-krab-400 to-amber-400">
-            Written in safe Rust.
-          </span>
+    <div class="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:items-center">
+      <div class="space-y-6 lg:col-span-8">
+        <h1 class="text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
+          Keep your Kafka clients <br class="hidden lg:block" /><span class="text-krab-500">and swap the broker.</span>
         </h1>
-
-        <p class="text-lg text-gray-300 sm:text-xl max-w-2xl font-normal leading-relaxed">
-          krabka is an open-source broker for the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Apache Kafka wire protocol</a>, with its own KRaft metadata quorum. Clients and tools that use supported Kafka APIs can connect without modification; see the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">compatibility matrix</a>. Selected decision kernels are <a href={getPath('/verification')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">proved with Creusot and model-checked with Stateright</a>.
+        <p class="max-w-2xl text-lg leading-relaxed text-gray-300 sm:text-xl">
+          krabka is an open-source broker <a href={getPath('/docs/kip-matrix')} class={link}>compatible with the Kafka protocol</a>, written in safe Rust with its own KRaft quorum. Key consensus and replication decisions are <a href={getPath('/verification')} class={link}>proved with Creusot and model-checked with Stateright</a>.
         </p>
+      </div>
 
-        <div class="flex flex-wrap items-center gap-4 pt-2">
-          <a
-            href={getPath('/get-started')}
-            class="inline-flex items-center justify-center rounded-xl bg-krab-600 px-6 py-3 text-base font-semibold text-white shadow-lg transition-all hover:bg-krab-700 hover:shadow-krab-500/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-krab-500"
-          >
-            Get Started
-            <svg class="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-            </svg>
-          </a>
-
-          <a href={getPath('/docs/browser-tools')} class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-base font-semibold text-white transition-all hover:border-white/40 hover:bg-white/10">Try in your browser</a>
-
-          <a
-            href="https://github.com/krabka-io"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-base font-semibold text-white transition-all hover:border-white/40 hover:bg-white/10"
-          >
-            <svg class="mr-2.5 h-5 w-5 fill-current" viewBox="0 0 24 24">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-            </svg>
-            GitHub
-          </a>
-        </div>
-        <p class="text-sm text-gray-400">No install is needed for the browser tools. Cluster Lab is view-only on phones; use a wider screen to edit and inject faults.</p>
+      <div class="flex flex-col gap-3 sm:flex-row lg:col-span-4 lg:flex-col">
+        <a
+          href={getPath('/get-started')}
+          class="inline-flex items-center justify-center rounded-xl bg-krab-600 px-8 py-4 text-lg font-semibold text-white shadow-lg transition-colors hover:bg-krab-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-krab-500"
+        >
+          Get started
+        </a>
+        <a
+          href={getPath('/docs/browser-tools')}
+          class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/10"
+        >
+          Try in your browser
+        </a>
       </div>
     </div>
-    <nav aria-label="Choose a task" class="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      {tasks.map(task => <a href={getPath(task.href)} class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-gray-200 hover:border-krab-500/50 hover:text-white">{task.title} →</a>)}
-    </nav>
   </div>
 </section>

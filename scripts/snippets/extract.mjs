@@ -10,13 +10,19 @@ export const pages = {
   'docs/streams-java': ['javaGradle'],
 };
 
+// Evaluates one literal snippet declaration (`const name = \x60...\x60` or `const name = {...}`)
+// from a page's source, never its imports or scripts. The home page reads the
+// tested get-started client snippets through this too, so it cannot drift from them.
+export function readDeclaration(source, name, scope = {}, page = 'page') {
+  const declaration = source.match(new RegExp(`const ${name} = (\x60(?:\\\\[\\s\\S]|[^\x60])*\x60|\\{[\\s\\S]*?^\\});`, 'm'));
+  assert(declaration, `${page}: missing ${name}`);
+  return runInNewContext(`(${declaration[1]})`, scope, { timeout: 1000 });
+}
+
 export function astroSnippets(source, page, releaseNumber) {
   const scope = { releaseNumber };
   for (const name of new Set(pages[page].map(key => key.split('.')[0]))) {
-    // Only the literal snippet declarations are evaluated, never page imports or scripts.
-    const declaration = source.match(new RegExp(`const ${name} = (\x60(?:\\\\[\\s\\S]|[^\x60])*\x60|\\{[\\s\\S]*?^\\});`, 'm'));
-    assert(declaration, `${page}: missing ${name}`);
-    scope[name] = runInNewContext(`(${declaration[1]})`, scope, { timeout: 1000 });
+    scope[name] = readDeclaration(source, name, scope, page);
   }
   const found = [];
   for (const [block] of source.matchAll(/<CodeBlock\b[\s\S]*?\/>/g)) {

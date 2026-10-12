@@ -10,11 +10,19 @@ interface Props {
   lang?: string;
   size?: 'xs' | 'sm';
   class?: string;
+  // 1-based line numbers to mark with `.line-highlight`.
+  highlight?: number[];
 }
 
-const { code, lang = 'text', size = 'xs', class: className } = Astro.props;
+const { code, lang = 'text', size = 'xs', class: className, highlight = [] } = Astro.props;
+const marked = new Set(highlight);
+const transformers = marked.size ? [{
+  line(node: { properties: Record<string, unknown> }, line: number) {
+    if (marked.has(line)) node.properties.class = [node.properties.class, 'line-highlight'].filter(Boolean).join(' ');
+  },
+}] : undefined;
 ---
 
 <div class:list={['code-block', size === 'sm' ? 'text-sm' : 'text-xs', className]}>
-  <Code code={code.replace(/\n+$/, '')} lang={lang} theme={theme} wrap={null} />
+  <Code code={code.replace(/\n+$/, '')} lang={lang} theme={theme} wrap={null} transformers={transformers} />
 </div>

@@ -1,0 +1,41 @@
+---
+// The home page's verification summary. /verification has the ledger, the
+// model bounds and the counts; this names the three methods and links there.
+import { getPath } from '../utils/paths';
+
+const methods = [
+  {
+    name: 'No unsafe Rust.',
+    text: 'The compiler enforces it across the workspace.',
+    href: '/verification#memory-safety',
+  },
+  {
+    name: 'Creusot proofs.',
+    text: 'Vote admission, quorum size, ISR and leader failover, and other decision kernels are proved against their contracts.',
+    href: '/verification#proof-contracts',
+  },
+  {
+    name: 'Stateright models.',
+    text: 'Consensus, failover, transactions, and group coordination are checked for every reachable state within each model’s bounds.',
+    href: '/verification#model-bounds',
+  },
+];
+---
+
+<section aria-labelledby="verification-heading" class="border-y border-white/5 bg-ocean-950/40 py-16">
+  <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+    <h2 id="verification-heading" class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+      Memory-safe, proved, and model-checked
+    </h2>
+    <ul class="mt-8 grid gap-6 md:grid-cols-3">
+      {methods.map((m) => (
+        <li class="text-base leading-relaxed text-gray-300">
+          <a href={getPath(m.href)} class="font-semibold text-white underline decoration-white/20 underline-offset-4 hover:decoration-krab-400">{m.name}</a>{' '}{m.text}
+        </li>
+      ))}
+    </ul>
+    <p class="mt-8">
+      <a href={getPath('/verification')} class="text-sm font-semibold text-krab-400 underline underline-offset-4 hover:text-krab-300">Read the verification details</a>
+    </p>
+  </div>
+</section>
