@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/ProseLayout.astro
 title: krabka 1.0.3
-description: "krabka-broker 1.0.3: faster cold backlog reads and controller admission and storage safety fixes. Also covers 1.0.2, including opt-in direct I/O."
+description: "krabka-broker 1.0.3: faster cold backlog reads, plus controller admission and storage safety fixes. Also covers 1.0.2, including opt-in direct I/O."
 lead: "krabka-broker 1.0.3 was tagged on 2026-10-12. It changes no on-disk format, so it upgrades from any 1.x release in place."
 ---
 
