@@ -49,9 +49,22 @@ export function homeBenchmark(openmessaging) {
   const cpuLeads = wins > runs.length / 2;
   const cpuMedian = median(runs.map((r) => r.efficiency));
   const heading = cpuLeads ? 'Less CPU per message than Apache Kafka' : 'How krabka compares with Apache Kafka';
-  const cpuSentence = cpuLeads
-    ? `In ${wins} of ${runs.length} max-rate OpenMessaging runs, krabka published more messages per CPU-second than Apache Kafka, a median of ${Math.round((cpuMedian - 1) * 100)}% more.`
-    : `Across ${runs.length} max-rate OpenMessaging runs, krabka published a median ${percent(cpuMedian)} of Apache Kafka's messages per CPU-second.`;
+  // The CPU sentence is returned in parts so the page can bold the run count.
+  // "CPU‑second" uses a non-breaking hyphen so the unit never splits across lines.
+  const cpu = cpuLeads
+    ? {
+        figure: `+${Math.round((cpuMedian - 1) * 100)}%`,
+        figureLabel: `messages per CPU‑second vs. Kafka, median of ${runs.length} runs`,
+        lead: 'In ',
+        strong: `${wins} of ${runs.length}`,
+        rest: ` max-rate OpenMessaging runs, krabka published more messages per CPU‑second than Apache Kafka, a median of ${Math.round((cpuMedian - 1) * 100)}% more.`,
+      }
+    : {
+        figure: null,
+        lead: `Across ${runs.length} max-rate OpenMessaging runs, krabka published a median ${percent(cpuMedian)} of Apache Kafka's messages per CPU‑second.`,
+        strong: '',
+        rest: '',
+      };
 
   // Throughput: a median per record size (rows) and broker count (columns).
   const sizes = [...new Set(runs.map((r) => r.size))].sort((a, b) => a - b);
@@ -63,7 +76,7 @@ export function homeBenchmark(openmessaging) {
   const grid = {
     columns: rfs.map((rf) => (rf === 1 ? '1 broker' : `${rf} brokers, RF${rf}`)),
     rows: sizes.map((size) => ({
-      label: size >= 1024 ? `${size / 1024} KiB records` : `${size}-byte records`,
+      label: size >= 1024 ? `${size / 1024} KiB records` : `${size} B records`,
       cells: rfs.map((rf) => {
         const value = cell(size, rf);
         return value === null ? null : { value: percent(value) };
@@ -86,7 +99,8 @@ export function homeBenchmark(openmessaging) {
 
   return {
     heading,
-    body: `${cpuSentence} ${throughputSentence}`,
+    cpu,
+    throughput: throughputSentence,
     grid,
     rounds: openmessaging.provenance.repetitions === 1 ? 'One measured round per run' : `The median of ${openmessaging.provenance.repetitions} measured rounds per run`,
   };
