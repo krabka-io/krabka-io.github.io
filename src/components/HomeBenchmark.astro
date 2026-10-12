@@ -7,15 +7,31 @@ const result = homeBenchmark(openmessaging);
 ---
 
 {result && (
-  <section aria-labelledby="benchmark-heading" class="py-16">
-    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+  <section aria-labelledby="benchmark-heading" class="py-12 md:py-16">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <h2 id="benchmark-heading" class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
         {result.kafkaClass ? 'Kafka-class throughput in a small footprint' : 'Throughput and footprint'}
       </h2>
       <p class="mt-6 max-w-3xl text-lg leading-relaxed text-gray-300">
         One krabka broker sustained <strong class="font-semibold text-white">{result.rate}</strong>, {result.comparison}, using <strong class="font-semibold text-white">{result.memory}</strong> of memory and no heap to size.
       </p>
-      <p class="mt-4 text-sm text-gray-400">
+
+      <!-- Publish rate, one broker, same workload: the bars show how close the two are. -->
+      <dl class="mt-8 grid max-w-3xl gap-4">
+        {result.bars.map((bar) => (
+          <div class="grid grid-cols-[7.5rem_1fr] items-center gap-x-4 sm:grid-cols-[9rem_1fr]">
+            <dt class:list={['text-sm font-semibold', bar.id === 'krabka' ? 'text-white' : 'text-gray-300']}>{bar.name}</dt>
+            <dd class="flex items-center gap-3">
+              <span class="block h-3 flex-1 overflow-hidden rounded-full bg-white/5" aria-hidden="true">
+                <span class:list={['block h-full rounded-full', bar.id === 'krabka' ? 'bg-krab-500' : 'bg-gray-500']} style={`width: ${bar.width.toFixed(1)}%`}></span>
+              </span>
+              <span class="w-24 shrink-0 text-right text-sm tabular-nums text-gray-300">{bar.value}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <p class="mt-6 text-sm text-gray-400">
         OpenMessaging Benchmark, max-rate 1 KiB records, one broker, {result.rounds}.
         <a href={getPath('/benchmarks')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Latency, three-broker results, and methodology</a>
       </p>

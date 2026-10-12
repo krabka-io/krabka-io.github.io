@@ -22,8 +22,15 @@ export function homeBenchmark(openmessaging) {
     ? `within ${Math.ceil(gap * 100)}% of Apache Kafka on the same workload`
     : `at or above Apache Kafka on the same workload`;
   const rounds = openmessaging.provenance.repetitions;
+  const top = Math.max(krabka.publish_rate, kafka.publish_rate);
   return {
     kafkaClass: gap <= KAFKA_CLASS_GAP,
+    bars: [krabka, kafka].map((v) => ({
+      id: v.id,
+      name: v.name,
+      value: `${Math.round(v.publish_rate / 1000)}k msg/s`,
+      width: (v.publish_rate / top) * 100,
+    })),
     rate: `${Math.round(krabka.publish_rate / 1000)}k msg/s`,
     memory: `${Math.round(krabka.rss_peak_bytes / 1024 ** 2)} MiB`,
     comparison,
