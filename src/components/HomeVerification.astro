@@ -11,7 +11,7 @@ const n = (value: number) => value.toLocaleString('en-US');
 const compact = (value: number) =>
   value >= 1_000_000 ? `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M` : n(value);
 
-interface Method { figure: string; mono?: boolean; title?: string; label: string; name: string; text: string; href: string }
+interface Method { figure: string; mono?: boolean; title?: string; label: string; name: string; text: string }
 
 const methods: Method[] = [
   {
@@ -20,7 +20,6 @@ const methods: Method[] = [
     label: 'the lint every workspace crate builds under',
     name: 'No unsafe Rust.',
     text: 'The compiler enforces it across the workspace.',
-    href: '/verification#memory-safety',
   },
   stats.catalogAvailable
     ? {
@@ -28,7 +27,6 @@ const methods: Method[] = [
         label: 'kernel functions proved',
         name: 'Creusot proofs.',
         text: 'Vote admission, quorum size, ISR and leader failover, and other decision kernels are proved against their contracts.',
-        href: '/verification#proof-contracts',
       }
     : {
         figure: 'krabka-verified',
@@ -36,7 +34,6 @@ const methods: Method[] = [
         label: 'the crate of proved kernels',
         name: 'Creusot proofs.',
         text: 'Vote admission, quorum size, ISR and leader failover, and other decision kernels are proved against their contracts.',
-        href: '/verification#proof-contracts',
       },
   {
     figure: compact(stats.pinnedTotal),
@@ -44,12 +41,11 @@ const methods: Method[] = [
     label: `states checked across ${n(stats.models)} models`,
     name: 'Stateright models.',
     text: 'Consensus, failover, transactions, and group coordination are checked for every reachable state within each model’s bounds.',
-    href: '/verification#model-bounds',
   },
 ];
 ---
 
-<section aria-labelledby="verification-heading" class="border-y border-white/5 bg-ocean-950/40 py-12 md:py-16">
+<section aria-labelledby="verification-heading" data-no-anchor class="border-y border-white/5 bg-ocean-950/40 py-12 md:py-16">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
     <h2 id="verification-heading" class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
       Memory-safe, proved, and model-checked
@@ -62,7 +58,7 @@ const methods: Method[] = [
           <p class:list={['flex h-11 items-end leading-none text-white', m.mono ? 'font-mono text-xl font-semibold sm:text-2xl' : 'text-4xl font-extrabold tabular-nums']} title={m.title}>{m.figure}</p>
           <p class="mt-1 text-sm text-gray-400">{m.label}</p>
           <p class="mt-4 text-base leading-relaxed text-gray-300">
-            <a href={getPath(m.href)} class="font-semibold text-white underline decoration-white/20 underline-offset-4 hover:decoration-krab-400">{m.name}</a>{' '}{m.text}
+            <strong class="font-semibold text-white">{m.name}</strong>{' '}{m.text}
           </p>
         </li>
       ))}

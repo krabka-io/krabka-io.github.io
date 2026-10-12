@@ -34,7 +34,7 @@ export const clientExcerpts = [
     address: /brokers:/,
   },
   {
-    id: 'cli', label: 'Kafka CLI', lang: 'bash',
+    id: 'cli', label: 'CLI', lang: 'bash',
     library: (code) => code.match(/apache\/kafka/) && 'Apache Kafka tools',
     segments: [{ from: /kafka-console-producer\.sh/ }, { from: /kafka-console-consumer\.sh/, to: /--from-beginning/ }],
     // The tested commands run the tools in a container; the excerpt shows the tool itself.

@@ -186,6 +186,22 @@ p, li, dd, blockquote {
   background: color-mix(in srgb, var(--color-krab-500) 22%, transparent);
 }
 
+/* Short excerpts that wrap on a phone instead of scrolling, so a highlighted
+ * line is never cut off. A wrapped line's continuation is indented. */
+@media (max-width: 639px) {
+  .code-wrap-sm pre.astro-code {
+    width: auto;
+    white-space: pre-wrap;
+  }
+  .code-wrap-sm pre.astro-code .line {
+    display: inline-block;
+    max-width: 100%;
+    padding-left: 2ch;
+    text-indent: -2ch;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* A block inside a panel that already draws the box (the tabbed snippets). */
 .code-block-bare {
   padding: 0;
