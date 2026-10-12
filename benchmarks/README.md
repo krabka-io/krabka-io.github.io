@@ -217,8 +217,11 @@ Kafka's latency tails match krabka's in the same cases. Redpanda's direct writes
 avoid them. Throughput and median latency are much less affected. On a different
 filesystem or storage layout the gap could be smaller or larger.
 
-Direct I/O for krabka's log is a possible future direction, not a current
-feature ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/issues/1333)).
+Since 1.0.2, krabka can write active segments with `O_DIRECT` when a topic sets
+`preallocate=true`, on Linux 6.1 or later where the filesystem reports direct-I/O
+alignment. It is off by default and the benchmark does not set `preallocate`, so krabka
+writes through the page cache here. Making direct I/O the default is an
+open question ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/issues/1333)).
 These results compare the brokers as they ship.
 
 
@@ -229,6 +232,6 @@ These results compare the brokers as they ship.
 - At least **14 available logical CPUs** and **34 GiB available RAM** (three 10 GiB brokers plus a 4 GiB client). Each broker receives 4 logical CPUs, a 4 CPU quota, 10 GiB RAM, zero swap, and a 131,072 open-file limit. RF3 runs three brokers; the client receives the remaining CPUs and a separate 4 GiB memory limit. SMT siblings are grouped where possible and the topology is recorded.
 - At least **150 GiB free disk** for a full run, or **4 GiB** for smoke, both at the checkout and Docker storage. Data uses Docker volumes and is deleted after each cluster repetition; measurements and logs remain.
 - At least **24,728 available Linux AIO slots** (`fs.aio-max-nr - fs.aio-nr`). Redpanda networking AIO is explicitly limited to 1,024 control blocks per shard so three nodes fit the usual 65,536-slot host limit consistently. This setting and the host limit are recorded; no sysctl is changed.
-- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to GitHub for the pinned OMB source and Maven repositories for dependencies. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v1.0.1, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
+- Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to GitHub for the pinned OMB source and Maven repositories for dependencies. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v1.0.3, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
 
 The runner owns only its uniquely named and labeled containers, volumes, and networks. It does not change host settings, stop other containers, commit, push, or deploy. Avoid other heavy work while measuring. Concurrent invocations in the same checkout fail; a hard-killed process can leave `.benchmarks/runner.lock`, which contains its PID and run ID. Inspect that process and its labeled Docker resources before manually removing a stale lock.
