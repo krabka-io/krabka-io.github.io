@@ -73,7 +73,7 @@ export function ombRetentionBytes(config) {
   return Math.ceil(OMB_BACKLOG_RETENTION_RATIO * config.consumerBacklogSizeGB * 1024 ** 3 / partitions);
 }
 
-export function ombDriver(vendor, rf, maxPollIntervalMs, retentionBytes = -1) {
+export function ombDriver(vendor, rf, maxPollIntervalMs, retentionBytes = -1, preallocate = false) {
   assert.ok(['krabka', 'kafka', 'redpanda'].includes(vendor) && [1, 3].includes(rf));
   assert.ok(maxPollIntervalMs === undefined || (Number.isInteger(maxPollIntervalMs)
     && maxPollIntervalMs > 0 && maxPollIntervalMs <= 2 ** 31 - 1), 'invalid poll interval');
@@ -84,7 +84,7 @@ replicationFactor: ${rf}
 topicConfig: |
   ${vendor === 'redpanda' ? 'write.caching=true' : `min.insync.replicas=${rf === 1 ? 1 : 2}`}
   retention.ms=-1
-  retention.bytes=${retentionBytes}
+  retention.bytes=${retentionBytes}${preallocate ? '\n  preallocate=true' : ''}
 commonConfig: |
   bootstrap.servers=broker-0:9092
   request.timeout.ms=30000
@@ -179,7 +179,8 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
 }
 
 export async function writeOmbReport(directory, provenance, trials) {
-  assert.equal(trials.length, provenance.cases.length * provenance.replication_factors.length * 3 * provenance.repetitions,
+  const vendors = provenance.vendors ?? ['krabka', 'kafka', 'redpanda'];
+  assert.equal(trials.length, provenance.cases.length * provenance.replication_factors.length * vendors.length * provenance.repetitions,
     'incomplete OMB matrix');
   const actual = new Set();
   for (const trial of trials) {
@@ -188,7 +189,7 @@ export async function writeOmbReport(directory, provenance, trials) {
   }
   assert.equal(actual.size, trials.length, 'duplicate OMB trials');
   for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
-    for (const vendor of ['krabka', 'kafka', 'redpanda']) for (let repetition = 1; repetition <= provenance.repetitions; repetition++) {
+    for (const vendor of vendors) for (let repetition = 1; repetition <= provenance.repetitions; repetition++) {
       assert.ok(actual.has(`${vendor}/${rf}/${repetition}/${workload.id}`), 'missing OMB trial');
     }
   }

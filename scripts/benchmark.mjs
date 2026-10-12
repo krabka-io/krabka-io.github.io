@@ -26,6 +26,8 @@ const { values: options } = parseArgs({ options: {
   'workloads': { type: 'string', default: 'all' },
   'replication-factors': { type: 'string', default: '1,3' },
   'repetitions': { type: 'string' },
+  'vendors': { type: 'string', default: VENDORS.join(',') },
+  'krabka-preallocate': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
@@ -33,6 +35,9 @@ const { values: options } = parseArgs({ options: {
 if (options.help) {
   console.log(`Usage: npm run benchmark -- [--suite openmessaging] [--smoke] [--dry-run] [--krabka-image REF] [--redpanda-image REF]
 OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --replication-factors 1,3; --repetitions 1..3.
+--vendors krabka,kafka,redpanda runs a subset of the brokers; such a run cannot be published.
+--krabka-preallocate sets preallocate=true on krabka's benchmark topics, which writes
+their active segments with O_DIRECT where the kernel and filesystem support it.
 Smoke: shortened workloads; never publishes.
 Dry run: validates the host and resolves images; starts no containers.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
@@ -68,15 +73,18 @@ async function main() {
   const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
   const cases = ombCases(options.workloads);
+  const vendors = options.vendors.split(',');
+  assert.ok(vendors.length > 0 && vendors.every((v, i) => VENDORS.includes(v) && vendors.indexOf(v) === i), 'invalid --vendors');
   const provenance = {
     schema_version: 1, suite: options.suite, run_id: runId, started_at: new Date().toISOString(),
     mode: options.smoke ? 'smoke' : 'full', status: 'running', repetitions,
-    images: {}, cases, workload_source: OMB,
+    images: {}, cases, vendors, workload_source: OMB,
     contract: { partitions: 'from upstream workload', acks: 'all', idempotence: true, batch_bytes: 1048576, linger_ms: 1,
       broker_cpus: 4, broker_memory_bytes: 10 * GIB, swap_bytes: 0, nofile: 131072,
       kafka_heap_bytes: GIB, redpanda_shards: 4, redpanda_memory_bytes: 8 * GIB,
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
+      krabka_preallocate: options['krabka-preallocate'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
       durability: 'buffered writes; no identical crash-durability claim',
@@ -489,8 +497,8 @@ rpk:
     // Run each OMB workload on fresh clusters.
     {
       for (const rf of replicationFactors) for (let repetition = 1; repetition <= repetitions; repetition++) {
-        const offset = (repetition - 1) % VENDORS.length;
-        const order = [...VENDORS.slice(offset), ...VENDORS.slice(0, offset)];
+        const offset = (repetition - 1) % vendors.length;
+        const order = [...vendors.slice(offset), ...vendors.slice(0, offset)];
         for (const workload of cases) for (const vendor of order) {
           const directory = path.join(artifacts, `rf${rf}-${vendor}-${repetition}-${workload.id}`);
           await fs.mkdir(directory);
@@ -502,7 +510,8 @@ rpk:
             // OMB pauses inside the message callback during backlog fill, so
             // Kafka's poll loop must survive that pause without leaving its group.
             await fs.writeFile(path.join(directory, 'driver.yaml'), ombDriver(vendor, rf,
-              workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined, ombRetentionBytes(workload.config)));
+              workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined, ombRetentionBytes(workload.config),
+              vendor === 'krabka' && options['krabka-preallocate']));
             const timeout = workload.timeout_ms;
             const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
               () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
