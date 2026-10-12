@@ -10,9 +10,9 @@ const font = fs.readFileSync(path.join(root, 'public', 'fonts', 'inter-latin-wgh
 
 const cards = [
   { file: 'home', kicker: 'Kafka-compatible broker', title: 'Keep your Kafka clients and swap the broker.', subtitle: 'Open-source and written in safe Rust, with its own KRaft quorum. Key decisions are proved with Creusot and model-checked with Stateright.' },
-  { file: 'docs', kicker: 'Documentation', title: 'Run, operate and build on krabka', subtitle: 'Quickstart, broker configuration, KIP matrix, streams libraries, operator and CLI guides.' },
-  { file: 'benchmarks', kicker: 'Benchmarks', title: 'krabka, Apache Kafka and Redpanda', subtitle: 'OpenMessaging Benchmark publish rates and latency, with results and methodology published.' },
-  { file: 'verification', kicker: 'Correctness & Verification', title: 'Proved kernels. Checked models.', subtitle: 'Safe Rust, Creusot proofs of decision kernels, and Stateright model checks of failure sequences.' },
+  { file: 'docs', kicker: 'Documentation', title: 'Guides for running and operating krabka', subtitle: 'Quickstart, broker configuration, KIP matrix, streams libraries, operator and CLI guides.' },
+  { file: 'benchmarks', kicker: 'Benchmarks', title: 'krabka, Apache Kafka and Redpanda', subtitle: 'Publish rates and latency from the OpenMessaging Benchmark, with the full results and method.' },
+  { file: 'verification', kicker: 'Verification', title: 'How krabka is verified', subtitle: 'Selected decision kernels are proved with Creusot. Stateright checks failure sequences within each model\'s bounds. The code is safe Rust.' },
   { file: 'lab', kicker: 'Cluster Lab', title: 'Real brokers in your browser', subtitle: 'Run krabka brokers, clients and streams apps in WebAssembly. Break the network and read the logs.' },
   { file: 'features', kicker: 'Features', title: 'A Kafka-compatible platform in Rust', subtitle: 'Native KRaft quorum, tiered storage, Postgres CDC, polyglot streams and a Kubernetes operator.' },
 ];
