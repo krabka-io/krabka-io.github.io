@@ -231,18 +231,22 @@ An SSD that is not told which blocks are free slows down as deleted data
 fills it. The benchmark host mounts its data volume without `discard` and
 trims it once a week, and each trial writes and deletes tens to hundreds of
 gigabytes. On 2026-10-13, after two days of trials, direct writes on the host
-ran at 0.3-0.5 GB/s; after `fstrim` released 632 GiB they ran at 1.1-1.4 GB/s.
-Trials that ran hours apart therefore did not start from the same disk, and
-the absolute numbers of runs before that date depend on how long the drives
-had gone untrimmed. The runner runs every broker of a workload back to back,
+were several times slower than after a manual `fstrim`
+([krabka-broker#1370](https://github.com/krabka-io/krabka-broker/issues/1370)
+has the measurements). Trials that ran hours apart therefore did not start
+from the same disk, and the absolute numbers of runs before that date depend
+on how long the drives had gone untrimmed. The runner runs every broker of a workload back to back,
 which keeps that drift small within a workload but does not remove it.
 
 From 2026-10-14 the runner trims the filesystems that hold the checkout and
-Docker's data before every trial, with `sudo -n fstrim`. The contract records
-whether a run asked for it (`disk_trim_before_trial`), and `disk_trim` in the
-provenance records the mounts, the trials trimmed and the bytes released. A
-host without passwordless sudo for `fstrim` runs untrimmed and records why;
-`--no-fstrim` turns the trim off.
+Docker's data before every trial, with `sudo -n fstrim`. The contract's
+`disk_trim_before_trial` is true only when every mount was trimmed before
+every trial, so the shard merge does not combine trimmed and untrimmed runs.
+`disk_trim` in the provenance records each mount, the trials trimmed and the
+bytes released, and the merged provenance keeps it for every shard. A mount
+that refuses the trim, for example on a host without passwordless sudo for
+`fstrim`, is recorded and not asked again, and the other mounts are still
+trimmed. `--no-fstrim` turns the trim off and needs no trim tools.
 
 ## Local runner prerequisites
 

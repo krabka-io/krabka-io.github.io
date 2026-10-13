@@ -28,6 +28,7 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'krabka-env': { type: 'string', multiple: true, default: [] },
   'no-fstrim': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
@@ -39,6 +40,7 @@ OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --repli
 --vendors krabka,kafka,redpanda runs a subset of the brokers; such a run cannot be published.
 --krabka-preallocate sets preallocate=true on krabka's benchmark topics, which writes
 their active segments with O_DIRECT where the kernel and filesystem support it.
+--krabka-env KRABKA_NAME=VALUE (repeatable) passes a setting to every krabka broker.
 Before every trial the runner trims the filesystems that hold the checkout and Docker's data
 with sudo -n fstrim, so each trial starts on SSDs with the same free blocks; --no-fstrim skips it.
 Smoke: shortened workloads; never publishes.
@@ -76,6 +78,9 @@ async function main() {
   const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
   const cases = ombCases(options.workloads);
+  for (const setting of options['krabka-env']) {
+    assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
+  }
   const vendors = options.vendors.split(',');
   assert.ok(vendors.length > 0 && vendors.every((v, i) => VENDORS.includes(v) && vendors.indexOf(v) === i), 'invalid --vendors');
   const provenance = {
@@ -88,6 +93,7 @@ async function main() {
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
+      ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
       disk_trim_before_trial: !options['no-fstrim'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
@@ -128,24 +134,35 @@ async function main() {
   }
   const docker = (args, settings) => command('docker', args, settings);
 
-  // Trim every filesystem in provenance.disk_trim.mounts. A host without
-  // passwordless sudo for fstrim runs on untrimmed: the first refusal is
-  // recorded and printed once, and no later trial asks again.
+  // Trim every filesystem in provenance.disk_trim.mounts that has not
+  // refused. A mount that refuses (no passwordless sudo for fstrim, or a
+  // filesystem without discard) is recorded and printed once, and is not
+  // asked again; the other mounts are still trimmed. The contract then says
+  // the run was not trimmed before every trial, so the shard merge does not
+  // combine it with a run that was.
   async function trimDisks(directory) {
     const trim = provenance.disk_trim;
-    if (!trim.requested || trim.unavailable) return;
-    try {
-      for (const [index, mount] of trim.mounts.entries()) {
-        const output = await command('sudo', ['-n', 'fstrim', '--verbose', mount],
-          { timeout: 600_000, output: path.join(directory, `fstrim-${index}`) });
-        trim.trimmed_bytes += Number(output.match(/\((\d+) bytes\) trimmed/)?.[1] ?? 0);
+    if (!trim.requested) return;
+    let complete = true;
+    for (const [index, entry] of trim.mounts.entries()) {
+      if (entry.unavailable) {
+        complete = false;
+        continue;
       }
-      trim.trials += 1;
-    } catch (error) {
-      if (controller.signal.aborted) throw error;
-      trim.unavailable = error.message.split('\n')[0];
-      console.warn(`benchmark: running untrimmed, fstrim unavailable: ${trim.unavailable}`);
+      try {
+        const output = await command('sudo', ['-n', 'fstrim', '--verbose', entry.mount],
+          { timeout: 600_000, output: path.join(directory, `fstrim-${index}`) });
+        entry.trimmed_bytes += Number(output.match(/\((\d+) bytes\) trimmed/)?.[1] ?? 0);
+        entry.trials += 1;
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        entry.unavailable = error.message.split('\n')[0];
+        complete = false;
+        console.warn(`benchmark: ${entry.mount} runs untrimmed, fstrim unavailable: ${entry.unavailable}`);
+      }
     }
+    if (complete) trim.trials += 1;
+    else provenance.contract.disk_trim_before_trial = false;
     await save();
   }
   async function removeContainer(id) {
@@ -302,12 +319,22 @@ async function main() {
       provenance.images[vendor] = { requested, reference, image_id: inspected.Id, labels: inspected.Config.Labels };
     }
     // An SSD that has not been told which blocks are free slows down as it
-    // fills with deleted data: on the benchmark host, two days of trials
-    // without a trim took direct writes from about 1.2 GB/s to 0.4 GB/s.
-    // Trimming before every trial gives each trial the same starting state.
-    const trimMounts = [...new Set(await Promise.all([ROOT, info.DockerRootDir].map(location =>
-      command('findmnt', ['--noheadings', '--output', 'TARGET', '--target', location]))))];
-    provenance.disk_trim = { requested: !options['no-fstrim'], mounts: trimMounts, trials: 0, trimmed_bytes: 0, unavailable: null };
+    // fills with deleted data, so trials that run hours apart do not start
+    // from the same disk. Trimming before every trial gives each trial the
+    // same starting state. See "SSD state" in benchmarks/README.md.
+    provenance.disk_trim = { requested: !options['no-fstrim'], mounts: [], trials: 0, unavailable: null };
+    if (provenance.disk_trim.requested) {
+      try {
+        const mounts = await Promise.all([ROOT, info.DockerRootDir].map(location =>
+          command('findmnt', ['--noheadings', '--output', 'TARGET', '--target', location])));
+        provenance.disk_trim.mounts = [...new Set(mounts)]
+          .map(mount => ({ mount, trials: 0, trimmed_bytes: 0, unavailable: null }));
+      } catch (error) {
+        provenance.disk_trim.unavailable = error.message.split('\n')[0];
+        provenance.contract.disk_trim_before_trial = false;
+        console.warn(`benchmark: running untrimmed, cannot find the mounts to trim: ${provenance.disk_trim.unavailable}`);
+      }
+    }
     await save();
     if (options['dry-run']) {
       provenance.status = 'dry-run';
@@ -390,7 +417,8 @@ async function main() {
             '--log-dir=/data', `--cluster-id=${clusterId}`, `--node-id=${i}`, `--initial-controllers=${initialControllers}`],
           `rf${rf}-${vendor}-${repetition}-format-${i}`, { output: path.join(directory, `format-${i}`) });
           args = [...common, '--env', 'RUST_LOG=warn', '--env', 'OTEL_SDK_DISABLED=true',
-            '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms', image,
+            '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms',
+            ...options['krabka-env'].flatMap(setting => ['--env', setting]), image,
             '--log-dir=/data', `--broker-id=${i}`, `--cluster-id=${clusterId}`, '--process-roles=controller,broker',
             '--listen-addr=0.0.0.0:9092', `--advertised-listener=${names[i]}:9092`,
             `--offsets-topic-replication-factor=${rf}`, `--transaction-state-replication-factor=${rf}`,

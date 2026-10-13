@@ -134,6 +134,17 @@ test('merging refuses shards that do not form one complete comparison', async ()
   }
 });
 
+test('a run from before the per-trial trim merges with one that recorded it off, not with one that trimmed', async () => {
+  const root = await scratch();
+  const old = await shard(root, { workload: 'simple-workload', rf: 1 });
+  const off = await shard(root, { workload: 'simple-workload', rf: 3,
+    overrides: { contract: { broker_cpus: 4, disk_trim_before_trial: false } } });
+  await merge([old, off], path.join(root, 'merged'));
+  const trimmed = await shard(root, { workload: 'simple-workload', rf: 3, host: 'vm-b',
+    overrides: { contract: { broker_cpus: 4, disk_trim_before_trial: true } } });
+  await assert.rejects(merge([old, trimmed], path.join(root, 'refused')), /differs in contract/);
+});
+
 test('a run from before --krabka-preallocate merges with one that recorded it off', async () => {
   const root = await scratch();
   const shards = [await shard(root, { workload: 'simple-workload', rf: 1 }),
