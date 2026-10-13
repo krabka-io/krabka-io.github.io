@@ -3,11 +3,17 @@ import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
+import baseLinks from './src/utils/satteri-base-links.mjs';
 import krabkaTheme from './src/utils/krabka-shiki-theme.mjs';
 import headingIds from './src/utils/heading-ids.mjs';
 
+// The path the site is served below. getPath() reads it as BASE_URL, and
+// baseLinks applies it to root-relative links in Markdown pages.
+const base = '/';
+
 export default defineConfig({
   site: 'https://krabka.io',
+  base,
   // Astro's HTML compression drops the whitespace between an inline element
   // and the text or element beside it when a line break separates them, which
   // glued words together (`<strong>WebAssembly</strong>` + newline + `and`
@@ -36,10 +42,10 @@ export default defineConfig({
     headingIds(),
   ],
   markdown: {
-    // Astro's default Sätteri pipeline, with one plugin and the site's code
-    // theme: synced guides carry wide tables, and each gets its own scroll
-    // container.
-    processor: satteri({ hastPlugins: [wrapTables] }),
+    // Astro's default Sätteri pipeline, with the site's code theme and two
+    // plugins: synced guides carry wide tables, and each gets its own scroll
+    // container; root-relative links get the site base, as getPath() gives it.
+    processor: satteri({ hastPlugins: [wrapTables, baseLinks(base)] }),
     shikiConfig: { theme: krabkaTheme },
   },
   vite: {

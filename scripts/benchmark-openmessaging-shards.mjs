@@ -55,6 +55,11 @@ export function lanes(shards, count) {
 }
 
 const imageDigest = image => image.reference;
+// A shared field as every shard records it. Runs from before
+// --krabka-preallocate have no krabka_preallocate in their contract, and
+// they ran with it off.
+const sharedField = (provenance, key) => key === 'contract'
+  ? { krabka_preallocate: false, ...provenance.contract } : provenance[key];
 // What defines a shard's OMB build. Each runner builds OMB itself, and Maven
 // stamps the jars it builds from /src with the build time, so their hashes
 // differ between two builds of the same source. The source is pinned by the
@@ -74,6 +79,7 @@ export async function loadShard(directory) {
   const provenance = JSON.parse(await fs.readFile(path.join(directory, 'provenance.json'), 'utf8'));
   assert.equal(provenance.suite, 'openmessaging', `${directory} is not an OpenMessaging run`);
   assert.equal(provenance.status, 'complete', `shard ${provenance.run_id} is ${provenance.status}`);
+  assert.deepEqual(provenance.vendors ?? VENDORS, VENDORS, `shard ${provenance.run_id} did not run every broker`);
   const trials = [];
   for (const rf of provenance.replication_factors) for (const vendor of VENDORS) {
     for (let repetition = 1; repetition <= provenance.repetitions; repetition++) for (const workload of provenance.cases) {
@@ -138,7 +144,9 @@ export function mergeProvenance(shards, runId) {
   assert.ok(shards.length > 0, 'no shards to merge');
   const [first] = shards.map(s => s.provenance);
   for (const { provenance } of shards) {
-    for (const key of SHARED) assert.deepEqual(provenance[key], first[key], `shard ${provenance.run_id} differs in ${key}`);
+    for (const key of SHARED) {
+      assert.deepEqual(sharedField(provenance, key), sharedField(first, key), `shard ${provenance.run_id} differs in ${key}`);
+    }
     assert.deepEqual(ombBuild(provenance), ombBuild(first), `shard ${provenance.run_id} differs in the OMB build`);
     for (const vendor of VENDORS) {
       assert.equal(imageDigest(provenance.images[vendor]), imageDigest(first.images[vendor]),

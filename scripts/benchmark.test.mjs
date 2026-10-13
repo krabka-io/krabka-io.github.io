@@ -268,6 +268,11 @@ test('OMB backlog topics retain 1.2x the backlog per partition and other topics 
   for (const bad of [0, -2, 1.5, NaN]) assert.throws(() => ombDriver('kafka', 1, undefined, bad), /invalid retention.bytes/);
 });
 
+test('the OMB driver sets preallocate only when asked', () => {
+  assert.doesNotMatch(ombDriver('krabka', 1), /preallocate/);
+  assert.match(ombDriver('krabka', 1, undefined, -1, true), /^  retention.bytes=-1\n  preallocate=true\ncommonConfig:/m);
+});
+
 const broker = (id, cpu, rss, current, inactive = 0) => ({ id, cpu_usage_us: cpu, rss_bytes: rss,
   memory_current_bytes: current, inactive_file_bytes: inactive, anon_bytes: rss / 2, oom_kill: 0 });
 test('medians use numeric ordering, handle even samples, and preserve raw values', () => {

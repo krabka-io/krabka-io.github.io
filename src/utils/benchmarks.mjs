@@ -15,6 +15,9 @@ const ombImageLabels = {
   // The signed v1.0.1 release index and its amd64 image, which the runner pulls.
   'sha256:d0a383b12176a55eb771c870d819ccb4f60ce0bb6b5356b5ec44285c01d7fd93': 'krabka-broker 1.0.1 (6c64d9a, signed release)',
   'sha256:299ff81dba7d4cbb96a4d2a7fca341c003929610e5be628ba0083587bd488c4d': 'krabka-broker 1.0.1 (6c64d9a, signed release)',
+  // The signed v1.0.3 release index and its amd64 image.
+  'sha256:ee5b77a5e83474ae051e2ea99f5d70a92fae352255297846e82b89e9ced60103': 'krabka-broker 1.0.3 (2de4008, signed release)',
+  'sha256:22890f0b03a7adcc0341c92936c1c694841b4b8066af3b0ad5b8fd09a2ab87cb': 'krabka-broker 1.0.3 (2de4008, signed release)',
 };
 function loadOpenMessaging() {
   const pointer = path.join(root, 'latest-openmessaging.md');
