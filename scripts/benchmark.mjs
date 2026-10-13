@@ -80,6 +80,10 @@ async function main() {
   const cases = ombCases(options.workloads);
   for (const setting of options['krabka-env']) {
     assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
+    // The settings are copied into provenance.json and the command log, so a
+    // secret must not be one of them.
+    assert.doesNotMatch(setting.split('=')[0], /SECRET|PASSWORD|PASSWD|TOKEN|CREDENTIAL|_KEY(_|$)|PRIVATE/,
+      `--krabka-env ${setting.split('=')[0]} looks like a secret; it would be recorded in the run's provenance`);
   }
   const vendors = options.vendors.split(',');
   assert.ok(vendors.length > 0 && vendors.every((v, i) => VENDORS.includes(v) && vendors.indexOf(v) === i), 'invalid --vendors');

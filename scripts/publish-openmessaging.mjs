@@ -46,6 +46,13 @@ export async function loadRun(directory) {
   assert.equal(provenance.suite, 'openmessaging', 'not an OpenMessaging run');
   assert.equal(provenance.mode, 'full', 'only full runs are published; smoke is a wiring check');
   assert.equal(provenance.status, 'complete', 'run is not complete');
+  // The published run is the site's standard comparison, so krabka must run
+  // as it ships: no broker settings passed with --krabka-env and no
+  // preallocate override. Those runs are experiments, kept but not published.
+  assert.ok(!provenance.contract?.krabka_env?.length,
+    'a run with --krabka-env broker settings is an experiment and is not published');
+  assert.ok(!provenance.contract?.krabka_preallocate,
+    'a run with --krabka-preallocate is an experiment and is not published');
   await fs.access(path.join(directory, 'summary.md'));
   const trials = [];
   const rawResults = [];
