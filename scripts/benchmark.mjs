@@ -28,6 +28,7 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'krabka-env': { type: 'string', multiple: true, default: [] },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
@@ -38,6 +39,7 @@ OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --repli
 --vendors krabka,kafka,redpanda runs a subset of the brokers; such a run cannot be published.
 --krabka-preallocate sets preallocate=true on krabka's benchmark topics, which writes
 their active segments with O_DIRECT where the kernel and filesystem support it.
+--krabka-env KRABKA_NAME=VALUE (repeatable) passes a setting to every krabka broker.
 Smoke: shortened workloads; never publishes.
 Dry run: validates the host and resolves images; starts no containers.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
@@ -73,6 +75,9 @@ async function main() {
   const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
   const cases = ombCases(options.workloads);
+  for (const setting of options['krabka-env']) {
+    assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
+  }
   const vendors = options.vendors.split(',');
   assert.ok(vendors.length > 0 && vendors.every((v, i) => VENDORS.includes(v) && vendors.indexOf(v) === i), 'invalid --vendors');
   const provenance = {
@@ -85,6 +90,7 @@ async function main() {
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
+      ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
       durability: 'buffered writes; no identical crash-durability claim',
@@ -358,7 +364,8 @@ async function main() {
             '--log-dir=/data', `--cluster-id=${clusterId}`, `--node-id=${i}`, `--initial-controllers=${initialControllers}`],
           `rf${rf}-${vendor}-${repetition}-format-${i}`, { output: path.join(directory, `format-${i}`) });
           args = [...common, '--env', 'RUST_LOG=warn', '--env', 'OTEL_SDK_DISABLED=true',
-            '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms', image,
+            '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms',
+            ...options['krabka-env'].flatMap(setting => ['--env', setting]), image,
             '--log-dir=/data', `--broker-id=${i}`, `--cluster-id=${clusterId}`, '--process-roles=controller,broker',
             '--listen-addr=0.0.0.0:9092', `--advertised-listener=${names[i]}:9092`,
             `--offsets-topic-replication-factor=${rf}`, `--transaction-state-replication-factor=${rf}`,
