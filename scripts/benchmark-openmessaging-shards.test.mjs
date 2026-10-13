@@ -120,6 +120,10 @@ test('merging refuses shards that do not form one complete comparison', async ()
     ['a different OMB patch', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3,
       overrides: { openmessaging: { commit: '5b1fa709', patches: { p: '4' }, build_image_id: 'sha256:ee', jars: { '/m2/dep.jar': '2' } } } }], /differs in the OMB build/],
     ['a smoke shard among full ones', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3, overrides: { mode: 'smoke' } }], /differs in mode/],
+    ['a direct-I/O krabka shard', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3,
+      overrides: { contract: { broker_cpus: 4, krabka_preallocate: true } } }], /differs in contract/],
+    ['a shard without every broker', [{ workload: 'simple-workload', rf: 1 }, { workload: 'simple-workload', rf: 3,
+      overrides: { vendors: ['krabka'] } }], /did not run every broker/],
   ];
   for (const [label, specs, error] of cases) {
     const root = await scratch();
@@ -128,6 +132,13 @@ test('merging refuses shards that do not form one complete comparison', async ()
     const out = path.join(root, 'merged');
     await assert.rejects(merge(shards, out), error, label);
   }
+});
+
+test('a run from before --krabka-preallocate merges with one that recorded it off', async () => {
+  const root = await scratch();
+  const shards = [await shard(root, { workload: 'simple-workload', rf: 1 }),
+    await shard(root, { workload: 'simple-workload', rf: 3, overrides: { contract: { broker_cpus: 4, krabka_preallocate: false } } })];
+  await merge(shards, path.join(root, 'merged'));
 });
 
 // A run interrupted part-way through RF3: every RF1 trial completed, RF3 has
