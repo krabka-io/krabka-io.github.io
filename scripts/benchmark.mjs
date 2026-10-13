@@ -28,6 +28,7 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'no-fstrim': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
@@ -38,6 +39,8 @@ OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --repli
 --vendors krabka,kafka,redpanda runs a subset of the brokers; such a run cannot be published.
 --krabka-preallocate sets preallocate=true on krabka's benchmark topics, which writes
 their active segments with O_DIRECT where the kernel and filesystem support it.
+Before every trial the runner trims the filesystems that hold the checkout and Docker's data
+with sudo -n fstrim, so each trial starts on SSDs with the same free blocks; --no-fstrim skips it.
 Smoke: shortened workloads; never publishes.
 Dry run: validates the host and resolves images; starts no containers.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
@@ -85,6 +88,7 @@ async function main() {
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
+      disk_trim_before_trial: !options['no-fstrim'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
       durability: 'buffered writes; no identical crash-durability claim',
@@ -123,6 +127,27 @@ async function main() {
     });
   }
   const docker = (args, settings) => command('docker', args, settings);
+
+  // Trim every filesystem in provenance.disk_trim.mounts. A host without
+  // passwordless sudo for fstrim runs on untrimmed: the first refusal is
+  // recorded and printed once, and no later trial asks again.
+  async function trimDisks(directory) {
+    const trim = provenance.disk_trim;
+    if (!trim.requested || trim.unavailable) return;
+    try {
+      for (const [index, mount] of trim.mounts.entries()) {
+        const output = await command('sudo', ['-n', 'fstrim', '--verbose', mount],
+          { timeout: 600_000, output: path.join(directory, `fstrim-${index}`) });
+        trim.trimmed_bytes += Number(output.match(/\((\d+) bytes\) trimmed/)?.[1] ?? 0);
+      }
+      trim.trials += 1;
+    } catch (error) {
+      if (controller.signal.aborted) throw error;
+      trim.unavailable = error.message.split('\n')[0];
+      console.warn(`benchmark: running untrimmed, fstrim unavailable: ${trim.unavailable}`);
+    }
+    await save();
+  }
   async function removeContainer(id) {
     await docker(['rm', '-f', '-v', id], { ignoreAbort: true, timeout: 30_000 });
     containers.delete(id);
@@ -276,6 +301,13 @@ async function main() {
       assert.equal(pinned.Id, inspected.Id, 'image changed during resolution');
       provenance.images[vendor] = { requested, reference, image_id: inspected.Id, labels: inspected.Config.Labels };
     }
+    // An SSD that has not been told which blocks are free slows down as it
+    // fills with deleted data: on the benchmark host, two days of trials
+    // without a trim took direct writes from about 1.2 GB/s to 0.4 GB/s.
+    // Trimming before every trial gives each trial the same starting state.
+    const trimMounts = [...new Set(await Promise.all([ROOT, info.DockerRootDir].map(location =>
+      command('findmnt', ['--noheadings', '--output', 'TARGET', '--target', location]))))];
+    provenance.disk_trim = { requested: !options['no-fstrim'], mounts: trimMounts, trials: 0, trimmed_bytes: 0, unavailable: null };
     await save();
     if (options['dry-run']) {
       provenance.status = 'dry-run';
@@ -504,6 +536,7 @@ rpk:
           await fs.mkdir(directory);
           console.log(`OMB RF${rf} ${vendor} ${workload.id} round ${repetition}/${repetitions}`);
           try {
+            await trimDisks(directory);
             const brokers = await launchCluster(vendor, rf, `${repetition}-${workload.id}`, directory);
             await fs.copyFile(path.join(artifacts, `${workload.id}.yaml`), path.join(directory, 'workload.yaml'));
             await fs.copyFile(path.join(ombRuntime.source, workload.upstream_file), path.join(directory, 'upstream-workload.yaml'));
