@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/ProseLayout.astro
 title: krabka 1.0.3
-description: "krabka-broker 1.0.3: faster cold backlog reads, plus controller admission and storage safety fixes. Also covers 1.0.2, including opt-in direct I/O."
+description: "krabka-broker 1.0.3: faster cold backlog reads, controller admission and storage safety fixes, and OpenMessaging results against 1.0.1, Kafka 4.3.1 and Redpanda 26.2.2. Also covers 1.0.2."
 lead: "krabka-broker 1.0.3 was tagged on 2026-10-12. It changes no on-disk format, so it upgrades from any 1.x release in place."
 ---
 
@@ -19,7 +19,7 @@ There was no announcement for 1.0.2, so this one covers both releases. The [CHAN
 
 **Topic settings that now work (1.0.2).** `compression.gzip.level`, `compression.lz4.level`, `compression.zstd.level`, `segment.jitter.ms`, `file.delete.delay.ms`, `flush.messages` and `flush.ms` were accepted before but did nothing. They now control the log, and topic overrides and broker defaults take effect through live configuration updates.
 
-**Cold backlog reads (1.0.3).** In 1.0.2, a plaintext (`sendfile`) fetch found the boundaries of a run of large batches by reading 16 KiB at each one while holding the partition's log mutex. When the backlog was no longer in the page cache, each of those reads went to disk. In our benchmark run that made 100 GB backlog drains 43–52% slower than in 1.0.1, and it held up appends to the same partition. 1.0.3 reads only the 61-byte batch header for a large batch and keeps buffered scans for runs of small batches ([krabka-broker#1359](https://github.com/krabka-io/krabka-broker/issues/1359)). Drain times are back to 1.0.1's or better.
+**Cold backlog reads (1.0.3).** In 1.0.2, a plaintext (`sendfile`) fetch found the boundaries of a run of large batches by reading 16 KiB at each one while holding the partition's log mutex. When the backlog was no longer in the page cache, each of those reads went to disk. In our benchmark runs that made 100 GB backlog drains much slower than in 1.0.1, and it held up appends to the same partition. 1.0.3 reads only the 61-byte batch header for a large batch and keeps buffered scans for runs of small batches ([krabka-broker#1359](https://github.com/krabka-io/krabka-broker/issues/1359)). Drain times are back to 1.0.1's or better.
 
 **Controller admission (1.0.3).** CreatePartitions, legacy AlterConfigs, AlterPartition and leader elections go through the controller's authoritative planning and guarded submission, so a stale request can no longer overwrite newer assignments, leadership, ISR or configuration. A topic UUID delete or incremental config update meant for a deleted topic no longer affects a topic recreated with the same name.
 
@@ -36,7 +36,13 @@ There was no announcement for 1.0.2, so this one covers both releases. The [CHAN
 
 ## Benchmarks
 
-The OpenMessaging Benchmark run for 1.0.3 against Apache Kafka 4.3.1 and Redpanda 26.2.2 is still in progress on the dedicated benchmark host. Its results will be published on the [benchmarks page](/benchmarks#openmessaging) once every trial has finished and been checked. Until then, the page shows the 1.0.1 results.
+Every OpenMessaging Benchmark trial completed for krabka 1.0.3, Apache Kafka 4.3.1 and Redpanda 26.2.2 on the dedicated benchmark host. The workloads, client and resource limits are the same as for the 1.0.1 run. The results come from four runs on that host. The first run stopped part-way through replication factor 3, when a Redpanda maximum-rate trial reached the disk reserve. The remaining workloads ran again after we made space. One trial ran again because other work ran on the host during it. The provenance of the published run records the source run of each trial and the reason it was run again.
+
+Compared with 1.0.1, krabka 1.0.3 published faster in most maximum-rate workloads, and most of all in the 1 KB ones. Its end-to-end p99 latency was lower or the same in every fixed-rate workload, and it drained both backlogs at both replication factors in the same time as 1.0.1 or less.
+
+At replication factor 1, krabka had the highest maximum rate in both single-partition workloads, and its p99 latency was the same as Redpanda's in every fixed-rate workload. Redpanda had the highest rate in most multi-partition workloads. At replication factor 3, krabka's p99 latency in the two 1 KB fixed-rate workloads is still far above Redpanda's: it is higher than Kafka's in one of them and lower in the other.
+
+These runs leave `preallocate` off, so krabka writes through the page cache. On the benchmark host, page-cache writers stall on ext4 journal commits under sustained load, and that causes most of the latency gap to Redpanda. The [methodology](https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/README.md) explains the write paths and lists the full contract and caveats.
 
 ## Links
 
