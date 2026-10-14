@@ -245,7 +245,7 @@ test('a split refuses to omit a completed trial, a whole comparison or a trial w
   const source = await interrupted(root, { omit: 'rf1-redpanda-1-simple-workload' });
   const attempt = (omit, reason = 'disk full', name = 'out') =>
     split(source, 1, path.join(root, name), 'test', undefined, omit, reason);
-  await assert.rejects(attempt(['krabka:simple-workload', 'redpanda:simple-workload']), /completed in run killed-run/);
+  await assert.rejects(attempt(['krabka:simple-workload']), /completed in run killed-run/);
   await fs.rm(path.join(source, 'rf1-kafka-1-simple-workload'), { recursive: true });
   await assert.rejects(attempt(['kafka:simple-workload', 'redpanda:simple-workload']), /needs at least two measured brokers/);
   await assert.rejects(attempt(['redpanda:simple-workload'], ''), /omitted trials need a reason/);
