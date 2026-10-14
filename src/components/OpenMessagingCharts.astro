@@ -40,19 +40,25 @@ const colors = { krabka: 'bg-krab-500', kafka: 'bg-sky-400', redpanda: 'bg-viole
       </p>
       <div class="mt-5 grid gap-5 lg:grid-cols-3">
         {metrics.map(metric => {
-          const maximum = Math.max(...workload.vendors.map(vendor => vendor[metric.key]));
+          // An omitted trial has no value; scale the bars to the measured ones.
+          const maximum = Math.max(...workload.vendors.filter(vendor => vendor[metric.key] !== null).map(vendor => vendor[metric.key]));
           return <figure class="frosted-card min-w-0 rounded-2xl p-5" aria-label={`${metric.title}, ${workload.id}, RF${group.rf}`}>
             <figcaption class="text-base font-semibold text-white">{metric.title}<span class="mt-1 block text-xs font-normal text-gray-400">{metric.direction} · {metric.unit}</span></figcaption>
             <dl class="mt-6 space-y-5">
               {workload.vendors.map(vendor => <div>
                 <dt class="text-sm text-gray-200">{vendor.name}</dt>
-                <dd class="mt-1 text-base font-semibold tabular-nums text-white" data-chart-value={vendor[metric.key]}>{format(vendor[metric.key], metric.digits)} <span class="text-xs font-normal text-gray-400">{metric.unit}</span></dd>
-                <div class="mt-2 h-3 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
-                  <div class={`h-full rounded-full ${colors[vendor.id]}`} style={`width: ${maximum > 0 ? vendor[metric.key] / maximum * 100 : 0}%`}></div>
-                </div>
+                {vendor.omitted
+                  ? <dd class="mt-1 text-sm text-gray-400">Not measured</dd>
+                  : <>
+                    <dd class="mt-1 text-base font-semibold tabular-nums text-white" data-chart-value={vendor[metric.key]}>{format(vendor[metric.key], metric.digits)} <span class="text-xs font-normal text-gray-400">{metric.unit}</span></dd>
+                    <div class="mt-2 h-3 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                      <div class={`h-full rounded-full ${colors[vendor.id]}`} style={`width: ${maximum > 0 ? vendor[metric.key] / maximum * 100 : 0}%`}></div>
+                    </div>
+                  </>}
               </div>)}
             </dl>
             <p class="mt-5 flex justify-between text-xs tabular-nums text-gray-400" aria-hidden="true"><span>0</span><span>{format(maximum, metric.digits)} {metric.unit}</span></p>
+            {workload.vendors.filter(vendor => vendor.omitted).map(vendor => <p class="mt-3 text-xs text-gray-400">{vendor.name} was not measured: {vendor.omitted}</p>)}
           </figure>;
         })}
       </div>

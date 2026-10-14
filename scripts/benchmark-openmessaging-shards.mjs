@@ -2,12 +2,14 @@
 //
 //   node scripts/benchmark-openmessaging-shards.mjs plan --workloads all --replication-factors 1,3 [--lanes 4]
 //   node scripts/benchmark-openmessaging-shards.mjs merge --out DIR SHARD_RUN_DIR...
-//   node scripts/benchmark-openmessaging-shards.mjs split --rf N [--workloads A,B] --reason TEXT --out DIR RUN_DIR
+//   node scripts/benchmark-openmessaging-shards.mjs split --rf N [--workloads A,B] --reason TEXT
+//     [--omit VENDOR:WORKLOAD,... --omit-reason TEXT] --out DIR RUN_DIR
 //
 // A shard is one workload at one replication factor, so all three brokers for
 // that pair, and every round of them, run on the same machine. The merge
 // refuses shards that disagree on images, mode, rounds, contract or OMB build,
-// and requires every workload x RF x broker x round exactly once. The merged
+// and requires every workload x RF x broker x round exactly once, except the
+// trials a split omitted with a stated reason (provenance.omitted). The merged
 // directory has the layout of a single-runner run (provenance.json,
 // summary.md, rf*/trial.json), with each shard's host and runner recorded
 // under provenance.shards.
@@ -16,7 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { OMB_WORKLOADS, ombCases, writeOmbReport } from './benchmark-openmessaging.mjs';
+import { OMB_WORKLOADS, checkOmbOmissions, ombCases, ombOmission, writeOmbReport } from './benchmark-openmessaging.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
 // Fields every shard must agree on for the shards to form one comparison.
@@ -80,9 +82,11 @@ export async function loadShard(directory) {
   assert.equal(provenance.suite, 'openmessaging', `${directory} is not an OpenMessaging run`);
   assert.equal(provenance.status, 'complete', `shard ${provenance.run_id} is ${provenance.status}`);
   assert.deepEqual(provenance.vendors ?? VENDORS, VENDORS, `shard ${provenance.run_id} did not run every broker`);
+  checkOmbOmissions(provenance, VENDORS);
   const trials = [];
   for (const rf of provenance.replication_factors) for (const vendor of VENDORS) {
     for (let repetition = 1; repetition <= provenance.repetitions; repetition++) for (const workload of provenance.cases) {
+      if (ombOmission(provenance, vendor, rf, workload.id)) continue;
       const name = `rf${rf}-${vendor}-${repetition}-${workload.id}`;
       const trial = JSON.parse(await fs.readFile(path.join(directory, name, 'trial.json'), 'utf8'));
       assert.deepEqual([trial.vendor, trial.rf, trial.repetition, trial.case.id], [vendor, rf, repetition, workload.id],
@@ -102,8 +106,13 @@ export async function loadShard(directory) {
 // derived_from, and the merged provenance keeps that record per shard.
 // `workloads` narrows the shard to some of the run's workloads, so a workload
 // with a failed trial can be rerun as its own shard; by default it takes all.
-export async function split(directory, rf, out, reason, workloads) {
+// `omit` lists `vendor:workload` trials at this RF that did not complete and
+// will not be rerun. Each must have no trial.json, so a completed result can
+// never be dropped, and the shard records them under `omitted` with
+// `omitReason`.
+export async function split(directory, rf, out, reason, workloads, omit = [], omitReason) {
   assert.ok(typeof reason === 'string' && reason.trim(), 'split needs a reason');
+  assert.ok(!omit.length || (typeof omitReason === 'string' && omitReason.trim()), 'omitted trials need a reason');
   const source = JSON.parse(await fs.readFile(path.join(directory, 'provenance.json'), 'utf8'));
   assert.equal(source.suite, 'openmessaging', `${directory} is not an OpenMessaging run`);
   assert.notEqual(source.status, 'complete', `run ${source.run_id} is complete; merge it as it is`);
@@ -112,11 +121,23 @@ export async function split(directory, rf, out, reason, workloads) {
   if (workloads) {
     for (const id of workloads) assert.ok(cases.some(c => c.id === id), `run ${source.run_id} did not run ${id}`);
   }
+  const omitted = omit.map(entry => {
+    const [vendor, workload, ...extra] = entry.split(':');
+    assert.ok(VENDORS.includes(vendor) && workload && !extra.length, `--omit takes vendor:workload, not ${entry}`);
+    assert.ok(cases.some(c => c.id === workload), `--omit names ${workload}, which is not in this shard`);
+    return { vendor, rf, workload, reason: omitReason };
+  });
+  checkOmbOmissions({ ...source, cases, replication_factors: [rf], omitted }, VENDORS);
   const names = [];
   let completed = 0;
   for (const vendor of VENDORS) for (let repetition = 1; repetition <= source.repetitions; repetition++) {
     for (const workload of cases) {
       const name = `rf${rf}-${vendor}-${repetition}-${workload.id}`;
+      if (ombOmission({ omitted }, vendor, rf, workload.id)) {
+        await assert.rejects(fs.access(path.join(directory, name, 'trial.json')), undefined,
+          `${name} completed in run ${source.run_id}; a completed trial cannot be omitted`);
+        continue;
+      }
       await assert.rejects(fs.access(path.join(directory, name, 'failure.json')), undefined,
         `${name} failed in run ${source.run_id}`);
       const stat = await fs.stat(path.join(directory, name, 'trial.json')).catch(() => {
@@ -128,6 +149,7 @@ export async function split(directory, rf, out, reason, workloads) {
   }
   const provenance = { ...source, run_id: `${source.run_id}-rf${rf}`, status: 'complete',
     cases, replication_factors: [rf], completed_trials: names.length, failed_trials: 0,
+    ...(omitted.length ? { omitted } : {}),
     completed_at: new Date(completed).toISOString(),
     derived_from: { run_id: source.run_id, status: source.status, replication_factor: rf,
       ...(workloads ? { workloads: cases.map(c => c.id) } : {}), reason } };
@@ -192,8 +214,14 @@ export function mergeProvenance(shards, runId) {
       cpu_sets: provenance.cpu_sets,
       images: provenance.images,
       ...(provenance.derived_from ? { derived_from: provenance.derived_from } : {}),
+      ...(provenance.omitted ? { omitted: provenance.omitted } : {}),
     })),
   };
+  // A shard's own omissions are the merged run's; the first shard's spread
+  // above must not stand for all of them.
+  delete merged.omitted;
+  const omitted = shards.flatMap(({ provenance }) => provenance.omitted ?? []);
+  if (omitted.length) merged.omitted = omitted;
   for (const workload of merged.cases) for (const rf of merged.replication_factors) {
     assert.ok(seen.has(`${workload.id}@rf${rf}`), `no shard ran ${workload.id} at RF${rf}`);
   }
@@ -230,11 +258,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`Merged ${result.shards} shards into ${result.run_id}: ${result.trials} trials.`);
   } else if (command === 'split') {
     const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
-      options: { out: { type: 'string' }, rf: { type: 'string' }, reason: { type: 'string' }, workloads: { type: 'string' } } });
+      options: { out: { type: 'string' }, rf: { type: 'string' }, reason: { type: 'string' }, workloads: { type: 'string' },
+        omit: { type: 'string' }, 'omit-reason': { type: 'string' } } });
     assert.ok(values.out && values.rf && values.reason && positionals.length === 1,
-      'usage: split --rf N [--workloads A,B] --reason TEXT --out DIR RUN_DIR');
+      'usage: split --rf N [--workloads A,B] --reason TEXT [--omit VENDOR:WORKLOAD,... --omit-reason TEXT] --out DIR RUN_DIR');
     const shard = await split(path.resolve(positionals[0]), Number(values.rf), path.resolve(values.out), values.reason,
-      values.workloads?.split(','));
+      values.workloads?.split(','), values.omit?.split(',') ?? [], values['omit-reason']);
     console.log(`Split ${shard.trials.length} RF${values.rf} trials into ${shard.provenance.run_id}.`);
   } else {
     throw new Error('usage: benchmark-openmessaging-shards.mjs plan|merge|split ...');
