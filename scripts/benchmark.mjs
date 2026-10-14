@@ -29,6 +29,7 @@ const { values: options } = parseArgs({ options: {
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
   'krabka-env': { type: 'string', multiple: true, default: [] },
+  'no-fstrim': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'help': { type: 'boolean', short: 'h' },
@@ -40,6 +41,8 @@ OpenMessaging: upstream Kafka driver/catalog; --workloads all|NAME,NAME; --repli
 --krabka-preallocate sets preallocate=true on krabka's benchmark topics, which writes
 their active segments with O_DIRECT where the kernel and filesystem support it.
 --krabka-env KRABKA_NAME=VALUE (repeatable) passes a setting to every krabka broker.
+Before every trial the runner trims the filesystems that hold the checkout and Docker's data
+with sudo -n fstrim, so each trial starts on SSDs with the same free blocks; --no-fstrim skips it.
 Smoke: shortened workloads; never publishes.
 Dry run: validates the host and resolves images; starts no containers.
 Requires native Linux/amd64 Docker with cgroup v2, Node >=22.12, JDK >=17,
@@ -77,6 +80,10 @@ async function main() {
   const cases = ombCases(options.workloads);
   for (const setting of options['krabka-env']) {
     assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
+    // The settings are copied into provenance.json and the command log, so a
+    // secret must not be one of them.
+    assert.doesNotMatch(setting.split('=')[0], /SECRET|PASSWORD|PASSWD|TOKEN|CREDENTIAL|_KEY(_|$)|PRIVATE/,
+      `--krabka-env ${setting.split('=')[0]} looks like a secret; it would be recorded in the run's provenance`);
   }
   const vendors = options.vendors.split(',');
   assert.ok(vendors.length > 0 && vendors.every((v, i) => VENDORS.includes(v) && vendors.indexOf(v) === i), 'invalid --vendors');
@@ -91,6 +98,7 @@ async function main() {
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
       ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
+      disk_trim_before_trial: !options['no-fstrim'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
       durability: 'buffered writes; no identical crash-durability claim',
@@ -129,6 +137,38 @@ async function main() {
     });
   }
   const docker = (args, settings) => command('docker', args, settings);
+
+  // Trim every filesystem in provenance.disk_trim.mounts that has not
+  // refused. A mount that refuses (no passwordless sudo for fstrim, or a
+  // filesystem without discard) is recorded and printed once, and is not
+  // asked again; the other mounts are still trimmed. The contract then says
+  // the run was not trimmed before every trial, so the shard merge does not
+  // combine it with a run that was.
+  async function trimDisks(directory) {
+    const trim = provenance.disk_trim;
+    if (!trim.requested) return;
+    let complete = true;
+    for (const [index, entry] of trim.mounts.entries()) {
+      if (entry.unavailable) {
+        complete = false;
+        continue;
+      }
+      try {
+        const output = await command('sudo', ['-n', 'fstrim', '--verbose', entry.mount],
+          { timeout: 600_000, output: path.join(directory, `fstrim-${index}`) });
+        entry.trimmed_bytes += Number(output.match(/\((\d+) bytes\) trimmed/)?.[1] ?? 0);
+        entry.trials += 1;
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        entry.unavailable = error.message.split('\n')[0];
+        complete = false;
+        console.warn(`benchmark: ${entry.mount} runs untrimmed, fstrim unavailable: ${entry.unavailable}`);
+      }
+    }
+    if (complete) trim.trials += 1;
+    else provenance.contract.disk_trim_before_trial = false;
+    await save();
+  }
   async function removeContainer(id) {
     await docker(['rm', '-f', '-v', id], { ignoreAbort: true, timeout: 30_000 });
     containers.delete(id);
@@ -281,6 +321,23 @@ async function main() {
       const pinned = JSON.parse(await docker(['image', 'inspect', reference]))[0];
       assert.equal(pinned.Id, inspected.Id, 'image changed during resolution');
       provenance.images[vendor] = { requested, reference, image_id: inspected.Id, labels: inspected.Config.Labels };
+    }
+    // An SSD that has not been told which blocks are free slows down as it
+    // fills with deleted data, so trials that run hours apart do not start
+    // from the same disk. Trimming before every trial gives each trial the
+    // same starting state. See "SSD state" in benchmarks/README.md.
+    provenance.disk_trim = { requested: !options['no-fstrim'], mounts: [], trials: 0, unavailable: null };
+    if (provenance.disk_trim.requested) {
+      try {
+        const mounts = await Promise.all([ROOT, info.DockerRootDir].map(location =>
+          command('findmnt', ['--noheadings', '--output', 'TARGET', '--target', location])));
+        provenance.disk_trim.mounts = [...new Set(mounts)]
+          .map(mount => ({ mount, trials: 0, trimmed_bytes: 0, unavailable: null }));
+      } catch (error) {
+        provenance.disk_trim.unavailable = error.message.split('\n')[0];
+        provenance.contract.disk_trim_before_trial = false;
+        console.warn(`benchmark: running untrimmed, cannot find the mounts to trim: ${provenance.disk_trim.unavailable}`);
+      }
     }
     await save();
     if (options['dry-run']) {
@@ -511,6 +568,7 @@ rpk:
           await fs.mkdir(directory);
           console.log(`OMB RF${rf} ${vendor} ${workload.id} round ${repetition}/${repetitions}`);
           try {
+            await trimDisks(directory);
             const brokers = await launchCluster(vendor, rf, `${repetition}-${workload.id}`, directory);
             await fs.copyFile(path.join(artifacts, `${workload.id}.yaml`), path.join(directory, 'workload.yaml'));
             await fs.copyFile(path.join(ombRuntime.source, workload.upstream_file), path.join(directory, 'upstream-workload.yaml'));

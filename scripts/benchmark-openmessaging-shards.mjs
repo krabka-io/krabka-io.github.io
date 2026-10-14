@@ -56,10 +56,10 @@ export function lanes(shards, count) {
 
 const imageDigest = image => image.reference;
 // A shared field as every shard records it. Runs from before
-// --krabka-preallocate have no krabka_preallocate in their contract, and
-// they ran with it off.
+// --krabka-preallocate or the per-trial trim have no krabka_preallocate or
+// disk_trim_before_trial in their contract, and they ran with both off.
 const sharedField = (provenance, key) => key === 'contract'
-  ? { krabka_preallocate: false, ...provenance.contract } : provenance[key];
+  ? { krabka_preallocate: false, disk_trim_before_trial: false, ...provenance.contract } : provenance[key];
 // What defines a shard's OMB build. Each runner builds OMB itself, and Maven
 // stamps the jars it builds from /src with the build time, so their hashes
 // differ between two builds of the same source. The source is pinned by the
@@ -182,6 +182,7 @@ export function mergeProvenance(shards, runId) {
     // shard ran on its own machine and keeps its own record here.
     shards: shards.map(({ provenance }) => ({
       run_id: provenance.run_id,
+      ...(provenance.disk_trim ? { disk_trim: provenance.disk_trim } : {}),
       cases: provenance.cases.map(c => c.id),
       replication_factors: provenance.replication_factors,
       started_at: provenance.started_at,

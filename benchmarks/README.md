@@ -225,6 +225,29 @@ open question ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/i
 These results compare the brokers as they ship.
 
 
+## SSD state
+
+An SSD that is not told which blocks are free slows down as deleted data
+fills it. The benchmark host mounts its data volume without `discard` and
+trims it once a week, and each trial writes and deletes tens to hundreds of
+gigabytes. On 2026-10-13, after two days of trials, direct writes on the host
+were several times slower than after a manual `fstrim`
+([krabka-broker#1370](https://github.com/krabka-io/krabka-broker/issues/1370)
+has the measurements). Trials that ran hours apart therefore did not start
+from the same disk, and the absolute numbers of runs before that date depend
+on how long the drives had gone untrimmed. The runner runs every broker of a workload back to back,
+which keeps that drift small within a workload but does not remove it.
+
+From 2026-10-14 the runner trims the filesystems that hold the checkout and
+Docker's data before every trial, with `sudo -n fstrim`. The contract's
+`disk_trim_before_trial` is true only when every mount was trimmed before
+every trial, so the shard merge does not combine trimmed and untrimmed runs.
+`disk_trim` in the provenance records each mount, the trials trimmed and the
+bytes released, and the merged provenance keeps it for every shard. A mount
+that refuses the trim, for example on a host without passwordless sudo for
+`fstrim`, is recorded and not asked again, and the other mounts are still
+trimmed. `--no-fstrim` turns the trim off and needs no trim tools.
+
 ## Local runner prerequisites
 
 - Node >=22.12 and JDK >=17 (`java` and `javac`). No Bazel build, sibling checkout, npm dependencies, or Docker Compose is needed.
@@ -232,6 +255,7 @@ These results compare the brokers as they ship.
 - At least **14 available logical CPUs** and **34 GiB available RAM** (three 10 GiB brokers plus a 4 GiB client). Each broker receives 4 logical CPUs, a 4 CPU quota, 10 GiB RAM, zero swap, and a 131,072 open-file limit. RF3 runs three brokers; the client receives the remaining CPUs and a separate 4 GiB memory limit. SMT siblings are grouped where possible and the topology is recorded.
 - At least **150 GiB free disk** for a full run, or **4 GiB** for smoke, both at the checkout and Docker storage. Data uses Docker volumes and is deleted after each cluster repetition; measurements and logs remain.
 - At least **24,728 available Linux AIO slots** (`fs.aio-max-nr - fs.aio-nr`). Redpanda networking AIO is explicitly limited to 1,024 control blocks per shard so three nodes fit the usual 65,536-slot host limit consistently. This setting and the host limit are recorded; no sysctl is changed.
+- Passwordless `sudo` for `fstrim` (see [SSD state](#ssd-state)); without it, trials run untrimmed.
 - Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to GitHub for the pinned OMB source and Maven repositories for dependencies. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v1.0.3, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
 
 The runner owns only its uniquely named and labeled containers, volumes, and networks. It does not change host settings, stop other containers, commit, push, or deploy. Avoid other heavy work while measuring. Concurrent invocations in the same checkout fail; a hard-killed process can leave `.benchmarks/runner.lock`, which contains its PID and run ID. Inspect that process and its labeled Docker resources before manually removing a stale lock.

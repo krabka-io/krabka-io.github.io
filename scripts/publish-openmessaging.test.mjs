@@ -60,6 +60,19 @@ test('smoke and incomplete runs are refused', async () => {
 });
 
 
+test('runs with broker settings or a preallocate override are experiments and are refused', async () => {
+  for (const [contract, message] of [
+    [{ krabka_env: ['KRABKA_LOG_TAIL_CACHE_SIZE=32MiB'] }, /--krabka-env/],
+    [{ krabka_preallocate: true }, /--krabka-preallocate/],
+  ]) {
+    const { root, run } = await fakeRun({ contract });
+    await assert.rejects(publish(run, root), message);
+    await assert.rejects(fs.access(path.join(root, 'benchmarks', 'latest-openmessaging.md')));
+  }
+  const { root, run } = await fakeRun({ contract: { krabka_env: [], krabka_preallocate: false } });
+  assert.deepEqual(await publish(run, root), { run_id: 'run-1', trials: 3 });
+});
+
 test('publication preserves every raw OMB field and interval in compressed results with verified checksums', async () => {
   const { root, run } = await fakeRun();
   const source = path.join(run, 'rf1-krabka-1-simple-workload', 'trial.json');
