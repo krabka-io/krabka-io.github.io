@@ -58,10 +58,10 @@ const colors = { krabka: 'bg-krab-500', kafka: 'bg-sky-400', redpanda: 'bg-viole
               </div>)}
             </dl>
             <p class="mt-5 flex justify-between text-xs tabular-nums text-gray-400" aria-hidden="true"><span>0</span><span>{format(maximum, metric.digits)} {metric.unit}</span></p>
-            {workload.vendors.filter(vendor => vendor.omitted).map(vendor => <p class="mt-3 text-xs text-gray-400">{vendor.name} was not measured: {vendor.omitted}</p>)}
           </figure>;
         })}
       </div>
+      {workload.vendors.filter(vendor => vendor.omitted).map(vendor => <p class="mt-3 max-w-4xl text-sm text-gray-400">{vendor.name} was not measured: {vendor.omitted}</p>)}
     </div>
   )))}
   <p class="mt-4 text-sm text-gray-400">Read the <a href={openmessaging.summaryURL} class="text-krab-400 underline underline-offset-4">source report</a> or the full tables below. These charts compare aggregate results. <a href="/benchmarks/explorer/" class="text-krab-400 underline underline-offset-4">Explore interval charts, resources, and trial data</a>. {(openmessaging.intervalsURL || openmessaging.archiveURL) ? <><a href={openmessaging.intervalsURL || openmessaging.archiveURL} class="text-krab-400 underline underline-offset-4">Raw OMB interval data</a> is also retained for this run.</> : <>This older published capture does not include raw interval data.</>}</p>
