@@ -1,0 +1,15 @@
+---
+import { benchmarkHint } from '../utils/benchmark-hints.mjs';
+const { workload, rf, label = 'Explain this workload' } = Astro.props;
+---
+<button type="button" class="benchmark-hint-trigger" data-benchmark-hint data-hint-text={benchmarkHint(workload, rf)} aria-describedby="benchmark-workload-tooltip">{label}<span aria-hidden="true" class="hint-mark"> ?</span></button>
+<script>import '../scripts/benchmark-hints';</script>
+<style>
+  .benchmark-hint-trigger[data-benchmark-hint] { border:0; border-radius:0; padding:0; background:transparent; color:inherit; font:inherit; text-align:left; white-space:normal; cursor:help; min-height:24px; }
+  .hint-mark { color:var(--color-krab-400); font-size:.85rem; font-weight:700; }
+  .benchmark-hint-trigger:focus-visible { outline:2px solid var(--color-krab-400); outline-offset:3px; }
+</style>
+<style is:global>
+  #benchmark-workload-tooltip { position:fixed; z-index:10000; width:min(360px, calc(100vw - 24px)); max-height:calc(100dvh - 24px); overflow:auto; padding:16px; color:var(--color-gray-100); background:var(--color-gray-950); border:1px solid var(--color-gray-500); border-radius:6px; font-size:14px; line-height:1.55; white-space:pre-line; box-shadow:0 8px 24px color-mix(in srgb, var(--color-gray-950) 35%, transparent); }
+  #benchmark-workload-tooltip[hidden] { display:none; }
+</style>

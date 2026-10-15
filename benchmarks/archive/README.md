@@ -23,13 +23,17 @@ Left out: the test setup and build. That means the Java sources and compiled cla
 
 ## Interactive viewer
 
-The website's [benchmark data explorer](https://krabka.io/benchmarks/explorer/) covers all 78 trials. Select a workload, replication factor and round to compare brokers across every OMB rate and latency series, backlog, or broker CPU and memory metric. Resource views support cluster totals and individual brokers. Zoom the time window, inspect exact samples, export a CSV, and compare aggregate latency quantiles and the full upstream cumulative distributions.
+The website's [benchmark data explorer](https://krabka.io/benchmarks/explorer/) combines this archive with the newer published interval captures. It opens the newest run. Its release matrix compares throughput, p99 latency and total CPU time with Kafka, Redpanda or the previous krabka release. Missing comparisons remain visible. Cross-release results do not isolate software changes because disk preparation changed.
+
+Select a workload, replication factor and round to compare OMB rate and latency series and backlog. This older archive also supplies broker CPU and memory timelines and client logs. Newer runs retain OMB intervals and resource totals, but do not supply resource timelines or client logs. The viewer disables unavailable controls. It does not reconstruct samples from totals.
+
+Resource views support cluster totals and individual brokers. Zoom the time window, inspect exact samples, export a CSV, and compare aggregate latency quantiles and upstream cumulative distributions. A trial's interval samples are not independent repeated trials.
 
 The trial catalog supports search and sorting. Trial drilldown exposes every original file listed above, including the complete runner trial, resource metadata, client stdout/stderr, run provenance and summary. JSON arrays expand in pages; logs retain their original line numbers. Original files can be downloaded individually. The view's URL preserves workload, broker selection, chart metric, scope, scale and window.
 
 OMB intervals use nominal 10-second interval ends relative to measurement; the source result has no absolute timestamps. Resources use their recorded `elapsed_ms` and the metadata's clock anchor, covering startup, warm-up, probing, measurement and shutdown. The two timelines are intentionally separate. CPU rates use the actual gap between samples, and memory is shown in MiB. Drawing retains extrema; tables, exports and source files keep all original samples.
 
-To develop locally, pull the LFS archive using the command below, then run `npm run start` or `npm run build:site`. Both run `npm run prepare:benchmark-archive`, which verifies the documented archive checksum and stages lossless gzip files plus a compact index. Generated files are ignored by Git. The browser fetches selected trials on demand and verifies each original file's size and SHA-256 when Web Crypto is available. Run `npm run test:benchmark` for transformation checks and, after building, `npm run check:benchmark-viewer` for browser coverage of the full matrix and drilldown.
+To develop locally, pull the LFS archive using the command below, then run `npm run start` or `npm run build:site`. Both run `npm run prepare:benchmark-archive`. This step verifies the archive checksum and the newer interval checksums, then stages lossless gzip files and a compact index. Generated files are ignored by Git. The browser fetches selected trials on demand and verifies each file's size and SHA-256 when Web Crypto is available. Run `npm run test:benchmark` for transformation checks. After building, run `npm run check:benchmark-viewer` for browser coverage of all available runs and file views.
 
 ## Checksum
 

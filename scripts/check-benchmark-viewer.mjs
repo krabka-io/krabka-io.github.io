@@ -6,7 +6,8 @@ import { chromium } from 'playwright';
 import { serve, DIST_DIR, installedChromium } from './lab-check-lib.mjs';
 
 const archive = JSON.parse(fs.readFileSync('src/data/benchmark-archive.json', 'utf8'));
-const run = archive.runs[0];
+const latest = archive.runs[0];
+const run = archive.runs.find(run => run.trials.every(trial => trial.resource_samples > 0));
 const output = path.resolve('artifacts/benchmark-viewer');
 fs.mkdirSync(output, { recursive: true });
 let browser;
@@ -23,10 +24,68 @@ let failedRequest;
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'dark' });
   const page = await context.newPage();
+  await page.route('**/result.json.gz', route => route.fulfill({
+    body: fs.readFileSync(path.join(DIST_DIR, new URL(route.request().url()).pathname)),
+    headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+  }));
   page.on('pageerror', error => errors.push(error.message));
   page.on('response', response => { if (response.status() >= 400 && response.url().startsWith(base)) errors.push(`${response.status()} ${response.url()}`); });
   const loaded = () => page.waitForFunction(() => document.getElementById('explorer-status').textContent.startsWith('Loaded'), { timeout: 30000 });
+  await page.route('**/archive-data/index.json', route => route.abort());
+  await page.goto(base + '/benchmarks/explorer/');
+  await page.waitForFunction(() => document.getElementById('explorer-status').hasAttribute('data-error'));
+  assert.match(await page.locator('#explorer-status').textContent(), /Reload to retry/);
+  await page.unroute('**/archive-data/index.json');
+  await page.locator('#retry-load').click(); await loaded();
   await page.goto(base + '/benchmarks/explorer/'); await loaded();
+  await page.unroute('**/result.json.gz');
+  assert.equal(await page.locator('#run-select').inputValue(), latest.id);
+  assert.match(await page.locator('#explorer-status').textContent(), /not published/);
+  assert.equal(await page.locator('#source-select option[value="resources"]').evaluate(option => option.disabled), true);
+  assert.equal(await page.locator('[data-matrix-row]:visible').count(), 14);
+  await page.selectOption('[data-matrix-peer]', 'redpanda');
+  assert.match(await page.locator('[data-matrix-summary]').textContent(), /1 not measured/);
+  await page.selectOption('[data-matrix-metric]', 'end_to_end_p99_ms');
+  assert.match(await page.locator('[data-matrix-note]').textContent(), /aggregate p99/);
+  await page.selectOption('[data-matrix-filter]', 'all');
+  assert.equal(await page.locator('[data-matrix-row]:visible').count(), latest.provenance.cases.length * latest.provenance.replication_factors.length);
+  for (const workload of latest.provenance.cases) {
+    const hint = page.locator(`[data-matrix-row][data-workload="${workload.id}"][data-rf="1"] [data-benchmark-hint]`);
+    await hint.hover();
+    await page.locator('#benchmark-workload-tooltip').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#benchmark-workload-tooltip').textContent(), /Why this test is useful/);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#benchmark-workload-tooltip').isVisible(), false);
+  }
+  const firstHint = page.locator('[data-matrix-row] [data-benchmark-hint]').first();
+  await firstHint.focus();
+  assert.equal(await page.locator('#benchmark-workload-tooltip').isVisible(), true);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 375, height: 1000 });
+  await firstHint.click();
+  assert.equal(await page.locator('#benchmark-workload-tooltip').isVisible(), true);
+  const hintBounds = await page.locator('#benchmark-workload-tooltip').boundingBox();
+  assert.ok(hintBounds.x >= 0 && hintBounds.x + hintBounds.width <= 375);
+  await page.screenshot({ path: path.join(output, 'hint-375.png') });
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.selectOption('[data-matrix-peer]', 'previous');
+  assert.match(await page.locator('[data-matrix-note]').textContent(), /preceding published release/);
+  assert.equal(await page.locator('[data-matrix-row]').first().locator('[data-matrix-cell] strong').first().textContent(), 'First run');
+  await page.selectOption('[data-matrix-peer]', 'kafka');
+  await page.selectOption('[data-matrix-metric]', 'publish_rate');
+  await page.selectOption('[data-matrix-filter]', 'max');
+  // Every newer published capture loads without inventing resource telemetry.
+  for (const capture of archive.runs.filter(r => r.id !== run.id)) {
+    await page.selectOption('#run-select', capture.id); await loaded();
+    for (const rf of capture.provenance.replication_factors) for (const workload of capture.provenance.cases) {
+      await page.selectOption('#rf-select', String(rf)); await page.selectOption('#workload-select', workload.id); await loaded();
+      const trials = capture.trials.filter(t => t.rf === rf && t.case.id === workload.id);
+      assert.equal(await page.locator('#summary-cards article').count(), trials.length);
+      assert.deepEqual(await page.locator('#summary-cards strong').allTextContents(), trials.map(t => t.publish_rate.toLocaleString('en-US', { maximumFractionDigits: 0 })));
+    }
+  }
+  await page.selectOption('#run-select', run.id); await loaded();
   assert.equal(await page.locator('#catalog-table tbody tr').count(), run.trials.length);
   assert.equal(await page.locator('#summary-cards article').count(), 3);
   assert.equal(await page.locator('#temporal-chart .chart-line').count(), 3);
@@ -121,10 +180,11 @@ try {
   await page.locator('#raw-search').fill('');
   await page.selectOption('#raw-file', 'result.json'); await page.locator('#open-file').click();
   await page.waitForFunction(() => document.getElementById('raw-status').textContent.includes('original JSON fields'));
-  for (const width of [390, 1440]) for (const theme of ['light', 'dark']) {
+  for (const width of [375, 1440]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 });
     await page.evaluate(theme => { localStorage.setItem('theme', theme); document.documentElement.dataset.theme = theme; }, theme);
-    await page.waitForTimeout(200);
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.waitForTimeout(500);
     const structure = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - innerWidth, h1s: document.querySelectorAll('h1').length, unnamed: [...document.querySelectorAll('select, input, button')].filter(el => el.getClientRects().length && !el.textContent.trim() && !el.labels?.length && !el.getAttribute('aria-label')).length }));
     assert.ok(structure.overflow <= 1, `${width} ${theme}: ${structure.overflow}px overflow`);
     assert.equal(structure.h1s, 1); assert.equal(structure.unnamed, 0);
@@ -133,14 +193,28 @@ try {
     await page.locator('section[aria-labelledby="distribution-heading"]').screenshot({ path: path.join(output, `distribution-${width}-${theme}.png`) });
     await page.locator('section[aria-labelledby="raw-heading"]').screenshot({ path: path.join(output, `drilldown-${width}-${theme}.png`) });
   }
+  for (const route of ['/', '/benchmarks/', '/benchmarks/explorer/']) {
+    await page.goto(base + route);
+    if (route.includes('explorer')) await loaded();
+    for (const width of [375, 1440]) for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.waitForTimeout(500);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${route} ${width} ${theme}: page overflow`);
+      const surface = route === '/' ? 'home' : route.includes('explorer') ? 'latest' : 'report';
+      await page.screenshot({ path: path.join(output, `${surface}-${width}-${theme}.png`), fullPage: true });
+      if (route.includes('explorer')) await page.locator('[data-benchmark-matrix]').screenshot({ path: path.join(output, `matrix-${width}-${theme}.png`) });
+    }
+  }
   assert.deepEqual(errors, []);
   fs.writeFileSync(path.join(output, 'visual-qc.json'), JSON.stringify({
-    route: '/benchmarks/explorer/', browser: 'Headless Chromium', widths: [390, 1440], themes: ['light', 'dark'],
+    route: '/benchmarks/explorer/', browser: 'Headless Chromium', widths: [375, 1440], themes: ['light', 'dark'],
     matrix: { combinations: run.provenance.cases.length * run.provenance.replication_factors.length, trials: run.trials.length },
     steps: [
-      { step: 1, surface: 'Selection and temporal comparison', health: 'Passed', evidence: ['desktop-dark.png', 'temporal-390-light.png', 'temporal-1440-dark.png'], checks: ['every workload/RF combination', 'metric and scope switching', 'zoom and cursor', 'exact samples and CSV', 'shareable URL restoration'] },
-      { step: 2, surface: 'Latency distribution', health: 'Passed', evidence: ['distribution-1440-light.png', 'distribution-390-dark.png'], checks: ['aggregate units', 'full percentile-to-latency mapping', 'contained plot', 'independent legend'] },
-      { step: 3, surface: 'Trial drilldown and catalog', health: 'Passed', evidence: ['drilldown-1440-dark.png', 'drilldown-390-light.png'], checks: ['searchable JSON and logs', 'empty stderr', 'original-file download', 'catalog filtering and sorting', 'failed-fetch retry', 'named controls', 'no page overflow'] },
+      { step: 1, surface: 'Selection and temporal comparison', health: 'Passed', evidence: ['desktop-dark.png', 'temporal-375-light.png', 'temporal-1440-dark.png'], checks: ['every workload/RF combination', 'metric and scope switching', 'zoom and cursor', 'exact samples and CSV', 'shareable URL restoration'] },
+      { step: 2, surface: 'Latency distribution', health: 'Passed', evidence: ['distribution-1440-light.png', 'distribution-375-dark.png'], checks: ['aggregate units', 'full percentile-to-latency mapping', 'contained plot', 'independent legend'] },
+      { step: 3, surface: 'Trial drilldown and catalog', health: 'Passed', evidence: ['drilldown-1440-dark.png', 'drilldown-375-light.png'], checks: ['searchable JSON and logs', 'empty stderr', 'original-file download', 'catalog filtering and sorting', 'failed-fetch retry', 'named controls', 'no page overflow'] },
     ],
     limits: ['Screenshots and browser checks do not establish complete accessibility compliance.', 'The broader site budget check requires the separately built broker WASM binary, absent in this local checkout.'],
   }, null, 2) + '\n');

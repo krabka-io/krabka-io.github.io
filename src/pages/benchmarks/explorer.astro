@@ -1,33 +1,39 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import archive from '../../data/benchmark-archive.json';
+import BenchmarkMatrix from '../../components/BenchmarkMatrix.astro';
+import BenchmarkHint from '../../components/BenchmarkHint.astro';
+import { getPath } from '../../utils/paths';
 const trialCount = archive.runs.reduce((sum, run) => sum + run.trials.length, 0);
 const resourceCount = archive.runs.flatMap(run => run.trials).reduce((sum, trial) => sum + trial.resource_samples, 0);
 ---
 <BaseLayout title="Benchmark data explorer | krabka" description="Explore every captured OpenMessaging interval, latency distribution, broker CPU and memory sample, client log, and provenance record.">
   <div class="explorer-shell mx-auto max-w-[96rem] px-4 py-10 sm:px-6 lg:px-8">
     <header class="mb-8">
-      <a href="/benchmarks/" class="text-sm font-semibold text-krab-400 hover:underline">← Broker benchmarks</a>
-      <p class="mt-6 text-xs font-bold uppercase tracking-[.18em] text-krab-400">OpenMessaging / Captured data</p>
-      <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-white sm:text-5xl">Benchmark data explorer</h1>
-      <p class="mt-4 max-w-3xl text-gray-300">Follow throughput and latency over time, inspect broker resources, and drill into the source behind every trial.</p>
-      <div class="archive-stats mt-6"><span><strong>{trialCount}</strong> trials</span><span><strong>{resourceCount.toLocaleString('en-US')}</strong> resource samples</span><span><strong>10 s</strong> OMB intervals</span><span><strong>250 ms</strong> target resource cadence</span></div>
+      <a href={getPath('/benchmarks')} class="text-sm font-semibold text-krab-400 hover:underline">Read the benchmark report</a>
+      <p class="mt-6 text-xs font-bold text-krab-400">OpenMessaging Benchmark</p>
+      <h1 class="mt-3 text-3xl font-extrabold tracking-tight text-white sm:text-5xl">Explore results across<br />krabka releases</h1>
+      <p class="mt-4 max-w-3xl text-gray-300">Compare published releases, then follow each trial over time. Keep throughput, latency and test conditions in view.</p>
+      <div class="archive-stats mt-6"><span><strong>{archive.runs.length}</strong> published runs</span><span><strong>{trialCount}</strong> captured trials</span><span><strong>{resourceCount.toLocaleString('en-US')}</strong> archived resource samples</span></div>
+      <p class="context-note">Each published release has one round per workload. The interval samples within a trial are not independent repeated trials. Resource timelines are available only where captured.</p>
+      <a href="#capture" class="subtle-link">Go to the trial timeline</a>
     </header>
-    <script type="application/json" id="archive-index" set:html={JSON.stringify(archive).replaceAll('<', '\\u003c')} />
-    <div data-explorer class="explorer">
+    <BenchmarkMatrix />
+    <script type="application/json" id="archive-index" set:html={JSON.stringify({ url: getPath('/benchmarks/archive-data/index.json') })} />
+    <div id="capture" data-explorer class="explorer scroll-mt-24">
       <aside class="explorer-sidebar panel">
         <h2>Capture selection</h2>
-        <label>Run<select id="run-select">{archive.runs.map(run => <option value={run.id}>{run.id}</option>)}</select></label>
+        <label>Release and run<select id="run-select">{archive.runs.map(run => <option value={run.id}>{run.provenance.images.krabka.requested.split(':').at(-1)} · {run.id.replace('omb-local-', '')}</option>)}</select></label>
         <label>Find a workload<input id="workload-search" type="search" placeholder="Rate, backlog, partitions…" /></label>
         <label>Workload<select id="workload-select"></select></label>
         <div class="control-pair"><label>Replication<select id="rf-select"></select></label><label>Round<select id="round-select"></select></label></div>
         <fieldset><legend>Compare brokers</legend><div class="vendor-options">{[['krabka', 'krabka'], ['kafka', 'Apache Kafka'], ['redpanda', 'Redpanda']].map(([id, name]) => <label><input type="checkbox" name="vendor" value={id} checked /><span class={`vendor-dot ${id}`}></span>{name}</label>)}</div></fieldset>
         <div id="workload-config" class="config"></div>
         <p class="context-note">Trials ran sequentially. Comparison lines share elapsed time, not wall-clock time. These are single-run measurements, not confidence intervals.</p>
-        <a href="#trial-catalog" class="subtle-link">Browse all {trialCount} trials ↓</a>
+        <a href="#trial-catalog" class="subtle-link">Browse the selected run’s trials</a>
       </aside>
       <div class="explorer-main">
-        <div class="selection-heading"><div><p id="selection-eyebrow" class="eyebrow"></p><h2 id="selection-title"></h2></div><button id="share-selection" type="button">Copy view link</button></div>
+        <div class="selection-heading"><div><p id="selection-eyebrow" class="eyebrow"></p><h2 id="selection-title"></h2><span id="selection-hint"><BenchmarkHint workload={archive.runs[0].provenance.cases[0]} rf={archive.runs[0].provenance.replication_factors[0]} /></span></div><button id="share-selection" type="button">Copy view link</button></div>
         <p id="explorer-status" role="status" aria-live="polite">Loading captured data…</p>
         <button id="retry-load" type="button" hidden>Retry loading</button>
         <div id="summary-cards" class="summary-cards"></div>
@@ -67,7 +73,7 @@ const resourceCount = archive.runs.flatMap(run => run.trials).reduce((sum, trial
       <div class="section-heading"><div><p class="eyebrow">Complete capture</p><h2 id="catalog-heading">Trial catalog</h2></div><label>Sort trials<select id="catalog-sort"><option value="capture">Capture order</option><option value="rate">Publish rate · highest first</option><option value="latency">End-to-end p99 · lowest first</option><option value="cpu">CPU time · lowest first</option><option value="memory">Peak RSS · lowest first</option></select></label><label>Filter trials<input id="catalog-search" type="search" placeholder="Broker, workload, RF…" /></label></div>
       <p id="catalog-count" class="context-note"></p><div class="table-scroll"><table id="catalog-table"></table></div>
     </section>
-    <details class="panel mt-8"><summary>Archive integrity and provenance</summary><div id="archive-provenance"></div><p class="context-note">The downloadable files are lossless copies from the checksum-verified Git LFS archive. Setup files, broker logs, and container inspections were excluded from the source archive.</p><a class="subtle-link" href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md">Archive documentation and verification instructions ↗</a></details>
+    <details class="panel mt-8"><summary>Archive integrity and provenance</summary><div id="archive-provenance"></div><p class="context-note">OMB results retain every upstream interval. Older captures include resource timelines and client logs from the verified Git LFS archive. Newer publications contain OMB files and compact trial summaries; missing telemetry is not reconstructed.</p><a class="subtle-link" href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md">Read the archive verification instructions</a></details>
     <noscript><p class="panel mt-8">This explorer requires JavaScript. The <a href="/benchmarks/">benchmark report and tables</a> and <a href="https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md">complete source archive</a> remain available without it.</p></noscript>
   </div>
 </BaseLayout>
@@ -93,7 +99,7 @@ const resourceCount = archive.runs.flatMap(run => run.trials).reduce((sum, trial
   .vendor-options { display: grid; gap: 12px; margin-top: 12px; }
   .vendor-options label { flex-direction: row; align-items: center; font-size: 13px; }
   .vendor-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dot); }
-  .explorer-shell { --vendor-krabka: #ff8466; --vendor-kafka: #38bdf8; --vendor-redpanda: #c4b5fd; }
+  .explorer-shell { --vendor-krabka: var(--color-krab-400); --vendor-kafka: var(--color-sky-400); --vendor-redpanda: var(--color-violet-400); }
   .vendor-dot.krabka { --dot: var(--vendor-krabka); }.vendor-dot.kafka { --dot: var(--vendor-kafka); }.vendor-dot.redpanda { --dot: var(--vendor-redpanda); }
   .explorer-shell legend { font-size: 12px; font-weight: 600; }
   .config { border-top: 1px solid var(--explorer-border); padding-top: 14px; font-size: 12px; line-height: 1.8; }
@@ -120,7 +126,6 @@ const resourceCount = archive.runs.flatMap(run => run.trials).reduce((sum, trial
   .sample-toolbar, .pagination, .raw-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 11px; color: var(--color-gray-400); }.raw-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 20px; }.raw-controls label { flex: 1 1 170px; }.raw-content { margin-top: 16px; max-height: 500px; overflow: auto; font-size: 12px; background: var(--color-gray-950); padding: 14px; border-radius: 8px; }.raw-content pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; font-family: var(--font-mono, monospace); }.raw-content details { margin: 0 0 0 12px; border-top: none; }.raw-content summary { padding: 4px 0; font-family: monospace; font-size: 11px; }.raw-content .json-value { padding: 3px 0; overflow-wrap: anywhere; font-family: monospace; }.raw-content .json-key { color: var(--color-krab-400); }.raw-content .json-page { font-size: 10px; margin: 8px; }
   #trial-catalog .table-scroll { max-height: 36rem; } #trial-catalog thead { position: sticky; top: 0; background: var(--color-gray-950); z-index: 1; }
   /* The dark-theme series colours wash out on a light page. */
-  :root[data-theme="light"] .explorer-shell { --vendor-krabka: #c2410c; --vendor-kafka: #0369a1; --vendor-redpanda: #6d28d9; }
   :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="krabka"] { stroke: var(--vendor-krabka); }
   :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="kafka"] { stroke: var(--vendor-kafka); }
   :root[data-theme="light"] .explorer-shell .chart-line[data-vendor="redpanda"] { stroke: var(--vendor-redpanda); }

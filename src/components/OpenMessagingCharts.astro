@@ -1,5 +1,6 @@
 ---
 import { openmessaging, format } from '../utils/benchmarks.mjs';
+import BenchmarkHint from './BenchmarkHint.astro';
 
 const groups = openmessaging?.rows ?? [];
 const first = groups[0];
@@ -34,7 +35,7 @@ const colors = { krabka: 'bg-krab-500', kafka: 'bg-sky-400', redpanda: 'bg-viole
   {groups.flatMap(group => group.cases.map(workload => (
     <div data-chart-panel data-workload={workload.id} data-rf={group.rf} hidden={group.rf !== first?.rf || workload.id !== initial?.id}>
       <p class="mt-5 text-sm text-gray-300 [overflow-wrap:anywhere]" data-chart-description>
-        <strong class="text-white">{workload.id} · RF{group.rf}</strong><br />
+        <strong class="text-white"><BenchmarkHint workload={workload} rf={group.rf} label={`${workload.id} · RF${group.rf}`} /></strong><br />
         {workload.config.topics} {workload.config.topics === 1 ? 'topic' : 'topics'} · {workload.config.partitionsPerTopic} partitions per topic · {format(workload.config.messageSize)}-byte messages · {workload.config.producerRate > 0 ? `${format(workload.config.producerRate)} messages/s offered` : 'Maximum sustainable rate (probed)'} · {workload.config.testDurationMinutes}-minute measurement
         {workload.config.consumerBacklogSizeGB > 0 && <><br />{workload.config.consumerBacklogSizeGB} GB backlog: end-to-end latency includes the wait before consumers drain it.</>}
       </p>

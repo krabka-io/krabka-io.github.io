@@ -1,0 +1,90 @@
+---
+import { benchmarkHistory } from '../utils/benchmarks.mjs';
+import { releaseVersion, matrixValue } from '../utils/benchmark-story.mjs';
+import { isMaxRate } from '../utils/home-benchmark.mjs';
+import { getPath } from '../utils/paths';
+import BenchmarkHint from './BenchmarkHint.astro';
+const runs = benchmarkHistory.map(run => ({ id: run.provenance.run_id, version: releaseVersion(run), rounds: run.provenance.repetitions, trim: !!run.provenance.contract.disk_trim_before_trial, rows: run.rows }));
+const latest = runs.at(-1);
+const cases = latest.rows.flatMap(group => group.cases.map(workload => ({ id: workload.id, rf: group.rf, max: isMaxRate(workload.config), config: workload.config })));
+const data = { runs, cases, explorer: getPath('/benchmarks/explorer') };
+---
+<section class="matrix-section" data-benchmark-matrix aria-labelledby="matrix-heading" data-no-anchor>
+  <div class="matrix-intro"><div><p class="eyebrow">Workload by workload</p><h2 id="matrix-heading">Read the pattern across releases</h2></div><p>Each cell compares krabka with a broker in the same run. Select a cell to inspect the captured intervals.</p></div>
+  <div class="matrix-controls">
+    <label>Compare with<select data-matrix-peer><option value="kafka">Apache Kafka</option><option value="redpanda">Redpanda</option><option value="previous">Previous krabka release</option></select></label>
+    <label>Measurement<select data-matrix-metric><option value="publish_rate">Publish rate · higher is better</option><option value="end_to_end_p99_ms">E2E p99 latency · lower is better</option><option value="cpu_seconds">Total broker CPU time · lower is better</option></select></label>
+    <label>Workloads<select data-matrix-filter><option value="max">Max-rate workloads</option><option value="all">All workloads</option></select></label>
+  </div>
+  <p class="matrix-summary" data-matrix-summary role="status" aria-live="polite"></p>
+  <p class="matrix-legend">100% is the comparison broker. <span class="legend-better">Favorable by more than 5%</span> · <span>within 5%</span> · <span class="legend-worse">unfavorable by more than 5%</span>. These bands are visual guides, not statistical significance.</p>
+  <p class="matrix-note" data-matrix-note>Rates on fixed-load workloads can be capped by offered load. Max-rate workloads give a clearer view of throughput limits.</p>
+  <div class="matrix-scroll" tabindex="0" role="region" aria-label="Release comparison matrix">
+    <table class="release-matrix"><caption class="sr-only">krabka results as percentages of the selected broker in each release run</caption><thead><tr><th scope="col">Workload</th>{runs.map(run => <th scope="col">{run.version}<small>{run.rounds} round · {run.trim ? 'SSD trimmed' : 'trim uncontrolled'}</small></th>)}</tr></thead>
+    <tbody>{cases.map(workload => <tr data-matrix-row data-workload={workload.id} data-rf={workload.rf} hidden={!workload.max}><th scope="row"><BenchmarkHint workload={workload} rf={workload.rf} label={`${workload.config.messageSize >= 1024 ? workload.config.messageSize / 1024 + ' KiB' : workload.config.messageSize + ' B'} · ${workload.config.partitionsPerTopic} ${workload.config.partitionsPerTopic === 1 ? 'partition' : 'partitions'} · RF${workload.rf}`} /><small>{workload.id}</small></th>{runs.map(run => {
+      const row = run.rows.find(group => group.rf === workload.rf)?.cases.find(row => row.id === workload.id);
+      const value = row && matrixValue(row.vendors, 'kafka', 'publish_rate');
+      return <td><a data-matrix-cell href={`${getPath('/benchmarks/explorer')}?run=${run.id}&workload=${workload.id}&rf=${workload.rf}#capture`}><strong>{value ? Math.round(value.ratio * 100) + '%' : 'Not measured'}</strong><span class="cell-track" aria-hidden="true"><span style={`width:${Math.min(100, (value?.ratio ?? 0) * 50)}%`}></span></span><small data-cell-detail></small></a></td>;
+    })}</tr>)}</tbody></table>
+  </div>
+  <p class="matrix-note">Bars share a 0–200% scale; longer values stop at the edge and keep their numeric label. Every workload has equal weight in the median. Missing comparisons are excluded and counted.</p>
+  <p class="matrix-note">Disk preparation changed in the latest run. Cross-release differences include test conditions. The full suite uses krabka’s shared page cache, not its direct I/O mode.</p>
+  <script type="application/json" data-matrix-data set:html={JSON.stringify(data).replaceAll('<', '\\u003c')} />
+</section>
+<script>
+  import { matrixValue } from '../utils/benchmark-story.mjs';
+  import { median } from '../utils/home-benchmark.mjs';
+  document.querySelectorAll<HTMLElement>('[data-benchmark-matrix]').forEach(root => {
+    const data = JSON.parse(root.querySelector('[data-matrix-data]')!.textContent!);
+    const peer = root.querySelector<HTMLSelectElement>('[data-matrix-peer]')!;
+    const metric = root.querySelector<HTMLSelectElement>('[data-matrix-metric]')!;
+    const filter = root.querySelector<HTMLSelectElement>('[data-matrix-filter]')!;
+    const fmt = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: metric.value === 'publish_rate' ? 0 : 2 });
+    const render = () => {
+      const latest: number[] = []; let missing = 0;
+      const higher = metric.value === 'publish_rate';
+      const unit = higher ? '/s' : metric.value === 'cpu_seconds' ? ' CPU s' : ' ms';
+      root.querySelectorAll<HTMLTableRowElement>('[data-matrix-row]').forEach((row, i) => {
+        const workload = data.cases[i]; row.hidden = filter.value === 'max' && !workload.max;
+        row.querySelectorAll<HTMLAnchorElement>('[data-matrix-cell]').forEach((cell, j) => {
+          const run = data.runs[j];
+          const match = run.rows.find(group => group.rf === workload.rf)?.cases.find(c => c.id === workload.id);
+          const previous = data.runs[j - 1]?.rows.find(group => group.rf === workload.rf)?.cases.find(c => c.id === workload.id);
+          const previousBroker = previous?.vendors.find(v => v.id === 'krabka');
+          const matchedPrevious = previousBroker && JSON.stringify(previous.config) === JSON.stringify(match?.config);
+          const vendors = peer.value === 'previous' ? [match?.vendors.find(v => v.id === 'krabka'), matchedPrevious && { ...previousBroker, id: 'previous' }].filter(Boolean) : match?.vendors;
+          const value = vendors && matrixValue(vendors, peer.value, metric.value);
+          cell.querySelector('strong')!.textContent = value ? Math.round(value.ratio * 100) + '%' : peer.value === 'previous' && !j ? 'First run' : 'Not measured';
+          cell.querySelector<HTMLElement>('.cell-track > span')!.style.width = `${Math.min(100, (value?.ratio ?? 0) * 50)}%`;
+          cell.dataset.outcome = !value ? 'missing' : Math.abs(value.ratio - 1) <= .05 ? 'near' : (higher ? value.ratio > 1 : value.ratio < 1) ? 'better' : 'worse';
+          const detail = value ? `${fmt(value.krabka)}${unit}` : 'No paired result';
+          cell.querySelector('[data-cell-detail]')!.textContent = detail;
+          cell.title = value ? `krabka ${fmt(value.krabka)}${unit}; ${peer.options[peer.selectedIndex].text} ${fmt(value.baseline)}${unit}. Open ${run.version}, ${workload.id}, RF${workload.rf}.` : 'Comparison not measured. Open the available trials and omission reason.';
+          const url = new URL(cell.href);
+          url.searchParams.set('metric', metric.value === 'end_to_end_p99_ms' ? 'endToEndLatency99pct' : 'publishRate');
+          cell.href = url.href;
+          if (!row.hidden && j === data.runs.length - 1) { if (value) latest.push(value.ratio); else missing++; }
+        });
+      });
+      const better = latest.filter(v => higher ? v > 1.05 : v < .95).length;
+      const worse = latest.filter(v => higher ? v < .95 : v > 1.05).length;
+      root.querySelector('[data-matrix-summary]')!.textContent = latest.length ? `Latest release: ${Math.round(median(latest) * 100)}% median · ${better} favorable · ${latest.length - better - worse} within 5% · ${worse} unfavorable · ${missing} not measured.` : 'No paired measurements for this selection.';
+      root.querySelector('[data-matrix-note]')!.textContent = (peer.value === 'previous' ? 'Each column compares with the preceding published release, with the same workload settings. Disk state changed; differences do not isolate software gains. ' : '') + (metric.value === 'cpu_seconds' ? 'Total CPU time covers startup, warm-up, probing, measurement and shutdown. Less CPU may also mean less throughput. Inspect the rate before judging efficiency.' : metric.value === 'end_to_end_p99_ms' ? 'Each cell uses the aggregate p99 reported by OMB. Backlog workloads include the wait before consumers drain the backlog. These are not interval-p99 averages.' : 'Fixed-load workloads can be capped by offered load. Max-rate workloads give a clearer view of throughput limits.');
+    };
+    for (const control of [peer, metric, filter]) control.addEventListener('change', render);
+    render();
+  });
+</script>
+<style>
+  .matrix-section { padding-block:2rem; border-top:1px solid var(--color-gray-700); color:var(--color-gray-300); }
+  .matrix-intro { display:flex; justify-content:space-between; gap:2rem; flex-wrap:wrap; margin-bottom:1.5rem; } .matrix-intro p:not(.eyebrow) { max-width:28rem; font-size:.875rem; line-height:1.65; }
+  .eyebrow { font-size:.75rem; font-weight:650; color:var(--color-krab-400); margin-bottom:.5rem; } h2 { color:var(--color-white); font-size:1.8rem; line-height:1.2; font-weight:700; letter-spacing:-.025em; }
+  .matrix-controls { display:flex; flex-wrap:wrap; gap:1rem; } label { display:flex; flex-direction:column; gap:.5rem; font-size:.75rem; flex:1 1 11rem; } select { padding:.75rem; border:1px solid var(--color-gray-600); background:var(--color-gray-950); color:var(--color-gray-100); border-radius:.3rem; min-width:0; }
+  .matrix-summary { padding:1rem 0; font-size:.875rem; font-weight:600; color:var(--color-gray-100); } .matrix-legend,.matrix-note { font-size:.75rem; line-height:1.6; color:var(--color-gray-400); margin-bottom:.75rem; } .legend-better { color:var(--color-sky-400); } .legend-worse { color:var(--color-amber-400); }
+  .matrix-scroll { overflow-x:auto; margin-block:1rem; } table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; table-layout:fixed; } th,td { padding:.6rem; border-bottom:1px solid var(--color-gray-700); text-align:left; } thead th { font-size:.875rem; color:var(--color-gray-100); } th:first-child { width:36%; padding-left:0; } tbody th { font-size:.75rem; font-weight:500; } small { display:block; font-size:.65rem; color:var(--color-gray-400); font-weight:400; line-height:1.4; margin-top:.35rem; overflow-wrap:anywhere; }
+  td a { display:block; padding:.5rem; color:var(--color-gray-200); text-decoration:none; border:1px solid transparent; } td a:hover,td a:focus-visible { border-color:var(--color-gray-400); } td strong { font-size:1.15rem; font-weight:650; } .cell-track { display:block; height:5px; position:relative; background:var(--color-gray-800); margin-top:.4rem; } .cell-track::after { content:''; position:absolute; height:9px; width:1px; background:var(--color-gray-400); left:50%; top:-2px; } .cell-track > span { display:block; height:100%; background:currentColor; }
+  .release-matrix th, .release-matrix td, .release-matrix small { white-space:normal; overflow-wrap:anywhere; }
+  .matrix-section .eyebrow { text-transform:none; letter-spacing:normal; }
+  td a[data-outcome='better'] { color:var(--color-sky-400); } td a[data-outcome='worse'] { color:var(--color-amber-400); } [hidden] { display:none; }
+  @media(max-width:600px) { th,td { padding:.4rem .15rem; } th:first-child { width:30%; } thead th { font-size:.8rem; } td a { padding:.25rem; } td strong { font-size:1rem; } small { font-size:.6rem; } tbody th span { display:block; font-size:.7rem; } }
+</style>

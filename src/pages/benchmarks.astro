@@ -2,6 +2,10 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 import OpenMessagingCharts from '../components/OpenMessagingCharts.astro';
+import BenchmarkOverview from '../components/BenchmarkOverview.astro';
+import BenchmarkMatrix from '../components/BenchmarkMatrix.astro';
+import BenchmarkHint from '../components/BenchmarkHint.astro';
+import { getPath } from '../utils/paths';
 import { methodologyURL, format, openmessaging } from '../utils/benchmarks.mjs';
 
 const latency = (ms: number | null) => ms === null ? '—' : ms >= 1000 ? format(ms / 1000, 1) + ' s' : format(ms, ms < 10 ? 1 : 0) + ' ms';
@@ -25,13 +29,14 @@ npm run benchmark -- --suite openmessaging`;
     <header class="max-w-4xl">
       <p class="mb-3 text-sm font-semibold text-krab-400">OpenMessaging Benchmark</p>
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">Broker benchmarks</h1>
-      <p class="mt-4 text-base text-gray-300 leading-relaxed">Compare krabka, Apache Kafka, and Redpanda using the upstream OpenMessaging Benchmark (OMB) workloads. All performance figures on this website come from published full OMB runs.</p>
+      <p class="mt-4 text-base text-gray-300 leading-relaxed">Compare throughput, tail latency and CPU use across published OpenMessaging Benchmark runs. Inspect release changes and the limits of each comparison.</p>
       <p class="mt-4 text-sm text-gray-400">These are our measurements using OMB, with source and configuration linked below.</p>
       {!openmessaging && <p class="mt-4 text-gray-300">No complete OpenMessaging run has been published yet.</p>}
       {openmessaging && <a href="#charts" class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Explore the charts</a>}
-      <a href="/benchmarks/explorer/" class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Explore every captured sample →</a>
+      <a href={getPath('/benchmarks/explorer')} class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Explore every captured sample</a>
       <a href="#methodology" class="mt-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Methodology and reproduction</a>
     </header>
+    <div class="mt-10"><BenchmarkOverview /><BenchmarkMatrix /></div>
 
     {openmessaging && (
       <section id="openmessaging" aria-labelledby="openmessaging-heading" class="mt-16 scroll-mt-24">
@@ -77,7 +82,7 @@ npm run benchmark -- --suite openmessaging`;
                 <tbody class="divide-y divide-white/5 text-gray-300">
                   {group.cases.map(workload => (
                     <tr>
-                      <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap">{workload.id}</th>
+                      <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap"><BenchmarkHint workload={workload} rf={group.rf} label={workload.id} /></th>
                       <td class="px-3 py-2 text-right whitespace-nowrap">{offered(workload.config.producerRate)}</td>
                       {workload.vendors.map(v => <><td class="px-3 py-2 text-right tabular-nums">{v.omitted ? <span title={v.omitted}>not measured</span> : format(v.publish_rate)}</td><td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{latency(v.end_to_end_p99_ms)}</td></>)}
                     </tr>
@@ -96,7 +101,7 @@ npm run benchmark -- --suite openmessaging`;
                 <thead class="text-gray-400"><tr><th scope="col" class="px-3 py-2">Workload</th>{openmessaging.images.map(image => <th scope="col" class="px-3 py-2 text-right">{image.name}</th>)}</tr></thead>
                 <tbody class="divide-y divide-white/5 text-gray-300">
                   {group.cases.map(workload => <tr>
-                    <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap">{workload.id}</th>
+                    <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap"><BenchmarkHint workload={workload} rf={group.rf} label={workload.id} /></th>
                     {workload.vendors.map(v => <td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{latency(v.publish_p99_ms)}</td>)}
                   </tr>)}
                 </tbody>
@@ -119,6 +124,22 @@ npm run benchmark -- --suite openmessaging`;
       <h2 id="methodology-heading" class="text-2xl font-bold text-white sm:text-3xl">Methodology and resource settings</h2>
       <p class="mt-4 text-sm text-gray-300 leading-relaxed">Full runs preserve the upstream workload payloads, partition counts, offered rates, backlog sizes, and durations. The pinned OMB commit, driver patch, immutable broker images, host resources, and effective configurations are recorded in each run’s provenance. Smoke runs are wiring checks and cannot supply website figures.</p>
       <p class="mt-4 text-sm text-gray-300 leading-relaxed">Publish rates are means of OMB’s measurement intervals; p99 latency comes from OMB’s aggregate latency results. When a run has multiple rounds, the tables show medians across those rounds.</p>
+    </section>
+
+    <section id="direct-io-qualification" aria-labelledby="qualification-heading" class="mt-14 scroll-mt-24 max-w-4xl border-t border-white/10 pt-8">
+      <p class="text-sm font-semibold text-krab-400">Proposed release gate · not yet automated</p>
+      <h2 id="qualification-heading" class="mt-3 text-2xl font-bold text-white">Qualify direct I/O before a release</h2>
+      <p class="mt-4 text-gray-300">The two reported rounds do not qualify a release. This plan tests each candidate against the previous release and the comparison brokers.</p>
+      <ol class="mt-5 list-decimal space-y-4 pl-5 text-sm leading-relaxed text-gray-300">
+        <li><strong class="text-white">Pin the comparison.</strong> Use immutable images for the candidate, previous release, Kafka and Redpanda. Record the OMB commit, hardware, kernel, filesystem and driver settings.</li>
+        <li><strong class="text-white">Run both write modes.</strong> Run the full OMB catalog at RF1 and RF3, with krabka’s default settings and with <code>preallocate=true</code>. Verify <code>O_DIRECT</code> on open segment descriptors. Record fallback as a failed direct-mode qualification.</li>
+        <li><strong class="text-white">Control disk state and repeat.</strong> Trim before every trial, confirm free space and use fresh clusters. Run at least five measured rounds per configuration. Rotate broker order across rounds. Keep ext4 and XFS results separate.</li>
+        <li><strong class="text-white">Review the distributions.</strong> Publish every round, median and range for throughput, publish and end-to-end p99 and p99.9. Align CPU and device telemetry with measurement intervals. Keep full-capture totals separate.</li>
+        <li><strong class="text-white">Check correctness and recovery.</strong> Check acknowledged records after process termination, leader failover, restart and disk-full errors. Include retention, segment roll, compaction and catch-up reads. Test host power loss separately before a power-loss durability claim.</li>
+        <li><strong class="text-white">Make a recorded release decision.</strong> Set workload budgets before the run. Proposed review triggers are a throughput drop above 5% or a p99 or CPU-cost increase above 10% against the previous release in the same mode. Repeat flagged pairs; do not claim statistical significance from these thresholds. Block qualification for correctness failures, missing required trials or unresolved regressions.</li>
+      </ol>
+      <p class="mt-5 text-sm text-gray-400">Publish direct-mode results separately from the default-mode suite. Archive raw OMB files, measurement timestamps, resource samples and all failed trials. A release note must state any qualification gap.</p>
+      <a href={methodologyURL + '#direct-io-release-qualification-plan'} class="mt-5 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Read the qualification protocol</a>
     </section>
 
     <section aria-labelledby="repeat-heading" class="mt-14 max-w-4xl">

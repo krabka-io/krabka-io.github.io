@@ -1,19 +1,22 @@
 ---
 import { getPath } from '../utils/paths';
+import { openmessaging } from '../utils/benchmarks.mjs';
+import { releaseVersion } from '../utils/benchmark-story.mjs';
 
 // Body-coloured links with a red underline: they read as links without pulling the eye from the headline.
 const link = 'font-medium text-gray-100 underline decoration-krab-500/70 decoration-2 underline-offset-4 hover:decoration-krab-400';
 ---
 
-<section class="relative overflow-hidden pt-12 pb-6 md:pt-20 md:pb-8">
+<section class="relative overflow-hidden pt-12 pb-12 md:pt-20 md:pb-16">
   <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
     <div class="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:items-center">
       <div class="space-y-6 lg:col-span-8">
+        <p class="text-sm font-semibold text-krab-400">Open-source streaming · Apache 2.0</p>
         <h1 class="text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
-          Keep your Kafka clients <br class="hidden lg:block" /><span class="text-krab-500">and swap the broker.</span>
+          Keep your Kafka clients.<br class="hidden lg:block" /> <span class="text-krab-500">Measure a different broker.</span>
         </h1>
         <p class="max-w-2xl text-lg leading-relaxed text-gray-300 sm:text-xl">
-          krabka is an open-source broker <a href={getPath('/docs/kip-matrix')} class={link}>compatible with the Kafka protocol</a>, written in safe Rust with its own KRaft quorum. Key consensus and replication decisions are <a href={getPath('/verification')} class={link}>proved with Creusot and model-checked with Stateright</a>.
+          krabka implements <a href={getPath('/docs/kip-matrix')} class={link}>supported Kafka APIs</a> in safe Rust, with its own KRaft quorum. Inspect its throughput, tail latency and CPU use before you decide where it fits.
         </p>
       </div>
 
@@ -25,16 +28,14 @@ const link = 'font-medium text-gray-100 underline decoration-krab-500/70 decorat
           Get started
         </a>
         <a
-          href={getPath('/docs/browser-tools')}
+          href={getPath('/benchmarks/explorer')}
           class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-8 py-4 text-lg font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/10"
         >
-          Try in your browser
+          Explore the measurements
         </a>
-        <!-- Launch callout, added for the 1.0 release (2026-10). Temporary: remove it, or
-             replace it with the next milestone, once 1.0 is no longer news. -->
         <p class="text-sm leading-relaxed text-gray-400 sm:basis-full lg:basis-auto">
-          <strong class="font-semibold text-gray-200">krabka 1.0 is out.</strong> On-disk formats stay readable across 1.x.
-          <a href={getPath('/news/krabka-1-0-0')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Read the announcement</a>
+          <strong class="font-semibold text-gray-200">Latest measured release: {releaseVersion(openmessaging)}.</strong> Published OMB results, with source files and test conditions.
+          <a href={getPath('/docs/browser-tools')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Try krabka in your browser</a>
         </p>
       </div>
     </div>
