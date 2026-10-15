@@ -15,7 +15,7 @@ import { runLoggedCommand } from './benchmark-command.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
 const DEFAULT_IMAGES = {
-  krabka: 'ghcr.io/krabka-io/krabka-broker:v1.0.3',
+  krabka: 'ghcr.io/krabka-io/krabka-broker:v1.0.5',
   kafka: 'apache/kafka:4.3.1',
   redpanda: 'docker.redpanda.com/redpandadata/redpanda:v26.2.2',
 };
