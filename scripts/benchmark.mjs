@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { VENDORS, aggregateSample, resourceTimeSeries } from './benchmark-results.mjs';
+import { VENDORS, aggregateSample, directIoCheck, ombMeasurementWindow, parseDiskstats, resourceTimeSeries, windowMetrics } from './benchmark-results.mjs';
 import { OMB, OMB_BACKLOG_RETENTION_RATIO, ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, prepareOmb, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
@@ -169,6 +169,32 @@ async function main() {
     else provenance.contract.disk_trim_before_trial = false;
     await save();
   }
+  // The mount, filesystem, block devices and their model and firmware behind
+  // each location, and the devices whose /proc/diskstats counters a trial
+  // samples. A RAID device lists its member devices too.
+  async function storageLayout(locations) {
+    const read = file => fs.readFile(file, 'utf8').then(text => text.trim(), () => null);
+    const mounts = [];
+    const devices = new Set();
+    for (const location of locations) {
+      const [mount] = JSON.parse(await command('findmnt', ['--json', '--output', 'TARGET,SOURCE,FSTYPE,OPTIONS', '--target', location])).filesystems;
+      if (mounts.some(m => m.target === mount.target)) continue;
+      const name = path.basename(mount.source);
+      const members = await fs.readdir(`/sys/block/${name}/slaves`).catch(() => []);
+      const disks = [];
+      for (const member of members.length ? members : [name]) {
+        const disk = path.basename(path.dirname(await fs.realpath(`/sys/class/block/${member}`)));
+        const base = (await fs.access(`/sys/block/${member}`).then(() => true, () => false)) ? member : disk;
+        disks.push({ device: member, disk: base, model: await read(`/sys/block/${base}/device/model`),
+          firmware: await read(`/sys/block/${base}/device/firmware_rev`),
+          size_bytes: Number(await read(`/sys/block/${base}/size`)) * 512 });
+        devices.add(member);
+      }
+      devices.add(name);
+      mounts.push({ ...mount, device: name, raid_level: await read(`/sys/block/${name}/md/level`), members: disks });
+    }
+    return { mounts, sampled_devices: [...devices].sort() };
+  }
   async function removeContainer(id) {
     await docker(['rm', '-f', '-v', id], { ignoreAbort: true, timeout: 30_000 });
     containers.delete(id);
@@ -297,6 +323,7 @@ async function main() {
       load_average: os.loadavg(), docker_version: info.ServerVersion,
       aio_max_nr: aioMax, aio_nr: aioUsed,
       javac, java, filesystem: await command('df', ['-T', ROOT]),
+      storage: await storageLayout([ROOT, info.DockerRootDir]),
     };
     provenance.runner = {
       repository_commit: await command('git', ['-C', ROOT, 'rev-parse', 'HEAD']),
@@ -491,6 +518,35 @@ rpk:
       return brokers;
     }
 
+    // During the OMB measurement, read each krabka broker's open files from a
+    // sidecar that shares its PID namespace and user, and check that every
+    // benchmark partition replica holds its newest segment open with O_DIRECT.
+    // The topic setting or a successful command alone does not prove the mode:
+    // an unsupported kernel or filesystem falls back to buffered writes.
+    async function verifyDirectIo(brokers, directory, workload, rf, signal) {
+      const stdout = path.join(directory, 'workload.stdout');
+      while (!(await fs.readFile(stdout, 'utf8').catch(() => '')).includes('----- Starting benchmark traffic')) {
+        await delay(2_000, undefined, { signal });
+      }
+      await delay(30_000, undefined, { signal });
+      const user = JSON.parse(await docker(['image', 'inspect', provenance.images.krabka.reference]))[0].Config.User || '0';
+      const script = 'for f in /proc/1/fd/*; do t=$(readlink "$f") || continue; case $t in /data/*.log) '
+        + 'echo "$t $(sed -n "s/^flags:\t//p" /proc/1/fdinfo/${f##*/})";; esac; done';
+      const brokersChecked = [];
+      for (const [i, broker] of brokers.entries()) {
+        const listing = await oneShot(['--pid', `container:${broker.id}`, '--user', user, '--network', 'none',
+          '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--entrypoint', '/bin/bash',
+          provenance.images.kafka.reference, '-c', script], `direct-io-${i}`);
+        await fs.writeFile(path.join(directory, `direct-io-broker-${i}.txt`), `${listing}\n`);
+        brokersChecked.push({ broker: broker.name, ...directIoCheck(listing, os.arch()) });
+      }
+      const expected = workload.config.topics * workload.config.partitionsPerTopic * rf;
+      const found = brokersChecked.reduce((n, b) => n + b.partitions, 0);
+      return { checked_at: new Date().toISOString(), arch: os.arch(), expected_partition_replicas: expected,
+        found_partition_replicas: found, brokers: brokersChecked,
+        verified: found === expected && brokersChecked.every(b => b.missing.length === 0) };
+    }
+
     async function readBroker(broker) {
       const files = ['cpu.stat', 'memory.current', 'memory.stat', 'memory.events', 'cgroup.procs'];
       const [cpu, memory, stats, events, procs] = await Promise.all(files.map(file => fs.readFile(path.join(broker.cgroup, file), 'utf8')));
@@ -523,17 +579,27 @@ rpk:
         schema_version: 1, started_at: startedAt, sampling_interval_ms: 250,
       })}\n`);
       const sampleFile = await fs.open(filename, 'w');
+      // Block device counters for the storage under the brokers, sampled with
+      // the cgroups, so device use can be read over the OMB measurement window.
+      const deviceNames = provenance.host.storage.sampled_devices;
+      const deviceSamples = [];
+      const deviceFile = await fs.open(path.join(path.dirname(filename), 'devices.jsonl'), 'w');
       const samplingController = new AbortController();
       let sampleError;
       async function sample() {
-        const brokersSampled = await Promise.all(brokers.map(readBroker));
+        const [brokersSampled, diskstats] = await Promise.all([Promise.all(brokers.map(readBroker)), fs.readFile('/proc/diskstats', 'utf8')]);
         aggregateSample(brokersSampled);
-        const current = { elapsed_ms: performance.now() - start, brokers: brokersSampled };
+        const elapsed = performance.now() - start;
+        const current = { elapsed_ms: elapsed, brokers: brokersSampled };
+        const device = { elapsed_ms: elapsed, devices: parseDiskstats(diskstats, deviceNames) };
         samples.push(current);
+        deviceSamples.push(device);
         await sampleFile.write(`${JSON.stringify(current)}\n`);
+        await deviceFile.write(`${JSON.stringify(device)}\n`);
       }
+      const closeFiles = () => Promise.all([sampleFile.close(), deviceFile.close()]);
       try { await sample(); }
-      catch (error) { await sampleFile.close(); throw error; }
+      catch (error) { await closeFiles(); throw error; }
       const sampling = (async () => {
         while (!samplingController.signal.aborted) {
           await delay(250, undefined, { signal: samplingController.signal }).catch(error => {
@@ -552,10 +618,10 @@ rpk:
         samplingController.abort();
         await sampling;
         try { if (!sampleError) await sample(); }
-        finally { await sampleFile.close(); }
+        finally { await closeFiles(); }
       }
       if (sampleError) throw sampleError;
-      return { output, samples, startedAt };
+      return { output, samples, deviceSamples, startedAt };
     }
 
     // Run each OMB workload on fresh clusters.
@@ -578,6 +644,11 @@ rpk:
               workload.config.consumerBacklogSizeGB > 0 ? workload.timeout_ms : undefined, ombRetentionBytes(workload.config),
               vendor === 'krabka' && options['krabka-preallocate']));
             const timeout = workload.timeout_ms;
+            const directAbort = new AbortController();
+            const directIo = vendor === 'krabka' && options['krabka-preallocate']
+              ? verifyDirectIo(brokers, directory, workload, rf, directAbort.signal).catch(error => ({ verified: false,
+                error: error.name === 'AbortError' ? 'the OMB measurement ended before the check ran' : error.message }))
+              : null;
             const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
               () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
                 '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--cpus', String(provenance.cpu_sets.client.length),
@@ -596,16 +667,28 @@ rpk:
                 assert.ok(disk.bavail * disk.bsize > (options.smoke ? 1 : 20) * GIB,
                   `OMB disk reserve exhausted at ${location}`);
               }
-            });
+            }).finally(() => directAbort.abort());
+            const directIoResult = directIo && await directIo;
+            if (directIoResult) {
+              await fs.writeFile(path.join(directory, 'direct-io.json'), `${JSON.stringify(directIoResult, null, 2)}\n`);
+              assert.ok(directIoResult.verified, `O_DIRECT not verified: ${directIoResult.error
+                ?? `${directIoResult.found_partition_replicas} of ${directIoResult.expected_partition_replicas} partition replicas found, `
+                  + `missing O_DIRECT on ${directIoResult.brokers.flatMap(b => b.missing).join(', ') || 'none'}`}`);
+            }
             const result = JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8'));
             const logs = await Promise.all(['stdout', 'stderr'].map(stream => fs.readFile(path.join(directory, `workload.${stream}`), 'utf8')));
             validateOmbResult(result, vendor, rf, workload.config, logs.join('\n'));
             const timeline = resourceTimeSeries(measurement.samples, measurement.startedAt);
             const metrics = { cpu_seconds: timeline.samples.at(-1).cluster.cpu_seconds,
               rss_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.rss_bytes)),
-              working_set_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.working_set_bytes)) };
+              working_set_peak_bytes: Math.max(...timeline.samples.map(s => s.cluster.working_set_bytes)),
+              // CPU, messages and device use over the OMB measurement window
+              // only; the totals above cover the full capture.
+              measurement_window: windowMetrics({ samples: measurement.samples, deviceSamples: measurement.deviceSamples,
+                startedAt: measurement.startedAt, window: ombMeasurementWindow(logs[0], measurement.startedAt), result }) };
             const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline,
-              retriable_commit_failures: retriableCommitFailures(logs.join('\n')) };
+              retriable_commit_failures: retriableCommitFailures(logs.join('\n')),
+              ...(directIoResult ? { direct_io: directIoResult } : {}) };
             await fs.writeFile(path.join(directory, 'trial.json'), `${JSON.stringify(trial, null, 2)}\n`);
             trials.push(trial);
             console.log(`OMB passed ${vendor} RF${rf} ${workload.id}: ${result.aggregatedEndToEndLatency99pct.toFixed(2)} ms end-to-end p99`);

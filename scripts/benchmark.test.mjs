@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
-import { median, aggregateSample, resourceSummary, resourceTimeSeries } from './benchmark-results.mjs';
+import { median, aggregateSample, directIoCheck, ombMeasurementWindow, parseDiskstats, resourceSummary, resourceTimeSeries, windowMetrics } from './benchmark-results.mjs';
 import { ombCases, ombWorkload, ombDriver, ombRetentionBytes, ombTimeoutMs, retriableCommitFailures, validateOmbResult, writeOmbReport } from './benchmark-openmessaging.mjs';
 import { runLoggedCommand } from './benchmark-command.mjs';
 
@@ -51,6 +51,9 @@ test('actual cleanup retains final exit state before removal and tolerates inspe
   } finally { await fs.rm(artifacts, { recursive: true, force: true }); }
 });
 
+const firstDevice = (await fs.readFile('/proc/diskstats', 'utf8')).trim().split('\n')[0].trim().split(/\s+/)[2];
+const sampledHost = { host: { storage: { sampled_devices: [firstDevice] } } };
+
 test('actual resource reader retains user and system CPU through the sampler', async () => {
   const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
   const reader = source.slice(source.indexOf('async function readBroker('),
@@ -65,7 +68,7 @@ test('actual resource reader retains user and system CPU through the sampler', a
       'cgroup.procs': `${process.pid}\n` })) await fs.writeFile(path.join(directory, name), data);
     const readBroker = runInNewContext(`(${reader.trim()})`, { fs, path, assert });
     const measure = runInNewContext(`(${sampler.trim()})`, {
-      fs, performance, AbortController, Date, delay, aggregateSample,
+      fs, path, performance, AbortController, Date, delay, aggregateSample, parseDiskstats, provenance: sampledHost,
       controller: new AbortController(), readBroker,
     });
     const filename = path.join(directory, 'resources.jsonl');
@@ -89,7 +92,7 @@ test('actual resource sampler retains its clock anchor when the client fails', a
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-clock-'));
   try {
     const measure = runInNewContext(`(${sampler.trim()})`, {
-      fs, performance, AbortController, Date, delay, aggregateSample,
+      fs, path, performance, AbortController, Date, delay, aggregateSample, parseDiskstats, provenance: sampledHost,
       controller: new AbortController(), readBroker: async () => broker('a', 100, 200, 300, 50),
     });
     for (const failed of [false, true]) {
@@ -331,4 +334,52 @@ test('time series preserves raw samples and uses actual gaps for cluster CPU and
   for (const elapsed_ms of [-1, NaN, 10]) {
     assert.throws(() => resourceTimeSeries([samples[0], { ...samples[1], elapsed_ms }], startedAt));
   }
+});
+
+test('diskstats counters parse in bytes and refuse a missing device', () => {
+  const text = ' 259  3 nvme0n1p3 10 0 80 5 20 0 160 9 0 30 40 0 0 0 0\n   9  3 md3 4 0 16 0 8 0 64 0 0 0 0 0 0 0 0\n';
+  assert.deepEqual(parseDiskstats(text, ['md3', 'nvme0n1p3']), {
+    md3: { reads: 4, read_bytes: 8192, writes: 8, written_bytes: 32768, io_ms: 0, weighted_io_ms: 0 },
+    nvme0n1p3: { reads: 10, read_bytes: 40960, writes: 20, written_bytes: 81920, io_ms: 30, weighted_io_ms: 40 },
+  });
+  assert.throws(() => parseDiskstats(text, ['sda']), /device counters unavailable: sda/);
+});
+
+test('the OMB measurement window runs from benchmark traffic to its aggregate, across midnight', () => {
+  const log = ['23:58:00.000 [main] INFO WorkloadGenerator - ----- Starting warm-up traffic (1m) ------',
+    '23:59:00.100 [main] INFO WorkloadGenerator - ----- Aggregated Pub Latency (ms) avg: 1',
+    '23:59:00.200 [main] INFO WorkloadGenerator - ----- Starting benchmark traffic (5m)------',
+    '00:04:00.700 [main] INFO WorkloadGenerator - ----- Aggregated Pub Latency (ms) avg: 2'].join('\n');
+  assert.deepEqual(ombMeasurementWindow(log, '2026-10-14T23:57:55.000Z'),
+    { started_at: '2026-10-14T23:59:00.200Z', ended_at: '2026-10-15T00:04:00.700Z', seconds: 300.5 });
+  assert.throws(() => ombMeasurementWindow(log.split('\n').slice(0, 2).join('\n'), '2026-10-14T23:57:55.000Z'), /start not found/);
+});
+
+test('window metrics interpolate CPU and device counters at the window edges', () => {
+  const at = (elapsed_ms, cpu) => ({ elapsed_ms, brokers: [broker('a', cpu, 1, 1, 1)] });
+  const samples = [at(0, 0), at(10_000, 4_000_000), at(20_000, 8_000_000)];
+  const deviceSamples = [0, 10_000, 20_000].map(elapsed_ms => ({ elapsed_ms,
+    devices: { md3: { reads: 0, read_bytes: 0, writes: elapsed_ms, written_bytes: elapsed_ms * 100, io_ms: elapsed_ms / 2, weighted_io_ms: 0 } } }));
+  const window = { started_at: '2026-10-14T00:00:05.000Z', ended_at: '2026-10-14T00:00:15.000Z', seconds: 10 };
+  const metrics = windowMetrics({ samples, deviceSamples, startedAt: '2026-10-14T00:00:00.000Z', window,
+    result: { publishRate: [100, 300] } });
+  assert.equal(metrics.cpu_seconds, 4);
+  assert.equal(metrics.published_messages, 2000);
+  assert.equal(metrics.messages_per_cpu_second, 500);
+  assert.deepEqual(metrics.devices.md3, { utilization: 0.5, read_bytes: 0, written_bytes: 1_000_000, reads: 0, writes: 10_000 });
+  assert.throws(() => windowMetrics({ samples, deviceSamples, startedAt: '2026-10-14T00:00:10.000Z', window,
+    result: { publishRate: [1] } }), /outside the samples/);
+});
+
+test('the O_DIRECT check needs the newest segment of every benchmark partition open with O_DIRECT', () => {
+  const listing = ['/data/__consumer_offsets-0/00000000000000000000.log 02100002',
+    '/data/test-topic-a-0/00000000000000000000.log 02100002',
+    '/data/test-topic-a-0/00000000000000000000.log 02140002',
+    '/data/test-topic-a-1/00000000000000000000.log 02140002',
+    '/data/test-topic-a-1/00000000000000001000.log 02100002'].join('\n');
+  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'] });
+  assert.deepEqual(directIoCheck(listing.replaceAll('02140002', '02100002'), 'x64').direct, 0);
+  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [] });
+  assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
+  assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
 });

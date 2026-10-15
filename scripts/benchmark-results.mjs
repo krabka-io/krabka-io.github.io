@@ -81,3 +81,99 @@ export function resourceSummary(samples, acknowledged) {
     measurement_wall_seconds: (samples.at(-1).elapsed_ms - samples[0].elapsed_ms) / 1000,
   };
 }
+
+// Block device counters from /proc/diskstats for the named devices. Field
+// order after major, minor and name is in the kernel's iostats.rst; sectors
+// are 512 bytes whatever the device's block size.
+export function parseDiskstats(text, names) {
+  const devices = {};
+  for (const line of text.split('\n')) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 14 || !names.includes(fields[2])) continue;
+    const n = fields.slice(3).map(Number);
+    devices[fields[2]] = { reads: n[0], read_bytes: n[2] * 512, writes: n[4], written_bytes: n[6] * 512,
+      io_ms: n[9], weighted_io_ms: n[10] };
+  }
+  for (const name of names) assert.ok(devices[name], `device counters unavailable: ${name}`);
+  return devices;
+}
+
+// OMB logs HH:MM:SS.mmm in UTC. Its measurement runs from "Starting benchmark
+// traffic" to the next aggregated latency line; warm-up, backlog fill and
+// drain come before it. `startedAt` is the resource sampler's clock anchor,
+// which precedes the client, so it gives the date and orders midnight.
+export function ombMeasurementWindow(stdout, startedAt) {
+  const lines = stdout.split('\n');
+  const begin = lines.findIndex(line => line.includes('----- Starting benchmark traffic'));
+  assert.ok(begin >= 0, 'OMB measurement start not found');
+  const end = lines.findIndex((line, i) => i > begin && line.includes('----- Aggregated Pub Latency'));
+  assert.ok(end > begin, 'OMB measurement end not found');
+  const anchor = Date.parse(startedAt);
+  assert.ok(Number.isFinite(anchor), 'invalid sampler anchor');
+  let previous = anchor;
+  const at = line => {
+    const match = line.match(/^(\d\d):(\d\d):(\d\d)\.(\d{3}) /);
+    assert.ok(match, `OMB log line has no time: ${line.slice(0, 40)}`);
+    const day = new Date(previous);
+    let time = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), ...match.slice(1, 4).map(Number), Number(match[4]));
+    // The sampler starts before the client; allow a few seconds of skew.
+    while (time < previous - 5_000) time += 86_400_000;
+    previous = time;
+    return time;
+  };
+  const started = at(lines[begin]);
+  const ended = at(lines[end]);
+  assert.ok(ended > started, 'empty OMB measurement window');
+  return { started_at: new Date(started).toISOString(), ended_at: new Date(ended).toISOString(), seconds: (ended - started) / 1000 };
+}
+
+// Linear interpolation of a counter at `t` ms, from samples with elapsed_ms.
+function counterAt(samples, value, t) {
+  assert.ok(t >= samples[0].elapsed_ms && t <= samples.at(-1).elapsed_ms, 'measurement window outside the samples');
+  const i = samples.findIndex(s => s.elapsed_ms >= t);
+  if (samples[i].elapsed_ms === t || i === 0) return value(samples[i]);
+  const [a, b] = [samples[i - 1], samples[i]];
+  return value(a) + (value(b) - value(a)) * (t - a.elapsed_ms) / (b.elapsed_ms - a.elapsed_ms);
+}
+
+// Broker CPU, published messages and device use over the OMB measurement
+// window only. Messages are OMB's mean publish rate times the window, because
+// OMB reports rates per interval, not counts.
+export function windowMetrics({ samples, deviceSamples, startedAt, window, result }) {
+  const anchor = Date.parse(startedAt);
+  const from = Date.parse(window.started_at) - anchor;
+  const to = Date.parse(window.ended_at) - anchor;
+  const cpu = s => aggregateSample(s.brokers).cpu_usage_us;
+  const cpuSeconds = (counterAt(samples, cpu, to) - counterAt(samples, cpu, from)) / 1e6;
+  const meanRate = result.publishRate.reduce((a, b) => a + b, 0) / result.publishRate.length;
+  const messages = meanRate * window.seconds;
+  assert.ok(cpuSeconds > 0 && messages > 0, 'invalid window CPU or message count');
+  const devices = {};
+  for (const name of Object.keys(deviceSamples[0]?.devices ?? {})) {
+    const delta = key => counterAt(deviceSamples, s => s.devices[name][key], to) - counterAt(deviceSamples, s => s.devices[name][key], from);
+    devices[name] = { utilization: delta('io_ms') / (to - from), read_bytes: delta('read_bytes'), written_bytes: delta('written_bytes'),
+      reads: delta('reads'), writes: delta('writes') };
+  }
+  return { ...window, cpu_seconds: cpuSeconds, published_messages: Math.round(messages),
+    messages_per_cpu_second: messages / cpuSeconds, devices };
+}
+
+// O_DIRECT check for a broker's open files. `listing` is "path flags" lines
+// with fdinfo's octal flags. Every partition directory of `topicPrefix` must
+// hold its newest .log open with O_DIRECT; sealed segments may be open for
+// reads without it.
+export const O_DIRECT = { x64: 0o40000, arm64: 0o200000 };
+export function directIoCheck(listing, arch, topicPrefix = 'test-topic-') {
+  assert.ok(O_DIRECT[arch], `O_DIRECT flag unknown for ${arch}`);
+  const newest = new Map();
+  const direct = new Set();
+  for (const line of listing.trim().split('\n').filter(Boolean)) {
+    const [file, flags] = line.split(' ');
+    const match = file.match(/^\/data\/([^/]+)\/(\d{20})\.log$/);
+    if (!match || !match[1].startsWith(topicPrefix)) continue;
+    if (!newest.has(match[1]) || match[2] > newest.get(match[1])) newest.set(match[1], match[2]);
+    if (Number.parseInt(flags, 8) & O_DIRECT[arch]) direct.add(`${match[1]}/${match[2]}`);
+  }
+  const missing = [...newest].filter(([partition, base]) => !direct.has(`${partition}/${base}`)).map(([p]) => p).sort();
+  return { partitions: newest.size, direct: newest.size - missing.length, missing };
+}
