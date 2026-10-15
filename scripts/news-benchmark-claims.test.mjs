@@ -1,7 +1,7 @@
-// Guards for the benchmark claims in src/pages/news/krabka-1-0-3.md. A
-// Markdown page cannot compute its wording, so these tests fail when the
-// published OpenMessaging data stops supporting a sentence in it. Change the
-// post, then the test, if a new run is published.
+// Guards for the benchmark claims in the news posts: krabka-1-0-3.md first,
+// then krabka-1-0-5.md below. A Markdown page cannot compute its wording, so
+// these tests fail when the published OpenMessaging data stops supporting a
+// sentence in it. Change the post, then the test, if a new run is published.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
@@ -49,4 +49,44 @@ test('at RF3 krabka p99 in the two 1 KB fixed-rate workloads is far above Redpan
   for (const id of oneKb) assert.ok(p99(current, 3, 'krabka', id) > 10 * p99(current, 3, 'redpanda', id), id);
   const aboveKafka = oneKb.filter(id => p99(current, 3, 'krabka', id) > p99(current, 3, 'kafka', id));
   assert.equal(aboveKafka.length, 1);
+});
+
+// Guards for the benchmark claims in src/pages/news/krabka-1-0-5.md, against
+// run omb-local-2026-10-14. Redpanda's RF3 3-producer trial is omitted there.
+const run105 = load('omb-local-2026-10-14');
+const has = (run, rf, vendor, id) => run.has(`${rf}/${vendor}/${id}`);
+const maxPairs105 = pairs(maxRate);
+
+test('1.0.5: krabka published faster than Kafka in nine of 14 maximum-rate workloads, and more per CPU-second in ten', () => {
+  assert.equal(maxPairs105.length, 14);
+  const faster = maxPairs105.filter(([rf, id]) => rate(run105, rf, 'krabka', id) > rate(run105, rf, 'kafka', id));
+  assert.equal(faster.length, 9);
+  const perCpu = (rf, vendor, id) => rate(run105, rf, vendor, id) / run105.get(`${rf}/${vendor}/${id}`).cpu_seconds;
+  assert.equal(maxPairs105.filter(([rf, id]) => perCpu(rf, 'krabka', id) > perCpu(rf, 'kafka', id)).length, 10);
+});
+
+test('1.0.5: Redpanda had the highest rate in most measured multi-partition maximum-rate workloads', () => {
+  const multi = pairs(id => maxRate(id) && !id.includes('1-partition')).filter(([rf, id]) => has(run105, rf, 'redpanda', id));
+  const led = multi.filter(([rf, id]) => ['krabka', 'kafka'].every(v => rate(run105, rf, 'redpanda', id) > rate(run105, rf, v, id)));
+  assert.ok(led.length > multi.length / 2);
+});
+
+test('1.0.5: at RF3 krabka\'s share of Kafka\'s rate rose in six of seven maximum-rate workloads; single-partition 1 KB went to level', () => {
+  const share = (run, id) => rate(run, 3, 'krabka', id) / rate(run, 3, 'kafka', id);
+  const ids3 = ids.filter(maxRate);
+  assert.equal(ids3.length, 7);
+  assert.equal(ids3.filter(id => share(run105, id) > share(current, id)).length, 6);
+  const single = 'max-rate-1-topic-1-partition-1p-1c-1kb';
+  assert.ok(share(current, single) < 0.95 && Math.abs(share(run105, single) - 1) < 0.02);
+});
+
+test('1.0.5: same p99 for every broker at RF1 fixed rates; at RF3 1 KB fixed rates krabka is below Kafka and far above Redpanda', () => {
+  for (const id of ids.filter(fixedRate)) {
+    assert.equal(p99(run105, 1, 'krabka', id), p99(run105, 1, 'kafka', id), id);
+    assert.equal(p99(run105, 1, 'krabka', id), p99(run105, 1, 'redpanda', id), id);
+  }
+  for (const id of ids.filter(id => fixedRate(id) && id.endsWith('1kb'))) {
+    assert.ok(p99(run105, 3, 'krabka', id) < p99(run105, 3, 'kafka', id), id);
+    assert.ok(p99(run105, 3, 'krabka', id) > 10 * p99(run105, 3, 'redpanda', id), id);
+  }
 });
