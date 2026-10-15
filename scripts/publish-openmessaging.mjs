@@ -4,7 +4,8 @@
 //
 // The OMB suite never commits results itself. This script takes the run
 // directory from a downloaded `openmessaging-<run>-<attempt>` artifact,
-// rejects anything but a complete full-mode matrix, and writes
+// rejects anything but a complete full-mode matrix (less any trials the
+// provenance lists as omitted, with a reason), and writes
 // benchmarks/openmessaging/<run-id>/ (provenance.json, summary.md and a
 // compact trials.json, intervals.json and gzip-compressed raw OMB results) plus
 // benchmarks/latest-openmessaging.md, which the website follows.
@@ -14,7 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { validateOmbResult } from './benchmark-openmessaging.mjs';
+import { checkOmbOmissions, ombOmission, validateOmbResult } from './benchmark-openmessaging.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
 const mean = values => values.reduce((a, b) => a + b, 0) / values.length;
@@ -54,10 +55,12 @@ export async function loadRun(directory) {
   assert.ok(!provenance.contract?.krabka_preallocate,
     'a run with --krabka-preallocate is an experiment and is not published');
   await fs.access(path.join(directory, 'summary.md'));
+  checkOmbOmissions(provenance, VENDORS);
   const trials = [];
   const rawResults = [];
   for (const rf of provenance.replication_factors) for (const vendor of VENDORS) {
     for (let repetition = 1; repetition <= provenance.repetitions; repetition++) for (const workload of provenance.cases) {
+      if (ombOmission(provenance, vendor, rf, workload.id)) continue;
       const file = path.join(directory, `rf${rf}-${vendor}-${repetition}-${workload.id}`, 'trial.json');
       const trial = JSON.parse(await fs.readFile(file, 'utf8'));
       assert.deepEqual([trial.vendor, trial.rf, trial.repetition, trial.case.id], [vendor, rf, repetition, workload.id], `mismatched ${file}`);

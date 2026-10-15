@@ -34,7 +34,13 @@ function loadOpenMessaging() {
   assert.equal(provenance.mode, 'full', 'smoke measurements cannot drive the website');
   assert.equal(provenance.status, 'complete', 'only complete OpenMessaging runs are published');
   const trials = JSON.parse(fs.readFileSync(path.join(directory, 'trials.json'), 'utf8'));
-  assert.equal(trials.length, provenance.cases.length * provenance.replication_factors.length * VENDORS.length * provenance.repetitions,
+  // Trials the run left out on purpose, each with its reason. The publisher
+  // checks the list; the page shows each one as not measured.
+  const omitted = provenance.omitted ?? [];
+  assert.ok(omitted.every(o => VENDORS.includes(o.vendor) && typeof o.reason === 'string' && o.reason.trim()),
+    'every omitted OpenMessaging trial needs a broker and a reason');
+  assert.equal(trials.length,
+    (provenance.cases.length * provenance.replication_factors.length * VENDORS.length - omitted.length) * provenance.repetitions,
     'incomplete OpenMessaging matrix');
   const sourceURL = 'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/openmessaging/' + match[1];
   const images = VENDORS.map(id => {
@@ -51,6 +57,12 @@ function loadOpenMessaging() {
       config: workload.config,
       vendors: images.map(image => {
         const selected = trials.filter(t => t.rf === rf && t.vendor === image.id && t.case.id === workload.id);
+        const omission = omitted.find(o => o.rf === rf && o.vendor === image.id && o.workload === workload.id);
+        if (omission) {
+          assert.equal(selected.length, 0, 'an omitted OMB trial has results');
+          return { id: image.id, name: image.name, omitted: omission.reason, publish_rate: null,
+            end_to_end_p99_ms: null, publish_p99_ms: null, rss_peak_bytes: null, cpu_seconds: null };
+        }
         assert.equal(selected.length, provenance.repetitions, 'missing or duplicate OMB trials');
         assert.deepEqual(selected.map(t => t.repetition).sort((a, b) => a - b),
           Array.from({ length: provenance.repetitions }, (_, i) => i + 1), 'invalid OMB repetitions');
@@ -63,7 +75,7 @@ function loadOpenMessaging() {
       }),
     })),
   }));
-  return { provenance, images, rows, trials, sourceURL,
+  return { provenance, images, rows, trials, omitted, sourceURL,
     archiveURL: fs.existsSync(path.join(root, 'archive', provenance.run_id + '.tar.gz'))
       ? 'https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md' : null,
     intervalsURL: fs.existsSync(path.join(directory, 'intervals.json'))

@@ -217,3 +217,38 @@ test('a split can take only the workloads whose trials all completed', async () 
   const rerun = await shard(root, { workload: '1-topic-1-partition-1kb', rf: 3, host: 'vm-rerun' });
   assert.deepEqual(await merge([out, rerun], path.join(root, 'merged')), { run_id: 'merged', shards: 2, trials: 6 });
 });
+
+test('a split can omit a trial that never completed, and the merged run says so', async () => {
+  const root = await scratch();
+  const source = await interrupted(root, { omit: 'rf1-redpanda-1-simple-workload' });
+  const reason = 'Redpanda reached the disk reserve; the disk cannot hold this trial.';
+  const out = path.join(root, 'rf1-shard');
+  const shard1 = await split(source, 1, out, 'run stopped at the disk reserve', undefined, ['redpanda:simple-workload'], reason);
+  assert.equal(shard1.trials.length, 2);
+  assert.deepEqual(shard1.provenance.omitted, [{ vendor: 'redpanda', rf: 1, workload: 'simple-workload', reason }]);
+  const rf3 = await shard(root, { workload: 'simple-workload', rf: 3, host: 'vm-rerun' });
+  const merged = path.join(root, 'merged');
+  assert.deepEqual(await merge([out, rf3], merged), { run_id: 'merged', shards: 2, trials: 5 });
+  const provenance = JSON.parse(await fs.readFile(path.join(merged, 'provenance.json'), 'utf8'));
+  assert.deepEqual(provenance.omitted, [{ vendor: 'redpanda', rf: 1, workload: 'simple-workload', reason }]);
+  assert.deepEqual(provenance.shards.map(s => s.omitted?.length ?? 0), [1, 0]);
+  const summary = await fs.readFile(path.join(merged, 'summary.md'), 'utf8');
+  assert.match(summary, /## Not measured\n\n- simple-workload, RF1, redpanda: Redpanda reached the disk reserve/);
+  // The other order: the omitting shard is not the first one.
+  const reordered = path.join(root, 'reordered');
+  await merge([rf3, out], reordered);
+  assert.equal(JSON.parse(await fs.readFile(path.join(reordered, 'provenance.json'), 'utf8')).omitted.length, 1);
+});
+
+test('a split refuses to omit a completed trial, a whole comparison or a trial without a reason', async () => {
+  const root = await scratch();
+  const source = await interrupted(root, { omit: 'rf1-redpanda-1-simple-workload' });
+  const attempt = (omit, reason = 'disk full', name = 'out') =>
+    split(source, 1, path.join(root, name), 'test', undefined, omit, reason);
+  await assert.rejects(attempt(['krabka:simple-workload']), /completed in run killed-run/);
+  await fs.rm(path.join(source, 'rf1-kafka-1-simple-workload'), { recursive: true });
+  await assert.rejects(attempt(['kafka:simple-workload', 'redpanda:simple-workload']), /needs at least two measured brokers/);
+  await assert.rejects(attempt(['redpanda:simple-workload'], ''), /omitted trials need a reason/);
+  await assert.rejects(attempt(['redpanda']), /takes vendor:workload/);
+  await assert.rejects(attempt(['redpanda:max-rate-1-topic-16-partitions-1kb']), /not in this shard/);
+});

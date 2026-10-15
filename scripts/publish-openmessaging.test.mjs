@@ -60,6 +60,19 @@ test('smoke and incomplete runs are refused', async () => {
 });
 
 
+test('a run that omits a trial with a reason is published without it', async () => {
+  const omitted = [{ vendor: 'redpanda', rf: 1, workload: 'simple-workload', reason: 'disk reserve reached' }];
+  const { root, run } = await fakeRun({ omitted });
+  await fs.rm(path.join(run, 'rf1-redpanda-1-simple-workload'), { recursive: true });
+  assert.deepEqual(await publish(run, root), { run_id: 'run-1', trials: 2 });
+  const provenance = JSON.parse(await fs.readFile(path.join(root, 'benchmarks', 'openmessaging', 'run-1', 'provenance.json'), 'utf8'));
+  assert.deepEqual(provenance.omitted, omitted);
+  for (const bad of [[{ ...omitted[0], reason: '' }], [omitted[0], { ...omitted[0], vendor: 'kafka' }]]) {
+    const attempt = await fakeRun({ omitted: bad });
+    await assert.rejects(publish(attempt.run, attempt.root));
+  }
+});
+
 test('runs with broker settings or a preallocate override are experiments and are refused', async () => {
   for (const [contract, message] of [
     [{ krabka_env: ['KRABKA_LOG_TAIL_CACHE_SIZE=32MiB'] }, /--krabka-env/],

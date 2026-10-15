@@ -12,9 +12,16 @@ test('website figures match the published OMB capture for every workload and RF'
   assert.equal(p.mode, 'full');
   assert.equal(p.status, 'complete');
   const raw = JSON.parse(fs.readFileSync(`benchmarks/openmessaging/${p.run_id}/trials.json`, 'utf8'));
-  assert.equal(raw.length, p.cases.length * p.replication_factors.length * 3 * p.repetitions);
+  const omitted = p.omitted ?? [];
+  assert.equal(raw.length, (p.cases.length * p.replication_factors.length * 3 - omitted.length) * p.repetitions);
   for (const group of openmessaging.rows) for (const workload of group.cases) for (const vendor of workload.vendors) {
     const selected = raw.filter(t => t.rf === group.rf && t.case.id === workload.id && t.vendor === vendor.id);
+    const omission = omitted.find(o => o.rf === group.rf && o.workload === workload.id && o.vendor === vendor.id);
+    if (omission) {
+      // An omitted trial has no figures and carries its reason to the page.
+      assert.deepEqual([selected.length, vendor.omitted, vendor.publish_rate, vendor.end_to_end_p99_ms], [0, omission.reason, null, null]);
+      continue;
+    }
     assert.equal(selected.length, p.repetitions);
     assert.equal(vendor.publish_rate, median(selected.map(t => t.publish_rate)));
     assert.equal(vendor.publish_p99_ms, median(selected.map(t => t.publish_latency_ms.p99)));

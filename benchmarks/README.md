@@ -163,6 +163,13 @@ rerun, for all three brokers, as its own shard. The shard's provenance, and the
 merged run's `shards` entry for it, record the source run, its status and the
 reason under `derived_from`.
 
+`--omit VENDOR:WORKLOAD,... --omit-reason TEXT` leaves out a trial that did not
+complete and cannot be run on this host, for example because the broker fills
+the disk before the trial ends. A trial with a result cannot be omitted, and at
+least two brokers stay in every comparison. The shard and the merged run list
+each omitted trial and its reason under `omitted`. The summary, the charts and
+the tables show it as not measured.
+
 Actions retains `provenance.json`, effective/upstream YAML, immutable image and
 source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
 250 ms CPU/memory time series, and failure diagnostics for 30 days. A complete

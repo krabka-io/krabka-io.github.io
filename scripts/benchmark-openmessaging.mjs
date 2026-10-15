@@ -73,6 +73,34 @@ export function ombRetentionBytes(config) {
   return Math.ceil(OMB_BACKLOG_RETENTION_RATIO * config.consumerBacklogSizeGB * 1024 ** 3 / partitions);
 }
 
+// Trials a run leaves out on purpose. provenance.omitted lists each one as
+// { vendor, rf, workload, reason }, for every round of it. Only a trial that
+// never completed can be omitted (see split in benchmark-openmessaging-shards.mjs),
+// and at least two brokers stay in every comparison.
+export function ombOmission(provenance, vendor, rf, workload) {
+  return (provenance.omitted ?? []).find(o => o.vendor === vendor && o.rf === rf && o.workload === workload);
+}
+
+export function checkOmbOmissions(provenance, vendors = ['krabka', 'kafka', 'redpanda']) {
+  const omitted = provenance.omitted ?? [];
+  assert.ok(Array.isArray(omitted), 'provenance.omitted must be a list');
+  const keys = new Set();
+  for (const o of omitted) {
+    assert.ok(vendors.includes(o.vendor), `omitted trial names unknown broker ${o.vendor}`);
+    assert.ok(provenance.replication_factors.includes(o.rf), 'omitted trial is outside the run\'s replication factors');
+    assert.ok(provenance.cases.some(c => c.id === o.workload), `omitted trial names unknown workload ${o.workload}`);
+    assert.ok(typeof o.reason === 'string' && o.reason.trim(), `omitted ${o.vendor} ${o.workload} RF${o.rf} needs a reason`);
+    const key = `${o.vendor}/${o.rf}/${o.workload}`;
+    assert.ok(!keys.has(key), `${key} is omitted twice`);
+    keys.add(key);
+  }
+  for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
+    const kept = vendors.filter(vendor => !keys.has(`${vendor}/${rf}/${workload.id}`));
+    assert.ok(kept.length >= 2, `${workload.id} at RF${rf} needs at least two measured brokers`);
+  }
+  return omitted;
+}
+
 export function ombDriver(vendor, rf, maxPollIntervalMs, retentionBytes = -1, preallocate = false) {
   assert.ok(['krabka', 'kafka', 'redpanda'].includes(vendor) && [1, 3].includes(rf));
   assert.ok(maxPollIntervalMs === undefined || (Number.isInteger(maxPollIntervalMs)
@@ -180,7 +208,9 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
 
 export async function writeOmbReport(directory, provenance, trials) {
   const vendors = provenance.vendors ?? ['krabka', 'kafka', 'redpanda'];
-  assert.equal(trials.length, provenance.cases.length * provenance.replication_factors.length * vendors.length * provenance.repetitions,
+  const omitted = checkOmbOmissions(provenance, vendors);
+  assert.equal(trials.length,
+    (provenance.cases.length * provenance.replication_factors.length * vendors.length - omitted.length) * provenance.repetitions,
     'incomplete OMB matrix');
   const actual = new Set();
   for (const trial of trials) {
@@ -190,7 +220,9 @@ export async function writeOmbReport(directory, provenance, trials) {
   assert.equal(actual.size, trials.length, 'duplicate OMB trials');
   for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
     for (const vendor of vendors) for (let repetition = 1; repetition <= provenance.repetitions; repetition++) {
-      assert.ok(actual.has(`${vendor}/${rf}/${repetition}/${workload.id}`), 'missing OMB trial');
+      const key = `${vendor}/${rf}/${repetition}/${workload.id}`;
+      if (ombOmission(provenance, vendor, rf, workload.id)) assert.ok(!actual.has(key), `omitted OMB trial ${key} is present`);
+      else assert.ok(actual.has(key), 'missing OMB trial');
     }
   }
   const mean = values => values.reduce((a, b) => a + b, 0) / values.length;
@@ -205,6 +237,10 @@ export async function writeOmbReport(directory, provenance, trials) {
   for (const trial of trials) {
     const result = trial.omb;
     lines.push(`| ${trial.case.id} | ${trial.rf} | ${trial.vendor} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`);
+  }
+  if (omitted.length) {
+    lines.push('', '## Not measured', '');
+    for (const o of omitted) lines.push(`- ${o.workload}, RF${o.rf}, ${o.vendor}: ${o.reason}`);
   }
   await fs.writeFile(path.join(directory, 'summary.md'), `${lines.join('\n')}\n`);
 }
