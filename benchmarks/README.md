@@ -176,6 +176,16 @@ source references, runtime jar hashes, raw OMB JSON, broker inspections/logs,
 matrix also produces `summary.md` and a job summary with publish/consume rates,
 publish/end-to-end p99 latency, CPU seconds and peak RSS. Resource windows include
 startup of the benchmark client, warm-up, probing, measurement and shutdown.
+
+Each trial also samples `/proc/diskstats` with the 250 ms resource samples, in
+`devices.jsonl`, for the block devices under the run directory and Docker
+storage. `provenance.host.storage` records those mounts, their filesystem and
+mount options, the RAID level and each member device's model and firmware.
+`trial.json` has `metrics.measurement_window`, which covers only the OMB
+measurement: its start and end from the client log, broker CPU seconds,
+published messages (the mean publish rate times the window), messages per CPU
+second, and each device's utilization and bytes read and written. The totals
+in `metrics` still cover the full capture.
 OMB does **not** check exact delivery counts or duplicate sequences. Missing or
 truncated result series, zero publish/consume traffic, publish errors, OOMs,
 logged client/consumer errors and missing resource counters fail the run,
@@ -293,6 +303,15 @@ artifact. Do not silently replace them with successful retries.
 Verify `O_DIRECT` on each active segment descriptor. Confirm the topic setting,
 filesystem alignment and supported kernel. A fallback to buffered writes fails
 direct-mode qualification. A successful command alone does not prove the mode.
+
+With `--krabka-preallocate`, the runner does this check 30 seconds into each
+krabka trial's OMB measurement. A sidecar container shares each broker's PID
+namespace and user, and lists its open segment files with their `fdinfo`
+flags. Every benchmark partition replica must hold its newest segment open
+with `O_DIRECT`, and the replicas found must equal the topic's partitions
+times the replication factor. Otherwise the trial fails. The listings are in
+`direct-io-broker-N.txt` and the result is in `direct-io.json` and in
+`trial.json` under `direct_io`.
 
 ### Measurements and acceptance
 
