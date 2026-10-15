@@ -114,6 +114,33 @@ test('archive staging deduplicates README checksums and preserves every file byt
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('archive staging skips a trial the run omitted with a reason', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-stage-omit-'));
+  try {
+    const id = 'omitted-fixture', archiveRoot = path.join(root, 'benchmarks/archive'), source = path.join(root, id);
+    const workload = { id: 'simple', config: {} };
+    const omitted = [{ vendor: 'redpanda', rf: 1, workload: 'simple', reason: 'disk reserve reached' }];
+    const provenance = { suite: 'openmessaging', mode: 'full', status: 'complete', completed_at: '2026-10-14', run_id: id, replication_factors: [1], repetitions: 1, cases: [workload], omitted };
+    const result = { publishRate: [10, 20], consumeRate: [9, 20], backlog: [1, 0], aggregatedPublishLatency50pct: 1, aggregatedPublishLatency99pct: 2, aggregatedPublishLatency999pct: 3, aggregatedEndToEndLatency50pct: 1, aggregatedEndToEndLatency99pct: 2, aggregatedEndToEndLatency999pct: 3 };
+    await fs.mkdir(archiveRoot, { recursive: true }); await fs.mkdir(source);
+    await fs.writeFile(path.join(source, 'provenance.json'), JSON.stringify(provenance));
+    await fs.writeFile(path.join(source, 'summary.md'), '# Capture\n');
+    for (const vendor of ['krabka', 'kafka']) {
+      const directory = path.join(source, `rf1-${vendor}-1-simple`); await fs.mkdir(directory);
+      const trial = { vendor, rf: 1, repetition: 1, case: workload, omb: result, metrics: { cpu_seconds: 1, rss_peak_bytes: 2, working_set_peak_bytes: 3 } };
+      const files = { 'trial.json': JSON.stringify(trial), 'result.json': JSON.stringify(result), 'resources.jsonl': resourceText, 'resources.jsonl.metadata.json': '{"started_at":"2026-10-14T00:00:00Z","sampling_interval_ms":250}', 'workload.stdout': 'a\n', 'workload.stderr': '' };
+      for (const [name, text] of Object.entries(files)) await fs.writeFile(path.join(directory, name), text);
+    }
+    const filename = id + '.tar.gz';
+    execFileSync('tar', ['-czf', path.join(archiveRoot, filename), '-C', root, id]);
+    const hash = digest(await fs.readFile(path.join(archiveRoot, filename)));
+    await fs.writeFile(path.join(archiveRoot, 'README.md'), `${hash}  ${filename}\n`);
+    const index = await prepareArchive(root);
+    assert.deepEqual(index.runs[0].trials.map(t => t.vendor), ['krabka', 'kafka']);
+    assert.deepEqual(index.runs[0].provenance.omitted, omitted);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('captured OMB quantile maps use percentile keys and latency values across the complete matrix', async t => {
   const indexFile = 'src/data/benchmark-archive.json';
   try { await fs.access(indexFile); } catch { t.skip('Run prepare:benchmark-archive to check the measured capture.'); return; }

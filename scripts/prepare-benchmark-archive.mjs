@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { checkOmbOmissions, ombOmission } from './benchmark-openmessaging.mjs';
 import { compactTrial } from './publish-openmessaging.mjs';
 
 export const digest = buffer => createHash('sha256').update(buffer).digest('hex');
@@ -41,6 +42,7 @@ export async function prepareArchive(root = process.cwd()) {
       assert.equal(provenance.suite, 'openmessaging');
       assert.equal(provenance.mode, 'full');
       assert.equal(provenance.status, 'complete');
+      checkOmbOmissions(provenance);
       const run = { id, filename, checksum, provenance, trials: [], files: [] };
       async function stage(relative) {
         const bytes = await fs.readFile(path.join(source, relative));
@@ -52,6 +54,8 @@ export async function prepareArchive(root = process.cwd()) {
       for (const file of ['provenance.json', 'summary.md']) run.files.push(await stage(file));
       for (const rf of provenance.replication_factors) for (const vendor of ['krabka', 'kafka', 'redpanda']) {
         for (let repetition = 1; repetition <= provenance.repetitions; repetition++) for (const workload of provenance.cases) {
+          // A trial the run omitted, with its reason, has no files.
+          if (ombOmission(provenance, vendor, rf, workload.id)) continue;
           const trialId = `rf${rf}-${vendor}-${repetition}-${workload.id}`;
           const trial = await readJSON(trialId + '/trial.json');
           const result = await readJSON(trialId + '/result.json');

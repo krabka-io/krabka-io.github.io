@@ -40,8 +40,10 @@ try {
   await page.goto(base + '/benchmarks/explorer/'); await loaded();
   await page.unroute('**/result.json.gz');
   assert.equal(await page.locator('#run-select').inputValue(), latest.id);
-  assert.match(await page.locator('#explorer-status').textContent(), /not published/);
-  assert.equal(await page.locator('#source-select option[value="resources"]').evaluate(option => option.disabled), true);
+  // The newest run offers resource timelines only when its archive supplies them.
+  const latestHasResources = latest.trials.every(trial => trial.resource_samples > 0);
+  assert.match(await page.locator('#explorer-status').textContent(), latestHasResources ? /Resource samples available/ : /not published/);
+  assert.equal(await page.locator('#source-select option[value="resources"]').evaluate(option => option.disabled), !latestHasResources);
   assert.equal(await page.locator('[data-matrix-row]:visible').count(), 14);
   await page.selectOption('[data-matrix-peer]', 'redpanda');
   assert.match(await page.locator('[data-matrix-summary]').textContent(), /1 not measured/);
