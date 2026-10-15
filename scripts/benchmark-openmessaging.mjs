@@ -95,8 +95,9 @@ export function checkOmbOmissions(provenance, vendors = ['krabka', 'kafka', 'red
     keys.add(key);
   }
   for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
+    // A run of one broker (--vendors) compares nothing and omits nothing.
     const kept = vendors.filter(vendor => !keys.has(`${vendor}/${rf}/${workload.id}`));
-    assert.ok(kept.length >= 2, `${workload.id} at RF${rf} needs at least two measured brokers`);
+    if (kept.length < vendors.length) assert.ok(kept.length >= 2, `${workload.id} at RF${rf} needs at least two measured brokers`);
   }
   return omitted;
 }

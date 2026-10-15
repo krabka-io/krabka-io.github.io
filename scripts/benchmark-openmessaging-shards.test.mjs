@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { OMB_WORKLOADS } from './benchmark-openmessaging.mjs';
+import { OMB_WORKLOADS, checkOmbOmissions } from './benchmark-openmessaging.mjs';
 import { lanes, merge, plan, split } from './benchmark-openmessaging-shards.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
@@ -251,4 +251,11 @@ test('a split refuses to omit a completed trial, a whole comparison or a trial w
   await assert.rejects(attempt(['redpanda:simple-workload'], ''), /omitted trials need a reason/);
   await assert.rejects(attempt(['redpanda']), /takes vendor:workload/);
   await assert.rejects(attempt(['redpanda:max-rate-1-topic-16-partitions-1kb']), /not in this shard/);
+});
+
+test('a run of one broker passes the omission check when it omits nothing', () => {
+  const provenance = { replication_factors: [3], cases: [{ id: 'simple-workload' }] };
+  assert.deepEqual(checkOmbOmissions(provenance, ['krabka']), []);
+  assert.throws(() => checkOmbOmissions({ ...provenance,
+    omitted: [{ vendor: 'kafka', rf: 3, workload: 'simple-workload', reason: 'x' }] }, ['krabka', 'kafka']), /at least two/);
 });
