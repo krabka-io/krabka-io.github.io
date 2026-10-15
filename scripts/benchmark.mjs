@@ -532,19 +532,36 @@ rpk:
       const user = JSON.parse(await docker(['image', 'inspect', provenance.images.krabka.reference]))[0].Config.User || '0';
       const script = 'for f in /proc/1/fd/*; do t=$(readlink "$f") || continue; case $t in /data/*.log) '
         + 'echo "$t $(sed -n "s/^flags:\t//p" /proc/1/fdinfo/${f##*/})";; esac; done';
-      const brokersChecked = [];
-      for (const [i, broker] of brokers.entries()) {
-        const listing = await oneShot(['--pid', `container:${broker.id}`, '--user', user, '--network', 'none',
-          '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--entrypoint', '/bin/bash',
-          provenance.images.kafka.reference, '-c', script], `direct-io-${i}`);
-        await fs.writeFile(path.join(directory, `direct-io-broker-${i}.txt`), `${listing}\n`);
-        brokersChecked.push({ broker: broker.name, ...directIoCheck(listing, os.arch()) });
+      // At a high rate a segment can fill in about a second, and a listing
+      // taken just after a roll shows the new segment before its O_DIRECT
+      // descriptor opens. Each partition replica passes once one of up to ten
+      // listings, 3 s apart, shows its newest segment open with O_DIRECT.
+      const brokersChecked = brokers.map(broker => ({ broker: broker.name, partitions: 0, verified: new Set(), attempts: 0 }));
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        for (const [i, broker] of brokers.entries()) {
+          const checked = brokersChecked[i];
+          if (attempt > 1 && checked.verified.size === checked.partitions) continue;
+          const listing = await oneShot(['--pid', `container:${broker.id}`, '--user', user, '--network', 'none',
+            '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--entrypoint', '/bin/bash',
+            provenance.images.kafka.reference, '-c', script], `direct-io-${i}`);
+          await fs.appendFile(path.join(directory, `direct-io-broker-${i}.txt`), `# attempt ${attempt}\n${listing}\n`);
+          const result = directIoCheck(listing, os.arch());
+          checked.partitions = Math.max(checked.partitions, result.partitions);
+          for (const partition of result.verified) checked.verified.add(partition);
+          checked.attempts = attempt;
+        }
+        if (brokersChecked.every(b => b.verified.size === b.partitions)) break;
+        await delay(3_000, undefined, { signal });
+      }
+      for (const checked of brokersChecked) {
+        checked.direct = checked.verified.size;
+        checked.verified = [...checked.verified].sort();
       }
       const expected = workload.config.topics * workload.config.partitionsPerTopic * rf;
       const found = brokersChecked.reduce((n, b) => n + b.partitions, 0);
       return { checked_at: new Date().toISOString(), arch: os.arch(), expected_partition_replicas: expected,
         found_partition_replicas: found, brokers: brokersChecked,
-        verified: found === expected && brokersChecked.every(b => b.missing.length === 0) };
+        verified: found === expected && brokersChecked.every(b => b.direct === b.partitions) };
     }
 
     async function readBroker(broker) {
@@ -673,7 +690,7 @@ rpk:
               await fs.writeFile(path.join(directory, 'direct-io.json'), `${JSON.stringify(directIoResult, null, 2)}\n`);
               assert.ok(directIoResult.verified, `O_DIRECT not verified: ${directIoResult.error
                 ?? `${directIoResult.found_partition_replicas} of ${directIoResult.expected_partition_replicas} partition replicas found, `
-                  + `missing O_DIRECT on ${directIoResult.brokers.flatMap(b => b.missing).join(', ') || 'none'}`}`);
+                  + `${directIoResult.brokers.reduce((n, b) => n + b.direct, 0)} with their newest segment open with O_DIRECT`}`);
             }
             const result = JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8'));
             const logs = await Promise.all(['stdout', 'stderr'].map(stream => fs.readFile(path.join(directory, `workload.${stream}`), 'utf8')));

@@ -175,5 +175,6 @@ export function directIoCheck(listing, arch, topicPrefix = 'test-topic-') {
     if (Number.parseInt(flags, 8) & O_DIRECT[arch]) direct.add(`${match[1]}/${match[2]}`);
   }
   const missing = [...newest].filter(([partition, base]) => !direct.has(`${partition}/${base}`)).map(([p]) => p).sort();
-  return { partitions: newest.size, direct: newest.size - missing.length, missing };
+  const verified = [...newest.keys()].filter(partition => !missing.includes(partition)).sort();
+  return { partitions: newest.size, direct: newest.size - missing.length, missing, verified };
 }

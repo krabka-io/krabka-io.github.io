@@ -377,9 +377,9 @@ test('the O_DIRECT check needs the newest segment of every benchmark partition o
     '/data/test-topic-a-0/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000001000.log 02100002'].join('\n');
-  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'] });
+  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
   assert.deepEqual(directIoCheck(listing.replaceAll('02140002', '02100002'), 'x64').direct, 0);
-  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [] });
+  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
   assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
   assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
 });
