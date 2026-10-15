@@ -1,11 +1,16 @@
 import { vendors, names, colors, resourceMetrics, metricInfo, intervalMetrics, parseResources, temporalSeries, envelope, nearest, quantiles, csv } from '../utils/benchmark-explorer.mjs';
+import { benchmarkHint } from '../utils/benchmark-hints.mjs';
 
 type Trial = { id: string; vendor: string; rf: number; repetition: number; case: { id: string; config: Record<string, number> }; files: any[]; [key: string]: any };
 type Capture = { result: Record<string, any>; resources: any[] };
+async function initialize() {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const select = (id: string) => $<HTMLSelectElement>(id);
 const input = (id: string) => $<HTMLInputElement>(id);
-const index = JSON.parse($('archive-index').textContent!);
+const indexResponse = await fetch(JSON.parse($('archive-index').textContent!).url);
+if (!indexResponse.ok) throw new Error(`Could not load the run index (HTTP ${indexResponse.status}).`);
+const index = await indexResponse.json();
+if (!Array.isArray(index.runs) || !index.runs.length) throw new Error('The run index has no captures.');
 let run = index.runs[0];
 let selected: Trial[] = [];
 let captures = new Map<string, Capture>();
@@ -40,9 +45,13 @@ async function readFile(trial: Trial | null, name: string) {
   const metadata = (trial ? trial.files : run.files).find((f: any) => f.name === name);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not load ${name} (HTTP ${response.status}).`);
-  if (typeof DecompressionStream === 'undefined') throw new Error('This browser needs support for gzip DecompressionStream to inspect the archive. Use the source archive link below.');
-  const compressed = await response.arrayBuffer();
-  const bytes = await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  let bytes = await response.arrayBuffer();
+  // Some hosts apply Content-Encoding, so fetch has already decompressed the file.
+  const prefix = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+  if (prefix[0] === 0x1f && prefix[1] === 0x8b) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('This browser needs support for gzip DecompressionStream to inspect the archive. Use the source archive link below.');
+    bytes = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  }
   if (bytes.byteLength !== metadata.bytes) throw new Error(`Incomplete ${name} file.`);
   if (crypto.subtle) {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -94,26 +103,32 @@ async function loadSelection() {
   document.querySelector('.explorer-main')?.setAttribute('aria-busy', 'true');
   try {
     const loaded = await Promise.all(selected.map(async trial => {
-      const [result, resources] = await Promise.all([readFile(trial, 'result.json'), readFile(trial, 'resources.jsonl')]);
+      const [result, resources] = await Promise.all([readFile(trial, 'result.json'), trial.files.some(file => file.name === 'resources.jsonl') ? readFile(trial, 'resources.jsonl') : Promise.resolve('')]);
       return [trial.id, { result: JSON.parse(result), resources: parseResources(resources) }] as [string, Capture];
     }));
     if (version !== loadVersion) return;
     captures = new Map(loaded); ready = true;
     options('scope-select', [['cluster', 'Cluster total'], ...Array.from({ length: selected[0].rf }, (_, i) => [String(i), `Broker ${i}`] as [string, string])]);
+    const hasResources = selected.every(trial => trial.resource_samples > 0);
+    select('source-select').querySelector<HTMLOptionElement>('option[value="resources"]')!.disabled = !hasResources;
+    if (!hasResources) select('source-select').value = 'omb';
     configureMetrics(); renderAll();
-    status(`Loaded ${selected.length} trials · ${selected.reduce((n, t) => n + t.interval_samples, 0).toLocaleString()} OMB intervals · ${selected.reduce((n, t) => n + t.resource_samples, 0).toLocaleString()} resource samples. Original files verified.`);
+    status(`Loaded ${selected.length} trials · ${selected.reduce((n, t) => n + t.interval_samples, 0).toLocaleString()} OMB intervals. ${hasResources ? 'Resource samples available.' : 'Resource timelines and client logs were not published for this run.'} Files verified.`);
   } catch (error) { if (version === loadVersion) status((error as Error).message, true); }
   finally { if (version === loadVersion) document.querySelector('.explorer-main')?.setAttribute('aria-busy', 'false'); }
 }
 function renderConfig() {
   const el = $('workload-config'); el.replaceChildren();
+  $('selection-hint').hidden = !selected.length;
   if (!selected.length) return;
+  $('selection-hint').querySelector<HTMLElement>('[data-benchmark-hint]')!.dataset.hintText = benchmarkHint(selected[0].case, selected[0].rf);
   const config = selected[0].case.config;
   const list = node('dl');
   for (const [label, value] of [['Topics', config.topics], ['Partitions / topic', config.partitionsPerTopic], ['Message size', fmt(config.messageSize, 0) + ' B'], ['Offered rate', config.producerRate > 0 ? fmt(config.producerRate, 0) + ' msg/s' : 'Maximum (probed)'], ['Measurement', config.testDurationMinutes + ' min'], ['Backlog', config.consumerBacklogSizeGB + ' GB']]) {
     const row = node('div'); row.append(node('dt', String(label)), node('dd', String(value))); list.append(row);
   }
   el.append(list);
+  for (const omission of run.provenance.omitted ?? []) if (omission.workload === select('workload-select').value && String(omission.rf) === select('rf-select').value) el.append(node('p', `${names[omission.vendor]} not measured: ${omission.reason}`, 'context-note'));
   if (config.consumerBacklogSizeGB > 0) el.append(node('p', 'End-to-end latency includes the wait while the backlog fills before consumers drain it.', 'context-note'));
 }
 function renderSummary() {
@@ -241,7 +256,8 @@ function renderTrial() {
   const trial = selected.find(t => t.id === select('detail-trial').value);
   const el = $('trial-details'); el.replaceChildren(); if (!trial) return;
   el.append(node('p', `${trial.id}`));
-  el.append(node('p', `Capture began ${trial.started_at} · ${fmt(trial.resource_duration_seconds, 2)} s · ${fmt(trial.resource_samples, 0)} resource samples · ${trial.interval_samples} OMB intervals.`));
+  el.append(node('p', trial.started_at ? `Capture began ${trial.started_at} · ${fmt(trial.resource_duration_seconds, 2)} s · ${fmt(trial.resource_samples, 0)} resource samples · ${trial.interval_samples} OMB intervals.` : `${trial.interval_samples} OMB intervals. Resource timelines and client logs were not published.`));
+  options('raw-file', [...trial.files, ...run.files].map(file => [file.name, file.name]));
   el.append(node('p', `Peak cluster RSS ${fmt(trial.rss_peak_bytes / 1024 ** 2)} MiB · peak working set ${fmt(trial.working_set_peak_bytes / 1024 ** 2)} MiB · maximum backlog ${fmt(trial.backlog_max, 0)} messages · retriable commit failures ${trial.retriable_commit_failures}.`));
   el.append(node('p', `Image: ${run.provenance.images[trial.vendor].reference}`));
 }
@@ -254,6 +270,8 @@ function renderCatalog() {
   $('catalog-count').textContent = `${trials.length} / ${run.trials.length} trials. Resource totals and peaks cover the full capture.`;
   table('catalog-table', ['Workload / open trial', 'Broker', 'RF', 'Round', 'Publish / s', 'Consume / s', 'Pub p99 ms', 'E2E p99 ms', 'CPU s', 'RSS MiB', 'Working set MiB', 'OMB intervals', 'Resource samples'], trials.map((trial: Trial) => {
     const button = node('button', trial.case.id); button.setAttribute('type', 'button');
+    button.setAttribute('data-benchmark-hint', ''); button.dataset.hintText = benchmarkHint(trial.case, trial.rf);
+    button.setAttribute('aria-describedby', 'benchmark-workload-tooltip');
     button.addEventListener('click', async () => {
       input('workload-search').value = ''; updateWorkloads(trial.case.id);
       select('rf-select').value = String(trial.rf); select('round-select').value = String(trial.repetition);
@@ -267,7 +285,7 @@ function renderProvenance() {
   const el = $('archive-provenance'); el.replaceChildren();
   for (const r of index.runs) {
     const p = r.provenance;
-    el.append(node('h3', r.id), node('p', `${p.status} · ${p.started_at} → ${p.completed_at} · ${p.host.cpu_model} · ${p.host.logical_cpus} logical CPUs`), node('p', `${r.filename} · SHA-256: ${r.checksum}`));
+    el.append(node('h3', r.id), node('p', `${p.status} · ${p.started_at} to ${p.completed_at} · ${p.host.cpu_model} · ${p.host.logical_cpus} logical CPUs`), node('p', r.checksum ? `${r.filename} · SHA-256: ${r.checksum}` : r.capture));
     for (const vendor of vendors) el.append(node('p', `${names[vendor]}: ${p.images[vendor].reference}`));
   }
   el.append(node('p', 'Inspect provenance.json in Trial drilldown for all image labels, shard sources, CPU sets, OMB commits, driver settings, patch hashes, and jar hashes.'));
@@ -383,3 +401,12 @@ options('round-select', Array.from({ length: run.provenance.repetitions }, (_, i
 renderCatalog(); renderProvenance();
 await loadSelection();
 if (ready) { configureMetrics(params.get('metric') ?? undefined); if ([...select('scope-select').options].some(o => o.value === params.get('scope'))) select('scope-select').value = params.get('scope')!; renderAll(); }
+}
+void initialize().catch(error => {
+  const status = document.getElementById('explorer-status')!;
+  status.textContent = `${error.message} Reload to retry.`;
+  status.setAttribute('data-error', 'true');
+  const retry = document.getElementById('retry-load')!;
+  retry.hidden = false;
+  retry.addEventListener('click', () => location.reload(), { once: true });
+});

@@ -1,6 +1,6 @@
 export const vendors = ['krabka', 'kafka', 'redpanda'];
 export const names = { krabka: 'krabka', kafka: 'Apache Kafka', redpanda: 'Redpanda' };
-export const colors = { krabka: '#ff8466', kafka: '#38bdf8', redpanda: '#c4b5fd' };
+export const colors = { krabka: 'var(--color-krab-400)', kafka: 'var(--color-sky-400)', redpanda: 'var(--color-violet-400)' };
 export const resourceMetrics = [
   ['cpu_cores', 'CPU cores', 'cores'], ['cpu_seconds', 'Cumulative CPU', 'CPU s'],
   ['cpu_user_cores', 'User CPU', 'cores'], ['cpu_system_cores', 'System CPU', 'cores'],

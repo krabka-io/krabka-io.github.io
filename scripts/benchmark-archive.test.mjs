@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import test from 'node:test';
 import { prepareArchive, digest, trialFiles } from './prepare-benchmark-archive.mjs';
 import { parseResources, temporalSeries, envelope, nearest, quantiles, intervalMetrics, metricInfo, csv } from '../src/utils/benchmark-explorer.mjs';
@@ -60,7 +60,7 @@ test('archive staging deduplicates README checksums and preserves every file byt
   try {
     const id = 'fixture', archiveRoot = path.join(root, 'benchmarks/archive'), source = path.join(root, id);
     const workload = { id: 'simple', config: {} };
-    const provenance = { suite: 'openmessaging', mode: 'full', status: 'complete', run_id: id, replication_factors: [1], repetitions: 1, cases: [workload] };
+    const provenance = { suite: 'openmessaging', mode: 'full', status: 'complete', completed_at: '2026-10-11', run_id: id, replication_factors: [1], repetitions: 1, cases: [workload] };
     const result = { publishRate: [10, 20], consumeRate: [9, 20], backlog: [1, 0], aggregatedPublishLatency50pct: 1, aggregatedPublishLatency99pct: 2, aggregatedPublishLatency999pct: 3, aggregatedEndToEndLatency50pct: 1, aggregatedEndToEndLatency99pct: 2, aggregatedEndToEndLatency999pct: 3 };
     await fs.mkdir(archiveRoot, { recursive: true }); await fs.mkdir(source);
     await fs.writeFile(path.join(source, 'provenance.json'), JSON.stringify(provenance));
@@ -86,6 +86,27 @@ test('archive staging deduplicates README checksums and preserves every file byt
         assert.equal(digest(bytes), file.sha256); assert.equal(bytes.length, file.bytes);
       }
     }
+    const published = path.join(root, 'benchmarks/openmessaging/newer');
+    await fs.mkdir(path.join(published, 'omb-results'), { recursive: true });
+    const compressed = gzipSync(JSON.stringify(result));
+    const interval = { vendor: 'krabka', rf: 1, repetition: 1, workload: 'simple', file: 'omb-results/trial.json.gz', sha256: digest(compressed), samples: 2 };
+    await fs.writeFile(path.join(published, interval.file), compressed);
+    await fs.writeFile(path.join(published, 'provenance.json'), JSON.stringify({ ...provenance, run_id: 'newer', completed_at: '2026-10-14' }));
+    await fs.writeFile(path.join(published, 'summary.md'), '# Published\n');
+    await fs.writeFile(path.join(published, 'trials.json'), JSON.stringify([{ vendor: 'krabka', rf: 1, repetition: 1, case: workload }]));
+    await fs.writeFile(path.join(published, 'intervals.json'), JSON.stringify({ run_id: 'newer', trials: [interval] }));
+    const combined = await prepareArchive(root);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'public/benchmarks/archive-data/index.json'), 'utf8')), combined);
+    assert.equal(combined.runs[0].id, 'newer');
+    const newer = combined.runs[0].trials[0];
+    assert.equal(newer.resource_samples, 0);
+    assert.equal(newer.started_at, undefined);
+    assert.deepEqual(newer.files.map(file => file.name), ['result.json', 'trial.json']);
+    const staged = gunzipSync(await fs.readFile(path.join(root, 'public/benchmarks/archive-data/newer', newer.files[0].file)));
+    assert.deepEqual(JSON.parse(staged), result);
+    await fs.writeFile(path.join(published, interval.file), 'corrupted');
+    await assert.rejects(prepareArchive(root), /published interval checksum mismatch/);
+    await fs.writeFile(path.join(published, interval.file), compressed);
     await fs.writeFile(path.join(archiveRoot, filename), 'version https://git-lfs.github.com/spec/v1\n');
     await assert.rejects(prepareArchive(root), /LFS pointer/);
     await fs.writeFile(path.join(archiveRoot, filename), 'corrupted archive');

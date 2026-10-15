@@ -1,0 +1,47 @@
+---
+import { benchmarkHistory, openmessaging, format } from '../utils/benchmarks.mjs';
+import { comparison, directComparison, releaseVersion } from '../utils/benchmark-story.mjs';
+import experiment from '../../benchmarks/experiments/direct-io-1370.json';
+import { getPath } from '../utils/paths';
+const result = comparison(openmessaging);
+const direct = directComparison(experiment);
+const percent = value => `${Math.round(value * 100)}%`;
+const history = benchmarkHistory.map(run => ({ run, summary: comparison(run), replicated: comparison(run, 'kafka', 1024, 3) }));
+const improving = history.length > 1 && history.every((entry, i) => !i || entry.replicated?.throughput > history[i - 1].replicated?.throughput);
+---
+<section class="benchmark-overview" aria-labelledby="overview-heading" data-no-anchor>
+  <div class="overview-heading"><div><p class="eyebrow">Latest full OMB run · krabka {releaseVersion(openmessaging)}</p><h2 id="overview-heading">What the measurements show</h2></div><a href={openmessaging.summaryURL}>Read the source results</a></div>
+  <div class="overview-results">
+    <div class="context"><h3>Shared page cache</h3><p>krabka and Kafka use the Linux page cache in this suite. Compare all max-rate workloads, then inspect the differences.</p><p class="note">{result.count} workload / replication-factor pairs. {openmessaging.provenance.repetitions} measured round per workload. {openmessaging.provenance.omitted?.length ?? 0} omitted trial across the full suite.</p></div>
+    <div class="figure"><strong>{percent(result.throughput)}</strong><span>of Kafka’s publish rate</span><small>Median; workload range {percent(result.min)} to {percent(result.max)}</small></div>
+    <div class="figure"><strong>{format(result.efficiency, 2)}×</strong><span>Kafka’s CPU efficiency index</span><small>Higher in {result.efficientCount} of {result.count} pairs</small></div>
+  </div>
+  <p class="note">CPU efficiency index = publish rate ÷ total broker CPU time, relative to Kafka. CPU capture includes startup, warm-up and shutdown. This is a proxy, not CPU cost per delivered message.</p>
+  <div class="release-history"><div><p class="eyebrow">Across published releases</p><h3>See where the gap changed</h3><p>{improving ? 'The replicated 1 KiB workloads improved relative to Kafka across these runs.' : 'Compare the replicated 1 KiB workloads with the full max-rate set.'} Check the full set alongside this group.</p><p class="note">Disk preparation can change between runs; each row records SSD trim. These results do not isolate the effect of code changes.</p></div>
+    <div class="table-wrap"><table><caption>krabka relative to Kafka in the same run</caption><thead><tr><th scope="col">Version</th><th scope="col">1 KiB, RF3</th><th scope="col">All max-rate</th><th scope="col">CPU index</th></tr></thead><tbody>{history.map(({run, summary, replicated}) => <tr><th scope="row"><a href={run.summaryURL}>{releaseVersion(run)}</a><small>{run.provenance.contract.disk_trim_before_trial ? 'Trimmed SSD' : 'Uncontrolled trim'}</small></th><td><strong>{percent(replicated.throughput)}</strong><div class="rate-track" aria-hidden="true"><span style={`width:${replicated.throughput / Math.max(...history.map(h => h.replicated.throughput)) * 100}%`}></span></div></td><td>{percent(summary.throughput)}</td><td>{format(summary.efficiency, 2)}×</td></tr>)}</tbody></table><p class="note">100% = Kafka’s rate. 1× = Kafka’s CPU index. Values are medians of workload ratios, not pooled throughput.</p></div>
+  </div>
+  <details class="direct-evidence" open>
+    <summary>Direct I/O: {direct.nearParity ? `within ${direct.gap}% of Redpanda’s rate in ${direct.count} reported rounds` : 'inspect the reported rounds'}</summary>
+    <div class="direct-body"><div><p>This separate experiment used {experiment.krabka_build} with <code>preallocate=true</code>, against Redpanda {experiment.redpanda_version}.</p><p class="note">One RF{experiment.rf}, 16-partition, 1 KiB max-rate workload. Trials ran interleaved after SSD trim on ext4 and mirrored NVMe drives. Figures are rounded in the source.</p><p>Redpanda had lower tail latency and disk utilization. CPU efficiency was not established for this experiment.</p><a href={experiment.source}>Read the direct I/O investigation</a></div><table><caption>Reported rounds, not a full release qualification</caption><thead><tr><th scope="col">Round</th><th scope="col">krabka</th><th scope="col">Redpanda</th></tr></thead><tbody>{experiment.rounds.map(round => <tr><th scope="row">{round.round}</th><td><strong>{format(round.krabka_rate / 1000)}k/s</strong><small>{round.krabka_e2e_p99_ms} ms E2E p99</small></td><td><strong>{format(round.redpanda_rate / 1000)}k/s</strong><small>{round.redpanda_e2e_p99_ms} ms E2E p99</small></td></tr>)}</tbody></table></div>
+  </details>
+  <div class="overview-footer"><a href={getPath('/benchmarks/explorer')}>Inspect every available interval</a><a href={getPath('/benchmarks') + '#direct-io-qualification'}>Read the direct I/O qualification plan</a></div>
+  <p class="note">Results apply to this host and these workloads. Similar throughput does not establish equal latency or crash durability.</p>
+</section>
+<style>
+  .benchmark-overview { border-top: 1px solid var(--color-gray-700); padding-block: 2.5rem; color: var(--color-gray-300); }
+  .overview-heading, .overview-footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:1.5rem; align-items:baseline; }
+  .eyebrow { color:var(--color-krab-400); font-size:.75rem; font-weight:650; margin-bottom:.75rem; }
+  h2 { font-size:clamp(1.7rem,3vw,2.6rem); font-weight:750; letter-spacing:-.03em; line-height:1.2; color:var(--color-white); }
+  h3 { font-size:1.25rem; font-weight:650; color:var(--color-white); margin-bottom:.75rem; }
+  p { line-height:1.65; } a { color:var(--color-krab-400); text-decoration:underline; text-underline-offset:4px; font-size:.875rem; }
+  .overview-results { display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:2rem; align-items:center; margin:2rem 0 1rem; }
+  .figure strong { display:block; font-size:clamp(3rem,6vw,5.5rem); line-height:1.1; font-weight:750; letter-spacing:-.05em; color:var(--color-white); font-variant-numeric:tabular-nums; }
+  .figure span, small { display:block; } small,.note { font-size:.75rem; line-height:1.6; color:var(--color-gray-400); margin-top:.6rem; }
+  .release-history { display:grid; grid-template-columns:1fr 1.7fr; gap:3rem; border-top:1px solid var(--color-gray-700); padding-block:2rem; margin-top:2rem; }
+  table { width:100%; border-collapse:collapse; font-size:.875rem; font-variant-numeric:tabular-nums; } caption { text-align:left; font-size:.75rem; color:var(--color-gray-400); margin-bottom:.7rem; }
+  th,td { text-align:right; padding:.85rem .6rem; border-bottom:1px solid var(--color-gray-700); } th:first-child { text-align:left; padding-left:0; } thead th { font-size:.75rem; font-weight:500; } td strong { font-size:1.3rem; color:var(--color-white); }
+  .rate-track { height:4px; background:var(--color-gray-800); margin-top:.5rem; } .rate-track span { display:block; height:100%; background:var(--color-krab-400); }
+  .direct-evidence { border-top:1px solid var(--color-gray-700); border-bottom:1px solid var(--color-gray-700); padding-block:1.3rem; } summary { cursor:pointer; font-size:1.05rem; font-weight:650; color:var(--color-white); } .direct-body { display:grid; grid-template-columns:1.2fr 1fr; gap:2rem; margin-top:1.5rem; } .direct-body p { margin-bottom:1rem; }
+  .overview-footer { padding-top:1.5rem; }
+  @media(max-width:760px) { .overview-results { grid-template-columns:1fr 1fr; gap:1.5rem; } .context { grid-column:1/-1; } .release-history,.direct-body { grid-template-columns:1fr; gap:1.25rem; } th,td { padding:.8rem .25rem; } table { font-size:.8rem; } small { font-size:.7rem; } }
+</style>

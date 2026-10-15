@@ -2,8 +2,52 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { openmessaging } from '../src/utils/benchmarks.mjs';
+import { openmessaging, benchmarkHistory } from '../src/utils/benchmarks.mjs';
+import { comparison, directComparison, matrixValue } from '../src/utils/benchmark-story.mjs';
+import { benchmarkHint } from '../src/utils/benchmark-hints.mjs';
 import { median } from './benchmark-results.mjs';
+
+test('every workload has a simple explanation of the test and its purpose', () => {
+  for (const workload of openmessaging.provenance.cases) for (const rf of openmessaging.provenance.replication_factors) {
+    const hint = benchmarkHint(workload, rf);
+    assert.match(hint, /What happens/);
+    assert.match(hint, /Why this test is useful/);
+    assert.ok(hint.includes(`RF${rf}`));
+    assert.ok(hint.includes(workload.config.messageSize === 100 ? '100 bytes' : '1 KiB'));
+    if (workload.config.consumerBacklogSizeGB) assert.match(hint, /delay includes time spent waiting/);
+    else if (workload.config.producerRate > 0 && workload.config.producerRate < 1_000_000) assert.match(hint, /do not prove equal top speed/);
+    else if (workload.config.producerRate > 0) assert.match(hint, /offers up to 10,000,000/);
+    if (workload.id.endsWith('-3producers')) assert.match(hint, /Three senders/);
+  }
+});
+
+test('release comparisons use paired max-rate ratios and exclude omissions', () => {
+  for (const run of benchmarkHistory) {
+    const summary = comparison(run);
+    const pairs = run.rows.flatMap(g => g.cases).filter(c => c.config.producerRate === 0 || c.config.producerRate >= 1_000_000)
+      .map(c => [c.vendors.find(v => v.id === 'krabka'), c.vendors.find(v => v.id === 'kafka')]);
+    assert.equal(summary.count, pairs.length);
+    assert.equal(summary.throughput, median(pairs.map(([a, b]) => a.publish_rate / b.publish_rate)));
+  }
+  const omission = openmessaging.rows.flatMap(g => g.cases).find(c => c.vendors.some(v => v.omitted));
+  assert.equal(matrixValue(omission.vendors, 'redpanda', 'publish_rate'), null);
+  assert.equal(matrixValue([{ id: 'krabka', cpu_seconds: 0 }, { id: 'kafka', cpu_seconds: 4 }], 'kafka', 'cpu_seconds').ratio, 0);
+  assert.equal(matrixValue([{ id: 'krabka', publish_rate: 1 }, { id: 'kafka', publish_rate: 0 }], 'kafka', 'publish_rate'), null);
+  const slower = { rows: [{ rf: 1, cases: [{ config: { producerRate: 0 }, vendors: [{ id: 'krabka', publish_rate: 50, cpu_seconds: 100 }, { id: 'kafka', publish_rate: 100, cpu_seconds: 50 }] }] }] };
+  assert.equal(comparison(slower).throughput, .5);
+  assert.equal(comparison(slower).efficiency, .25);
+  assert.equal(comparison(slower).efficientCount, 0);
+  assert.equal(comparison({ rows: [] }), null);
+});
+
+test('direct I/O parity wording requires every reported round to be within the bound', () => {
+  const evidence = JSON.parse(fs.readFileSync('benchmarks/experiments/direct-io-1370.json'));
+  assert.equal(directComparison(evidence).nearParity, true);
+  assert.equal(directComparison(evidence).gap, 3);
+  assert.equal(directComparison({ rounds: [] }), null);
+  assert.equal(directComparison({ rounds: [{ krabka_rate: 90, redpanda_rate: 100 }] }).nearParity, false);
+  assert.equal(directComparison({ rounds: [{ krabka_rate: 100, redpanda_rate: 0 }] }), null);
+});
 
 test('website figures match the published OMB capture for every workload and RF', () => {
   assert.ok(openmessaging);

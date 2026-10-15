@@ -22,14 +22,18 @@ const ombImageLabels = {
   'sha256:2a81d1ba38de4e8ffb032fedf67952845185158a7607ac76ba38fa162dc37e50': 'krabka-broker 1.0.5 (ac9deff, signed release)',
   'sha256:8c515d335e89455525fb1ad4d9986769c9dd18e44fb259250919c6e7cb53bd84': 'krabka-broker 1.0.5 (ac9deff, signed release)',
 };
-function loadOpenMessaging() {
+function latestRunId() {
   const pointer = path.join(root, 'latest-openmessaging.md');
   if (!fs.existsSync(pointer)) return null;
   const match = fs.readFileSync(pointer, 'utf8').match(/^\[Dated report and per-trial results\]\(openmessaging\/([\w-]+)\/summary\.md\)/);
   assert.ok(match, 'latest OpenMessaging report must link to a dated run');
-  const directory = path.join(root, 'openmessaging', match[1]);
+  return match[1];
+}
+export function loadOpenMessaging(id) {
+  if (!id) return null;
+  const directory = path.join(root, 'openmessaging', id);
   const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'provenance.json'), 'utf8'));
-  assert.equal(provenance.run_id, match[1], 'OpenMessaging provenance must match the latest report');
+  assert.equal(provenance.run_id, id, 'OpenMessaging provenance must match the report');
   assert.equal(provenance.suite, 'openmessaging', 'only OpenMessaging results can drive the website');
   assert.equal(provenance.mode, 'full', 'smoke measurements cannot drive the website');
   assert.equal(provenance.status, 'complete', 'only complete OpenMessaging runs are published');
@@ -42,7 +46,7 @@ function loadOpenMessaging() {
   assert.equal(trials.length,
     (provenance.cases.length * provenance.replication_factors.length * VENDORS.length - omitted.length) * provenance.repetitions,
     'incomplete OpenMessaging matrix');
-  const sourceURL = 'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/openmessaging/' + match[1];
+  const sourceURL = 'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/openmessaging/' + id;
   const images = VENDORS.map(id => {
     const image = provenance.images[id];
     const digest = image.reference.split('@').at(-1);
@@ -83,4 +87,8 @@ function loadOpenMessaging() {
     summaryURL: sourceURL.replace('/tree/', '/blob/') + '/summary.md',
     provenanceURL: sourceURL.replace('/tree/', '/blob/') + '/provenance.json' };
 }
-export const openmessaging = loadOpenMessaging();
+export const openmessaging = loadOpenMessaging(latestRunId());
+export const benchmarkHistory = fs.readdirSync(path.join(root, 'openmessaging'))
+  .filter(id => fs.existsSync(path.join(root, 'openmessaging', id, 'trials.json')))
+  .map(loadOpenMessaging)
+  .sort((a, b) => a.provenance.completed_at.localeCompare(b.provenance.completed_at));

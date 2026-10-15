@@ -266,3 +266,79 @@ trimmed. `--no-fstrim` turns the trim off and needs no trim tools.
 - Registry access to `ghcr.io`, Docker Hub, and `docker.redpanda.com`; access to GitHub for the pinned OMB source and Maven repositories for dependencies. Tags are pulled and resolved to registry digests once before running. The defaults are Krabka v1.0.5, Kafka 4.3.1, and Redpanda v26.2.2; versions never silently advance.
 
 The runner owns only its uniquely named and labeled containers, volumes, and networks. It does not change host settings, stop other containers, commit, push, or deploy. Avoid other heavy work while measuring. Concurrent invocations in the same checkout fail; a hard-killed process can leave `.benchmarks/runner.lock`, which contains its PID and run ID. Inspect that process and its labeled Docker resources before manually removing a stale lock.
+
+## Direct I/O release qualification plan
+
+Status: proposed release gate. The current release pipeline does not run this
+qualification. The two rounds reported in [the direct I/O investigation](https://github.com/krabka-io/krabka-broker/issues/1370#issuecomment-6157203260)
+are evidence for one workload, not release qualification. Redpanda had lower
+end-to-end p99 and disk utilization in those rounds. They do not establish a
+CPU efficiency advantage for krabka.
+
+### Test matrix and controls
+
+For each release candidate, pin immutable images for the candidate, the previous
+release, Kafka and Redpanda. Pin the OMB commit, patches and client jars. Run the
+full upstream workload catalog at RF1 and RF3 in both krabka modes: default
+page-cache writes and `preallocate=true`. Compare each mode with the same mode
+of the previous release. Keep ext4 and XFS results separate. Record the kernel,
+mount options, device layout, firmware, CPU limits and memory limits.
+
+Run at least five measured rounds per configuration. Rotate broker order across
+rounds; keep paired comparisons close in time. Trim the SSD before every trial,
+verify the trim succeeded, and record free space. Start a fresh cluster with
+fresh data for each trial. Keep all failed and incomplete attempts in the
+artifact. Do not silently replace them with successful retries.
+
+Verify `O_DIRECT` on each active segment descriptor. Confirm the topic setting,
+filesystem alignment and supported kernel. A fallback to buffered writes fails
+direct-mode qualification. A successful command alone does not prove the mode.
+
+### Measurements and acceptance
+
+Retain raw OMB results, exact measurement timestamps, broker resource samples,
+device telemetry, client logs and provenance for every round. Show each round,
+median and range for publish and consume rates, publish p99 and p99.9, and
+end-to-end p99 and p99.9. Show backlog separately. Do not average interval
+percentiles or count intervals as independent trials.
+
+Measure broker CPU and device utilization over the OMB measurement window.
+Report full-capture totals separately. Calculate CPU cost from the measured CPU
+seconds and the measured message count in the same window. Do not compare JVM
+heap or Redpanda memory reservations with krabka RSS as an efficiency claim.
+
+Set workload budgets before the run. Proposed review triggers, relative to the
+previous release in the same mode and on the same storage stack, are:
+
+- a median publish-rate drop greater than 5%;
+- a median end-to-end p99 increase greater than 10%;
+- a median measurement-window CPU cost increase greater than 10%.
+
+These thresholds trigger investigation; they are not confidence intervals or
+proof of statistical significance. Repeat flagged pairs and review every round
+and interval. Review higher percentiles, backlog and device utilization even
+when no threshold triggers. Block qualification for an unresolved regression,
+a missing required trial, a mode-verification failure or a correctness failure.
+Record the decision and its evidence in the release artifact.
+
+### Correctness and recovery
+
+Check acknowledged record IDs and duplicates across process termination,
+leader failover, restart and disk-full errors. Include segment roll, retention,
+compaction and catch-up reads. Check write-error propagation and bounded queue
+behavior. Test host power loss separately before a power-loss durability claim.
+OMB rates alone cannot establish delivery correctness or crash durability.
+
+### Publication work before adoption
+
+The publisher currently refuses `krabka_preallocate` overrides in the default
+suite. Add a separate direct-mode publication track before adopting this gate;
+do not relax the default-mode guard. Preserve the mode, image digests, disk
+state, repetition ID, failed attempts and telemetry coverage in its schema.
+Teach the viewer to group by mode and storage stack before it compares releases.
+
+Attach the qualification matrix and decision to each release. Publish all raw
+artifacts, including failures, and state any qualification gap in release notes.
+A release with incomplete qualification must not claim direct-I/O parity across
+the full suite. The maintainers must approve the budgets and implement this gate
+before the site describes direct I/O as release-qualified.
