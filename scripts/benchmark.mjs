@@ -530,8 +530,12 @@ rpk:
       }
       await delay(30_000, undefined, { signal });
       const user = JSON.parse(await docker(['image', 'inspect', provenance.images.krabka.reference]))[0].Config.User || '0';
-      const script = 'for f in /proc/1/fd/*; do t=$(readlink "$f") || continue; case $t in /data/*.log) '
-        + 'echo "$t $(sed -n "s/^flags:\t//p" /proc/1/fdinfo/${f##*/})";; esac; done';
+      // One `ls` and shell built-ins: a process per descriptor took about a
+      // second for 150 descriptors, longer than a segment lives at a maximum
+      // rate, so the listing mixed the descriptors of consecutive segments.
+      const script = 'ls -l /proc/1/fd 2>/dev/null | while read -r _ _ _ _ _ _ _ _ fd _ t; do case $t in /data/*.log) '
+        + 'f=; while IFS=$\'\\t\' read -r k v; do [ "$k" = flags: ] && f=$v; done < /proc/1/fdinfo/$fd 2>/dev/null; '
+        + 'echo "$t $f";; esac; done';
       // At a high rate a segment can fill in about a second, and a listing
       // taken just after a roll shows the new segment before its O_DIRECT
       // descriptor opens. Each partition replica passes once one of up to ten
