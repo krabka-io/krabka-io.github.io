@@ -28,6 +28,7 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'test-duration-minutes': { type: 'string' },
   'krabka-env': { type: 'string', multiple: true, default: [] },
   'no-fstrim': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
@@ -78,6 +79,12 @@ async function main() {
   const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
   const cases = ombCases(options.workloads);
+  // A shorter measurement for a workload that cannot finish on the host, for
+  // example one whose unlimited retention fills the disk before its upstream
+  // duration ends. Recorded in the contract; the publisher refuses such runs.
+  const testDuration = options['test-duration-minutes'] === undefined ? undefined : Number(options['test-duration-minutes']);
+  assert.ok(testDuration === undefined || (Number.isInteger(testDuration) && testDuration >= 1),
+    '--test-duration-minutes must be a positive whole number');
   for (const setting of options['krabka-env']) {
     assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
     // The settings are copied into provenance.json and the command log, so a
@@ -98,6 +105,7 @@ async function main() {
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
       ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
+      ...(testDuration !== undefined ? { test_duration_minutes: testDuration } : {}),
       disk_trim_before_trial: !options['no-fstrim'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
@@ -397,7 +405,7 @@ async function main() {
       provenance.openmessaging = ombRuntime.provenance;
       for (const workload of cases) {
         const source = await fs.readFile(path.join(ombRuntime.source, workload.upstream_file), 'utf8');
-        const effective = ombWorkload(source, options.smoke);
+        const effective = ombWorkload(source, options.smoke, testDuration);
         Object.assign(workload, { config: effective.config, source_sha256: effective.sha256,
           timeout_ms: ombTimeoutMs(effective.config, options.smoke) });
         await fs.writeFile(path.join(artifacts, `${workload.id}.yaml`), effective.yaml);

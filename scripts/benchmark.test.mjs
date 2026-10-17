@@ -383,3 +383,13 @@ test('the O_DIRECT check needs the newest segment of every benchmark partition o
   assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
   assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
 });
+
+test('--test-duration-minutes shortens only the measurement and refuses a bad value', () => {
+  const source = 'name: x\ntopics: 1\npartitionsPerTopic: 3\nmessageSize: 100\npayloadFile: "payload/payload-100b.data"\ntestDurationMinutes: 15\nproducerRate: 0\nconsumerBacklogSizeGB: 0\n';
+  const shortened = ombWorkload(source, false, 5);
+  assert.equal(shortened.config.testDurationMinutes, 5);
+  assert.equal(shortened.config.partitionsPerTopic, 3);
+  assert.equal(ombWorkload(source, false).config.testDurationMinutes, 15);
+  assert.equal(shortened.sha256, ombWorkload(source, false).sha256, 'the upstream hash stays the source file\'s');
+  assert.throws(() => ombWorkload(source, false, 0), /invalid test duration/);
+});

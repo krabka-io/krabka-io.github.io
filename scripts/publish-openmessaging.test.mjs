@@ -115,3 +115,8 @@ test('publication preserves every raw OMB field and interval in compressed resul
   assert.equal('omb' in compact[0], false);
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test('a run with a shortened measurement is refused', async () => {
+  const { root, run } = await fakeRun({ contract: { test_duration_minutes: 5 } });
+  await assert.rejects(publish(run, root), /departs from the upstream workloads/);
+});
