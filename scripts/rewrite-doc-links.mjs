@@ -1,4 +1,7 @@
 import path from 'node:path';
+import { slug } from 'github-slugger';
+
+const guideId = (file) => file.replace(/\.md$/i, '').split('/').map((part) => slug(part)).join('/');
 
 // Matches, in one pass: fenced code, inline code (both left alone), or a markdown link.
 // Generic calls in Go samples such as `NewSerde[Order](schema, cache)` look like links,
@@ -29,13 +32,13 @@ export function rewriteDocLinks(content, { docsSubdir, repo, sourceFile = '', so
 
     // Explicitly imported READMEs can live outside docs/ and link to each other.
     const imported = publishedPaths?.get(repoPath.toLowerCase());
-    if (imported) return `[${label}](/docs/${docsSubdir}/${imported.replace(/\.md$/i, '').toLowerCase()}${suffix})`;
+    if (imported) return `[${label}](/docs/${docsSubdir}/${guideId(imported)}${suffix})`;
 
     // 1. Link to sibling markdown guide in the same docs collection
     const guide = repoPath.startsWith('docs/') ? repoPath.slice(5).toLowerCase() : null;
     if (!sourcePath && /\.md$/i.test(repoPath) && guide && (!publishedFiles || publishedFiles.has(guide) || !guide.includes('/') || guide.startsWith('operations/'))) {
-      const slug = repoPath.slice(5).replace(/\.md$/i, '').toLowerCase();
-      const destUrl = slug === 'index' ? `/docs/${docsSubdir}` : `/docs/${docsSubdir}/${slug}`;
+      const id = guideId(repoPath.slice(5));
+      const destUrl = id === 'index' ? `/docs/${docsSubdir}` : `/docs/${docsSubdir}/${id}`;
       return `[${label}](${destUrl}${suffix})`;
     }
 

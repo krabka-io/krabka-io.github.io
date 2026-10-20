@@ -5,6 +5,21 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { syncGuides, COMPONENTS } from './sync-docs.mjs';
 
+test('synced links use the rendered IDs for dotted and underscored guide names', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-doc-ids-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, 'broker');
+  fs.mkdirSync(path.join(repo, 'docs/operations'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'docs/operations/capacity.md'), '# Capacity\n[report](performance-kafka-4.3.1.md#three-brokers) [matrix](../KIP_MATRIX.md)');
+  fs.writeFileSync(path.join(repo, 'docs/operations/performance-kafka-4.3.1.md'), '# Report');
+  fs.writeFileSync(path.join(repo, 'docs/KIP_MATRIX.md'), '# Matrix');
+  const content = path.join(dir, 'content');
+  syncGuides([{ name: 'broker', repo: 'krabka-broker', docsSubdir: 'broker', localRepoDir: repo }], content);
+  const page = fs.readFileSync(path.join(content, 'broker/operations/capacity.md'), 'utf8');
+  assert.match(page, /\[report\]\(\/docs\/broker\/operations\/performance-kafka-431#three-brokers\)/);
+  assert.match(page, /\[matrix\]\(\/docs\/broker\/kip_matrix\)/);
+});
+
 test('nested guides are staged together; a missing required guide preserves previous content', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-docs-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
