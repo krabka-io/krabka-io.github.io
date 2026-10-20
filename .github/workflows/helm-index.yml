@@ -15,6 +15,18 @@ on:
         description: Verified schema registry 0.4.3 source commit
         required: true
         type: string
+      operator_digest:
+        description: Verified operator 1.0.2 image digest
+        required: true
+        type: string
+      rebalancer_digest:
+        description: Verified rebalancer 0.4.5 image digest
+        required: true
+        type: string
+      registry_digest:
+        description: Verified schema registry 0.4.3 image digest
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -38,6 +50,9 @@ jobs:
           OPERATOR_REVISION: ${{ inputs.operator_revision }}
           REBALANCER_REVISION: ${{ inputs.rebalancer_revision }}
           REGISTRY_REVISION: ${{ inputs.registry_revision }}
+          OPERATOR_DIGEST: ${{ inputs.operator_digest }}
+          REBALANCER_DIGEST: ${{ inputs.rebalancer_digest }}
+          REGISTRY_DIGEST: ${{ inputs.registry_digest }}
         run: |
           : "${HELM_GPG_KEY:?Release chart signing key is required}"
           bash scripts/build-helm-index.sh

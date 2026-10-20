@@ -108,9 +108,9 @@ for repo in ${repos}; do
 
   # This temporary release worker packages only the frozen component sources.
   case "${repo}" in
-    krabka-operator) revision="${OPERATOR_REVISION}" ;;
-    krabka-rebalancer) revision="${REBALANCER_REVISION}" ;;
-    krabka-schema-registry) revision="${REGISTRY_REVISION}" ;;
+    krabka-operator) revision="${OPERATOR_REVISION}"; image_digest="${OPERATOR_DIGEST}" ;;
+    krabka-rebalancer) revision="${REBALANCER_REVISION}"; image_digest="${REBALANCER_DIGEST}" ;;
+    krabka-schema-registry) revision="${REGISTRY_REVISION}"; image_digest="${REGISTRY_DIGEST}" ;;
     *) echo "Unexpected chart repository: ${repo}" >&2; exit 1 ;;
   esac
   [[ "${revision}" =~ ^[0-9a-f]{40}$ ]]
@@ -145,6 +145,41 @@ PY
     else
       echo "    ${chart}: ${chart_version} (from the workspace Cargo.toml)"
     fi
+    # Pin existing image selectors before signing the public package.
+    expected_image="$(python3 - "${src}/charts/${chart}/values.yaml" "${repo}" "${chart_version}" "${image_digest}" <<'PIN_IMAGE'
+from pathlib import Path
+import re, sys
+path, repo, version, digest = sys.argv[1:]
+assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest), "image digest must be immutable"
+path = Path(path)
+text = path.read_text()
+block = re.search(r"(?m)^image:\n(?:[ \t].*\n|[ \t]*\n)*", text)
+assert block, "chart has no top-level image selector"
+original = block.group()
+repository = "ghcr.io/krabka-io/" + repo
+assert f"  repository: {repository}\n" in original
+if repo == "krabka-schema-registry":
+    old, new = '  tag: ""', f'  tag: "{version}@{digest}"'
+    expected = f"{repository}:{version}@{digest}"
+else:
+    old, new = '  digest: ""', f'  digest: "{digest}"'
+    expected = f"{repository}@{digest}"
+assert original.count(old) == 1, "image selector differs from reviewed source"
+path.write_text(text[:block.start()] + original.replace(old, new, 1) + text[block.end():])
+print(expected)
+PIN_IMAGE
+    )"
+    template=templates/deployment.yaml
+    if [[ "${repo}" == krabka-schema-registry ]]; then template=templates/statefulset.yaml; fi
+    helm template verified "${src}/charts/${chart}" --set bootstrapServers=broker:9092 \
+      --show-only "${template}" > "${work}/rendered.yaml"
+    python3 - "${work}/rendered.yaml" "${expected_image}" <<'VERIFY_IMAGE'
+from pathlib import Path
+import sys
+images = [line.split(":", 1)[1].strip().strip("\"'") for line in Path(sys.argv[1]).read_text().splitlines() if line.strip().startswith("image:")]
+assert images and images[0] == sys.argv[2], (images, sys.argv[2])
+VERIFY_IMAGE
+    printf '%s %s\n' "${chart}" "${expected_image}" >> "${out}/image-pins.txt"
     helm package "${src}/charts/${chart}" \
       --version "${chart_version}" \
       --app-version "${chart_version}" \
