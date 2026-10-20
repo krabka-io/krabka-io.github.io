@@ -106,6 +106,19 @@ for repo in ${repos}; do
   git clone --quiet --depth 1 --branch "${branch}" \
     "https://github.com/${org}/${repo}.git" "${src}"
 
+  # This temporary release worker packages only the frozen component sources.
+  case "${repo}" in
+    krabka-operator) revision="${OPERATOR_REVISION}" ;;
+    krabka-rebalancer) revision="${REBALANCER_REVISION}" ;;
+    krabka-schema-registry) revision="${REGISTRY_REVISION}" ;;
+    *) echo "Unexpected chart repository: ${repo}" >&2; exit 1 ;;
+  esac
+  [[ "${revision}" =~ ^[0-9a-f]{40}$ ]]
+  git -C "${src}" fetch --quiet --depth 1 origin "${revision}"
+  git -C "${src}" checkout --quiet --detach FETCH_HEAD
+  test "$(git -C "${src}" rev-parse HEAD)" = "${revision}"
+  printf '%s %s\n' "${repo}" "${revision}" >> "${out}/source-revisions.txt"
+
   version="$(
     python3 - "${src}/Cargo.toml" <<'PY'
 import sys, pathlib, tomllib
