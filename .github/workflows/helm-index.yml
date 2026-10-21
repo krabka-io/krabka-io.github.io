@@ -38,8 +38,10 @@ concurrency:
 
 jobs:
   index:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Checkout repository
         uses: actions/checkout@v7
 
