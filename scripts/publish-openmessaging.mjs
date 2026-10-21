@@ -54,6 +54,8 @@ export async function loadRun(directory) {
     'a run with --krabka-env broker settings is an experiment and is not published');
   assert.ok(!provenance.contract?.krabka_preallocate,
     'a run with --krabka-preallocate is an experiment and is not published');
+  assert.ok(!provenance.contract?.krabka_seccomp,
+    'a run with --krabka-io-uring changes krabka\'s container security profile and is not published');
   assert.ok(provenance.contract?.test_duration_minutes === undefined,
     'a run with --test-duration-minutes departs from the upstream workloads and is not published');
   await fs.access(path.join(directory, 'summary.md'));

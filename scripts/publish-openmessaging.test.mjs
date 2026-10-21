@@ -120,3 +120,8 @@ test('a run with a shortened measurement is refused', async () => {
   const { root, run } = await fakeRun({ contract: { test_duration_minutes: 5 } });
   await assert.rejects(publish(run, root), /departs from the upstream workloads/);
 });
+
+test('a run with --krabka-io-uring is refused', async () => {
+  const { root, run } = await fakeRun({ contract: { krabka_seccomp: 'docker-29.8.1-default+io_uring' } });
+  await assert.rejects(publish(run, root), /container security profile/);
+});

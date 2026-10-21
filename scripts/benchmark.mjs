@@ -28,6 +28,7 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'krabka-io-uring': { type: 'boolean', default: false },
   'test-duration-minutes': { type: 'string' },
   'krabka-env': { type: 'string', multiple: true, default: [] },
   'no-fstrim': { type: 'boolean', default: false },
@@ -104,6 +105,11 @@ async function main() {
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
+      // Docker's default seccomp profile refuses io_uring_setup, so a broker
+      // that submits direct writes through io_uring falls back to its write
+      // threads. --krabka-io-uring starts krabka's brokers under that profile
+      // plus the three io_uring syscalls; see benchmarks/seccomp/.
+      ...(options['krabka-io-uring'] ? { krabka_seccomp: 'docker-29.8.1-default+io_uring' } : {}),
       ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
       ...(testDuration !== undefined ? { test_duration_minutes: testDuration } : {}),
       disk_trim_before_trial: !options['no-fstrim'],
@@ -338,7 +344,7 @@ async function main() {
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
         'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
         'benchmarks/OpenMessagingMain.java', 'benchmarks/omb-kafka-coalesce-commits.patch',
-        'benchmarks/BenchmarkAdmin.java'].map(async name =>
+        'benchmarks/BenchmarkAdmin.java', 'benchmarks/seccomp/krabka-io-uring.json'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
     console.log(`benchmark ${runId}: ${provenance.mode}; artifacts ${artifacts}`);
@@ -457,7 +463,10 @@ async function main() {
           `rf${rf}-${vendor}-${repetition}-format-${i}`, { output: path.join(directory, `format-${i}`) });
           args = [...common, '--env', 'RUST_LOG=warn', '--env', 'OTEL_SDK_DISABLED=true',
             '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms',
-            ...options['krabka-env'].flatMap(setting => ['--env', setting]), image,
+            ...options['krabka-env'].flatMap(setting => ['--env', setting]),
+            ...(options['krabka-io-uring']
+              ? ['--security-opt', `seccomp=${path.join(ROOT, 'benchmarks/seccomp/krabka-io-uring.json')}`] : []),
+            image,
             '--log-dir=/data', `--broker-id=${i}`, `--cluster-id=${clusterId}`, '--process-roles=controller,broker',
             '--listen-addr=0.0.0.0:9092', `--advertised-listener=${names[i]}:9092`,
             `--offsets-topic-replication-factor=${rf}`, `--transaction-state-replication-factor=${rf}`,
