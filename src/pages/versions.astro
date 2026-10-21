@@ -8,23 +8,25 @@ import wireMatrix from '../data/kafka-wire-matrix.json';
 const snapshot = await getEcosystemVersions();
 const ecosystemRepos = snapshot.repos;
 
-const provenanceSnippet = `# Verify the broker container image signature (Sigstore, keyless)
-cosign verify ghcr.io/krabka-io/krabka-broker:latest \\
-  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
+const provenanceSnippet = `# Verify the broker v1.0.8 image signature (Sigstore, keyless)
+IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:1d0dd0d4d721e47866eda23279c37aba11324db222ba8cd7f001554c32e7745f
+IDENTITY=https://github.com/krabka-io/krabka-broker/.github/workflows/release.yml@refs/tags/v1.0.8
+cosign verify "$IMAGE" \\
+  --certificate-identity "$IDENTITY" \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-# Verify the SLSA provenance attestation on the same image
-cosign verify-attestation --type slsaprovenance ghcr.io/krabka-io/krabka-broker:latest \\
-  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
+# Verify the SLSA v1 provenance attestation on the same image
+cosign verify-attestation --type https://slsa.dev/provenance/v1 "$IMAGE" \\
+  --certificate-identity "$IDENTITY" \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Verify the CycloneDX SBOM attestation on the same image
-cosign verify-attestation --type cyclonedx ghcr.io/krabka-io/krabka-broker:latest \\
-  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-broker/\\.github/workflows/release\\.yml@refs/tags/v' \\
+cosign verify-attestation --type cyclonedx "$IMAGE" \\
+  --certificate-identity "$IDENTITY" \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Verify a Java client artifact signature
-ARTIFACT=krabka-streams-1.4.1.jar
+ARTIFACT=krabka-streams-1.4.2.jar
 gpg --verify "$ARTIFACT.asc" "$ARTIFACT"`;
 
 const pageSchema = {
@@ -184,7 +186,7 @@ const pageSchema = {
                       </span>
                     ) : (
                       <span class="inline-flex items-center rounded bg-white/5 border border-white/10 px-2 py-0.5 text-[11px] text-gray-400">
-                        Planned (L3)
+                        {item.provenance}
                       </span>
                     )}
                   </td>
