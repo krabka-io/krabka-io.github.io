@@ -59,10 +59,12 @@ jobs:
     # shards never got a runner. max-parallel does not help, because GitHub can
     # send every matrix job's queued event at once. So the matrix has only as
     # many jobs as VMs fit: four 16-core lanes (64 vCPUs) or two 32-core lanes.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       lanes: ${{ steps.plan.outputs.lanes }}
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -90,6 +92,8 @@ jobs:
       matrix:
         lane: ${{ fromJSON(needs.plan.outputs.lanes) }}
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -182,8 +186,10 @@ jobs:
     # comparison keeps its four separate reports per shard and is not merged.
     needs: [plan, benchmark]
     if: ${{ !cancelled() && inputs.mode != 'dry-run' && inputs.krabka_comparison_image == '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
