@@ -37,9 +37,14 @@ export function ombCases(selection = 'all') {
   return names.map(id => ({ id, upstream_file: `workloads/${id}.yaml` }));
 }
 
-export function ombWorkload(source, smoke) {
-  // Keep the upstream fields/payload. Only shorten duration/rate/backlog in smoke.
+export function ombWorkload(source, smoke, durationMinutes) {
+  // Keep the upstream fields/payload. Only shorten duration/rate/backlog in
+  // smoke, or the measurement with --test-duration-minutes.
   let effective = source.replace(/^(payloadFile:\s*)["']?([^"'\n]+)["']?\s*$/m, '$1"/src/$2"');
+  if (durationMinutes !== undefined) {
+    assert.ok(Number.isInteger(durationMinutes) && durationMinutes >= 1, 'invalid test duration');
+    effective = effective.replace(/^testDurationMinutes:.*$/m, `testDurationMinutes: ${durationMinutes}`);
+  }
   if (smoke) {
     effective = effective.replace(/^testDurationMinutes:.*$/m, 'testDurationMinutes: 1')
       .replace(/^producerRate:.*$/m, 'producerRate: 5000')

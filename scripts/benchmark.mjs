@@ -28,6 +28,8 @@ const { values: options } = parseArgs({ options: {
   'repetitions': { type: 'string' },
   'vendors': { type: 'string', default: VENDORS.join(',') },
   'krabka-preallocate': { type: 'boolean', default: false },
+  'krabka-io-uring': { type: 'boolean', default: false },
+  'test-duration-minutes': { type: 'string' },
   'krabka-env': { type: 'string', multiple: true, default: [] },
   'no-fstrim': { type: 'boolean', default: false },
   'smoke': { type: 'boolean', default: false },
@@ -78,6 +80,12 @@ async function main() {
   const repetitions = options.smoke ? 1 : Number(options.repetitions ?? 1);
   assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 3, 'repetitions must be 1..3');
   const cases = ombCases(options.workloads);
+  // A shorter measurement for a workload that cannot finish on the host, for
+  // example one whose unlimited retention fills the disk before its upstream
+  // duration ends. Recorded in the contract; the publisher refuses such runs.
+  const testDuration = options['test-duration-minutes'] === undefined ? undefined : Number(options['test-duration-minutes']);
+  assert.ok(testDuration === undefined || (Number.isInteger(testDuration) && testDuration >= 1),
+    '--test-duration-minutes must be a positive whole number');
   for (const setting of options['krabka-env']) {
     assert.match(setting, /^KRABKA_[A-Z0-9_]+=[^\s]*$/, `invalid --krabka-env ${setting}`);
     // The settings are copied into provenance.json and the command log, so a
@@ -97,7 +105,13 @@ async function main() {
       redpanda_reserve_bytes: GIB, redpanda_write_caching: true,
       redpanda_network_iocbs_per_shard: 1024,
       krabka_preallocate: options['krabka-preallocate'],
+      // Docker's default seccomp profile refuses io_uring_setup, so a broker
+      // that submits direct writes through io_uring falls back to its write
+      // threads. --krabka-io-uring starts krabka's brokers under that profile
+      // plus the three io_uring syscalls; see benchmarks/seccomp/.
+      ...(options['krabka-io-uring'] ? { krabka_seccomp: 'docker-29.8.1-default+io_uring' } : {}),
       ...(options['krabka-env'].length ? { krabka_env: options['krabka-env'] } : {}),
+      ...(testDuration !== undefined ? { test_duration_minutes: testDuration } : {}),
       disk_trim_before_trial: !options['no-fstrim'],
       client_memory_bytes: 4 * GIB, client_heap_bytes: 2 * GIB,
       resource_sampling_ms: 250,
@@ -330,7 +344,7 @@ async function main() {
       source_hashes: Object.fromEntries(await Promise.all(['scripts/benchmark.mjs', 'scripts/benchmark-results.mjs',
         'scripts/benchmark-openmessaging.mjs', 'scripts/benchmark-command.mjs',
         'benchmarks/OpenMessagingMain.java', 'benchmarks/omb-kafka-coalesce-commits.patch',
-        'benchmarks/BenchmarkAdmin.java'].map(async name =>
+        'benchmarks/BenchmarkAdmin.java', 'benchmarks/seccomp/krabka-io-uring.json'].map(async name =>
         [name, createHash('sha256').update(await fs.readFile(path.join(ROOT, name))).digest('hex')]))),
     };
     console.log(`benchmark ${runId}: ${provenance.mode}; artifacts ${artifacts}`);
@@ -397,7 +411,7 @@ async function main() {
       provenance.openmessaging = ombRuntime.provenance;
       for (const workload of cases) {
         const source = await fs.readFile(path.join(ombRuntime.source, workload.upstream_file), 'utf8');
-        const effective = ombWorkload(source, options.smoke);
+        const effective = ombWorkload(source, options.smoke, testDuration);
         Object.assign(workload, { config: effective.config, source_sha256: effective.sha256,
           timeout_ms: ombTimeoutMs(effective.config, options.smoke) });
         await fs.writeFile(path.join(artifacts, `${workload.id}.yaml`), effective.yaml);
@@ -449,7 +463,10 @@ async function main() {
           `rf${rf}-${vendor}-${repetition}-format-${i}`, { output: path.join(directory, `format-${i}`) });
           args = [...common, '--env', 'RUST_LOG=warn', '--env', 'OTEL_SDK_DISABLED=true',
             '--env', `KRABKA_CONTROLLER_QUORUM_VOTERS=${voters}`, '--env', 'KRABKA_CLASSIC_GROUP_INITIAL_REBALANCE_DELAY=1ms',
-            ...options['krabka-env'].flatMap(setting => ['--env', setting]), image,
+            ...options['krabka-env'].flatMap(setting => ['--env', setting]),
+            ...(options['krabka-io-uring']
+              ? ['--security-opt', `seccomp=${path.join(ROOT, 'benchmarks/seccomp/krabka-io-uring.json')}`] : []),
+            image,
             '--log-dir=/data', `--broker-id=${i}`, `--cluster-id=${clusterId}`, '--process-roles=controller,broker',
             '--listen-addr=0.0.0.0:9092', `--advertised-listener=${names[i]}:9092`,
             `--offsets-topic-replication-factor=${rf}`, `--transaction-state-replication-factor=${rf}`,
@@ -530,21 +547,42 @@ rpk:
       }
       await delay(30_000, undefined, { signal });
       const user = JSON.parse(await docker(['image', 'inspect', provenance.images.krabka.reference]))[0].Config.User || '0';
-      const script = 'for f in /proc/1/fd/*; do t=$(readlink "$f") || continue; case $t in /data/*.log) '
-        + 'echo "$t $(sed -n "s/^flags:\t//p" /proc/1/fdinfo/${f##*/})";; esac; done';
-      const brokersChecked = [];
-      for (const [i, broker] of brokers.entries()) {
-        const listing = await oneShot(['--pid', `container:${broker.id}`, '--user', user, '--network', 'none',
-          '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--entrypoint', '/bin/bash',
-          provenance.images.kafka.reference, '-c', script], `direct-io-${i}`);
-        await fs.writeFile(path.join(directory, `direct-io-broker-${i}.txt`), `${listing}\n`);
-        brokersChecked.push({ broker: broker.name, ...directIoCheck(listing, os.arch()) });
+      // One `ls` and shell built-ins: a process per descriptor took about a
+      // second for 150 descriptors, longer than a segment lives at a maximum
+      // rate, so the listing mixed the descriptors of consecutive segments.
+      const script = 'ls -l /proc/1/fd 2>/dev/null | while read -r _ _ _ _ _ _ _ _ fd _ t; do case $t in /data/*.log) '
+        + 'f=; while IFS=$\'\\t\' read -r k v; do [ "$k" = flags: ] && f=$v; done < /proc/1/fdinfo/$fd 2>/dev/null; '
+        + 'echo "$t $f";; esac; done';
+      // At a high rate a segment can fill in about a second, and a listing
+      // taken just after a roll shows the new segment before its O_DIRECT
+      // descriptor opens. Each partition replica passes once one of up to ten
+      // listings, 3 s apart, shows its newest segment open with O_DIRECT.
+      const brokersChecked = brokers.map(broker => ({ broker: broker.name, partitions: 0, verified: new Set(), attempts: 0 }));
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        for (const [i, broker] of brokers.entries()) {
+          const checked = brokersChecked[i];
+          if (attempt > 1 && checked.verified.size === checked.partitions) continue;
+          const listing = await oneShot(['--pid', `container:${broker.id}`, '--user', user, '--network', 'none',
+            '--cpuset-cpus', provenance.cpu_sets.client.join(','), '--entrypoint', '/bin/bash',
+            provenance.images.kafka.reference, '-c', script], `direct-io-${i}`);
+          await fs.appendFile(path.join(directory, `direct-io-broker-${i}.txt`), `# attempt ${attempt}\n${listing}\n`);
+          const result = directIoCheck(listing, os.arch());
+          checked.partitions = Math.max(checked.partitions, result.partitions);
+          for (const partition of result.verified) checked.verified.add(partition);
+          checked.attempts = attempt;
+        }
+        if (brokersChecked.every(b => b.verified.size === b.partitions)) break;
+        await delay(3_000, undefined, { signal });
+      }
+      for (const checked of brokersChecked) {
+        checked.direct = checked.verified.size;
+        checked.verified = [...checked.verified].sort();
       }
       const expected = workload.config.topics * workload.config.partitionsPerTopic * rf;
       const found = brokersChecked.reduce((n, b) => n + b.partitions, 0);
       return { checked_at: new Date().toISOString(), arch: os.arch(), expected_partition_replicas: expected,
         found_partition_replicas: found, brokers: brokersChecked,
-        verified: found === expected && brokersChecked.every(b => b.missing.length === 0) };
+        verified: found === expected && brokersChecked.every(b => b.direct === b.partitions) };
     }
 
     async function readBroker(broker) {
@@ -673,7 +711,7 @@ rpk:
               await fs.writeFile(path.join(directory, 'direct-io.json'), `${JSON.stringify(directIoResult, null, 2)}\n`);
               assert.ok(directIoResult.verified, `O_DIRECT not verified: ${directIoResult.error
                 ?? `${directIoResult.found_partition_replicas} of ${directIoResult.expected_partition_replicas} partition replicas found, `
-                  + `missing O_DIRECT on ${directIoResult.brokers.flatMap(b => b.missing).join(', ') || 'none'}`}`);
+                  + `${directIoResult.brokers.reduce((n, b) => n + b.direct, 0)} with their newest segment open with O_DIRECT`}`);
             }
             const result = JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8'));
             const logs = await Promise.all(['stdout', 'stderr'].map(stream => fs.readFile(path.join(directory, `workload.${stream}`), 'utf8')));

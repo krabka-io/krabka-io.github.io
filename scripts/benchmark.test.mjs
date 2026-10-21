@@ -377,9 +377,19 @@ test('the O_DIRECT check needs the newest segment of every benchmark partition o
     '/data/test-topic-a-0/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000001000.log 02100002'].join('\n');
-  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'] });
+  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
   assert.deepEqual(directIoCheck(listing.replaceAll('02140002', '02100002'), 'x64').direct, 0);
-  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [] });
+  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
   assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
   assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
+});
+
+test('--test-duration-minutes shortens only the measurement and refuses a bad value', () => {
+  const source = 'name: x\ntopics: 1\npartitionsPerTopic: 3\nmessageSize: 100\npayloadFile: "payload/payload-100b.data"\ntestDurationMinutes: 15\nproducerRate: 0\nconsumerBacklogSizeGB: 0\n';
+  const shortened = ombWorkload(source, false, 5);
+  assert.equal(shortened.config.testDurationMinutes, 5);
+  assert.equal(shortened.config.partitionsPerTopic, 3);
+  assert.equal(ombWorkload(source, false).config.testDurationMinutes, 15);
+  assert.equal(shortened.sha256, ombWorkload(source, false).sha256, 'the upstream hash stays the source file\'s');
+  assert.throws(() => ombWorkload(source, false, 0), /invalid test duration/);
 });
