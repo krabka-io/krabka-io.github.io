@@ -3,24 +3,11 @@
 This is the Astro site at https://krabka.io. Read this file before you change
 pages, components, styles or copy. `CLAUDE.md` imports it.
 
-## Prose
+## Website style and authority
 
-- Write all prose in ASD-STE100 Simplified Technical English, as the krabka
-  [prose style guide](https://github.com/krabka-io/krabka-broker/blob/main/docs/style_guides/prose_style_guide.md)
-  defines it. It governs docs pages, guides, captions, alt text, commit
-  messages and pull requests.
-- **Exception: the home page** (`src/pages/index.astro` and the `Home*` and
-  `Hero` components) can use a more marketing voice. The rules below still
-  apply to it.
-- Use sentence case for headings, buttons, links and labels. Write "Get
-  started", not "Get Started". Do not join names with "&".
-- Do not use these patterns. They read as generated text:
-  - two-fragment slogans ("Fast broker. Safe Rust.") and "X, not just Y"
-  - lists of three for rhythm only
-  - filler words: seamless, robust, leverage, powerful, blazing, effortless
-  - "Hub", "Directory" and similar labels for ordinary pages
-- A link that ends a section starts with a verb and says what the reader does
-  next: "Run the complete examples", "Read how krabka is verified".
+Read [the website style guide](docs/style_guides/website_style_guide.md) before changing copy, content structure, or presentation. Its explicit website overrides take precedence over the linked broker prose guide. Choose plain, welcoming English for introductions and benefits and the technical register for technical passages, wherever they occur; the exception is not limited to the homepage. Contributor prose, including commits and pull requests, uses the linked technical prose guide.
+
+The website guide is canonical for editorial and presentation rules, including functional badges and tiles, occasional arrows, reuse approvals, and house conventions. Browser-tool UI design remains outside that guide's scope.
 
 ## Claims
 
@@ -34,19 +21,9 @@ pages, components, styles or copy. `CLAUDE.md` imports it.
 - Keep the scope words: "selected kernels", "within each model's bounds",
   "supported Kafka APIs". Formal-methods readers check them.
 
-## Visual design
+## Presentation safeguards
 
-- Do not use gradient text, pill badges, decorative arrows (→), glows, or grids
-  of equal task tiles.
-- Use the theme variables (`--color-*`, `--code-*`) and Tailwind colour
-  classes. Do not hardcode hex or rgba colours in pages or components. The
-  light theme redefines the variables in `src/styles/theme-light.css`, so a
-  hardcoded colour breaks it.
-- Check every change in the light and the dark theme, and at phone width
-  (375 px) and desktop width.
-- The browser tools (Cluster Lab, the playgrounds, the proof explorer) stay
-  dark in the light theme on purpose. Their colours move to shared theme
-  tokens in a later refactor; do not theme them one by one.
+Use theme variables and Tailwind color classes, not hardcoded hex or rgba colors. Check presentation changes in both themes at 375 px and desktop widths. The browser tools intentionally remain dark in the light theme; do not theme them separately before the shared-token refactor. Follow the style guide's approval requirements for new components/assets, occasional arrows, and monospace exceptions in tables.
 
 ## Code samples
 
