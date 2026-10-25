@@ -1,12 +1,13 @@
 // HTTP smoke checks after deployment and on the existing daily schedule.
 // Browser behavior is covered separately by check-site against the build.
 import path from 'node:path';
+import { readSitemap, siteURL } from './sitemap.mjs';
 import { fileURLToPath } from 'node:url';
 
 export async function checkProduction(site = 'https://krabka.io') {
   const failures = [];
   const pages = ['/', '/get-started/', '/docs/', '/docs/quickstart/', '/docs/operations/', '/docs/browser-tools/', '/api/', '/versions/', '/verification/', '/benchmarks/', '/search/', '/docs/lab/', '/docs/proof-explorer/'];
-  const assets = ['/pagefind/pagefind-ui.js', '/pagefind/pagefind-ui.css', '/playground/krabka_playground.js', '/playground/krabka_playground_bg.wasm', '/playground/broker/krabka-broker.wasm', '/why3-web/manifest.json', '/sitemap-index.xml', '/robots.txt'];
+  const assets = ['/pagefind/pagefind-ui.js', '/pagefind/pagefind-ui.css', '/playground/krabka_playground.js', '/playground/krabka_playground_bg.wasm', '/playground/broker/krabka-broker.wasm', '/why3-web/manifest.json', '/robots.txt'];
   for (const route of [...pages, ...assets]) {
     try {
       const page = pages.includes(route);
@@ -31,6 +32,30 @@ export async function checkProduction(site = 'https://krabka.io') {
       failures.push(`${route}: ${error.message}`);
       console.error(`✗ ${failures.at(-1)}`);
     }
+  }
+  try {
+    async function xml(url, root) {
+      const response = await fetch(url, { signal: AbortSignal.timeout(20000), redirect: 'error' });
+      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+      if (!/(?:text|application)\/xml/.test(response.headers.get('content-type') ?? '')) throw new Error(`${url}: expected XML MIME type`);
+      return readSitemap(await response.text(), root, url);
+    }
+    const indexURL = new URL('/sitemap-index.xml', site).href;
+    const children = await xml(indexURL, 'sitemapindex');
+    const pages = new Set();
+    for (const child of children) {
+      siteURL(child, site, indexURL);
+      for (const location of await xml(child, 'urlset')) {
+        const page = siteURL(location, site, child).href;
+        if (pages.has(page)) throw new Error(`Duplicate sitemap URL: ${page}`);
+        pages.add(page);
+      }
+    }
+    if (!pages.has(new URL('/', site).href)) throw new Error('Sitemap does not include the home page');
+    console.log(`✓ Published sitemap: ${pages.size} URLs in ${children.length} file(s)`);
+  } catch (error) {
+    failures.push(`sitemap: ${error.message}`);
+    console.error(`✗ ${failures.at(-1)}`);
   }
   return failures;
 }

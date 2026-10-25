@@ -66,6 +66,7 @@ Use these maintenance guides for the task at hand:
 - [Develop and preview the website](docs/development.md): prerequisites, synchronization, build tiers, and commands by task.
 - [Understand the architecture](docs/architecture.md): content ownership, browser tools, verification data, and a small source map.
 - [Run checks and review results](docs/testing.md): required gates, integration prerequisites, artifacts, and review ownership.
+- [Maintain generated sitemaps](docs/sitemaps.md): build-time generation, coverage checks, and published XML checks.
 - [Maintain publishing and stable URLs](docs/publishing.md): deployment, chart aggregation, component references, and brand downloads.
 - [Apply the website style guide](docs/style_guides/website_style_guide.md): audience, prose registers, evidence, links, and presentation policy.
 

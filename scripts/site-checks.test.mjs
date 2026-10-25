@@ -80,15 +80,16 @@ test('demo fragments validate scenarios, kernels and proof-session IDs', async (
 
 test('SEO issues in the API directory and missing crawler files fail', (t) => {
   const dir = fixture(t);
-  const page = (title) => `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io/"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
+  const page = (title, route = '/') => `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io${route}"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
   write(dir, 'index.html', page('Home'));
-  write(dir, 'api/index.html', page('API'));
-  write(dir, 'robots.txt', 'User-agent: *');
-  write(dir, 'sitemap-index.xml', '<sitemapindex/>');
+  write(dir, 'api/index.html', page('API', '/api/'));
+  write(dir, 'robots.txt', 'User-agent: *\nSitemap: https://krabka.io/sitemap-index.xml');
+  write(dir, 'sitemap-index.xml', '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://krabka.io/sitemap-0.xml</loc></sitemap></sitemapindex>');
+  write(dir, 'sitemap-0.xml', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://krabka.io/</loc></url><url><loc>https://krabka.io/api/</loc></url></urlset>');
   check('check-seo.mjs', dir, 0);
   write(dir, 'api/index.html', '<h1>API</h1>');
   assert.match(check('check-seo.mjs', dir, 1), /api[\\/]index\.html/);
-  write(dir, 'api/index.html', page('API'));
+  write(dir, 'api/index.html', page('API', '/api/'));
   fs.rmSync(path.join(dir, 'robots.txt'));
   check('check-seo.mjs', dir, 1);
 });
@@ -96,9 +97,24 @@ test('SEO issues in the API directory and missing crawler files fail', (t) => {
 test('production smoke detects missing pages and HTML returned for essential assets', async (t) => {
   let broken = false;
   let redirected = false;
+  let sitemapMode = '';
   const server = http.createServer((req, res) => {
     if (redirected && req.url === '/docs/') { res.writeHead(302, { location: '/' }); res.end(); return; }
     if (broken && req.url === '/api/') { res.writeHead(404); res.end(); return; }
+    const origin = `http://${req.headers.host}`;
+    if (req.url === '/sitemap-0.xml' && sitemapMode === 'missing-child') { res.writeHead(404); res.end(); return; }
+    if (req.url === '/sitemap-index.xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      if (sitemapMode === 'empty-index') { res.end('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
+      res.end(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemap-0.xml</loc></sitemap></sitemapindex>`);
+      return;
+    }
+    if (req.url === '/sitemap-0.xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      if (sitemapMode === 'empty-child') { res.end('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
+      res.end(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url></urlset>`);
+      return;
+    }
     const page = req.url.endsWith('/');
     const type = req.url.endsWith('.js') ? 'text/javascript' : req.url.endsWith('.css') ? 'text/css'
       : req.url.endsWith('.wasm') ? 'application/wasm' : req.url.endsWith('.json') ? 'application/json'
@@ -117,4 +133,11 @@ test('production smoke detects missing pages and HTML returned for essential ass
   broken = false;
   redirected = true;
   assert.match((await checkProduction(site)).join('\n'), /Unexpected redirect/);
+  redirected = false;
+  for (const mode of ['empty-index', 'empty-child', 'missing-child']) {
+    sitemapMode = mode;
+    const errors = await checkProduction(site);
+    assert.equal(errors.length, 1, mode);
+    assert.match(errors[0], /sitemap:/);
+  }
 });

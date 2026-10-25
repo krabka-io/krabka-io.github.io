@@ -17,14 +17,14 @@
     "build:playground": "bash playground/build.sh",
     "build:why3-web": "bash why3-web/install.sh",
     "build:broker": "bash playground/broker-wasi/build.sh",
-    "build:site": "npm run prepare:benchmark-archive && astro build && pagefind --site dist",
-    "build": "npm run prepare:benchmark-archive && npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && pagefind --site dist",
+    "build:site": "npm run prepare:benchmark-archive && astro build && npm run check-sitemap && pagefind --site dist",
+    "build": "npm run prepare:benchmark-archive && npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && npm run check-sitemap && pagefind --site dist",
     "check-links": "node scripts/check-links.mjs",
     "check-catalog": "node --experimental-strip-types scripts/check-catalog.mjs",
     "check-seo": "node scripts/check-seo.mjs",
     "check-api-links": "node scripts/check-api-links.mjs",
     "check-production": "node scripts/check-production.mjs",
-    "test:website": "node --experimental-strip-types --test scripts/doc-title.test.mjs scripts/site-checks.test.mjs scripts/sync-docs.test.mjs scripts/sync-proofs.test.mjs scripts/versions.test.mjs scripts/heading-ids.test.mjs scripts/satteri-base-links.test.mjs scripts/page-budgets.test.mjs scripts/operator-crds.test.mjs && node scripts/check-sync-links.mjs",
+    "test:website": "node --experimental-strip-types --test scripts/doc-title.test.mjs scripts/site-checks.test.mjs scripts/sitemap.test.mjs scripts/sync-docs.test.mjs scripts/sync-proofs.test.mjs scripts/versions.test.mjs scripts/heading-ids.test.mjs scripts/satteri-base-links.test.mjs scripts/page-budgets.test.mjs scripts/operator-crds.test.mjs && node scripts/check-sync-links.mjs",
     "check-component-docs": "node --test scripts/operator-crds.test.mjs && node scripts/check-component-docs.mjs",
     "check-site": "node scripts/check-site.mjs",
     "check-page-budgets": "node scripts/check-page-budgets.mjs",
@@ -53,7 +53,8 @@
     "check-snippets": "node scripts/check-snippets.mjs",
     "test:snippets": "node --test scripts/snippets/extract.test.mjs",
     "prepare:benchmark-archive": "node scripts/prepare-benchmark-archive.mjs",
-    "check:benchmark-viewer": "node scripts/check-benchmark-viewer.mjs"
+    "check:benchmark-viewer": "node scripts/check-benchmark-viewer.mjs",
+    "check-sitemap": "node scripts/check-sitemap.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "0.4.3",
@@ -70,6 +71,7 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
     "pagefind": "^1.5.2",
-    "playwright": "1.64.0"
+    "playwright": "1.64.0",
+    "sax": "^1.6.1"
   }
 }

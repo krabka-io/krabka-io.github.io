@@ -37,8 +37,9 @@ export default defineConfig({
     '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
   integrations: [
-    // The 404 and search pages carry noindex; leave them out of the sitemap too.
-    sitemap({ filter: (page) => !/\/(404|search)\/?$/.test(new URL(page).pathname) }),
+    // Exclude noindex pages and the authored /docs/api redirect to /api.
+    // check-sitemap verifies this list against the final HTML on every build.
+    sitemap({ filter: (page) => !/\/(404|search|docs\/api)\/?$/.test(new URL(page).pathname) }),
     headingIds(),
   ],
   markdown: {
