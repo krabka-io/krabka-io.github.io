@@ -1,378 +1,91 @@
-# krabka-io.github.io
+# Krabka website
 
-The official website and unified documentation hub for the [krabka](https://github.com/krabka-io) streaming ecosystem, built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com).
+This repository maintains [krabka.io](https://krabka.io), the website for the
+Krabka streaming ecosystem. It helps Kafka users explore the components,
+evaluate the available evidence, and reach the relevant setup and usage guides.
+It also serves browser-hosted tools, the aggregated Helm chart index, and stable
+brand downloads used by published charts.
 
-Hosted live at [krabka.io](https://krabka.io) and [krabka-io.github.io](https://krabka-io.github.io).
+The site brings together documentation from component repositories. Those
+repositories remain the source of their guides and compiler-generated API
+references. This repository owns their website presentation, navigation, and
+links, not the implementation of every component. The website uses Astro and
+Tailwind CSS; the browser tools have separate build requirements.
 
-The site also publishes two things the rest of the organization depends on: the aggregated Helm chart repository and the brand assets that published charts use for their icons.
+## Use Krabka
 
----
+Start with the live site rather than building this repository to install a
+broker or client. Choose the route that matches your next task:
 
-## 🚀 Quick Start
+- [Get started with Krabka](https://krabka.io/get-started) for the supported local setup and client examples.
+- [Read the documentation](https://krabka.io/docs) for component guides and operational procedures.
+- [Explore the Cluster Lab](https://krabka.io/docs/lab) to run browser-hosted cluster scenarios and deliberate faults.
+- [Inspect verification evidence](https://krabka.io/verification) for selected proved kernels, model bounds, and other correctness checks.
+- [Find compiler API references](https://krabka.io/api) published by the component repositories.
 
-### Prerequisites
-- **Node.js**: `>= 22.12.0` (the `engines` field in `package.json`; CI uses Node 24)
-- **npm**: the version that ships with Node
-- **Rust toolchain**: 1.99.0 or newer (the `rust-version` of `playground` and `playground/broker-wasi`, and the toolchain krabka-broker pins), with the `wasm32-unknown-unknown` target and `bash` and `curl` on the path. `npm run build` needs it, because it compiles the WebAssembly playground and Cluster Lab. `playground/build.sh` adds the target through `rustup` and downloads the matching `wasm-bindgen` CLI.
-- **`git`** and, for release tags, an authenticated **`gh`**: `npm run sync-docs` and `npm run sync-proofs` read the sibling repositories from `..` when they sit beside this one, and clone them from GitHub otherwise.
-- **Real broker for the Cluster Lab** (`npm run build:broker`): the `wasm32-wasip1` target and wasi-sdk 34, whose clang, llvm-ar and WASI sysroot compile the broker's C code (the script downloads it into `playground/broker-wasi/.tools/` when `WASI_SDK_PATH` is unset). Every broker of the lab is this module, so without it the lab still loads but each broker node reports "no build on this site" and refuses connections; `check-lab-clusters` and `check-real-broker` need it too
+The browser tools are exploration tools, not a substitute for deployment
+qualification. Keep the stated compatibility limits and verification scope with
+any result you share.
 
-### Commands
+## Work on the website
 
-```bash
-# Install dependencies
-npm install
+Read [Contributing](CONTRIBUTING.md) and the
+[website style guide](docs/style_guides/website_style_guide.md) before changing
+copy or presentation. Edit imported component guides in their source repository,
+not in generated copies under `src/content/docs/`.
 
-# Fetch the raw benchmark capture used by the data explorer
-git lfs install
+For a pages-only preview, use Node.js 22.12.0 or newer (CI uses Node 24), npm,
+Git, and Git LFS. Network access is needed for package installation, the benchmark
+archive, and component synchronization. From a checkout of this repository:
+
+```sh
+npm ci
 git lfs pull --include "benchmarks/archive/*.tar.gz"
-
-# Sync docs and proof sessions from sibling repos, then start the dev server
-npm run dev
-
-# Start the dev server without syncing
-npm run start
-
-# Manually synchronize markdown guides and compiler API archives
 npm run sync-docs
-
-# Build the WASM playground, sync docs and proofs, then the full static bundle in ./dist
-# (the deploy workflow also runs build:broker and build:why3-web first)
-npm run build
-
-# Build pages only (skipping playground WASM rebuild)
-npm run build:site
-
-# Build the WASM playground and Cluster Lab module only
-npm run build:playground
-
-# Build the real krabka-broker for wasm32-wasip1 and stage it for the Cluster Lab
-npm run build:broker
-
-# Run internal link integrity audit (run after `npm run build`; crawls `dist/`)
-npm run check-links
-
-# Run technical SEO audit (titles, descriptions, canonicals, social cards, sitemaps)
-npm run check-seo
-
-# Check getting started snippet coverage and shell syntax (fetches the synced guides)
-npm run check-snippets
-npm run test:snippets
-
-# Run upstream OpenMessaging workloads against Krabka, Kafka 4.3.1, and Redpanda
-# Native Linux/amd64 Docker, JDK 17+, 14 logical CPUs, 34 GiB available RAM
-npm run benchmark -- --dry-run
-npm run benchmark -- --smoke
-npm run benchmark
-npm run test:benchmark
-
-# Check the captured-data explorer in a browser (after build:site)
-npm run check:benchmark-viewer
-
-# Execute an integration suite; run these sequentially, with port 9092 free.
-# Docker is required. Rust, Go, Java, Python, and Node.js use their native tools;
-# the Java suite needs JDK 21, Gradle 9.6.1 and Maven; Helm needs kind/kubectl/helm.
-npm run check-snippets -- compose
-npm run check-snippets -- helm
-npm run check-snippets -- rust
-npm run check-snippets -- go
-npm run check-snippets -- java
-npm run check-snippets -- python
-npm run check-snippets -- javascript
-
-# Verify that every API reference linked from /api resolves (needs the network)
-npm run check-api-links
-
-# Cluster Lab checks: presets parse (no build needed), then the headless Chromium
-# suites, which need `npm run build` and Playwright with Chromium. check-lab needs
-# no broker; check-lab-clusters and check-real-broker need `npm run build:broker`.
-# check-lab-logs runs the Logs tab's parser, filters and store in plain node
-npm run check-lab-presets
-npm run check-lab-logs
-# check-lab-analyzer runs the Network and Storage analyzers' decoders in plain node
-npm run check-lab-analyzer
-npm run check-lab
-npm run check-lab-clusters
-# check-lab-experiments runs every preset experiment on real brokers (needs build:broker)
-npm run check-lab-experiments
-npm run check-lab-external
-npm run check-real-broker
-npm run check-wasi
-
-# Regenerate the analyzers' Kafka schemas, error names and API keys from the latest
-# krabka-protocol and krabka-broker (siblings fetched at origin/HEAD, else cloned)
-npm run gen-kafka-schemas
-
-# Re-point the kernel explorer's source links at krabka-broker origin/HEAD after
-# checking every quoted signature and contract clause still matches the source
-npm run repin-kernels
-
-# Sync the broker's proof sessions and Coma files for the proof explorer
 npm run sync-proofs
-
-# Build Why3 and browser provers with Bazel (needs Docker) for the browser re-check
-npm run build:why3-web
-
-# Check that the synced broker verification catalog still parses into the ledger rows
-npm run check-catalog
-
-# Preview production build locally
-npm run preview
+npm run start
 ```
 
----
+If Git LFS is not initialized, run `git lfs install` first. Open the URL printed
+by Astro, normally `http://localhost:4321`. This path does not compile Rust or
+produce working playground, broker, or Why3 modules. A page loading successfully
+does not establish that its browser tool is available. See
+[development setup](docs/development.md) for full build tiers and recovery from
+missing inputs. The benchmark archive is required by the preview even for a
+copy edit.
 
-## 🏗️ Architecture & Features
+Before requesting review, run the [required checks](docs/testing.md). Record
+anything you could not test and distinguish local results from deployed-site
+verification. Keep changes focused; this documentation does not authorize
+publishing, deployment, or repository-setting changes.
 
-### 1. Decoupled Build + Unified Distribution Documentation
-- **Dynamic Content Collections:** Markdown guides authored inside language sub-repositories (`krabka-streams-java`, `krabka-streams-go`, `krabka-broker`) are ingested via `scripts/sync-docs.mjs` into `src/content/docs/`.
-- **Dynamic Routing:** `src/pages/docs/[...slug].astro` renders ingested guides with an automated right-hand **"On This Page" Table of Contents**, syntax highlighting, custom markdown typography, and GitHub source provenance footers.
-- **Collapsible Symmetrical Navigation:** `src/layouts/DocsLayout.astro` groups ecosystem topics into collapsible accordions with automatic active-state expansion and breadcrumbs.
+## Repository documentation
 
-### 2. Central API Reference Hub (`/api`)
-- `/api` is a directory of every component's compiler-generated reference. It is driven by `src/data/api-reference.json`, one entry per component, and each entry links to where that component's own repository publishes its reference on `https://krabka.io/<repository>/`. This site does not host or copy those trees.
-  - **Rust (Bazel `rust_doc`):** `krabka-broker`, `krabka-protocol`, `krabka-client-rs`, `krabka-streams-rs`, `krabka-cli`, `krabka-connect`, `krabka-operator`, `krabka-rebalancer` and `krabka-gateway`. Each repository's `docs-pages.yml` builds `//crates/...:*_doc`, assembles a landing page with `aspect rustdoc-site`, and deploys it to that repository's GitHub Pages. Pages must be enabled with source "GitHub Actions" in each repository's settings.
-  - **Java:** Javadoc from `krabka-streams-java`, at `/krabka-streams-java/api/`.
-  - **Go:** godoc from `krabka-streams-go`, at `/krabka-streams-go/`.
-- `npm run check-api-links` fetches every link in the directory and fails on a non-200 answer or on the old placeholder page. It needs the network, so it is not part of `npm run build`.
-- Release tags come from `src/data/versions.json`, which `scripts/sync-docs.mjs` refreshes from the sibling repositories and the GitHub API.
+Use these maintenance guides for the task at hand:
 
-### 3. Interactive WebAssembly Consensus Playground (`/docs/playground`)
-- `/docs/playground` runs Krabka's real KRaft consensus quorum directly in the browser.
-- `playground/` holds the Rust crate binding `krabka-kraft-core` to WebAssembly via `wasm-bindgen`, compiled during the site build via `playground/build.sh`.
+- [Develop and preview the website](docs/development.md): prerequisites, synchronization, build tiers, and commands by task.
+- [Understand the architecture](docs/architecture.md): content ownership, browser tools, verification data, and a small source map.
+- [Run checks and review results](docs/testing.md): required gates, integration prerequisites, artifacts, and review ownership.
+- [Maintain publishing and stable URLs](docs/publishing.md): deployment, chart aggregation, component references, and brand downloads.
+- [Apply the website style guide](docs/style_guides/website_style_guide.md): audience, prose registers, evidence, links, and presentation policy.
 
-### 4. Verification Playground (`/docs/verification-playground`)
-- The same `playground/` crate also binds `krabka-verified`, the broker's Creusot-proved decision kernels, through one `run_kernel(name, json)` dispatcher. The page evaluates a curated set of kernels in the browser with each function's `requires` and `ensures` contract beside the result; inputs outside a precondition are reported, not evaluated.
-- Each kernel's panel carries a "Proof ledger" drilldown quoting the broker's catalog: what the catalog says the kernel proves, which production code calls it, its Why3 proof sessions, and what the caller must establish.
-- Below the explorer, an expandable Stateright model ledger built from `src/data/stateright-models.json` and the catalog lists every model entry point with what it drives, its bounds, its properties, its pinned unique-state counts, and the catalog's own description. The models themselves cannot run in a browser (they are test modules of I/O-bearing crates), so the ledger is an inventory, not a checker.
+The [benchmark instructions](benchmarks/README.md),
+[lab design](playground/docs/lab-design.md),
+[real-broker contract](playground/docs/lab-real-broker.md), and
+[Why3 build guide](why3-web/README.md) remain the canonical subsystem documents.
+Dated measurements and unfinished manual acceptance work belong in the
+[issue #91 review record](docs/reviews/issue-91.md), not the evergreen setup path.
 
-### 4b. Proof Explorer (`/docs/proof-explorer`)
-- `scripts/sync-proofs.mjs` copies the broker's Why3find proof sessions (`verif/**/proof.json`) and the Coma files Creusot generated into `src/data/proof-sessions.json` and `public/proofs/coma/`. The page is a full-window app: the sessions by module on the left (arrow keys walk them, `/` filters), and for the open session tabs for its proof tree (tactics, provers, times), the `[@expl]` obligations parsed from the Coma with their source spans, and the generated Coma itself, syntax-highlighted by `public/proofs/highlight.js`.
-- With the `why3-web` bundle present (`npm run build:why3-web`, built with Bazel in a Docker container; see `why3-web/README.md`), the page re-checks a session in the browser: Why3 compiled with js_of_ocaml loads the Coma file, splits it with the recorded tactics, and Alt-Ergo (JavaScript), Z3, cvc5 or CVC4 (WebAssembly) re-check each supported leaf through its Why3 SMT-LIB driver. Z3 enables shared memory with a scoped service worker, reloads once and resumes the check.
+## Contributing, security, and licenses
 
-### 5. Cluster Lab (`/docs/lab`)
-- A distributed-systems playground: real `krabka-broker` processes, a schema registry, producers, consumers and `krabka-client-streams` apps placed on a canvas. The brokers are the real broker compiled for `wasm32-wasip1` (`playground/broker-wasi`, staged by `npm run build:broker`, contract in `playground/docs/lab-real-broker.md`) and run in Web Workers on the browser WASI runtime in `public/playground/wasi/`. Clients and apps run as one sans-IO simulation inside the `playground/` crate (`playground/src/lab/`, contract in `playground/docs/lab-design.md`). The page owns the clock and the virtual network; faults (kill, restart, wipe, isolate, partition, latency, loss) are deliberate. The network, the clients and the apps replay under the seed; the broker processes draw real randomness and do not.
-- The page is an app that fills the window under the site header, with the guide below it: a toolbar (Play, Step, Settle, speed, the clock), a left rail of Build, Scenarios and Connect tabs (`palette.js` over the small tab component in `tabs.js`), the canvas under an always-visible "Break things" bar (`faults.js`), a dock of Events, Logs, Network bytes and Storage tabs, and the inspector on the right, which lists every node while nothing is selected and suggests things to try. A first-visit tour (`tour.js`) and the `?` dialog explain the controls; the end-to-end checks mark the tour as seen.
-- The front-end is `public/playground/lab/` (hand-written ES modules, no bundler): `app.js` boots and wires the panels, `world.js` wraps the `Lab` wasm class and the animation-frame clock, `canvas.js` is the SVG canvas, `kinds.js` the node-kind catalogue (form fields with the nodes' defaults, the values a node added from the palette starts with, control commands, derived edges, status lines), `views.js` the kind-specific inspector views, `inspector.js` the inspector with its command bar, and `logs.js`, `logstore.js` and `logparse.js` the Logs tab, its bounded line store and level settings, and the pure parser and filters behind it. Presets live in `presets.js`: ten scenarios: a single-broker quickstart, three-broker KRaft clusters (a consumer group of two, a schema registry with an Avro producer and a decoding consumer, a Kafka Streams word count, two independent consumer groups), a broker observer, minimum in-sync replicas, a slow replica, a rack split, and five brokers under a network partition. A preset that needs a node kind the loaded module does not carry is badged *full build*, decided by probing the module at boot.
-- A broker's disk is a volume of the WASI runtime, kept in IndexedDB (database `krabka-wasi`, one volume per scenario and node) whatever the persistence setting says. The one node of the lab module with durable state is the echo node, whose counter is drained from the module after every step and written to IndexedDB (`storage.js`: database `krabka-lab`, stores `logs`, `kv`, `scenarios`), keyed by the scenario's `id`; reopening a saved scenario folds it back into `loadScenarioWithState`. The schema registry keeps its schemas in the `_schemas` topic on the brokers and replays it on every start. Scenarios also export/import as JSON and travel whole inside a share link (`#s=`). `storage.js` also folds every op into an in-memory mirror of each node's image, whatever the persistence setting: turning "Persist to this browser" back on replaces the scenario's stored records with the mirror in one transaction, ahead of any later op, so the ops skipped while it was off leave no gap. A node whose stored data is forgotten while it runs is not written again until it restarts from nothing. Share codes decode without `DecompressionStream` through the raw-DEFLATE decoder in `inflate.js`.
-- Several tabs can host one scenario over WebRTC data channels (`session.js`): the hub makes a `?join=` invite link, the spoke shows an answer code to paste back, no signalling server. The hub assigns clients and apps to peers; a real broker and its disk stay in the hub's tab, so the hub never moves one to a spoke. Frames for nodes hosted elsewhere leave through `drainEgress` and arrive through `pushIngress`. Each tab holds the frames it sends to another tab until its own clock reaches the frame's `deliver_at` (`EgressScheduler` in `world.js`), since the receiver delivers on arrival and tabs share no clock; that keeps link latency real across tabs. Only the host edits the scenario: a spoke's inspector shows node configuration read-only.
-- Network: the dock's Network tab is a protocol analyzer. The world records every frame it sends with its delivery time and up to 64 KiB of payload (`World::drain_wire`, at most 2,048 frames between drains), and the page drains it on every flush into `capture.js`, which keeps 64 MiB, pairs Kafka requests with responses by client endpoint, connection and correlation id, and times them (RTT, server, link). `kafka-decode.js` decodes headers, every message version, record batches (CRC-32C recomputed; gzip, snappy, lz4 and zstd opened by `codecs.js` and `unzstd.js`) and records from `kafka-schemas.json`, which `npm run gen-kafka-schemas` generates from the latest krabka-protocol schemas and krabka-broker error table, recording their revisions. Exports: pcapng (raw IPv4/TCP, lab milliseconds), JSON, CSV. `bytes-view.js` is the linked field tree and hex view both analyzers use.
-- Storage: Browse opens a broker's log directory by partition (`disk.js`): segments with their batches and records, the KRaft metadata log as metadata records, offset and time indexes checked against their segment, producer-state snapshots and checkpoints, and per-partition checks across segments and the leader-epoch checkpoint. `scripts/check-lab-analyzer.mjs` runs all of it in plain node on `scripts/fixtures/lab-analyzer.json`, real frames and files from a lab run.
-- Logs: the dock's Logs tab is a JSON log viewer for the broker processes. Each broker writes one JSON object per line on stderr (`ts` in lab seconds, `level`, `target`, `message` and the event's own fields at the top level, contract in `playground/docs/lab-real-broker.md`), and the page keeps up to 5,000 lines per node and 20,000 in all, the newest following in a virtualized list. A row expands into the record as a collapsible JSON tree; the filters are a minimum level, nodes, targets and a text search that takes `field:value` terms; the stream can pause, clear, and download what is shown as NDJSON. The log level is the `KRABKA_LOG` environment variable (`info`, `debug`, `warn,krabka_broker=debug`), set per scenario for all brokers or for one, kept in `localStorage` (`krabka-lab.loglevels`) and not in the node's config. Changing it restarts the affected brokers on their own disks, after a confirmation.
-- `scripts/check-lab.mjs` (`npm run check-lab`, after `npm run build`) drives the built page in headless Chromium on a scenario of echo and pinger nodes, so it needs no broker module: the preset runs, faults take effect, the echo counter survives a reload and a reopen from the Saved list, re-enabling persistence restores exactly the live state, Forget holds on a running node, a share link opens without `DecompressionStream` (and the decoder round-trips `CompressionStream` output past 64 KiB), a share link reproduces the scenario, and two pages host a scenario together over WebRTC with the cross-tab round trip matching the same-tab one and the spoke kept read-only (`--no-webrtc` skips that part). It needs `playwright` or `playwright-core` (project-local or global) and a Chromium Playwright can find (`npx playwright install chromium`, or `PLAYWRIGHT_BROWSERS_PATH`); it exits 2 when either is missing.
-- `scripts/check-lab-logs.mjs` (plain node, 23 checks) tests the log parser, filters and level directives; `scripts/check-lab-logs-ui.mjs` (`npm run check-lab-logs-ui`) drives the Logs tab in headless Chromium against two WASI test guests: level and text filters, the JSON tree, NDJSON download, and a level change that restarts one node on its disk.
-- `scripts/check-lab-clusters.mjs` (`npm run check-lab-clusters`, after `npm run build:broker` and `npm run build`) runs the shipped cluster presets on real brokers at 5×, in the same headless Chromium. In the three-broker preset one KRaft quorum creates the topic and two consumers share it, and every command of the command bars works. In the registry preset the consumer decodes every value, a second registry joins as a secondary and serves a write by forwarding it to the primary, and a reload replays the `_schemas` topic. The streams preset counts words into a store with its changelog topic, and the five-broker preset serves from its majority and heals a partition. It exits 2 when Playwright or the broker module is missing.
-<!-- J3 -->
-- Process faults and experiments. Besides the network faults, the world takes `cut_one_way`/`heal_one_way` (frames one way are dropped, the other way flows), `pause`/`resume` (a simulated node stops; a real broker's worker stops getting input, readiness and timers, like SIGSTOP, while frames wait in its socket buffers), `clock_skew` (a real broker's REALTIME is offset, MONOTONIC untouched) and `disk` (a real broker's volume turns `slow`, each `fd_sync`/`fd_datasync` waiting `ms` of lab time, `full`, growing writes failing with ENOSPC, or `eio`). The WASI runtime keeps these per process in a small shared buffer (`WasiProcess.pause()`, `resume()`, `setClockSkew(ms)`, `setDisk(mode, ms)`), and `external.js` applies them when the world records the fault. The fault bar's node group has Pause and "More…" (clock skew, disk); the link group has a one-way cut either way and "More…" (latency, loss, reset); the canvas menu offers the same. The krabka broker does not fsync on produce, so a slow disk shows at start, recovery and segment roll rather than in produce latency; a full or failing disk makes the broker log the error and stop.
-- A scenario's optional `experiment` (`experiment.js`) is a script on the lab clock: `steps` apply faults (`world.fault`) or commands (`world.control`; node `"admin"` is the hidden admin) at their times, and `expect` checks are decided `at` a time or must hold `by` one: `invariants_hold` (the invariant checker of `invariants.js`), `isr_size`, `consumer_lag`, `event`, `producer_acked`, `leader_changed`, `snapshot_path` (a dotted path into a node's state), and `kafka_error` (an error code in a response the network capture decoded); `since` subtracts a counter's earlier value. The Scenarios tab edits and validates it, Run experiment restarts the scenario on fresh disks and lists every step and check with its time and result, and `window.krabkaLab.experiment.toJSON()` returns the results. The min-isr, slow-replica and five-broker presets carry one. Fork here pauses the clock, flushes the brokers, copies their volumes (`exportVolume`/`importVolume`) under a new saved scenario that keeps the original cluster id (`forked_from`) and opens it; clients start fresh. `src/components/LabLink.astro` renders a preset as a card whose link carries the scenario in `#s=` (encoded at build time by `codec.js`) with `?focus=1&run=1`, which folds the lab's side columns and runs the experiment. `scripts/check-lab-experiments.mjs` (`npm run check-lab-experiments`) runs every preset experiment at 5× on real brokers and fails on any failed check; it exits 2 when Playwright or the broker module is missing.
-<!-- /J3 -->
+Use [Contributing](CONTRIBUTING.md) for the issue and pull-request workflow and
+[AGENTS.md](AGENTS.md) for coding-agent safeguards. Report vulnerabilities
+privately through the route in [Security](SECURITY.md), not a public issue.
 
-### 6. Correctness & Verification (`/verification`)
-- **Verification page (`/verification`):** How the broker establishes correctness: forbidden `unsafe` Rust, Creusot-proved decision kernels in `krabka-verified`, exhaustive Stateright model checking, mutation testing, and differential suites against live Apache Kafka. Its evidence ledger is a tabbed, filterable list of expandable rows: every Creusot ledger row (what it proves, host caller, proof sessions, caller preconditions), every Stateright model, and the other evidence tiers.
-- **Verification catalog (`/docs/broker/verification`):** The Creusot proof ledger and Stateright model inventory, synced from `krabka-broker/docs/verification.md`. `src/utils/verification-catalog.ts` parses that file at build time and `src/utils/verification-data.ts` joins it with the site's data files; the counts on the homepage and the verification page come from that parse, so they follow the broker's catalog rather than hand-maintained copy.
-- Website performance figures come only from published full OpenMessaging Benchmark runs. Observability (`krabka-o11y`) and Postgres-compatible compute (`gres`) are documented in their own repositories and are linked as the broader Krabka ecosystem.
-
-OpenMessaging benchmark tasks are documented in [benchmarks/README.md](benchmarks/README.md). `npm run benchmark` runs the upstream OMB catalog at RF1/RF3. Publish a validated full run with `node scripts/publish-openmessaging.mjs RUN_DIR`; both the homepage and benchmark page follow `benchmarks/latest-openmessaging.md`.
-
-The manual **OpenMessaging broker benchmarks** workflow runs the upstream Kafka workload catalog against Krabka, Kafka 4.3.1, and Redpanda on the organization's Google Cloud runners. It retains results and diagnostics as Actions artifacts; see [the benchmark instructions](benchmarks/README.md#openmessaging-on-google-cloud).
-
-### 7. Aggregated Helm Chart Repository
-
-Users add one repository URL:
-
-```bash
-helm repo add krabka https://krabka.io/charts
-helm repo update
-```
-
-`scripts/build-helm-index.sh` walks the `krabka-io` organization, takes every repository that holds a `charts/` directory, packages each chart (signing it when `HELM_GPG_KEY` is set), and writes one `index.yaml` over the whole set in `public/charts/`. It needs `helm`, an authenticated `gh`, and `python3`. The `helm-index.yml` workflow runs daily and opens a pull request for a maintainer to merge.
-
-A component repository can trigger an immediate index rebuild via repository dispatch:
-
-```bash
-gh api repos/krabka-io/krabka-io.github.io/dispatches -f event_type=charts-changed
-```
-
-The chart signing public key lives in [krabka-io/tooling](https://github.com/krabka-io/tooling), under `charts/`. No key material is stored here.
-
-### 8. Brand Assets & Chart Icons
-
-`/brand` lists every mark with the URL it is served from. Published Helm charts point their `Chart.yaml` icon at `/logo.png`. Treat a rename under `public/brand` or `public/logo.png` as a breaking change for published charts.
-
-### 9. Release Verification & Track Resolution (`/versions`)
-- Release tracking across stable, pre-release, and development channels with SLSA Level 3 provenance verification steps and Sigstore signatures.
-
-### 9b. Code Highlighting
-- Every code snippet is highlighted with Shiki and one theme, `src/utils/krabka-shiki-theme.mjs`, whose palette is the one the rustdoc, Javadoc and Go API sites use. Hand-written pages render snippets through `src/components/CodeBlock.astro` (pass the Shiki language id); the synced Markdown guides get the same theme from `markdown.shikiConfig` in `astro.config.mjs`. The proof explorer highlights Coma in the browser with its own small tokenizer, because Shiki runs at build time and the explorer loads each Coma file on demand.
-
-### 10. Automated Verification Suites
-- **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
-- **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
-- **Website Snippets (`scripts/check-snippets.mjs`, `snippets.yml`):** Extracts every displayed snippet from `/get-started`, `/docs/quickstart`, and the Rust, Go, and Java client pages, plus the synced Java/Go getting started guides. New or missing snippets fail coverage. Separate CI jobs run on pull requests, main, and daily to catch drift in the imported guides. Sources, dependency locks, and diagnostics are saved as workflow artifacts.
-  - Docker Compose and Helm examples execute against the checked-out `public/quickstart` manifests; Helm uses its own kind cluster and kubeconfig. Readiness polling, interactive stdin, and consumer time limits come from the test harness. CLI and client producers must write the expected value, read back with the standard Kafka consumer.
-  - All Rust examples compile against the same git revisions and dependency lock as the playground. The streams test driver runs its existing output assertion; the two infinite consumer loops are compile checks. Both Rust producers, franz-go, Apache Kafka Java, confluent-kafka Python, and KafkaJS run against the actual quickstart broker image.
-  - Go/Java guide fragments get missing program structure and fixture inputs. Serdes use the libraries' registry stubs; columnar and streams examples run locally, with output assertions where the guide feeds records. Gradle BOM blocks and the Maven XML resolve their published dependencies. Repository build commands (`go test`, `bazel test`, `./gradlew build`) receive shell syntax checks; their execution belongs to the source repositories' CI.
-- **Cluster Lab End-to-End (`scripts/check-lab.mjs`):** Drives `/docs/lab` in headless Chromium without a broker, persistence and WebRTC hosting included. `check-lab-clusters.mjs` runs the cluster presets on real brokers; `check-lab-presets.mjs`, `check-lab-external.mjs`, `check-real-broker.mjs` and `check-wasi.mjs` cover the presets, the external-node contract, the real broker and the WASI runtime.
-- **Catalog Parse Check (`scripts/check-catalog.mjs`):** Runs the verification-catalog parser against the synced `docs/verification.md` and fails when the ledger table or the model paragraphs no longer parse, so a layout change in the broker's catalog cannot silently empty the site's ledger. The deploy workflow runs it after every build.
-
----
-
-## 📁 Repository Structure
-
-```
-krabka-io.github.io/
-├── .github/workflows/
-│   ├── deploy.yml            # Builds the site and deploys to GitHub Pages
-│   ├── helm-index.yml        # Rebuilds the aggregated chart index and opens a pull request
-│   ├── kafkactl-lab.yml      # Releases the kafkactl lab bridge binaries
-│   ├── snippets.yml          # Getting started deployments and client-library examples
-│   └── playground.yml        # Playground and WASI crates: tests, clippy, wasm builds
-├── kafkactl-lab/             # krabka build of fgrosse/kafkactl with the lab bridge command (Go)
-├── playground/               # krabka-playground: WASM consensus simulator, verified kernels, Cluster Lab (Rust)
-│   ├── src/lib.rs            # wasm-bindgen shim over krabka-kraft-core
-│   ├── src/kernels.rs        # run_kernel dispatcher over krabka-verified
-│   ├── src/lab/              # Cluster Lab world, nodes, network and scenarios
-│   ├── broker-wasi/          # The real krabka-broker for wasm32-wasip1
-│   ├── wasi-guest/           # Test guest for the browser WASI runtime
-│   ├── docs/                 # lab-design.md and lab-real-broker.md
-│   └── build.sh              # Compiles to WebAssembly in public/playground/
-├── why3-web/                 # Why3 and browser provers, built with Bazel for the proof explorer
-├── public/
-│   ├── brand/                # Stable brand marks and lockups
-│   ├── charts/               # Aggregated Helm repository: index.yaml and tarballs
-│   ├── docs/lab/             # Cross-origin isolation service worker for the Cluster Lab
-│   ├── playground/           # Hand-written front-end: playground, verified kernels, lab/ and wasi/
-│   ├── proofs/               # Proof explorer front-end; coma/ is synced (gitignored)
-│   ├── quickstart/           # Downloadable manifests (docker-compose.yml, krabka-cluster.yaml, crds.yaml)
-│   ├── favicon.svg / .ico    # Geometric Dungeness crab icon suite
-│   ├── logo.png / logo.svg   # Chart icon and square mark
-│   ├── robots.txt            # Search engine crawler permissions & sitemap reference
-│   └── og/                   # Social cards, rendered by scripts/og-images.mjs
-├── scripts/
-│   ├── sync-docs.mjs         # Multi-repo documentation & release asset sync engine
-│   ├── sync-proofs.mjs       # Copies the broker's Why3find sessions and Coma files
-│   ├── check-links.mjs       # Internal link crawl and resolution validator
-│   ├── check-seo.mjs         # Production technical SEO audit suite
-│   ├── check-api-links.mjs   # Fetches every API reference the /api directory links to
-│   ├── check-catalog.mjs     # Verification catalog parse check (ledger rows and model notes)
-│   ├── check-lab*.mjs        # Cluster Lab presets, legacy-scenario migration, the Logs tab's pure side and headless Chromium end-to-end checks
-│   ├── lab-check-lib.mjs     # Harness and the echo and pinger scenario the lab checks share
-│   ├── check-real-broker.mjs # Real broker in the Cluster Lab
-│   ├── check-wasi.mjs        # Browser WASI runtime and cross-origin isolation
-│   ├── check-proof-readability.mjs # Obligation summaries in the proof explorer
-│   ├── check-proof-highlight.mjs # Why3 highlighter keywords, line count and escaping
-│   ├── check-snippets.mjs    # Compile and run the website quickstarts and client samples
-│   ├── snippets/             # Source extraction, coverage checks, and extractor tests
-│   ├── verify-code-stubs.mjs # Legacy JSON/XML Markdown inspection
-│   └── build-helm-index.sh   # Rebuilds public/charts from component repositories
-├── src/
-│   ├── components/           # Reusable UI components (Navbar, Footer, CodeBlock, EvidenceLedger, VerificationBar, etc.)
-│   ├── content.config.ts     # Content Collections glob loader schema
-│   ├── content/docs/         # Ingested markdown guides (gitignored, populated by sync-docs)
-│   ├── data/
-│   │   ├── versions.json     # Live synchronized active release version mappings
-│   │   ├── ecosystem-versions.json # Cached baseline release and commit status
-│   │   ├── kafka-wire-matrix.json  # Wire protocol coverage matrix
-│   │   ├── verified-kernels.json   # Kernel explorer specs
-│   │   ├── stateright-models.json  # Stateright model entry points
-│   │   └── proof-sessions.json     # Synced proof sessions (gitignored)
-│   ├── layouts/
-│   │   ├── BaseLayout.astro  # HTML shell, OpenGraph tags, JSON-LD Schema.org metadata
-│   │   ├── DocsLayout.astro  # Documentation shell with collapsible sidebar & sticky TOC
-│   │   └── ProseLayout.astro # Article layout for long-form prose pages
-│   ├── pages/
-│   │   ├── 404.astro         # Custom branded 404 error page
-│   │   ├── api/index.astro   # Searchable API Reference Directory, from src/data/api-reference.json
-│   │   ├── docs/             # Hub landing, module home templates, and [...slug].astro
-│   │   ├── features/         # Technical architecture pages (KRaft, Tiered Storage, etc.)
-│   │   ├── brand.astro       # Brand guidelines and vector assets
-│   │   ├── get-started.astro # Interactive quickstart with Docker Compose and Helm
-│   │   ├── index.astro       # Primary ecosystem homepage
-│   │   ├── verification.astro # Correctness overview and the expandable evidence ledger
-│   │   └── versions.astro    # Release tracks and SLSA artifact provenance
-│   ├── styles/
-│   │   ├── custom.css        # Ocean dark theme, custom scrollbars, markdown typography
-│   │   ├── evidence.css      # Expandable evidence ledger (verification page and playground)
-│   │   ├── kernels.css       # Verified kernel explorer styling
-│   │   ├── lab.css           # Cluster Lab styling
-│   │   ├── playground.css    # Interactive consensus simulator styling
-│   │   └── proofs.css        # Proof explorer styling
-│   └── utils/
-│       ├── paths.ts          # Base URL path resolution helper
-│       ├── satteri-wrap-tables.mjs # Markdown table wrapper plugin
-│       ├── verification-catalog.ts # Parser for the synced broker verification catalog
-│       ├── verification-data.ts    # Joins the catalog with src/data for the verification pages
-│       ├── verification-loader.ts  # Reads the synced catalog and data files at build time
-│       └── versions.ts       # GitHub GraphQL live release resolution
-├── BUILD.bazel / MODULE.bazel # Bazel build of the why3-web bundle
-├── astro.config.mjs          # Astro static site configuration
-├── tailwind.config.mjs       # Tailwind configuration with @tailwindcss/typography
-└── package.json              # Scripts and project dependencies
-```
-
----
-
-## Website checks and review
-
-Run these checks after syncing guides and proofs and building all browser assets:
-
-```bash
-npm run test:website
-npm run test:snippets
-npm run build:site
-npm run check-links
-npm run check-seo
-npm run check-page-budgets
-npx playwright install chromium
-npm run check-site
-# Network checks against the deployed site, independent of local build results:
-npm run check-production
-npm run check-api-links
-```
-
-The deploy workflow runs the local checks before publishing. It retains the browser screenshots, controlled timings, and payload report as the `website-checks` Actions artifact. Production smoke checks run after a main-branch deployment and on the daily schedule. A successful local build does not establish deployment success.
-
-`check-site` checks the entry pages, operations index, releases, search, lab, and proof explorer at 390 and 1440 pixels in both themes. It checks visible control names, page overflow, keyboard navigation, release filtering, inspector focus return, and ten maintained search queries. It writes `artifacts/site-check/measurements.json` and screenshots. `check-page-budgets` writes `build.json` in that directory and rejects missing pages, missing assets, or payload overruns.
-
-Measurements use a loopback static server with no network throttling, one sample per visit, and a fresh browser context followed by a repeat visit. The server sends `no-store`; the repeat visit can reuse browser compilation and storage, but does not measure a warm HTTP cache. These measurements are separate from field Web Vitals. Keep the profile and sample count with any comparison. Record field LCP, INP, and CLS only when there are enough real visits to report their 75th percentile.
-
-The October 2026 build baseline used upstream guides and proof sessions synced on October 4 and the deployed WASM modules. It was measured before a new Rust build or production deployment:
-
-| Payload | Raw bytes | Gzip bytes |
-| --- | ---: | ---: |
-| Ordinary entry-page HTML | 31–99 KB | 7.6–19.6 KB |
-| Benchmark HTML | 388,472 | 84,648 |
-| Proof explorer HTML | 2,828,662 | 249,113 |
-| Lab JavaScript | 814,225 | 242,038 |
-| Broker WASM | 15,226,339 | 5,666,758 |
-| Playground WASM | 6,569,972 | 2,481,890 |
-| Brand preview images | 26,374 | 26,604 |
-
-The group sizes sum files; gzip sizes estimate per-file compression, not the site's transfer encoding. Review `scripts/page-budgets.json` before changing a ceiling. The brand gallery uses small WebP previews; original download URLs remain public contracts. Run `npm run build:brand` after changing an original image.
-
-### Manual task protocol for issue #91
-
-Use a clean environment and record exact image digests, client versions, device/browser, network profile, theme, date, participant count, completion, elapsed time, and failures. Keep cleanup separate and use disposable clusters for recovery tests.
-
-1. Observe five first-time participants: find the browser trial, run the local quickstart, produce and read `hello krabka`, then find compatibility and migration guidance. Record assistance and where each person stops. The proposed criterion is four independent completions out of five.
-2. Ask five participants to predict and run the minimum-ISR lab experiment, explain the visible result, and find the local-install next step. Record the same measures. Repeat these tasks in March with the same protocol; do not infer traffic or conversion rates from the small sample.
-3. Have a second engineer rehearse backup/restore and upgrade/recovery on a disposable cluster. Record capture boundaries, source/target digests, readiness and replication checks, expected output, observed output, and unsupported cases. A previous image is a recovery option only after persisted-format compatibility has been tested.
-4. Review keyboard order, visible focus, accessible names, announcements, contrast, reduced motion, screen-reader reading, and 200%/400% zoom against WCAG 2.2 AA. Check phone, tablet, and desktop widths in both themes, including app controls. Record remaining gaps. Automated structural checks do not establish accessibility conformance.
-5. Review available analytics and search questions before selecting the next tutorial. Run its published commands from a clean environment. Check the ten queries in `scripts/check-site.mjs` and record missing or misleading results.
-
-The observed user studies, second-engineer rehearsals, full accessibility review, field measurements, and demand-based tutorial selection remain open acceptance work in [#91](https://github.com/krabka-io/krabka-io.github.io/issues/91).
-
-| Review owner | Content or check | Review interval |
-| --- | --- | --- |
-| Website maintainer | Quickstart, Get Started, browser-tools guide, navigation, search and budgets | Monthly and after setup or UI changes |
-| Broker maintainers | Imported operations, configuration, qualification, compatibility and migration procedures | Every candidate release and after recovery-contract changes |
-| Client maintainers | Runnable language example and imported client guides | Every client release |
-| Verification maintainers | Proof and kernel scope, evidence links and guided lab checks | After catalog, broker or scenario changes |
-| Component maintainers | Compiler API publication and release metadata | Every release; daily availability checks |
-| Website maintainer | Production smoke checks and manual task records | Daily automated checks; monthly review of failures |
-
-Assign a named reviewer from each role when scheduling the manual work. The imported guide's source date is the commit date, not a record of a human review.
-
-## 📜 License
-
-Apache License 2.0. Copyright &copy; 2026 The Krabka Authors.
+Original website code and code samples use
+[Apache 2.0](LICENSES/Apache-2.0.txt). Original prose uses
+[CC BY 4.0](LICENSES/CC-BY-4.0.txt). Imported and third-party material retains its
+existing terms. Read the [license scope map](LICENSE) for mixed files,
+attribution, and artwork treatment, and the [trademark policy](trademark.md) for
+use of the name, logo, and wordmark. Copyright licensing and permission to imply
+official branding are separate questions.
