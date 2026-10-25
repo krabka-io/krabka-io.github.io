@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { getCollection, render } from 'astro:content';
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
+import { docTitle } from '../../utils/doc-title.mjs';
 
 export async function getStaticPaths() {
   const docs = await getCollection('docs');
@@ -33,7 +34,7 @@ const componentLabelMap: Record<string, string> = {
 
 const baseTitle = entry.data?.title || headings[0]?.text || 'Documentation Guide';
 const label = componentLabelMap[component];
-const title = label ? `${baseTitle} (${label})` : baseTitle;
+const title = docTitle(baseTitle, entry.id, label);
 // A synced guide rarely has a description in its frontmatter. Search results
 // show the description, so use the guide's opening paragraph rather than a
 // sentence every guide would share.
