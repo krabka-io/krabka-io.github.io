@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { slug } from 'github-slugger';
+import { importedInputs } from './lastmod-provenance.mjs';
 
 export const authoredRoutes = {
   "/404": "src/pages/404.astro",
@@ -58,20 +59,39 @@ const generatedGaps = {
   '/': 'unreviewed-benchmark-and-verification-inputs',
   '/releases': 'release-edit-and-membership-history-unavailable',
   '/versions': 'live-version-snapshot-history-unavailable',
-  '/news': 'release-edit-and-membership-history-unavailable',
   '/benchmarks': 'benchmark-data-significance-unreviewed',
   '/benchmarks/explorer': 'benchmark-archive-significance-unreviewed',
   '/verification': 'catalog-and-proof-significance-unreviewed',
   '/docs/verification-playground': 'catalog-and-proof-significance-unreviewed',
   '/docs/proof-explorer': 'catalog-and-proof-significance-unreviewed',
+  '/docs/operator/crds': 'crd-and-shared-input-significance-unreviewed',
 };
+// Known non-import inputs. Patterns describe incomplete families, not dated
+// dependencies; reviewed records need exact files instead of these selectors.
+const verificationInputs = ['src/content/docs/broker/verification.md', 'src/data/proof-sessions.json', 'src/data/verified-kernels.json', 'src/data/stateright-models.json', 'public/proofs/coma/**'];
+const benchmarkInputs = ['benchmarks/latest-openmessaging.md', 'benchmarks/openmessaging/**/provenance.json', 'benchmarks/openmessaging/**/trials.json'];
+const generatedInputs = {
+  '/': [...verificationInputs, ...benchmarkInputs],
+  '/releases': ['src/data/versions.json', 'src/data/ecosystem-versions.json', 'external:GitHub-release-collection-and-edit-history'],
+  '/versions': ['src/data/ecosystem-versions.json', 'external:GitHub-repositories-tags-releases-and-comparisons'],
+  '/benchmarks': benchmarkInputs,
+  '/benchmarks/explorer': ['src/data/benchmark-archive.json', 'public/benchmarks/archive-data/**', 'benchmarks/archive/*.tar.gz'],
+  '/verification': verificationInputs,
+  '/docs/verification-playground': verificationInputs,
+  '/docs/proof-explorer': [...verificationInputs, 'public/proofs/**', 'public/why3-web/**'],
+  '/docs/operator/crds': ['src/content/docs/operator/crds.json'],
+};
+
 const guideId = (file) => file.replace(/\.md$/i, '').split('/').map((part) => slug(part)).join('/');
 
 export function routeInputs(root, url) {
   const route = new URL(url).pathname.replace(/\/$/, '') || '/';
   if (authoredRoutes[route]) {
     const source = authoredRoutes[route];
-    return { family: 'authored', source, inputs: [source], gap: generatedGaps[route] };
+    let imports = [source];
+    try { imports = [...importedInputs(root, source)]; } catch { /* An omitted route can lack generated build inputs. */ }
+    return { family: generatedInputs[route] ? 'data-driven' : 'authored', source,
+      inputs: [...new Set([...imports, ...(generatedInputs[route] ?? [])])].sort(), gap: generatedGaps[route] };
   }
   const provenanceFile = path.join(root, 'src/content/docs/lastmod-provenance.json');
   const provenance = fs.existsSync(provenanceFile) ? JSON.parse(fs.readFileSync(provenanceFile, 'utf8')) : { components: {} };

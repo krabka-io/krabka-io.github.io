@@ -104,10 +104,11 @@ Sync failure leaves both previous content and provenance intact.
 
 Guides currently omit dates because their significant source changes and full
 render dependencies have not been reviewed. CRD pages report the schema gap.
-Release and news indexes omit dates because publication does not establish
+The release index omits dates because publication does not establish
 edited notes or addition/removal history. Versions omit dates because their
 live snapshots lack complete history. Benchmark, catalog and proof views
 report their unreviewed data inputs. The homepage includes those data gaps.
+News pages use authored content, not live release notes.
 These omissions apply online and offline. A release edit timestamp alone would
 not prove complete collection history, including removed releases.
 

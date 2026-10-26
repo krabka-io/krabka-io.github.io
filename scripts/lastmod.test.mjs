@@ -128,9 +128,27 @@ test('sync publishes per-file/custom/nested provenance atomically without changi
 test('malformed explicit dates fail, including records for unmapped routes', () => {
   for (const date of ['2026-02-30', '2026-10-01T12:00:00', 'not-a-date']) assert.throws(() => validateAttestations({ '/unknown': { date } }), /invalid explicit lastmod/);
   assert.equal(routeInputs(process.cwd(), 'https://krabka.io/releases/').gap, 'release-edit-and-membership-history-unavailable');
+  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/news/').family, 'authored');
+  assert.ok(routeInputs(process.cwd(), 'https://krabka.io/releases/').inputs.includes('external:GitHub-release-collection-and-edit-history'));
   assert.equal(routeInputs(process.cwd(), 'https://krabka.io/versions/').gap, 'live-version-snapshot-history-unavailable');
   assert.equal(routeInputs(process.cwd(), 'https://krabka.io/new-route/'), null);
   assert.ok(Object.keys(authoredRoutes).length > 1);
+});
+
+test('dirty date records omit, but malformed supplied dates still fail', (t) => {
+  const f = fixture(t);
+  f.write('page.astro', '<h1>Verified claim</h1>'); f.commit();
+  const record = f.reviewed(['page.astro']);
+  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/one': record })); f.commit();
+  const dir = path.join(f.root, 'dist');
+  sitemaps(dir, ['https://krabka.io/one/']);
+  const options = { root: f.root, map: () => mapPage('page.astro') };
+  assert.equal(applyLastmod(dir, options)[0].date, '2026-10-01');
+  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/one': { ...record, date: '2026-10-02' } }));
+  sitemaps(dir, ['https://krabka.io/one/']);
+  assert.equal(applyLastmod(dir, options)[0].reason, 'uncommitted-date-attestations');
+  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/unmapped': { ...record, date: '2026-02-30' } }));
+  assert.throws(() => applyLastmod(dir, options), /invalid explicit lastmod/);
 });
 
 const ns = 'http://www.sitemaps.org/schemas/sitemap/0.9';
