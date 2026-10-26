@@ -4,12 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readSitemap } from './sitemap.mjs';
-import { repositoryState, resolveLastmod, validateAttestations } from './lastmod-provenance.mjs';
+import { repositoryState, sourceFileProvenance, resolveLastmod, validateAttestations } from './lastmod-provenance.mjs';
 import { routeInputs } from './lastmod-routes.mjs';
 
 const unescape = (text) => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, entity) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity]);
 
-export function applyLastmod(dir, { root = process.cwd(), attestations = JSON.parse(fs.readFileSync(path.join(root, 'scripts/lastmod-reviewed.json'), 'utf8')), map = routeInputs, state = repositoryState(root) } = {}) {
+export function applyLastmod(dir, { root = process.cwd(), attestations, map = routeInputs, state = repositoryState(root) } = {}) {
+  if (!attestations) {
+    attestations = JSON.parse(fs.readFileSync(path.join(root, 'scripts/lastmod-reviewed.json'), 'utf8'));
+    const record = sourceFileProvenance(root, 'website', 'scripts/lastmod-reviewed.json');
+    if (record.dirtySource !== false) state = { ...state, attestationReason: 'uncommitted-date-attestations' };
+  }
   validateAttestations(attestations); // Supplied malformed dates fail, even on omitted routes.
   const indexFile = path.join(dir, 'sitemap-index.xml');
   let index = fs.readFileSync(indexFile, 'utf8');

@@ -79,7 +79,8 @@ Their current hashes are guards, not evidence that every input changed on
 12 October. Review these proposed baselines with the implementation.
 
 The resolver checks complete website history, baseline ancestry, tracked input
-paths, clean input status and exact hashes. Dirty or untracked inputs, changed
+paths, clean input and attestation status, exact hashes and intervening commits.
+A later input edit followed by a revert still needs review, even with equal hashes. Dirty or untracked inputs, changed
 hashes, missing files and unavailable history remove dates with reasons.
 An unrelated file or commit does not change a verified date. There is no build,
 sync, filesystem-mtime or repository-HEAD fallback. CI checks out full website

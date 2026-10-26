@@ -78,6 +78,7 @@ export function resolveLastmod({ root, url, mapping, attestation, state = reposi
   if (!mapping) return omit('unmapped-route');
   if (mapping.gap) return omit(mapping.gap);
   if (!attestation) return omit('no-reviewed-significant-update');
+  if (state.attestationReason) return omit(state.attestationReason);
   if (!state.historyComplete) return omit(state.reason ?? 'incomplete-website-history');
   if (mapping.provenance?.some((record) => !record || record.reason || !record.historyComplete || record.dirtySource !== false)) return omit('incomplete-upstream-provenance');
   const inputs = Object.keys(attestation.inputs).sort();
@@ -88,6 +89,8 @@ export function resolveLastmod({ root, url, mapping, attestation, state = reposi
     // This also checks deletions, staged changes and untracked input files.
     if (git(root, ['status', '--porcelain', '--untracked-files=all', '--', ...inputs])) return omit('dirty-or-untracked-input');
     execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', attestation.revision, state.revision], { stdio: 'ignore', timeout: 15_000 });
+    // Hash equality alone cannot detect a later edit followed by a revert.
+    if (git(root, ['log', '--format=%H', `${attestation.revision}..${state.revision}`, '--', ...inputs])) return omit('input-history-changed-since-review');
     for (const file of inputs) {
       if (contentHash(fs.readFileSync(path.join(root, file))) !== attestation.inputs[file]) return omit(`changed-unreviewed-input:${file}`);
       // A tracked baseline is required, even for input paths ignored by Git.

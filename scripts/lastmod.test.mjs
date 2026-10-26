@@ -41,7 +41,7 @@ test('explicit review wins; unknown, changed, dirty, shallow and non-Git inputs 
   f.write('shared.astro', '<p>Changed substantive claim</p>');
   assert.equal(resolve().reason, 'dirty-or-untracked-input');
   f.commit();
-  assert.equal(resolve().reason, 'changed-unreviewed-input:shared.astro');
+  assert.equal(resolve().reason, 'input-history-changed-since-review');
   assert.equal(resolve({ attestation: f.reviewed(['page.astro', 'shared.astro'], '2026-10-02') }).date, '2026-10-02');
   f.write('page.astro', '<h1>Original claim</h1>\n'); f.commit();
   // Cosmetic reviews keep the previous significant date, never the commit date.
@@ -58,6 +58,17 @@ test('new imported dependencies cannot silently reuse an old date', (t) => {
   const resolve = (record) => resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping: mapPage('page.astro'), attestation: record });
   assert.equal(resolve(f.reviewed(['page.astro'])).reason, 'unattested-import-dependency');
   assert.equal(resolve(f.reviewed(['page.astro', 'shared.astro'])).date, '2026-10-01');
+});
+
+test('restored bytes cannot hide a significant intervening edit or revert', (t) => {
+  const f = fixture(t);
+  f.write('page.astro', '<h1>Original claim</h1>'); f.commit();
+  const attestation = f.reviewed(['page.astro']);
+  f.write('page.astro', '<h1>Revised claim</h1>'); f.commit();
+  f.write('page.astro', '<h1>Original claim</h1>'); f.commit();
+  const record = resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping: mapPage('page.astro'), attestation });
+  assert.equal(record.date, null);
+  assert.equal(record.reason, 'input-history-changed-since-review');
 });
 
 test('source history pins paths and follows renames; HEAD, copies and local modifications are not page dates', (t) => {
