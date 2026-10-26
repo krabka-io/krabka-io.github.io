@@ -34,7 +34,7 @@ Read [Contributing](CONTRIBUTING.md) and the
 copy or presentation. Edit imported component guides in their source repository,
 not in generated copies under `src/content/docs/`.
 
-For a pages-only preview, use Node.js 22.12.0 or newer (CI uses Node 24), npm,
+For a pages-only preview, use Node.js 22.23.4 or newer (CI uses Node 24), npm,
 Git, and Git LFS. Network access is needed for package installation, the benchmark
 archive, and component synchronization. From a checkout of this repository:
 

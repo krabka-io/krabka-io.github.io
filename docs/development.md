@@ -4,7 +4,7 @@ Use this guide for setup and local preview. See [testing](testing.md) for review
 
 ## Prerequisites
 
-Use Node.js 22.12.0 or newer and its bundled npm; CI uses Node 24. Install Git and Git LFS. Sync scripts read component checkouts beside this repository when available and otherwise clone them from GitHub. Release-tag lookup uses the GitHub API; authenticated `gh` is useful for release metadata and required for maintainer chart tasks. Network access is needed for dependencies, archives, and upstream synchronization.
+Use Node.js 22.23.4 or newer and its bundled npm; CI uses Node 24. Install Git and Git LFS. Sync scripts read component checkouts beside this repository when available and otherwise clone them from GitHub. Release-tag lookup uses the GitHub API; authenticated `gh` is useful for release metadata and required for maintainer chart tasks. Network access is needed for dependencies, archives, and upstream synchronization.
 
 A pages-only preview does not need Rust. Full browser-tool builds have these additional requirements:
 

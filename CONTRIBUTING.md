@@ -22,7 +22,7 @@ and the expected result. Use the private route in
 
 ## Prepare a local checkout
 
-Use Node.js 22.12.0 or later, npm, Git, and Git LFS. CI uses Node.js 24. The sync commands
+Use Node.js 22.23.4 or later, npm, Git, and Git LFS. CI uses Node.js 24. The sync commands
 read sibling repositories or clone missing ones from GitHub; network access is
 needed for missing source inputs. Release-tag lookup uses the GitHub API; authenticated gh is useful for that lookup.
 
