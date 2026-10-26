@@ -18,9 +18,6 @@ set -euo pipefail
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${crate_dir}/../.." && pwd)"
 out_dir="${repo_root}/public/playground/broker"
-tools_dir="${crate_dir}/.tools"
-sdk_release="wasi-sdk-34"
-sdk_version="34.0"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "error: cargo is not on PATH." >&2
@@ -34,32 +31,11 @@ if command -v rustup >/dev/null 2>&1; then
 fi
 
 echo "==> C toolchain for wasm32-wasip1"
-if [[ -z "${CC_wasm32_wasip1:-}" || -z "${AR_wasm32_wasip1:-}" || -z "${CFLAGS_wasm32_wasip1:-}" ]]; then
-  sdk="${WASI_SDK_PATH:-}"
-  if [[ -z "${sdk}" ]]; then
-    case "$(uname -s)" in
-      Linux) os=linux ;;
-      Darwin) os=macos ;;
-      *) echo "error: no wasi-sdk build for $(uname -s); set WASI_SDK_PATH." >&2; exit 1 ;;
-    esac
-    case "$(uname -m)" in
-      x86_64 | amd64) arch=x86_64 ;;
-      aarch64 | arm64) arch=arm64 ;;
-      *) echo "error: no wasi-sdk build for $(uname -m); set WASI_SDK_PATH." >&2; exit 1 ;;
-    esac
-    sdk_name="wasi-sdk-${sdk_version}-${arch}-${os}"
-    sdk="${tools_dir}/${sdk_name}"
-    if [[ ! -x "${sdk}/bin/clang" ]]; then
-      url="https://github.com/WebAssembly/wasi-sdk/releases/download/${sdk_release}/${sdk_name}.tar.gz"
-      echo "    downloading ${url}"
-      mkdir -p "${tools_dir}"
-      curl -LsSf --retry 5 --retry-all-errors "${url}" | tar xz -C "${tools_dir}"
-    fi
-  fi
-  export CC_wasm32_wasip1="${CC_wasm32_wasip1:-${sdk}/bin/clang}"
-  export AR_wasm32_wasip1="${AR_wasm32_wasip1:-${sdk}/bin/llvm-ar}"
-  export CFLAGS_wasm32_wasip1="${CFLAGS_wasm32_wasip1:---sysroot=${sdk}/share/wasi-sysroot}"
+source "${repo_root}/scripts/wasi-sdk-env.sh"
+if [[ -n "${WASI_SDK_MANAGED_DIR:-}" ]]; then
+  trap 'rm -rf -- "${WASI_SDK_MANAGED_DIR}"' EXIT
 fi
+
 echo "    CC=${CC_wasm32_wasip1} AR=${AR_wasm32_wasip1} CFLAGS=${CFLAGS_wasm32_wasip1}"
 
 # Run cargo from inside the crate so that its .cargo/config.toml (the

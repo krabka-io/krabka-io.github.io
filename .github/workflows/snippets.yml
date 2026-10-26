@@ -60,8 +60,8 @@ jobs:
       - name: Install kind
         if: matrix.suite == 'helm'
         run: |
-          curl -fsSL --retry 3 https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64 -o /tmp/kind
-          sudo install /tmp/kind /usr/local/bin/kind
+          kind="$(python3 scripts/install-tool.py kind)"
+          echo "$(dirname "${kind}")" >> "${GITHUB_PATH}"
       - name: Test the website examples
         shell: bash
         run: |
