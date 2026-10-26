@@ -69,3 +69,21 @@ mod tests {
         assert2::assert!(decompress(b"not zstd", 100).is_err());
     }
 }
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_sequence_expansion_beyond_block_window() {
+        let frame = include_bytes!("../test-fixtures/oversized-sequence.zst");
+        // Same compressed block is valid with an 8 KiB window: 4096 'a' bytes.
+        let mut valid = *frame;
+        valid[5] = 0x18;
+        assert2::assert!(decompress(&valid, 8192).unwrap().as_ref() == vec![b'a'; 4096]);
+        // An ample application output budget must not bypass the block bound.
+        let error = decompress(frame, 8192).unwrap_err();
+        assert2::assert!(matches!(&error, CompressionError::InvalidData(_)));
+        assert2::assert!(error.to_string().contains("TooManyBytesGenerated"));
+    }
+}

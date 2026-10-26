@@ -264,6 +264,17 @@ jobs:
         run: |
           mkdir -p deployed-inventory
           tar -xf deployed-pages/artifact.tar -C deployed-inventory ./sitemap-inventory.json
+      - name: Verify published playground WASM matches the deployed artifact
+        run: |
+          tar -xf deployed-pages/artifact.tar -C deployed-inventory ./playground/krabka_playground_bg.wasm
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            https://krabka.io/playground/krabka_playground_bg.wasm \
+            --output deployed-inventory/live-playground.wasm
+          expected="$(sha256sum deployed-inventory/playground/krabka_playground_bg.wasm | cut -d ' ' -f 1)"
+          actual="$(sha256sum deployed-inventory/live-playground.wasm | cut -d ' ' -f 1)"
+          echo "Pages artifact: ${expected}; live WASM: ${actual}; commit: ${GITHUB_SHA}; run: ${GITHUB_RUN_ID}"
+          test "${expected}" = "${actual}"
+
       - name: Check published pages, essential assets and component APIs
         run: |
           node scripts/check-production.mjs https://krabka.io deployed-inventory/sitemap-inventory.json

@@ -17,6 +17,7 @@ After [preparing guides, proofs, and archive data](development.md#pages-only-pre
 
 ## Automated verification suites
 
+- **Deployment contract (`scripts/deployment-contract.test.mjs`):** Parses the deploy workflow and checks blocking validation, build-before-upload order, main-only publication, job dependencies, and the production inventory comparison. Mutation cases reject representative regressions. It runs through `test:website`; it does not test GitHub repository settings or perform a deployment. See [deployment recovery](publishing.md#recover-from-a-failed-deployment).
 - **Link Integrity Crawler (`scripts/check-links.mjs`):** Recursively crawls every built HTML page in `dist/` and asserts that 100% of internal links resolve to valid targets with zero 404s.
 - **Technical SEO Auditor (`scripts/check-seo.mjs`):** Validates title tags, meta descriptions, canonical URLs, Open Graph / Twitter Card tags, single H1 hierarchies, and sitemaps.
 - **Website Snippets (`scripts/check-snippets.mjs`, `snippets.yml`):** Extracts every displayed snippet from `/get-started`, `/docs/quickstart`, and the Rust, Go, and Java client pages, plus the synced Java/Go getting started guides. New or missing snippets fail coverage. Separate CI jobs run on pull requests, main, and daily to catch drift in the imported guides. Sources, dependency locks, and diagnostics are saved as workflow artifacts.
