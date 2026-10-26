@@ -17,7 +17,6 @@ set -euo pipefail
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${crate_dir}/.." && pwd)"
 out_dir="${repo_root}/public/playground"
-tools_dir="${crate_dir}/.tools"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "error: cargo is not on PATH." >&2
@@ -42,28 +41,17 @@ if command -v rustup >/dev/null 2>&1; then
 fi
 
 echo "==> wasm-bindgen CLI ${wb_version}"
-wasm_bindgen=""
-if command -v wasm-bindgen >/dev/null 2>&1 &&
-  [[ "$(wasm-bindgen --version | awk '{print $2}')" == "${wb_version}" ]]; then
-  wasm_bindgen="$(command -v wasm-bindgen)"
+# Explicit overrides are caller-managed; never implicitly execute a PATH binary.
+if [[ -n "${WASM_BINDGEN:-}" ]]; then
+  wasm_bindgen="${WASM_BINDGEN}"
 else
-  triple="x86_64-unknown-linux-musl"
-  exe=""
-  case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) triple="aarch64-apple-darwin" ;;
-    Darwin-x86_64) triple="x86_64-apple-darwin" ;;
-    Linux-aarch64) triple="aarch64-unknown-linux-gnu" ;;
-    MINGW*-x86_64 | MSYS*-x86_64 | CYGWIN*-x86_64) triple="x86_64-pc-windows-msvc" exe=".exe" ;;
-  esac
-  cached="${tools_dir}/${wb_version}/wasm-bindgen${exe}"
-  if [[ ! -x "${cached}" ]]; then
-    name="wasm-bindgen-${wb_version}-${triple}"
-    url="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${wb_version}/${name}.tar.gz"
-    echo "    downloading ${url}"
-    mkdir -p "${tools_dir}/${wb_version}"
-    curl -sSfL "${url}" | tar xz -C "${tools_dir}/${wb_version}" --strip-components=1 "${name}/wasm-bindgen${exe}"
-  fi
-  wasm_bindgen="${cached}"
+  wasm_bindgen="$(python3 "${repo_root}/scripts/install-tool.py" wasm-bindgen --version "${wb_version}")"
+  managed_install="$(dirname "$(dirname "${wasm_bindgen}")")"
+  trap 'rm -rf -- "${managed_install}"' EXIT
+fi
+if [[ "$("${wasm_bindgen}" --version | awk '{print $2}')" != "${wb_version}" ]]; then
+  echo "error: wasm-bindgen override does not match Cargo.lock (${wb_version})." >&2
+  exit 1
 fi
 
 # Run cargo from inside the crate so that its .cargo/config.toml (the
