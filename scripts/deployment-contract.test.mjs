@@ -5,6 +5,8 @@ import { load } from 'js-yaml';
 
 const workflow = load(fs.readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const lab = "steps.changes.outputs.lab == 'true'";
+const proofs = "steps.changes.outputs.proofs == 'true'";
 const mainOnly = "github.ref == 'refs/heads/main'";
 
 // This is a contract for the current workflow, not a general shell analyzer.
@@ -41,9 +43,58 @@ function contract(doc, pkg) {
   assert.equal(smoke.needs, 'deploy', 'production smoke needs a successful deployment');
 
   const tests = command(build, 'Check website validation and sync guards', 'npm run test:website');
-  const compile = command(build, 'Build static website', 'npm run build');
+  const selection = command(build, 'Select CI checks', 'node scripts/ci-changes.mjs');
+  assert.equal(build.steps[selection].id, 'changes');
+  assert.ok(selection < tests, 'selection precedes validation');
+  const compile = command(build, 'Build static website', 'npm run sync-docs && npm run sync-proofs && npm run build:site');
   const checks = command(build, 'Check built links, SEO and page budgets',
-    'npm run check-links\nnpm run check-seo\nnpm run check-page-budgets');
+    'npm run check-links\nnpm run check-seo\nnpm run check-page-budgets -- --wasm=${{ steps.changes.outputs.lab }}');
+  assert.deepEqual(doc.on.pull_request.types, ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft']);
+  for (const trigger of [doc.on.pull_request, doc.on.push]) {
+    for (const key of ['paths', 'paths-ignore', 'branches-ignore']) assert.equal(trigger[key], undefined, 'no required-check path filters');
+  }
+  assert.deepEqual(doc.on.schedule, [{ cron: '0 4 * * *' }]);
+  assert.deepEqual(doc.on.repository_dispatch.types, ['release-published']);
+  assert.ok(Object.hasOwn(doc.on, 'workflow_dispatch'));
+  assert.deepEqual(doc.concurrency, {
+    group: "${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}",
+    'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+  }, 'PRs cancel only superseded PRs; production runs stay serialized through smoke');
+  const suites = [
+    ['Build the real broker for the Cluster Lab', 'npm run build:broker', lab],
+    ['Build the consensus playground', 'npm run build:playground', lab],
+    ['Check the proof workers', 'npm run check-proof-workers', proofs],
+    ['Build the Why3 web bundle', 'npm run build:why3-web', `${proofs} && steps.why3-web.outputs.cache-hit != 'true'`],
+    ['Check the Why3 web bundle is in place', 'test -s public/why3-web/manifest.json', proofs],
+    ['Install Chromium', 'npx playwright install --with-deps chromium', undefined],
+    ['Check general website browsers', 'npm run check-site -- --suite=site\nnpm run check:benchmark-viewer\nnpm run check-component-docs', undefined],
+    ['Check proof startup and replay with Z3 and cvc5', 'npm run check-site -- --suite=proofs\nnpm run check-proof-smt', proofs],
+    ['Check Cluster Lab browser startup', 'npm run check-site -- --suite=lab', lab],
+    ["Check the Cluster Lab's preset experiments on real brokers", 'npm run check-lab-experiments', lab],
+    ['Check browser SSPI encryption on real brokers', 'npm run check-lab-clusters -- --preset=sspi-encrypted', lab],
+    ['Check rebalancing and share consumers on real brokers', 'npm run check-lab-clusters -- --preset=rebalancer --repeat=2\nnpm run check-lab-clusters -- --preset=share-group --repeat=2\nnpm run check-lab-clusters -- --preset=share-redelivery --repeat=2', lab],
+    ['Check broker ACL identities and allow/deny examples', 'npm run check-lab-acls\nnpm run check-lab-clusters -- --preset=broker-acls\nnpm run check-lab-clusters -- --preset=broker-acls-deny', lab],
+    ['Test snippet extraction and coverage', 'npm run test:snippets', undefined],
+    ['Check benchmark data and archive transformations', 'npm run prepare:benchmark-archive && npm run test:benchmark', undefined],
+    ['Check the verification catalog still parses', 'npm run check-catalog', undefined],
+    ["Check the proof explorer's highlighter and summaries", 'npm run check-proof-highlight && npm run check-proof-readability', undefined],
+    ["Check the Cluster Lab's network and storage analyzers", 'npm run check-lab-analyzer', undefined],
+    ["Check the Cluster Lab's invariants, charts and record trace", 'npm run check-lab-observe', undefined],
+  ];
+  for (const [name, run, condition] of suites) {
+    const index = command(build, name, run, condition);
+    assert.ok(index > selection, `${name} follows selection`);
+    if (name.startsWith('Build ') || name === 'Check the proof workers') assert.ok(index < compile, `${name} precedes static build`);
+    if (name.includes('startup') || name === 'Check general website browsers') assert.ok(index > compile, `${name} uses built site`);
+  }
+  for (const [name, condition] of [
+    ['Setup Rust with the wasm32 targets', lab], ['Cache the Rust builds', lab], ['Cache the Why3 web bundle', proofs],
+  ]) blocking(build.steps.find(step => step.name === name), name, condition);
+  // A selected failure must fail build. Omitted suites use step-level skips,
+  // not skipped dependency jobs that can accidentally suppress the merge gate.
+  for (const step of build.steps) assert.ok(step['continue-on-error'] === undefined || step['continue-on-error'] === false);
+  assert.equal(build.needs, undefined);
+  assert.equal(build.name, undefined, 'required build check keeps its name');
   const uploads = build.steps.filter((step) => step.uses?.startsWith('actions/upload-pages-artifact@'));
   assert.equal(uploads.length, 1, 'one Pages artifact upload');
   blocking(uploads[0], 'Pages upload', mainOnly);
@@ -73,6 +124,9 @@ function contract(doc, pkg) {
   assert.equal(pkg.scripts.build,
     'npm run prepare:benchmark-archive && npm run build:playground && node scripts/sync-docs.mjs && node --experimental-strip-types scripts/sync-proofs.mjs && astro build && npm run check-sitemap && pagefind --site dist',
     'release build retains blocking build and sitemap commands');
+  assert.equal(pkg.scripts['build:site'], 'npm run prepare:benchmark-archive && astro build && npm run check-sitemap && pagefind --site dist');
+  assert.equal(pkg.scripts['sync-docs'], 'node scripts/sync-docs.mjs');
+  assert.equal(pkg.scripts['sync-proofs'], 'node --experimental-strip-types scripts/sync-proofs.mjs');
   const [testCommand, syncCommand, ...extra] = pkg.scripts['test:website'].split(' && ');
   assert.equal(extra.length, 0, 'website test chain has no extra commands');
   assert.equal(syncCommand, 'node scripts/check-sync-links.mjs');
@@ -91,6 +145,15 @@ test('deployment preserves blocking build, validation, upload and production smo
 const step = (doc, name, job = 'build') => doc.jobs[job].steps.find((entry) => entry.name === name);
 const validation = 'Check built links, SEO and page budgets';
 const mutations = {
+  'missing ready event': doc => { doc.on.pull_request.types = ['opened']; },
+  'required-check path filtering': doc => { doc.on.pull_request.paths = ['src/**']; },
+  'production cancellation': doc => { doc.concurrency['cancel-in-progress'] = true; },
+  'shared PR queue': doc => { doc.concurrency.group = 'pages'; },
+  'missing classifier': doc => { step(doc, 'Select CI checks').run = 'true'; },
+  'lost sync before site build': doc => { step(doc, 'Build static website').run = 'npm run build:site'; },
+  'lab runs unconditionally': doc => { delete step(doc, 'Build the real broker for the Cluster Lab').if; },
+  'proof failures ignored': doc => { step(doc, 'Check proof startup and replay with Z3 and cvc5')['continue-on-error'] = true; },
+  'general browser accidentally starts all tools': doc => { step(doc, 'Check general website browsers').run = 'npm run check-site'; },
   'missing validation': (doc) => { doc.jobs.build.steps = doc.jobs.build.steps.filter((entry) => entry.name !== validation); },
   'missing link check': (doc) => { step(doc, validation).run = 'npm run check-seo\nnpm run check-page-budgets'; },
   'missing SEO check': (doc) => { step(doc, validation).run = 'npm run check-links\nnpm run check-page-budgets'; },
@@ -140,7 +203,7 @@ for (const [name, mutate] of Object.entries(mutations)) {
   });
 }
 
-for (const name of ['build', 'check-links', 'check-seo', 'check-page-budgets', 'test:website']) {
+for (const name of ['build', 'build:site', 'sync-docs', 'sync-proofs', 'check-links', 'check-seo', 'check-page-budgets', 'test:website']) {
   test(`deployment contract rejects disabled ${name} script`, () => {
     const pkg = structuredClone(manifest);
     pkg.scripts[name] = 'true';
@@ -153,5 +216,18 @@ for (const run of ['echo scripts/deployment-contract.test.mjs', manifest.scripts
     const pkg = structuredClone(manifest);
     pkg.scripts['test:website'] = run;
     assert.throws(() => contract(workflow, pkg));
+  });
+}
+
+// Skipped suites are allowed only through the classifier's exact conditions.
+// A selected failure cannot turn into a successful (or skipped) build check.
+for (const entry of workflow.jobs.build.steps.filter(step => step.if?.startsWith('steps.changes.outputs.'))) {
+  for (const [label, change] of [
+    ['skip selected suite', step => { step.if = 'false'; }],
+    ['ignore selected failure', step => { step['continue-on-error'] = true; }],
+  ]) test(`deployment rejects ${label}: ${entry.name}`, () => {
+    const doc = structuredClone(workflow);
+    change(step(doc, entry.name));
+    assert.throws(() => contract(doc, manifest));
   });
 }

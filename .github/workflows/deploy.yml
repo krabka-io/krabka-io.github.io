@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   schedule:
     - cron: '0 4 * * *'
   repository_dispatch:
@@ -17,8 +18,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -38,6 +39,10 @@ jobs:
           node-version: 24
           cache: 'npm'
 
+      - name: Select CI checks
+        id: changes
+        run: node scripts/ci-changes.mjs
+
       - name: Install dependencies
         run: npm ci
 
@@ -53,14 +58,18 @@ jobs:
       - name: Check benchmark data and archive transformations
         run: npm run prepare:benchmark-archive && npm run test:benchmark
 
+      - name: Test snippet extraction and coverage
+        run: npm run test:snippets
+
       # Two Rust crates compile to WebAssembly here. The consensus playground
       # and the Cluster Lab (/docs/playground, /docs/lab) are `playground/`,
-      # built for wasm32-unknown-unknown by `npm run build`, which runs
+      # built for wasm32-unknown-unknown by `build:playground`, which runs
       # playground/build.sh; that script downloads the matching wasm-bindgen
       # CLI itself. The real krabka-broker the lab runs in a Web Worker is
       # `playground/broker-wasi/`, built for wasm32-wasip1 by
       # `npm run build:broker`.
       - name: Setup Rust with the wasm32 targets
+        if: steps.changes.outputs.lab == 'true'
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: 1.99.0
@@ -70,6 +79,7 @@ jobs:
       # own: the broker's dependency graph is large, and a copy per pull
       # request would crowd main's out of the repository's cache quota.
       - name: Cache the Rust builds
+        if: steps.changes.outputs.lab == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
@@ -85,6 +95,7 @@ jobs:
       # into dist/ and the published lab serves it. On a pull request this is
       # the check that the broker still builds for the lab.
       - name: Build the real broker for the Cluster Lab
+        if: steps.changes.outputs.lab == 'true'
         run: npm run build:broker
 
       # The proof explorer's browser re-check needs Why3 and Alt-Ergo compiled
@@ -96,6 +107,7 @@ jobs:
       # that goes into it, and runs the build only on a miss. Pull requests
       # read the copy that main saved; the README is not an input.
       - name: Cache the Why3 web bundle
+        if: steps.changes.outputs.proofs == 'true'
         id: why3-web
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -103,17 +115,23 @@ jobs:
           key: why3-web-bundle-v1-${{ hashFiles('why3-web/**', '!why3-web/README.md', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', '.bazelrc') }}
 
       - name: Build the Why3 web bundle
-        if: steps.why3-web.outputs.cache-hit != 'true'
+        if: steps.changes.outputs.proofs == 'true' && steps.why3-web.outputs.cache-hit != 'true'
         run: npm run build:why3-web
 
       - name: Check the Why3 web bundle is in place
+        if: steps.changes.outputs.proofs == 'true'
         run: test -s public/why3-web/manifest.json
 
       - name: Check the proof workers
+        if: steps.changes.outputs.proofs == 'true'
         run: npm run check-proof-workers
 
+      - name: Build the consensus playground
+        if: steps.changes.outputs.lab == 'true'
+        run: npm run build:playground
+
       - name: Build static website
-        run: npm run build
+        run: npm run sync-docs && npm run sync-proofs && npm run build:site
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -125,15 +143,26 @@ jobs:
         run: |
           npm run check-links
           npm run check-seo
-          npm run check-page-budgets
+          npm run check-page-budgets -- --wasm=${{ steps.changes.outputs.lab }}
 
-      - name: Check browser proof replay with Z3 and cvc5
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Check general website browsers
         run: |
-          npx playwright install --with-deps chromium
-          npm run check-site
+          npm run check-site -- --suite=site
           npm run check:benchmark-viewer
           npm run check-component-docs
+
+      - name: Check proof startup and replay with Z3 and cvc5
+        if: steps.changes.outputs.proofs == 'true'
+        run: |
+          npm run check-site -- --suite=proofs
           npm run check-proof-smt
+
+      - name: Check Cluster Lab browser startup
+        if: steps.changes.outputs.lab == 'true'
+        run: npm run check-site -- --suite=lab
 
       - name: Save website browser checks
         if: always()
@@ -169,16 +198,20 @@ jobs:
       # The presets' scripted experiments (timed faults and checks) on real
       # brokers in headless Chromium: the build above staged the broker module.
       - name: Check the Cluster Lab's preset experiments on real brokers
+        if: steps.changes.outputs.lab == 'true'
         run: npm run check-lab-experiments
 
       - name: Check browser SSPI encryption on real brokers
+        if: steps.changes.outputs.lab == 'true'
         run: npm run check-lab-clusters -- --preset=sspi-encrypted
       - name: Check rebalancing and share consumers on real brokers
+        if: steps.changes.outputs.lab == 'true'
         run: |
           npm run check-lab-clusters -- --preset=rebalancer --repeat=2
           npm run check-lab-clusters -- --preset=share-group --repeat=2
           npm run check-lab-clusters -- --preset=share-redelivery --repeat=2
       - name: Check broker ACL identities and allow/deny examples
+        if: steps.changes.outputs.lab == 'true'
         run: |
           npm run check-lab-acls
           npm run check-lab-clusters -- --preset=broker-acls
