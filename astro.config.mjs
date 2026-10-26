@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
+import sitemapLimits from './scripts/sitemap-limits.mjs';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
 import baseLinks from './src/utils/satteri-base-links.mjs';
@@ -39,7 +40,14 @@ export default defineConfig({
   integrations: [
     // Exclude noindex pages and the authored /docs/api redirect to /api.
     // check-sitemap verifies this list against the final HTML on every build.
-    sitemap({ filter: (page) => !/\/(404|search|docs\/api)\/?$/.test(new URL(page).pathname) }),
+    sitemap({
+      filter: (page) => !/\/(404|search|docs\/api)\/?$/.test(new URL(page).pathname),
+      chunks: {
+        docs: (item) => /^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined,
+        website: (item) => !/^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined,
+      },
+    }),
+    sitemapLimits(),
     headingIds(),
   ],
   markdown: {

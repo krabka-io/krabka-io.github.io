@@ -8,6 +8,90 @@ This repository owns the website, generated guide presentation, browser-hosted t
 - **Dynamic Routing:** `src/pages/docs/[...slug].astro` renders ingested guides with an automated right-hand **"On This Page" Table of Contents**, syntax highlighting, custom markdown typography, and GitHub source provenance footers.
 - **Collapsible Symmetrical Navigation:** `src/layouts/DocsLayout.astro` groups ecosystem topics into collapsible accordions with automatic active-state expansion and breadcrumbs.
 
+## SEO and sitemaps
+
+The build derives sitemap URLs from Astro routes and checks the result against
+indexable canonical HTML. `robots.txt` advertises `sitemap-index.xml`, which
+links to `sitemap-docs-0.xml` for `/docs` and its descendants and
+`sitemap-website-0.xml` for the remaining website pages. Each group can acquire
+additional numbered shards. Redirects, error pages, `noindex` pages and non-page
+artifacts are excluded. Component API deployments own their own inventories.
+See [sitemap maintenance and remaining protocol work](sitemaps.md).
+
+### Optional metadata contract
+
+`lastmod`, `changefreq` and `priority` are not required. The shared XML reader
+used by local build and published checks validates values when supplied. Invalid
+supplied metadata fails; absence never does. Page dates describe significant
+page changes, while index dates describe changes to the child XML file.
+`changefreq` is an optional frequency hint, not a crawl schedule;
+[Google ignores it and priority, but can use accurate lastmod](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap#additional-notes-about-xml-sitemaps).
+No blanket frequency or synthetic date is generated. Local build checks also
+validate original XML bytes against the vendored official XSDs; published checks
+currently use only the shared reader. See [validator setup](sitemaps.md#commands).
+
+### Planned site-wide lastmod provenance
+
+The target is every indexable page, not only Markdown guides. Keep date
+resolution centralized rather than editing each of the site's page templates:
+
+- Authored pages use verified significant changes to their content and substantive
+  shared dependencies, not every layout, style or repository commit.
+- Synced guides use the original source path at the exact synced revision, with
+  complete history and dirty-source checks as described below.
+- Generated pages include their meaningful data inputs: release data and edited
+  release notes, benchmark results, proof/catalog data and CRD schemas. The
+  current live release query has publication dates, not a reliable last-edit date
+  for changed notes; do not treat publication as proof of the last content update.
+- Omit dates when provenance is incomplete. Report these gaps without requiring
+  metadata coverage. Unchanged rebuilds must leave dates unchanged.
+
+**Scoping estimate (not an implemented diff):** about 12–16 files in a separate
+follow-up PR. Likely changes are a central provenance resolver, a route/input
+mapping and their tests; `scripts/sync-docs.mjs` and its tests; release metadata in
+`src/utils/versions.ts` and its tests; `astro.config.mjs`; sitemap checking and its
+tests; `.github/workflows/deploy.yml` for history; and these two SEO design and
+maintenance documents. Other data loaders may need provenance hooks, which is
+why this is a range. No blanket edit of all page templates is expected. Keep
+this separate from XSD validation: source history, data dependencies, unchanged
+rebuilds and index-date semantics need independent review and regression cases.
+
+Markdown can provide reliable dates through its source repository, not through
+the copied file's filesystem timestamp. This pipeline is not implemented yet:
+
+1. Extend `scripts/sync-docs.mjs` provenance beyond its current per-repository
+   `sources.json` date. For each source Markdown path, query
+   `git log -1 --format=%cI -- <source-path>` at the exact revision being synced.
+   Store a separate per-file record with the source repository, source path,
+   pinned revision, last-change commit and date; do not change the existing
+   destination-to-source `files` mapping consumed by source links.
+2. Establish sufficient history first. The fallback sparse clone currently uses
+   `--depth 1`; Git can mistake the shallow boundary for a change to every file.
+   Fetch history for the pinned revision, or obtain verified path history from
+   the upstream API. When completeness cannot be established, omit the date and
+   report unavailable provenance without blocking the build. Never substitute
+   the repository HEAD date. Do not use history dates for dirty or untracked
+   source content without a verified override.
+3. Map the per-file provenance through the same destination/slug normalization
+   used by generated documentation routes. Feed dates into Astro's sitemap
+   `serialize` callback by canonical URL. Prefer an explicitly maintained,
+   validated significant-update date where available; per-file Git dates are a
+   fallback candidate, not proof that a change was significant.
+4. Account for other meaningful page inputs: generated CRD material, embedded
+   data, rewritten links and substantive shared content. Track their meaningful
+   changes or omit dates where the dependency mapping is incomplete. A cosmetic
+   change, checkout, docs copy or rebuild alone must not refresh page dates.
+5. Keep existing dates stable across unchanged rebuilds. Before enabling date
+   generation, test unrelated upstream commits, shallow history, source renames,
+   dirty files, missing history, changed dependencies and repeat builds. Metadata
+   completeness can be reported, but is not a required coverage threshold.
+
+Do not derive index `lastmod` from the newest page date: a child can change when
+URLs are removed or hints are edited without a later page date. Persist a child
+content hash and its verified change time if index dates are needed; otherwise
+omit them. The installed Astro chunk writer derives index dates from the newest
+item date, so override or suppress that behavior before enabling page dates.
+
 ## Component API references
 
 - `/api` is a directory of every component's compiler-generated reference. It is driven by `src/data/api-reference.json`, one entry per component, and each entry links to where that component's own repository publishes its reference on `https://krabka.io/<repository>/`. This site does not host or copy those trees.

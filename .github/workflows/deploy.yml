@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install sitemap XSD validator
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/sitemap-validator"
+          "${RUNNER_TEMP}/sitemap-validator/bin/python3" -m pip install -r scripts/requirements-sitemap.txt
+          echo "${RUNNER_TEMP}/sitemap-validator/bin" >> "${GITHUB_PATH}"
+
       - name: Check website validation and sync guards
         run: npm run test:website
 
@@ -243,7 +249,21 @@ jobs:
           node-version: 24
       - name: Install sitemap parser for production checks
         run: npm ci --ignore-scripts
+      - name: Install sitemap XSD validator
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/sitemap-validator"
+          "${RUNNER_TEMP}/sitemap-validator/bin/python3" -m pip install -r scripts/requirements-sitemap.txt
+          echo "${RUNNER_TEMP}/sitemap-validator/bin" >> "${GITHUB_PATH}"
+      - name: Download the deployed Pages artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: github-pages
+          path: deployed-pages
+      - name: Read the release URL inventory from the Pages artifact
+        run: |
+          mkdir -p deployed-inventory
+          tar -xf deployed-pages/artifact.tar -C deployed-inventory ./sitemap-inventory.json
       - name: Check published pages, essential assets and component APIs
         run: |
-          node scripts/check-production.mjs
+          node scripts/check-production.mjs https://krabka.io deployed-inventory/sitemap-inventory.json
           node scripts/check-api-links.mjs
