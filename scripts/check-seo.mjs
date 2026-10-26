@@ -149,7 +149,7 @@ for (const file of htmlFiles) {
 
 // 9. Check robots.txt and sitemap
 const robotsExists = fs.existsSync(path.join(DIST_DIR, 'robots.txt'));
-const sitemapExists = fs.existsSync(path.join(DIST_DIR, 'sitemap-index.xml')) || fs.existsSync(path.join(DIST_DIR, 'sitemap-0.xml'));
+const sitemapExists = fs.existsSync(path.join(DIST_DIR, 'sitemap-index.xml'));
 
 try {
   const result = checkSitemap(DIST_DIR);

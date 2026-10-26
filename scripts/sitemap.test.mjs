@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { checkSitemap as checkBuild } from './check-sitemap.mjs';
+import { checkSitemap as checkBuild, buildInventory } from './check-sitemap.mjs';
 import { readSitemap, MAX_BYTES, MAX_ENTRIES, siteURL, scopedURL, assertSection, assertCrawlable } from './sitemap.mjs';
 
 const checkSitemap = (dir) => checkBuild(dir, 'https://krabka.io', { sections: false });
@@ -41,6 +41,14 @@ test('sitemap covers indexable pages and follows additions and removals', (t) =>
   assert.equal(checkSitemap(dir).pages, 3);
   fs.rmSync(path.join(dir, 'docs/new'), { recursive: true });
   assert.throws(() => checkSitemap(dir), /Unexpected sitemap URL.*docs\/new/);
+});
+
+test('release inventory resolves encoded child filenames like the build checker', (t) => {
+  const { dir, write } = fixture(t);
+  fs.renameSync(path.join(dir, 'sitemap-0.xml'), path.join(dir, 'sitemap-café.xml'));
+  write('sitemap-index.xml', xml('sitemapindex', 'sitemap', [site + '/sitemap-caf%C3%A9.xml']));
+  assert.deepEqual(checkSitemap(dir), { pages: 2, sitemaps: 1 });
+  assert.deepEqual(buildInventory(dir), { site, urls: [site + '/', site + '/docs/'] });
 });
 
 test('sitemap rejects excluded pages, duplicate URLs, external URLs and missing files', (t) => {

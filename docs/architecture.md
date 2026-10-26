@@ -26,9 +26,9 @@ supplied metadata fails; absence never does. Page dates describe significant
 page changes, while index dates describe changes to the child XML file.
 `changefreq` is an optional frequency hint, not a crawl schedule;
 [Google ignores it and priority, but can use accurate lastmod](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap#additional-notes-about-xml-sitemaps).
-No blanket frequency or synthetic date is generated. Local build checks also
-validate original XML bytes against the vendored official XSDs; published checks
-currently use only the shared reader. See [validator setup](sitemaps.md#commands).
+No blanket frequency or synthetic date is generated. Both local build checks and
+published checks validate original XML bytes against the vendored official XSDs.
+See [validator setup](sitemaps.md#commands).
 
 ### Planned site-wide lastmod provenance
 

@@ -61,8 +61,9 @@ The protocol does not require exhaustive HTML coverage or prohibit all query
 strings; this site's stricter coverage and clean-URL rules are local policy.
 
 Treat freshness as agreement with the current build, not a hard-coded page
-count or a new timestamp on every rebuild. Report excluded routes and reasons
-so that deliberate exclusions remain reviewable.
+count or a new timestamp on every rebuild. The build checker skips excluded
+HTML files without listing them. It reports an unexpected sitemap URL if the
+sitemap includes an excluded route.
 
 ### Implementation sequence
 

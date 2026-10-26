@@ -62,9 +62,7 @@ export function readSitemap(xml, root, source) {
       text = '';
     }
     if (stack.length === 3 && tag.local === 'loc') {
-      if (stack[1] !== entry || tag.uri !== namespace) throw new Error(`${source}: invalid loc element`);
       locationCount++;
-      text = '';
     }
   };
   parser.ontext = parser.oncdata = (value) => {

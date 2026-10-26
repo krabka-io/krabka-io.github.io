@@ -84,7 +84,7 @@ export function checkSitemap(dir, site = 'https://krabka.io', { sections = true 
 // Written only after all checks pass, and packaged inside the Pages artifact.
 export function buildInventory(dir, site = 'https://krabka.io') {
   const children = readSitemap(fs.readFileSync(path.join(dir, 'sitemap-index.xml')), 'sitemapindex', 'sitemap-index.xml');
-  return { site, urls: children.flatMap((child) => readSitemap(fs.readFileSync(path.join(dir, new URL(child).pathname)), 'urlset', child)).sort() };
+  return { site, urls: children.flatMap((child) => readSitemap(fs.readFileSync(path.join(dir, decodeURIComponent(new URL(child).pathname).replace(/^\//, ''))), 'urlset', child)).sort() };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

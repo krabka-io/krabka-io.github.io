@@ -9,9 +9,9 @@ The local build was not regenerated for this audit.
 The [revised plan](sitemaps.md) and [SEO design](architecture.md#seo-and-sitemaps)
 supersede its one-child layout recommendation. Local generation now separates
 website and documentation children, and supplied optional metadata is validated.
-The build checker now enforces the vendored official XSDs for the index and
-every referenced child. Site-wide date generation and the remaining non-XSD
-protocol boundaries remain planned; none of these changes establishes deployment.
+The build and published checkers now enforce the vendored official XSDs and explicit
+non-XSD protocol boundaries for the index and every referenced child. Site-wide date
+generation remains planned; none of these changes establishes deployment.
 
 ## Conclusions
 
@@ -149,8 +149,7 @@ implemented until they exist and their regressions pass.
 
 ## Evidence and verification
 
-Private audit artifacts are under
-`/home/matt/.openclaw/workspace/coordinator/analyses/sitemap-gap-2026-10-25/`:
+The audit used these private, untracked artifacts:
 
 - `xml-evidence.json`: live/local XML results, full URL lists, schema sources
   and SHA-256 hashes, robots response and URL-set comparison.
