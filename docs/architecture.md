@@ -58,7 +58,8 @@ inputs that imports cannot discover. Benchmark pages include tracked report
 and trial files; the explorer uses tracked LFS archives rather than generated
 archive JSON. Verification pages include the synced broker catalog and tracked
 kernel/model data. The homepage also includes the get-started source used for
-its client excerpts. The proof explorer includes its tracked scripts and data,
+its client excerpts and the tracked version data used in homepage structured
+data. Other pages do not inherit that unused layout import. The proof explorer includes its tracked scripts and data,
 the sync generator, and the broker catalog rather than treating its generated
 sessions JSON as a tracked website input.
 

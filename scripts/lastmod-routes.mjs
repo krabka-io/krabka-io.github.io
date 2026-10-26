@@ -61,7 +61,7 @@ export const authoredRoutes = {
 // with tracked source files or upstream per-file provenance, not build timestamps.
 const benchmarkInputs = ['benchmarks/latest-openmessaging.md', 'benchmarks/openmessaging/**/provenance.json', 'benchmarks/openmessaging/**/trials.json', 'benchmarks/openmessaging/**/summary.md', 'benchmarks/openmessaging/**/intervals.json'];
 const generatedInputs = {
-  '/': ['src/pages/get-started.astro', ...benchmarkInputs],
+  '/': ['src/pages/get-started.astro', 'src/data/versions.json', ...benchmarkInputs],
   '/benchmarks': benchmarkInputs,
   '/benchmarks/explorer': ['benchmarks/archive/README.md', 'benchmarks/archive/*.tar.gz'],
   '/docs/lab': ['public/playground/lab/**', 'public/playground/*.html'],

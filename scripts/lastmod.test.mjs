@@ -168,6 +168,8 @@ test('data-driven routes have concrete tracked inputs, not unreviewed gaps or ge
     assert.ok(!mapping.inputs.some((file) => file.includes('*') || file.includes('BaseLayout') || file === 'src/data/proof-sessions.json' || file === 'src/data/benchmark-archive.json'));
   }
   assert.ok(routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/pages/get-started.astro'));
+  assert.ok(routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/data/versions.json'));
+  assert.ok(!routeInputs(process.cwd(), 'https://krabka.io/features/kraft/').inputs.includes('src/data/versions.json'));
   assert.ok(routeInputs(process.cwd(), 'https://krabka.io/benchmarks/explorer').inputs.some((file) => file.endsWith('.tar.gz')));
   for (const route of ['/releases', '/versions']) assert.equal(routeInputs(process.cwd(), 'https://krabka.io' + route).gap, 'unpinned-external-api-history');
   assert.equal(routeInputs(process.cwd(), 'https://krabka.io/new-route'), null);
