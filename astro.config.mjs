@@ -2,6 +2,7 @@ import { defineConfig } from 'astro/config';
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import sitemapLimits from './scripts/sitemap-limits.mjs';
+import sitemapLastmod from './scripts/sitemap-lastmod.mjs';
 import { satteri } from '@astrojs/markdown-satteri';
 import wrapTables from './src/utils/satteri-wrap-tables.mjs';
 import baseLinks from './src/utils/satteri-base-links.mjs';
@@ -47,6 +48,7 @@ export default defineConfig({
         website: (item) => !/^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined,
       },
     }),
+    sitemapLastmod(),
     sitemapLimits(),
     headingIds(),
   ],

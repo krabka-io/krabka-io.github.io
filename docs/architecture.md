@@ -30,67 +30,91 @@ No blanket frequency or synthetic date is generated. Both local build checks and
 published checks validate original XML bytes against the vendored official XSDs.
 See [validator setup](sitemaps.md#commands).
 
-### Planned site-wide lastmod provenance
+### Site-wide lastmod provenance
 
-The target is every indexable page, not only Markdown guides. Keep date
-resolution centralized rather than editing each of the site's page templates:
+The resolver covers the final sitemap inventory, not a fixed page count.
+`scripts/lastmod-routes.mjs` maps authored routes, synced guides and CRD routes.
+The build reports new, unmapped routes without assigning a date.
+A mapped route does not imply complete provenance.
 
-- Authored pages use verified significant changes to their content and substantive
-  shared dependencies, not every layout, style or repository commit.
-- Synced guides use the original source path at the exact synced revision, with
-  complete history and dirty-source checks as described below.
-- Generated pages include their meaningful data inputs: release data and edited
-  release notes, benchmark results, proof/catalog data and CRD schemas. The
-  current live release query has publication dates, not a reliable last-edit date
-  for changed notes; do not treat publication as proof of the last content update.
-- Omit dates when provenance is incomplete. Report these gaps without requiring
-  metadata coverage. Unchanged rebuilds must leave dates unchanged.
+`scripts/sitemap-lastmod.mjs` runs after Astro writes its sitemaps and before
+`scripts/sitemap-limits.mjs` splits them by bytes. It adds verified page dates
+and writes `dist/lastmod-report.json`. The normal sitemap checker then verifies
+canonical coverage, protocol rules, schemas and reachability. The report lists
+each canonical URL, route family, declared inputs, evidence and omission reason.
+Coverage is a diagnostic, not a passing threshold.
 
-**Scoping estimate (not an implemented diff):** about 12–16 files in a separate
-follow-up PR. Likely changes are a central provenance resolver, a route/input
-mapping and their tests; `scripts/sync-docs.mjs` and its tests; release metadata in
-`src/utils/versions.ts` and its tests; `astro.config.mjs`; sitemap checking and its
-tests; `.github/workflows/deploy.yml` for history; and these two SEO design and
-maintenance documents. Other data loaders may need provenance hooks, which is
-why this is a range. No blanket edit of all page templates is expected. Keep
-this separate from XSD validation: source history, data dependencies, unchanged
-rebuilds and index-date semantics need independent review and regression cases.
+#### Significant-update ownership
 
-Markdown can provide reliable dates through its source repository, not through
-the copied file's filesystem timestamp. This pipeline is not implemented yet:
+Website maintainers own `scripts/lastmod-reviewed.json`. Each record declares a
+complete set of meaningful inputs, their SHA-256 hashes, an explicit significant
+update date, a baseline revision and the review evidence. This explicit date
+has precedence over Git candidates. The resolver never promotes a candidate
+commit date automatically. All supplied dates are validated, including records
+for routes that are absent or omitted. Invalid dates fail the build.
 
-1. Extend `scripts/sync-docs.mjs` provenance beyond its current per-repository
-   `sources.json` date. For each source Markdown path, query
-   `git log -1 --format=%cI -- <source-path>` at the exact revision being synced.
-   Store a separate per-file record with the source repository, source path,
-   pinned revision, last-change commit and date; do not change the existing
-   destination-to-source `files` mapping consumed by source links.
-2. Establish sufficient history first. The fallback sparse clone currently uses
-   `--depth 1`; Git can mistake the shallow boundary for a change to every file.
-   Fetch history for the pinned revision, or obtain verified path history from
-   the upstream API. When completeness cannot be established, omit the date and
-   report unavailable provenance without blocking the build. Never substitute
-   the repository HEAD date. Do not use history dates for dirty or untracked
-   source content without a verified override.
-3. Map the per-file provenance through the same destination/slug normalization
-   used by generated documentation routes. Feed dates into Astro's sitemap
-   `serialize` callback by canonical URL. Prefer an explicitly maintained,
-   validated significant-update date where available; per-file Git dates are a
-   fallback candidate, not proof that a change was significant.
-4. Account for other meaningful page inputs: generated CRD material, embedded
-   data, rewritten links and substantive shared content. Track their meaningful
-   changes or omit dates where the dependency mapping is incomplete. A cosmetic
-   change, checkout, docs copy or rebuild alone must not refresh page dates.
-5. Keep existing dates stable across unchanged rebuilds. Before enabling date
-   generation, test unrelated upstream commits, shallow history, source renames,
-   dirty files, missing history, changed dependencies and repeat builds. Metadata
-   completeness can be reported, but is not a required coverage threshold.
+Review changes to the main content, material claims, embedded data, structured
+content, useful links and artwork. Consider substantive shared content too.
+Formatting, CSS adjustments, ordinary navigation, analytics and the footer's
+copyright year do not establish a new significant update. Include conservative
+hash guards for these files when they can change rendered content. A changed
+hash removes the date until review; it does not assign the new commit date.
+After a cosmetic change, refresh the hashes and keep the significant date.
+After a substantive change, establish the date from cited evidence first.
 
-Do not derive index `lastmod` from the newest page date: a child can change when
-URLs are removed or hints are edited without a later page date. Persist a child
-content hash and its verified change time if index dates are needed; otherwise
-omit them. The installed Astro chunk writer derives index dates from the newest
-item date, so override or suppress that behavior before enabling page dates.
+A record covers the whole route, not only its newest known input. Review the
+static import closure and all non-import inputs, such as file reads, images,
+client scripts, configuration, transforms and data. New imported dependencies
+that are absent from the record cause omission. Import discovery is a guard,
+not a claim that static analysis finds every meaningful input. Do not mark a
+record complete while an input or its significant history is unknown.
+
+The two initial records cover the KRaft and operator feature pages. They propose
+12 October 2026 as the baseline for the feature-scope descriptions changed in
+`a6d74993a9f17a8b67e355a92987a3807d7bc580`. The implementation author inspected
+those changes. These records do not claim prior approval by a maintainer.
+They include the shared source, render transforms, lockfile, fonts and image
+inputs. The imported versions data is unused on these non-homepage routes.
+Their current hashes are guards, not evidence that every input changed on
+12 October. Review these proposed baselines with the implementation.
+
+The resolver checks complete website history, baseline ancestry, tracked input
+paths, clean input status and exact hashes. Dirty or untracked inputs, changed
+hashes, missing files and unavailable history remove dates with reasons.
+An unrelated file or commit does not change a verified date. There is no build,
+sync, filesystem-mtime or repository-HEAD fallback. CI checks out full website
+history. A source archive or shallow checkout still builds, without those dates.
+
+#### Synced and generated inputs
+
+`sync-docs` publishes `src/content/docs/lastmod-provenance.json` atomically with
+the guides. Each source file has its original repository/path, pinned revision,
+last-change candidate, history status, dirty-source status and source hash.
+Each guide also has a transformed-content hash. CRD source records remain
+separate from Markdown records. Candidate significance is explicitly unreviewed.
+The existing `sources.json` component fields and destination-to-source mapping
+remain unchanged for GitHub footers. The component HEAD date is not a page date.
+
+Fallback sparse clones acquire full history with filtered blobs. Existing
+shallow sibling checkouts are not modified or silently trusted. They report
+incomplete history. The lookup uses the pinned revision and follows renames.
+Non-Git, dirty and untracked source cases retain reasons without guessed dates.
+Sync failure leaves both previous content and provenance intact.
+
+Guides currently omit dates because their significant source changes and full
+render dependencies have not been reviewed. CRD pages report the schema gap.
+Release and news indexes omit dates because publication does not establish
+edited notes or addition/removal history. Versions omit dates because their
+live snapshots lack complete history. Benchmark, catalog and proof views
+report their unreviewed data inputs. The homepage includes those data gaps.
+These omissions apply online and offline. A release edit timestamp alone would
+not prove complete collection history, including removed releases.
+
+Index entries have no `lastmod`. Astro never receives page dates, so its chunk
+writer cannot infer child-file dates from page dates. The limits pass rebuilds
+index references from parsed locations and preserves page metadata through
+splits. URL removal and metadata-only changes still produce undated references.
+No dependency under `node_modules` is patched.
 
 ## Component API references
 

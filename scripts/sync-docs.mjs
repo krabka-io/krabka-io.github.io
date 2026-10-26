@@ -5,6 +5,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { rewriteDocLinks } from './rewrite-doc-links.mjs';
 import { load } from 'js-yaml';
+import { sourceFileProvenance, contentHash } from './lastmod-provenance.mjs';
 
 const ROOT_DIR = process.cwd();
 const CONTENT_DOCS_DIR = path.join(ROOT_DIR, 'src', 'content', 'docs');
@@ -79,6 +80,7 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
   const clones = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-docs-'));
   const backup = staged + '-previous';
   const sources = {};
+  const provenance = { version: 1, components: {} };
   try {
     if (fs.existsSync(contentDir)) fs.cpSync(contentDir, staged, { recursive: true });
     for (const comp of components) {
@@ -90,7 +92,7 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
       if (!fs.existsSync(path.join(sourceRepoDir, comp.guides?.[0]?.source ?? 'docs'))) {
         const tempCloneDir = path.join(clones, comp.repo);
         console.log(`  → Fetching docs from GitHub (krabka-io/${comp.repo})...`);
-        execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse', `https://github.com/krabka-io/${comp.repo}.git`, tempCloneDir], { stdio: 'pipe', timeout: 120000 });
+        execFileSync('git', ['clone', '--filter=blob:none', '--sparse', `https://github.com/krabka-io/${comp.repo}.git`, tempCloneDir], { stdio: 'pipe', timeout: 120000 });
         const directories = comp.guides ? [...new Set(comp.guides.map(({ source }) => path.posix.dirname(source)).filter((dir) => dir !== '.'))] : ['docs'];
         if (comp.crdsDir) directories.push(comp.crdsDir);
         if (directories.length) execFileSync('git', ['-C', tempCloneDir, 'sparse-checkout', 'set', ...directories], { stdio: 'pipe', timeout: 120000 });
@@ -116,10 +118,12 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
       const publishedFiles = new Set(files.map((file) => file.toLowerCase()));
       const publishedPaths = new Map(guides.map(({ source, destination }) => [source.toLowerCase(), destination]));
       if (sources[comp.docsSubdir]) sources[comp.docsSubdir].files = Object.fromEntries(guides.map(({ source, destination }) => [destination, source]));
+      const records = provenance.components[comp.docsSubdir] = { repo: comp.repo, files: {}, crds: {} };
       for (const { source, destination: file } of guides) {
         const srcFile = path.join(sourceRepoDir, source);
         const destFile = path.join(destDocsDir, file);
         let content = fs.readFileSync(srcFile, 'utf8');
+        const originalHash = contentHash(content);
         if (!content.trim()) throw new Error(`${comp.name}: required guide ${source} is empty`);
 
         // Rewrite relative markdown links and code links to prevent 404 errors
@@ -127,10 +131,14 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
 
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.writeFileSync(destFile, content);
+        records.files[file] = { ...sourceFileProvenance(sourceRepoDir, comp.repo, source, sources[comp.docsSubdir]?.commit), renderedHash: contentHash(content) };
+        if (records.files[file].sourceHash !== originalHash) records.files[file].reason = 'source-changed-during-sync';
       }
       if (comp.crdsDir) {
         const crdsDir = path.join(sourceRepoDir, comp.crdsDir);
         const resources = fs.readdirSync(crdsDir).filter((file) => /\.ya?ml$/i.test(file)).sort().map((file) => {
+          const sourcePath = `${comp.crdsDir}/${file}`;
+          records.crds[sourcePath] = sourceFileProvenance(sourceRepoDir, comp.repo, sourcePath, sources[comp.docsSubdir]?.commit);
           const crd = load(fs.readFileSync(path.join(crdsDir, file), 'utf8'));
           if (crd?.kind !== 'CustomResourceDefinition' || !crd.spec?.names?.kind || !crd.spec?.versions?.length || crd.spec.versions.some((version) => !version.schema?.openAPIV3Schema)) throw new Error(`${comp.name}: invalid CRD ${file}`);
           return { ...crd, _sourcePath: `${comp.crdsDir}/${file}` };
@@ -141,6 +149,7 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
       }
       console.log(`  ✓ Synced and transformed ${files.length} markdown guide(s) to ${destDocsDir}`);
     }
+    fs.writeFileSync(path.join(staged, 'lastmod-provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
     fs.writeFileSync(path.join(staged, 'sources.json'), JSON.stringify(sources, null, 2) + '\n');
     if (fs.existsSync(contentDir)) fs.renameSync(contentDir, backup);
     try {
