@@ -5,7 +5,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { rewriteDocLinks } from './rewrite-doc-links.mjs';
 import { load } from 'js-yaml';
-import { sourceFileProvenance, contentHash } from './lastmod-provenance.mjs';
+import { sourceFileProvenance, contentHash, ignoredRevisions } from './lastmod-provenance.mjs';
 
 const ROOT_DIR = process.cwd();
 const CONTENT_DOCS_DIR = path.join(ROOT_DIR, 'src', 'content', 'docs');
@@ -74,7 +74,7 @@ function markdownFiles(dir, prefix = '') {
 
 // Publish only after every required component has been fetched and validated.
 // A failed fetch or missing guide leaves the previous content and provenance intact.
-export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DIR) {
+export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DIR, { ignoreRevs = ignoredRevisions(ROOT_DIR) } = {}) {
   fs.mkdirSync(path.dirname(contentDir), { recursive: true });
   const staged = fs.mkdtempSync(path.join(path.dirname(contentDir), '.docs-stage-'));
   const clones = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-docs-'));
@@ -131,14 +131,14 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
 
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.writeFileSync(destFile, content);
-        records.files[file] = { ...sourceFileProvenance(sourceRepoDir, comp.repo, source, sources[comp.docsSubdir]?.commit), renderedHash: contentHash(content) };
+        records.files[file] = { ...sourceFileProvenance(sourceRepoDir, comp.repo, source, sources[comp.docsSubdir]?.commit, { ignoreRevs }), renderedHash: contentHash(content) };
         if (records.files[file].sourceHash !== originalHash) records.files[file].reason = 'source-changed-during-sync';
       }
       if (comp.crdsDir) {
         const crdsDir = path.join(sourceRepoDir, comp.crdsDir);
         const resources = fs.readdirSync(crdsDir).filter((file) => /\.ya?ml$/i.test(file)).sort().map((file) => {
           const sourcePath = `${comp.crdsDir}/${file}`;
-          records.crds[sourcePath] = sourceFileProvenance(sourceRepoDir, comp.repo, sourcePath, sources[comp.docsSubdir]?.commit);
+          records.crds[sourcePath] = sourceFileProvenance(sourceRepoDir, comp.repo, sourcePath, sources[comp.docsSubdir]?.commit, { ignoreRevs });
           const crd = load(fs.readFileSync(path.join(crdsDir, file), 'utf8'));
           if (crd?.kind !== 'CustomResourceDefinition' || !crd.spec?.names?.kind || !crd.spec?.versions?.length || crd.spec.versions.some((version) => !version.schema?.openAPIV3Schema)) throw new Error(`${comp.name}: invalid CRD ${file}`);
           return { ...crd, _sourcePath: `${comp.crdsDir}/${file}` };

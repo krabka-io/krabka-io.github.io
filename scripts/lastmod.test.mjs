@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
-import { contentHash, sourceFileProvenance, importedInputs, resolveLastmod, validateAttestations } from './lastmod-provenance.mjs';
+import { contentHash, sourceFileProvenance, importedInputs, resolveLastmod, ignoredRevisions } from './lastmod-provenance.mjs';
 import { authoredRoutes, routeInputs } from './lastmod-routes.mjs';
 import { syncGuides } from './sync-docs.mjs';
 import { applyLastmod } from './sitemap-lastmod.mjs';
@@ -14,141 +14,181 @@ import { readSitemap, validateXSD } from './sitemap.mjs';
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lastmod-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let date = '2026-10-01T12:00:00Z';
   const write = (file, text) => { fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); fs.writeFileSync(path.join(root, file), text); };
-  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid', GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z' } }).trim();
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid', GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } }).trim();
   git('init', '-q');
-  const commit = () => { git('add', '.'); git('commit', '-qm', 'Fixture content'); return git('rev-parse', 'HEAD'); };
-  const reviewed = (inputs, date = '2026-10-01') => ({ date, complete: true, owner: 'Fixture reviewer', revision: git('rev-parse', 'HEAD'), evidence: 'Explicit significant-update review for these fixture inputs.', inputs: Object.fromEntries(inputs.map((file) => [file, contentHash(fs.readFileSync(path.join(root, file)))])) });
-  return { root, write, git, commit, reviewed };
+  const commit = (when = date) => { date = when; git('add', '.'); git('commit', '-qm', 'Fixture content'); return git('rev-parse', 'HEAD'); };
+  return { root, write, git, commit };
 }
+const mapPage = (source, inputs = [source]) => ({ family: 'authored', source, inputs });
+const resolve = (f, mapping, options = {}) => resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping, ...options });
 
-const mapPage = (source, inputs = [source]) => ({ family: 'authored', source, inputs, complete: true });
-
-test('explicit review wins; unknown, changed, dirty, shallow and non-Git inputs omit without a fallback', (t) => {
+test('maximum content-file date is automatic; unrelated HEAD, dirty, untracked and incomplete history behave correctly', (t) => {
   const f = fixture(t);
-  f.write('page.astro', '<h1>Original claim</h1>');
-  f.write('shared.astro', '<p>Shared claim</p>');
-  f.commit();
-  const attestation = f.reviewed(['page.astro', 'shared.astro']);
-  const resolve = (changes = {}) => resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping: mapPage('page.astro', ['page.astro', 'shared.astro']), attestation, ...changes });
-  assert.equal(resolve().date, '2026-10-01');
-  f.write('unrelated.txt', 'An unrelated commit'); f.commit();
-  assert.equal(resolve().date, '2026-10-01');
-  assert.equal(resolve({ mapping: null }).reason, 'unmapped-route');
-  assert.equal(resolve({ attestation: null }).reason, 'no-reviewed-significant-update');
-  assert.equal(resolve({ state: { historyComplete: false } }).date, null);
-  assert.equal(resolve({ state: { historyComplete: false, reason: 'non-git-source' } }).reason, 'non-git-source');
-  f.write('shared.astro', '<p>Changed substantive claim</p>');
-  assert.equal(resolve().reason, 'dirty-or-untracked-input');
-  f.commit();
-  assert.equal(resolve().reason, 'input-history-changed-since-review');
-  assert.equal(resolve({ attestation: f.reviewed(['page.astro', 'shared.astro'], '2026-10-02') }).date, '2026-10-02');
-  f.write('page.astro', '<h1>Original claim</h1>\n'); f.commit();
-  // Cosmetic reviews keep the previous significant date, never the commit date.
-  assert.equal(resolve({ attestation: f.reviewed(['page.astro', 'shared.astro'], '2026-10-02') }).date, '2026-10-02');
-  assert.equal(resolve({ attestation: f.reviewed(['page.astro']) }).reason, 'unattested-route-input');
+  f.write('page.astro', '<h1>Original</h1>'); f.commit();
+  f.write('shared.astro', '<p>Shared claim</p>'); f.commit('2026-10-02T12:00:00Z');
+  const mapping = mapPage('page.astro', ['page.astro', 'shared.astro']);
+  assert.equal(resolve(f, mapping).date, '2026-10-02');
+  f.write('unrelated.txt', 'Unrelated'); f.commit('2026-10-03T12:00:00Z');
+  assert.equal(resolve(f, mapping).date, '2026-10-02');
+  assert.equal(resolve(f, null).reason, 'unmapped-route');
+  assert.equal(resolve(f, mapping, { state: { historyComplete: false } }).date, null);
+  assert.equal(resolve(f, mapping, { state: { historyComplete: false, reason: 'non-git-source' } }).reason, 'non-git-source');
+  f.write('shared.astro', '<p>Changed claim</p>');
+  assert.equal(resolve(f, mapping).reason, 'dirty-or-untracked-source');
+  f.git('add', 'shared.astro');
+  assert.equal(resolve(f, mapping).date, null); // staged changes also omit
+  f.commit('2026-10-04T12:00:00Z');
+  assert.equal(resolve(f, mapping).date, '2026-10-04');
+  f.write('new.json', '{}');
+  assert.equal(resolve(f, mapPage('new.json')).date, null);
+  f.write('.gitignore', 'ignored.json\n'); f.write('ignored.json', '{}');
+  assert.equal(resolve(f, mapPage('ignored.json')).date, null);
 });
 
-test('new imported dependencies cannot silently reuse an old date', (t) => {
+test('Git clean filters such as LFS do not mistake hydrated content for a dirty or mismatched input', (t) => {
   const f = fixture(t);
-  f.write('page.astro', "---\nimport Shared from './shared.astro';\n---\n<Shared />");
-  f.write('shared.astro', '<p>A meaningful input</p>');
-  f.commit();
-  assert.deepEqual([...importedInputs(f.root, 'page.astro')].sort(), ['page.astro', 'shared.astro']);
-  const resolve = (record) => resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping: mapPage('page.astro'), attestation: record });
-  assert.equal(resolve(f.reviewed(['page.astro'])).reason, 'unattested-import-dependency');
-  assert.equal(resolve(f.reviewed(['page.astro', 'shared.astro'])).date, '2026-10-01');
+  f.git('config', 'filter.fixture.clean', 'sed s/hydrated/stored/g');
+  f.git('config', 'filter.fixture.smudge', 'sed s/stored/hydrated/g');
+  f.write('.gitattributes', 'asset.bin filter=fixture\n');
+  f.write('asset.bin', 'hydrated'); f.commit();
+  assert.equal(f.git('show', 'HEAD:asset.bin'), 'stored');
+  assert.equal(resolve(f, mapPage('asset.bin')).date, '2026-10-01');
 });
 
-test('restored bytes cannot hide a significant intervening edit or revert', (t) => {
+test('optional ignored cosmetic commits and prefixes select previous file history; edit/revert requires no attestation', (t) => {
   const f = fixture(t);
-  f.write('page.astro', '<h1>Original claim</h1>'); f.commit();
-  const attestation = f.reviewed(['page.astro']);
-  f.write('page.astro', '<h1>Revised claim</h1>'); f.commit();
-  f.write('page.astro', '<h1>Original claim</h1>'); f.commit();
-  const record = resolveLastmod({ root: f.root, url: 'https://krabka.io/page/', mapping: mapPage('page.astro'), attestation });
-  assert.equal(record.date, null);
-  assert.equal(record.reason, 'input-history-changed-since-review');
+  f.write('page.astro', '<h1>Original</h1>'); const original = f.commit();
+  f.write('page.astro', '<h1>Original</h1>\n'); const cosmetic = f.commit('2026-10-02T12:00:00Z');
+  assert.equal(resolve(f, mapPage('page.astro')).date, '2026-10-02');
+  for (const ignored of [cosmetic, cosmetic.slice(0, 9)]) {
+    const record = resolve(f, mapPage('page.astro'), { ignoreRevs: [ignored] });
+    assert.equal(record.date, '2026-10-01'); assert.equal(record.evidence[0].lastChange.commit, original);
+  }
+  f.write('scripts/lastmod-ignore-revs.txt', `# cosmetic\n${cosmetic.slice(0, 9)} # formatting\n`);
+  assert.equal(resolve(f, mapPage('page.astro')).date, '2026-10-01');
+  f.write('page.astro', '<h1>Revised</h1>'); f.commit('2026-10-03T12:00:00Z');
+  f.write('page.astro', '<h1>Original</h1>'); f.commit('2026-10-04T12:00:00Z');
+  assert.equal(resolve(f, mapPage('page.astro')).date, '2026-10-04');
+  f.write('scripts/lastmod-ignore-revs.txt', 'not-a-sha\n');
+  assert.throws(() => ignoredRevisions(f.root), /Invalid ignored/);
 });
 
-test('source history pins paths and follows renames; HEAD, copies and local modifications are not page dates', (t) => {
+test('content import traversal stops at chrome/plumbing; shared content and data changes update the page date', (t) => {
   const f = fixture(t);
-  f.write('docs/operations/KIP_MATRIX.md', '# Original matrix\n');
-  const original = f.commit();
-  f.write('unrelated.txt', 'Not a guide change'); const pinned = f.commit();
-  const clean = sourceFileProvenance(f.root, 'broker', 'docs/operations/KIP_MATRIX.md', pinned);
-  assert.equal(clean.lastChange.commit, original);
-  assert.equal(clean.revision, pinned);
-  assert.equal(clean.lastChange.significance, 'unreviewed');
-  assert.equal(clean.historyComplete, true);
-  f.git('mv', 'docs/operations/KIP_MATRIX.md', 'docs/operations/Renamed.md'); f.commit();
-  assert.equal(sourceFileProvenance(f.root, 'broker', 'docs/operations/Renamed.md').lastChange.commit, f.git('rev-parse', 'HEAD'));
-  f.write('docs/operations/Renamed.md', '# Local change');
+  f.write('src/pages/features/kraft.astro', "import Base from '../../layouts/BaseLayout.astro';\nimport Hero from '../../components/Hero.astro';");
+  f.write('src/layouts/BaseLayout.astro', "import versions from '../data/versions.json';");
+  f.write('src/data/versions.json', '{}');
+  f.write('src/components/Hero.astro', "import data from '../data/claims.json';\nimport '../styles/global.css';");
+  f.write('src/data/claims.json', '{}'); f.write('src/styles/global.css', 'body {}'); f.commit();
+  const mapping = () => routeInputs(f.root, 'https://krabka.io/features/kraft/');
+  assert.deepEqual(mapping().inputs, ['src/components/Hero.astro', 'src/data/claims.json', 'src/pages/features/kraft.astro']);
+  f.write('src/layouts/BaseLayout.astro', "import versions from '../data/versions.json';\n<!-- chrome -->");
+  f.write('src/data/versions.json', '{"unused":"updated"}'); f.write('src/styles/global.css', 'body { margin: 0; }');
+  // Even dirty shell/CSS and its unused data do not suppress content dates.
+  assert.equal(resolve(f, mapping()).date, '2026-10-01');
+  f.commit('2026-10-02T12:00:00Z');
+  assert.equal(resolve(f, mapping()).date, '2026-10-01');
+  f.write('src/data/claims.json', '{"new":"claim"}'); f.commit('2026-10-03T12:00:00Z');
+  assert.equal(resolve(f, mapping()).date, '2026-10-03');
+  f.write('src/components/Hero.astro', "import data from '../data/claims.json';\n<p>New shared content</p>"); f.commit('2026-10-04T12:00:00Z');
+  assert.equal(resolve(f, mapping()).date, '2026-10-04');
+  assert.ok(![...importedInputs(f.root, 'src/pages/features/kraft.astro')].some((file) => file.includes('BaseLayout')));
+});
+
+test('source history pins paths, follows renames, filters upstream cosmetic commits and rejects shallow/non-Git/dirty sources', (t) => {
+  const f = fixture(t);
+  f.write('docs/operations/KIP_MATRIX.md', '# Matrix\n'); const original = f.commit();
+  f.write('unrelated.txt', 'Unrelated'); const pinned = f.commit('2026-10-02T12:00:00Z');
+  const record = sourceFileProvenance(f.root, 'broker', 'docs/operations/KIP_MATRIX.md', pinned);
+  assert.equal(record.lastChange.commit, original); assert.equal(record.revision, pinned);
+  assert.equal(record.lastChange.significance, undefined);
+  f.git('mv', 'docs/operations/KIP_MATRIX.md', 'docs/operations/Renamed.md');
+  const renamed = f.commit('2026-10-03T12:00:00Z');
+  assert.equal(sourceFileProvenance(f.root, 'broker', 'docs/operations/Renamed.md').lastChange.commit, renamed);
+  assert.equal(sourceFileProvenance(f.root, 'broker', 'docs/operations/Renamed.md', undefined, { ignoreRevs: [renamed] }).lastChange.commit, original);
+  f.write('docs/operations/Renamed.md', '# Local');
   assert.equal(sourceFileProvenance(f.root, 'broker', 'docs/operations/Renamed.md').reason, 'dirty-or-untracked-source');
-  f.write('docs/untracked.md', '# New guide');
-  assert.equal(sourceFileProvenance(f.root, 'broker', 'docs/untracked.md').reason, 'dirty-or-untracked-source');
-  fs.mkdirSync(path.join(f.root, 'archive'));
-  f.write('archive/guide.md', '# No Git metadata');
-  assert.equal(sourceFileProvenance(path.join(f.root, 'archive'), 'broker', 'guide.md').reason, 'non-git-source');
   f.git('checkout', '--', 'docs/operations/Renamed.md');
-  const shallow = path.join(os.tmpdir(), 'shallow-' + path.basename(f.root));
-  t.after(() => fs.rmSync(shallow, { recursive: true, force: true }));
+  const shallow = path.join(f.root, 'shallow');
   execFileSync('git', ['clone', '-q', '--depth', '1', 'file://' + f.root, shallow]);
-  const incomplete = sourceFileProvenance(shallow, 'broker', 'docs/operations/Renamed.md');
-  assert.equal(incomplete.reason, 'incomplete-history');
-  assert.equal(incomplete.lastChange, null);
+  assert.equal(sourceFileProvenance(shallow, 'broker', 'docs/operations/Renamed.md').reason, 'incomplete-history');
+  fs.mkdirSync(path.join(f.root, 'archive')); f.write('archive/guide.md', '# Archive');
+  assert.equal(sourceFileProvenance(path.join(f.root, 'archive'), 'broker', 'guide.md').reason, 'non-git-source');
 });
 
-test('sync publishes per-file/custom/nested provenance atomically without changing source-link mappings', (t) => {
+test('sync publishes automatic nested/custom guide dates atomically and preserves source-link mappings', (t) => {
   const f = fixture(t);
-  f.write('docs/operations/KIP_MATRIX.md', '# Matrix\n');
-  f.write('README.md', '# Custom guide\n'); f.commit();
-  const content = path.join(os.tmpdir(), 'content-' + path.basename(f.root));
-  t.after(() => fs.rmSync(content, { recursive: true, force: true }));
+  f.write('docs/operations/KIP_MATRIX.md', '# Matrix\n'); f.write('README.md', '# Custom guide\n'); f.commit();
+  f.write('README.md', '# Custom guide\n\n'); const cosmetic = f.commit('2026-10-02T12:00:00Z');
+  const content = path.join(f.root, 'site/src/content/docs');
   const comp = { name: 'broker', repo: 'krabka-broker', docsSubdir: 'broker', localRepoDir: f.root,
     guides: [{ source: 'docs/operations/KIP_MATRIX.md', destination: 'operations/KIP_MATRIX.md' }, { source: 'README.md', destination: 'reference.md' }] };
-  syncGuides([comp], content);
-  const file = path.join(content, 'lastmod-provenance.json');
-  const before = fs.readFileSync(file, 'utf8');
+  syncGuides([comp], content, { ignoreRevs: [cosmetic] });
+  const file = path.join(content, 'lastmod-provenance.json'); const before = fs.readFileSync(file, 'utf8');
   const record = JSON.parse(before).components.broker.files['operations/KIP_MATRIX.md'];
   assert.equal(record.sourcePath, 'docs/operations/KIP_MATRIX.md');
   assert.equal(record.renderedHash, contentHash(fs.readFileSync(path.join(content, 'broker/operations/KIP_MATRIX.md'))));
   assert.equal(JSON.parse(fs.readFileSync(path.join(content, 'sources.json'))).broker.files['reference.md'], 'README.md');
-  const site = path.join(f.root, 'site');
-  fs.mkdirSync(path.join(site, 'src/content/docs'), { recursive: true });
-  fs.copyFileSync(file, path.join(site, 'src/content/docs/lastmod-provenance.json'));
-  const mapped = routeInputs(site, 'https://krabka.io/docs/broker/operations/kip_matrix/');
-  assert.equal(mapped.family, 'synced-guide');
-  assert.equal(mapped.provenance[0].sourcePath, 'docs/operations/KIP_MATRIX.md');
-  assert.equal(routeInputs(site, 'https://krabka.io/docs/broker/reference/').family, 'synced-guide');
+  for (const route of ['/docs/broker/operations/kip_matrix/', '/docs/broker/reference/']) {
+    const mapped = routeInputs(path.join(f.root, 'site'), 'https://krabka.io' + route);
+    assert.equal(mapped.family, 'synced-guide'); assert.deepEqual(mapped.inputs, []);
+    assert.equal(resolve(f, mapped).date, '2026-10-01');
+    assert.equal(resolve(f, { ...mapped, provenance: [{ ...record, historyComplete: false }] }).date, null);
+    assert.equal(resolve(f, { ...mapped, provenance: [{ ...record, dirtySource: true }] }).date, null);
+  }
   assert.throws(() => syncGuides([{ ...comp, guides: [...comp.guides, { source: 'missing.md', destination: 'missing.md' }] }], content));
   assert.equal(fs.readFileSync(file, 'utf8'), before);
 });
 
-test('malformed explicit dates fail, including records for unmapped routes', () => {
-  for (const date of ['2026-02-30', '2026-10-01T12:00:00', 'not-a-date']) assert.throws(() => validateAttestations({ '/unknown': { date } }), /invalid explicit lastmod/);
-  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/releases/').gap, 'release-edit-and-membership-history-unavailable');
-  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/news/').family, 'authored');
-  assert.ok(routeInputs(process.cwd(), 'https://krabka.io/releases/').inputs.includes('external:GitHub-release-collection-and-edit-history'));
-  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/versions/').gap, 'live-version-snapshot-history-unavailable');
-  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/new-route/'), null);
-  assert.ok(Object.keys(authoredRoutes).length > 1);
+test('CRD kinds use their matching YAML history, index uses all YAML histories, and content components contribute', (t) => {
+  const f = fixture(t);
+  const base = { repo: 'operator', historyComplete: true, dirtySource: false, reason: null };
+  const crds = Object.fromEntries(['Kafka', 'KafkaTopic'].map((kind, i) => [`charts/crds/${kind}.yaml`, { ...base, sourcePath: `charts/crds/${kind}.yaml`, lastChange: { date: `2026-10-0${i + 2}T12:00:00Z`, commit: String(i).repeat(40) } }]));
+  f.write('src/content/docs/lastmod-provenance.json', JSON.stringify({ components: { operator: { crds, files: {} } } }));
+  f.write('src/content/docs/operator/crds.json', JSON.stringify({ resources: ['Kafka', 'KafkaTopic'].map((kind) => ({ _sourcePath: `charts/crds/${kind}.yaml`, spec: { names: { kind } } })) }));
+  f.write('src/pages/docs/operator/crds.astro', '<h1>CRDs</h1>');
+  f.write('src/pages/docs/operator/crds/[kind].astro', "import Description from '../../../../components/CrdDescription.astro';");
+  f.write('src/components/CrdDescription.astro', '<p>Description</p>'); f.commit();
+  const mapping = (route) => routeInputs(f.root, 'https://krabka.io/docs/operator/crds' + route);
+  assert.equal(resolve(f, mapping('/kafka/')).date, '2026-10-02');
+  assert.equal(resolve(f, mapping('/kafkatopic/')).date, '2026-10-03');
+  assert.equal(mapping('/kafka/').provenance.length, 1);
+  assert.equal(resolve(f, mapping('/')).date, '2026-10-03');
+  f.write('src/components/CrdDescription.astro', '<p>Updated description</p>'); f.commit('2026-10-04T12:00:00Z');
+  assert.equal(resolve(f, mapping('/kafka/')).date, '2026-10-04');
 });
 
-test('dirty date records omit, but malformed supplied dates still fail', (t) => {
+test('data-driven routes have concrete tracked inputs, not unreviewed gaps or generated snapshots', () => {
+  for (const route of ['/', '/benchmarks', '/benchmarks/explorer', '/verification', '/docs/verification-playground', '/docs/proof-explorer']) {
+    const mapping = routeInputs(process.cwd(), 'https://krabka.io' + route);
+    assert.equal(mapping.gap, undefined, route);
+    assert.ok(mapping.inputs.includes(authoredRoutes[route]));
+    assert.ok(!mapping.inputs.some((file) => file.includes('*') || file.includes('BaseLayout') || file === 'src/data/proof-sessions.json' || file === 'src/data/benchmark-archive.json'));
+  }
+  assert.ok(routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/pages/get-started.astro'));
+  assert.ok(routeInputs(process.cwd(), 'https://krabka.io/benchmarks/explorer').inputs.some((file) => file.endsWith('.tar.gz')));
+  for (const route of ['/releases', '/versions']) assert.equal(routeInputs(process.cwd(), 'https://krabka.io' + route).gap, 'unpinned-external-api-history');
+  assert.equal(routeInputs(process.cwd(), 'https://krabka.io/new-route'), null);
+});
+
+test('a non-Git source archive builds and reports omission instead of failing wildcard discovery', (t) => {
   const f = fixture(t);
-  f.write('page.astro', '<h1>Verified claim</h1>'); f.commit();
-  const record = f.reviewed(['page.astro']);
-  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/one': record })); f.commit();
-  const dir = path.join(f.root, 'dist');
-  sitemaps(dir, ['https://krabka.io/one/']);
-  const options = { root: f.root, map: () => mapPage('page.astro') };
-  assert.equal(applyLastmod(dir, options)[0].date, '2026-10-01');
-  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/one': { ...record, date: '2026-10-02' } }));
-  sitemaps(dir, ['https://krabka.io/one/']);
-  assert.equal(applyLastmod(dir, options)[0].reason, 'uncommitted-date-attestations');
-  f.write('scripts/lastmod-reviewed.json', JSON.stringify({ '/unmapped': { ...record, date: '2026-02-30' } }));
-  assert.throws(() => applyLastmod(dir, options), /invalid explicit lastmod/);
+  const archive = path.join(f.root, 'archive');
+  f.write('archive/src/pages/benchmarks/explorer.astro', '<h1>Explorer</h1>');
+  const dir = path.join(archive, 'dist'); sitemaps(dir, ['https://krabka.io/benchmarks/explorer/']);
+  const records = applyLastmod(dir, { root: archive });
+  assert.equal(records[0].date, null); assert.equal(records[0].reason, 'non-git-source');
+});
+
+test('date comparison uses instants across time zones and survives rewritten/squashed history without pinned baselines', (t) => {
+  const f = fixture(t); f.write('page.astro', '<p>Page</p>'); f.commit();
+  const upstream = (date) => ({ historyComplete: true, dirtySource: false, lastChange: { date } });
+  const mapping = { ...mapPage('page.astro'), provenance: [upstream('2026-10-03T23:30:00-04:00'), upstream('2026-10-04T02:00:00Z')] };
+  assert.equal(resolve(f, mapping).date, '2026-10-04');
+  f.write('page.astro', '<p>Squashed content</p>'); f.git('add', '.'); f.git('commit', '--amend', '-qm', 'Squashed');
+  assert.equal(resolve(f, mapPage('page.astro')).date, '2026-10-01');
 });
 
 const ns = 'http://www.sitemaps.org/schemas/sitemap/0.9';
@@ -158,30 +198,24 @@ function sitemaps(dir, urls) {
   fs.writeFileSync(path.join(dir, 'sitemap-website-0.xml'), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="${ns}">${urls.map((url) => `<url><loc>${url}</loc></url>`).join('')}</urlset>`);
 }
 
-test('central build hook preserves dates through forced byte/count splits and unchanged rebuilds, never index dates', (t) => {
-  const f = fixture(t);
-  f.write('page.astro', '<h1>Verified content</h1>'); f.commit();
-  const record = f.reviewed(['page.astro']);
+test('central hook preserves automatic dates through forced byte/count splits and identical rebuilds, never index dates', (t) => {
+  const f = fixture(t); f.write('page.astro', '<h1>Content</h1>'); f.commit();
   const urls = ['https://krabka.io/one/', 'https://krabka.io/two/', 'https://krabka.io/three/'];
-  const options = { root: f.root, attestations: Object.fromEntries(['/one', '/two', '/three'].map((route) => [route, record])), map: () => mapPage('page.astro') };
+  const options = { root: f.root, map: () => mapPage('page.astro') };
   const build = (name, inventory = urls) => {
     const dir = path.join(f.root, name); sitemaps(dir, inventory);
     const records = applyLastmod(dir, options);
     assert.equal(records.filter((entry) => entry.date).length, inventory.length);
     enforceSitemapLimits(dir, { maxBytes: 260, maxEntries: 1 });
-    const indexFile = path.join(dir, 'sitemap-index.xml');
-    const index = fs.readFileSync(indexFile, 'utf8');
+    const indexFile = path.join(dir, 'sitemap-index.xml'); const index = fs.readFileSync(indexFile, 'utf8');
     assert.doesNotMatch(index, /lastmod/);
-    const children = readSitemap(index, 'sitemapindex', indexFile);
-    assert.equal(children.length, inventory.length);
+    const children = readSitemap(index, 'sitemapindex', indexFile); assert.equal(children.length, inventory.length);
     validateXSD([{ file: indexFile, root: 'sitemapindex' }, ...children.map((child) => ({ file: path.join(dir, path.basename(new URL(child).pathname)), root: 'urlset' }))]);
     for (const child of children) {
       const xml = fs.readFileSync(path.join(dir, path.basename(new URL(child).pathname)), 'utf8');
-      assert.match(xml, /<lastmod>2026-10-01<\/lastmod>/);
-      assert.ok(Buffer.byteLength(xml) <= 260);
+      assert.match(xml, /<lastmod>2026-10-01<\/lastmod>/); assert.ok(Buffer.byteLength(xml) <= 260);
     }
     return Object.fromEntries(fs.readdirSync(dir).sort().map((file) => [file, fs.readFileSync(path.join(dir, file), 'utf8')]));
   };
-  assert.deepEqual(build('first'), build('second'));
-  build('removed', urls.slice(0, 1));
+  assert.deepEqual(build('first'), build('second')); build('removed', urls.slice(0, 1));
 });

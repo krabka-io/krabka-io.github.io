@@ -38,79 +38,76 @@ The build reports new, unmapped routes without assigning a date.
 A mapped route does not imply complete provenance.
 
 `scripts/sitemap-lastmod.mjs` runs after Astro writes its sitemaps and before
-`scripts/sitemap-limits.mjs` splits them by bytes. It adds verified page dates
+`scripts/sitemap-limits.mjs` splits them by bytes. It adds Git-derived page dates
 and writes `dist/lastmod-report.json`. The normal sitemap checker then verifies
 canonical coverage, protocol rules, schemas and reachability. The report lists
 each canonical URL, route family, declared inputs, evidence and omission reason.
 Coverage is a diagnostic, not a passing threshold.
 
-#### Significant-update ownership
+#### Automatic content dates
 
-Website maintainers own `scripts/lastmod-reviewed.json`. Each record declares a
-complete set of meaningful inputs, their SHA-256 hashes, an explicit significant
-update date, a baseline revision and the review evidence. This explicit date
-has precedence over Git candidates. The resolver never promotes a candidate
-commit date automatically. All supplied dates are validated, including records
-for routes that are absent or omitted. Invalid dates fail the build.
+For each mapped route, the resolver queries `git log --follow -1 --format=%cI`
+for each content-bearing input and takes the maximum timestamp. The output
+uses UTC `YYYY-MM-DD` dates consistently. There is no human attestation file,
+input-hash lockfile, or pinned website baseline revision. Squash merges and
+rebases use the history present in the checked-out repository.
 
-Review changes to the main content, material claims, embedded data, structured
-content, useful links and artwork. Consider substantive shared content too.
-Formatting, CSS adjustments, ordinary navigation, analytics and the footer's
-copyright year do not establish a new significant update. Include conservative
-hash guards for these files when they can change rendered content. A changed
-hash removes the date until review; it does not assign the new commit date.
-After a cosmetic change, refresh the hashes and keep the significant date.
-After a substantive change, establish the date from cited evidence first.
+Static import traversal includes page entries, content components, rendering
+logic that changes content, and tracked data. The route map adds file-read
+inputs that imports cannot discover. Benchmark pages include tracked report
+and trial files; the explorer uses tracked LFS archives rather than generated
+archive JSON. Verification pages include the synced broker catalog and tracked
+kernel/model data. The homepage also includes the get-started source used for
+its client excerpts. The proof explorer includes its tracked scripts and data,
+the sync generator, and the broker catalog rather than treating its generated
+sessions JSON as a tracked website input.
 
-A record covers the whole route, not only its newest known input. Review the
-static import closure and all non-import inputs, such as file reads, images,
-client scripts, configuration, transforms and data. New imported dependencies
-that are absent from the record cause omission. Import discovery is a guard,
-not a claim that static analysis finds every meaningful input. Do not mark a
-record complete while an input or its significant history is unknown.
+Traversal stops at global layouts, navigation, footer, logo, code-block styling,
+CSS, fonts, favicons, social images, path/heading/highlighting utilities, and
+build/dependency configuration. Changes to these files do not date or suppress
+otherwise clean routes. Stopping at layouts also excludes their unused versions
+import from non-homepage routes. Content-bearing imports such as `Hero.astro`,
+`BenchmarkOverview.astro`, `EcosystemGrid.astro`, and `CrdDescription.astro` do
+contribute to routes that use them.
 
-The two initial records cover the KRaft and operator feature pages. They propose
-12 October 2026 as the baseline for the feature-scope descriptions changed in
-`a6d74993a9f17a8b67e355a92987a3807d7bc580`. The implementation author inspected
-those changes. These records do not claim prior approval by a maintainer.
-They include the shared source, render transforms, lockfile, fonts and image
-inputs. The imported versions data is unused on these non-homepage routes.
-Their current hashes are guards, not evidence that every input changed on
-12 October. Review these proposed baselines with the implementation.
+`scripts/lastmod-ignore-revs.txt` optionally lists cosmetic-only commit SHAs or
+unambiguous hexadecimal prefixes of at least seven characters. Blank lines and
+`#` comments are accepted. The default list is empty. When the list is nonempty,
+the resolver walks each file's rename-following history and selects its first
+non-ignored commit. The same list applies during upstream guide and CRD sync.
+Malformed entries fail validation. This exception list does not require routine
+per-page maintenance or suppress a page date after an ordinary content commit.
 
-The resolver checks complete website history, baseline ancestry, tracked input
-paths, clean input and attestation status, exact hashes and intervening commits.
-A later input edit followed by a revert still needs review, even with equal hashes. Dirty or untracked inputs, changed
-hashes, missing files and unavailable history remove dates with reasons.
-An unrelated file or commit does not change a verified date. There is no build,
-sync, filesystem-mtime or repository-HEAD fallback. CI checks out full website
-history. A source archive or shallow checkout still builds, without those dates.
+Dirty, untracked, missing, non-Git or shallow content inputs produce explicit
+omission reasons. A tracked LFS file is checked through Git's clean filters,
+not by comparing its hydrated bytes with the pointer blob. Unmapped routes
+remain undated until added to the route map. `/releases` and `/versions` remain
+undated because live API edit/membership history is not pinned in Git; their
+offline caches do not establish complete live history. There is no build,
+sync, filesystem-mtime or repository-HEAD fallback. CI uses full website history.
 
 #### Synced and generated inputs
 
 `sync-docs` publishes `src/content/docs/lastmod-provenance.json` atomically with
-the guides. Each source file has its original repository/path, pinned revision,
-last-change candidate, history status, dirty-source status and source hash.
-Each guide also has a transformed-content hash. CRD source records remain
-separate from Markdown records. Candidate significance is explicitly unreviewed.
-The existing `sources.json` component fields and destination-to-source mapping
-remain unchanged for GitHub footers. The component HEAD date is not a page date.
+the guides. Each source record has its repository/path, synced revision,
+last per-file commit and date, history status, and dirty-source status. Source
+and rendered hashes remain sync diagnostics, not a manually maintained date
+gate. The existing `sources.json` footer contract is unchanged.
+
+Clean synced guides with complete upstream history use their Markdown file's
+record directly. A component HEAD date, link rewrite, global docs layout or
+shared guide renderer does not replace the Markdown date. Custom destination
+paths and nested guide paths retain their original source-file history.
+
+CRD kind routes combine the matching YAML record with their page source,
+content components, and tracked field-description data. The CRD index combines
+all YAML records with its own content inputs. The generated `crds.json` snapshot
+is not queried as an untracked website source.
 
 Fallback sparse clones acquire full history with filtered blobs. Existing
 shallow sibling checkouts are not modified or silently trusted. They report
-incomplete history. The lookup uses the pinned revision and follows renames.
-Non-Git, dirty and untracked source cases retain reasons without guessed dates.
-Sync failure leaves both previous content and provenance intact.
-
-Guides currently omit dates because their significant source changes and full
-render dependencies have not been reviewed. CRD pages report the schema gap.
-The release index omits dates because publication does not establish
-edited notes or addition/removal history. Versions omit dates because their
-live snapshots lack complete history. Benchmark, catalog and proof views
-report their unreviewed data inputs. The homepage includes those data gaps.
-News pages use authored content, not live release notes.
-These omissions apply online and offline. A release edit timestamp alone would
-not prove complete collection history, including removed releases.
+incomplete history. The source lookup uses the synced revision and follows
+renames. Sync failure leaves previous content and provenance intact.
 
 Index entries have no `lastmod`. Astro never receives page dates, so its chunk
 writer cannot infer child-file dates from page dates. The limits pass rebuilds

@@ -2,6 +2,8 @@
 // The final sitemap is reconciled against this map on every build.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { kindSlug } from '../src/utils/operator-crds.mjs';
 import { slug } from 'github-slugger';
 import { importedInputs } from './lastmod-provenance.mjs';
 
@@ -55,57 +57,65 @@ export const authoredRoutes = {
   "/versions": "src/pages/versions.astro"
 };
 
-const generatedGaps = {
-  '/': 'unreviewed-benchmark-and-verification-inputs',
-  '/releases': 'release-edit-and-membership-history-unavailable',
-  '/versions': 'live-version-snapshot-history-unavailable',
-  '/benchmarks': 'benchmark-data-significance-unreviewed',
-  '/benchmarks/explorer': 'benchmark-archive-significance-unreviewed',
-  '/verification': 'catalog-and-proof-significance-unreviewed',
-  '/docs/verification-playground': 'catalog-and-proof-significance-unreviewed',
-  '/docs/proof-explorer': 'catalog-and-proof-significance-unreviewed',
-  '/docs/operator/crds': 'crd-and-shared-input-significance-unreviewed',
-};
-// Known non-import inputs. Patterns describe incomplete families, not dated
-// dependencies; reviewed records need exact files instead of these selectors.
-const verificationInputs = ['src/content/docs/broker/verification.md', 'src/data/proof-sessions.json', 'src/data/verified-kernels.json', 'src/data/stateright-models.json', 'public/proofs/coma/**'];
-const benchmarkInputs = ['benchmarks/latest-openmessaging.md', 'benchmarks/openmessaging/**/provenance.json', 'benchmarks/openmessaging/**/trials.json'];
+// File-read/generated dependencies are explicit; generated snapshots are replaced
+// with tracked source files or upstream per-file provenance, not build timestamps.
+const benchmarkInputs = ['benchmarks/latest-openmessaging.md', 'benchmarks/openmessaging/**/provenance.json', 'benchmarks/openmessaging/**/trials.json', 'benchmarks/openmessaging/**/summary.md', 'benchmarks/openmessaging/**/intervals.json'];
 const generatedInputs = {
-  '/': [...verificationInputs, ...benchmarkInputs],
-  '/releases': ['src/data/versions.json', 'src/data/ecosystem-versions.json', 'external:GitHub-release-collection-and-edit-history'],
-  '/versions': ['src/data/ecosystem-versions.json', 'external:GitHub-repositories-tags-releases-and-comparisons'],
+  '/': ['src/pages/get-started.astro', ...benchmarkInputs],
   '/benchmarks': benchmarkInputs,
-  '/benchmarks/explorer': ['src/data/benchmark-archive.json', 'public/benchmarks/archive-data/**', 'benchmarks/archive/*.tar.gz'],
-  '/verification': verificationInputs,
-  '/docs/verification-playground': verificationInputs,
-  '/docs/proof-explorer': [...verificationInputs, 'public/proofs/**', 'public/why3-web/**'],
-  '/docs/operator/crds': ['src/content/docs/operator/crds.json'],
+  '/benchmarks/explorer': ['benchmarks/archive/README.md', 'benchmarks/archive/*.tar.gz'],
+  '/docs/lab': ['public/playground/lab/**', 'public/playground/*.html'],
+  '/docs/proof-explorer': ['public/proofs/*.js', 'scripts/sync-proofs.mjs', 'src/data/verified-kernels.json', 'src/data/stateright-models.json'],
 };
-
+const generatedSnapshots = new Set(['src/data/benchmark-archive.json', 'src/data/proof-sessions.json', 'src/content/docs/operator/crds.json']);
+const catalogRoutes = new Set(['/', '/verification', '/docs/verification-playground', '/docs/proof-explorer']);
 const guideId = (file) => file.replace(/\.md$/i, '').split('/').map((part) => slug(part)).join('/');
+const readJSON = (root, file, fallback) => fs.existsSync(path.join(root, file)) ? JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')) : fallback;
+
+function expandInputs(root, selectors) {
+  return selectors.flatMap((selector) => {
+    if (!selector.includes('*')) return [selector];
+    // Include untracked (non-ignored) files too, so additions invalidate dates
+    // until committed. Generated ignored output is not a content source.
+    try {
+      return execFileSync('git', ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', selector], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split('\0').filter(Boolean);
+    } catch {
+      // Source archives still build: the resolver reports non-Git history and
+      // omits dates before attempting to query these diagnostic selectors.
+      return [selector];
+    }
+  });
+}
 
 export function routeInputs(root, url) {
   const route = new URL(url).pathname.replace(/\/$/, '') || '/';
+  const provenance = readJSON(root, 'src/content/docs/lastmod-provenance.json', { components: {} });
+  const crds = provenance.components.operator?.crds ?? {};
+  if (route === '/docs/operator/crds' || route.startsWith('/docs/operator/crds/')) {
+    const index = route === '/docs/operator/crds';
+    const source = index ? authoredRoutes[route] : 'src/pages/docs/operator/crds/[kind].astro';
+    const snapshot = readJSON(root, 'src/content/docs/operator/crds.json', { resources: [] });
+    const resource = snapshot.resources.find((item) => route === `/docs/operator/crds/${kindSlug(item)}`);
+    if (!index && !resource) return null;
+    return { family: 'generated-crd', source,
+      inputs: [...importedInputs(root, source)].filter((file) => !generatedSnapshots.has(file)).sort(),
+      provenance: index ? Object.values(crds) : [crds[resource._sourcePath]],
+      ...(!Object.keys(crds).length ? { gap: 'missing-crd-provenance' } : {}) };
+  }
   if (authoredRoutes[route]) {
     const source = authoredRoutes[route];
-    let imports = [source];
-    try { imports = [...importedInputs(root, source)]; } catch { /* An omitted route can lack generated build inputs. */ }
-    return { family: generatedInputs[route] ? 'data-driven' : 'authored', source,
-      inputs: [...new Set([...imports, ...(generatedInputs[route] ?? [])])].sort(), gap: generatedGaps[route] };
+    const imports = [...importedInputs(root, source)].filter((file) => !generatedSnapshots.has(file));
+    const readsBenchmarks = imports.includes('src/utils/benchmarks.mjs');
+    return { family: generatedInputs[route] || catalogRoutes.has(route) ? 'data-driven' : 'authored', source,
+      inputs: [...new Set([...imports, ...expandInputs(root, [...(generatedInputs[route] ?? []), ...(readsBenchmarks ? benchmarkInputs : [])])])].sort(),
+      provenance: catalogRoutes.has(route) ? [provenance.components.broker?.files?.['verification.md']] : [],
+      ...(['/releases', '/versions'].includes(route) ? { gap: 'unpinned-external-api-history' } : {}) };
   }
-  const provenanceFile = path.join(root, 'src/content/docs/lastmod-provenance.json');
-  const provenance = fs.existsSync(provenanceFile) ? JSON.parse(fs.readFileSync(provenanceFile, 'utf8')) : { components: {} };
   for (const [component, data] of Object.entries(provenance.components)) {
     for (const [destination, record] of Object.entries(data.files)) {
       if (route !== `/docs/${component}/${guideId(destination)}`) continue;
-      const content = `src/content/docs/${component}/${destination}`;
-      return { family: 'synced-guide', source: 'src/pages/docs/[...slug].astro',
-        inputs: [content, 'src/pages/docs/[...slug].astro', 'scripts/rewrite-doc-links.mjs'], provenance: [record],
-        gap: record.reason ?? (!record.historyComplete ? 'incomplete-upstream-history' : 'guide-significance-and-render-dependencies-unreviewed') };
+      return { family: 'synced-guide', source: 'src/pages/docs/[...slug].astro', inputs: [], provenance: [record] };
     }
   }
-  if (/^\/docs\/operator\/crds\//.test(route)) return { family: 'generated-crd', source: 'src/pages/docs/operator/crds/[kind].astro',
-    inputs: ['src/pages/docs/operator/crds/[kind].astro', 'src/content/docs/operator/crds.json', 'src/utils/operator-crds.mjs'],
-    provenance: Object.values(provenance.components.operator?.crds ?? {}), gap: 'crd-and-shared-input-significance-unreviewed' };
   return null;
 }
