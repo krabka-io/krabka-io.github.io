@@ -1081,3 +1081,17 @@ fn a_busy_coordinator_is_asked_again_and_a_fenced_producer_stops() {
     h.run_for(10);
     assert!(failed(&h.take_events()).contains(&(seq, -1, codes::INVALID_TXN_STATE)));
 }
+
+#[test]
+fn zstd_batch_rejects_sequence_expansion_beyond_block_window() {
+    // Valid v2 framing and CRC: rejection must come from decompression, not
+    // the batch header, checksum or subsequent record parser.
+    let fixture =
+        include_bytes!("../../../vendor/krabka-compression/test-fixtures/oversized-sequence.batch");
+    let error = RecordBatch::decode(&mut fixture.as_slice()).unwrap_err();
+    assert!(matches!(
+        &error,
+        krabka_protocol::records::RecordsError::Compression(_)
+    ));
+    assert!(error.to_string().contains("TooManyBytesGenerated"));
+}

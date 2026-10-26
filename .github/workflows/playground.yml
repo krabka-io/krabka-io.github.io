@@ -47,8 +47,20 @@ jobs:
         with:
           workspaces: playground
 
+      - name: Reject vulnerable ruzstd in the shipped WASM graph
+        run: python3 playground/check-security.py
+
+      # Report the entire lockfile, including unrelated advisories. The target
+      # guard above blocks this issue; broader audit remediation is separate.
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Report full lockfile advisories
+        continue-on-error: true
+        run: cargo audit --file playground/Cargo.lock
+
       - name: Test the shim on the host target
-        run: cargo test --manifest-path playground/Cargo.toml --locked
+        run: cargo test --manifest-path playground/Cargo.toml --locked -p krabka-playground -p krabka-compression
 
       - name: Lint the wasm target
         run: |
@@ -56,6 +68,7 @@ jobs:
             --manifest-path playground/Cargo.toml \
             --target wasm32-unknown-unknown \
             --locked \
+            -p krabka-playground -p krabka-compression \
             -- -D warnings
 
   # The entry crate that runs the real krabka-broker in the lab: its own

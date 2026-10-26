@@ -69,7 +69,7 @@ fi
 # Run cargo from inside the crate so that its .cargo/config.toml (the
 # getrandom backend cfg for wasm32) applies.
 echo "==> Building krabka-playground (release)"
-(cd "${crate_dir}" && cargo build --target wasm32-unknown-unknown --release)
+(cd "${crate_dir}" && cargo build --locked --target wasm32-unknown-unknown --release)
 
 # Cargo writes to CARGO_TARGET_DIR when it is set, and to the crate's own
 # target directory otherwise. Cargo ran inside the crate, so a relative

@@ -356,8 +356,9 @@ mod tests {
         let mut expected = Vec::new();
         for (codec, low, high, levels_differ) in [
             (CompressionType::Gzip, 1, 9, true),
-            (CompressionType::Zstd, 1, 19, true),
-            (CompressionType::Lz4, 1, 17, true),
+            // The pure-Rust vendored encoders expose only one compression level.
+            (CompressionType::Zstd, 1, 19, false),
+            (CompressionType::Lz4, 1, 17, false),
         ] {
             let default = compress(codec, &payload).unwrap();
             let at_default =
