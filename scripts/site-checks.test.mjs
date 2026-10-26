@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +7,7 @@ import { test } from 'node:test';
 import http from 'node:http';
 import { runInNewContext } from 'node:vm';
 import { encodeShare } from '../public/playground/lab/codec.js';
-import { checkProduction } from './check-production.mjs';
+import { checkProduction, checkPublishedSitemap } from './check-production.mjs';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 test('analytics load on the configured site, never on local checks or previews', () => {
@@ -30,7 +29,9 @@ test('analytics load on the configured site, never on local checks or previews',
 });
 
 function fixture(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-site-check-'));
+  const temporary = process.env.TMPDIR ?? path.resolve('artifacts');
+  fs.mkdirSync(temporary, { recursive: true, mode: 0o700 });
+  const dir = fs.mkdtempSync(path.join(temporary, 'krabka-site-check-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -80,15 +81,16 @@ test('demo fragments validate scenarios, kernels and proof-session IDs', async (
 
 test('SEO issues in the API directory and missing crawler files fail', (t) => {
   const dir = fixture(t);
-  const page = (title) => `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io/"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
-  write(dir, 'index.html', page('Home'));
-  write(dir, 'api/index.html', page('API'));
-  write(dir, 'robots.txt', 'User-agent: *');
-  write(dir, 'sitemap-index.xml', '<sitemapindex/>');
+  const page = (title, route = '/') => `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io${route}"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
+  write(dir, 'index.html', page('Home') + '<a href="/api/">API</a>');
+  write(dir, 'api/index.html', page('API', '/api/'));
+  write(dir, 'robots.txt', 'User-agent: *\nSitemap: https://krabka.io/sitemap-index.xml');
+  write(dir, 'sitemap-index.xml', '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://krabka.io/sitemap-website-0.xml</loc></sitemap></sitemapindex>');
+  write(dir, 'sitemap-website-0.xml', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://krabka.io/</loc></url><url><loc>https://krabka.io/api/</loc></url></urlset>');
   check('check-seo.mjs', dir, 0);
   write(dir, 'api/index.html', '<h1>API</h1>');
   assert.match(check('check-seo.mjs', dir, 1), /api[\\/]index\.html/);
-  write(dir, 'api/index.html', page('API'));
+  write(dir, 'api/index.html', page('API', '/api/'));
   fs.rmSync(path.join(dir, 'robots.txt'));
   check('check-seo.mjs', dir, 1);
 });
@@ -96,9 +98,25 @@ test('SEO issues in the API directory and missing crawler files fail', (t) => {
 test('production smoke detects missing pages and HTML returned for essential assets', async (t) => {
   let broken = false;
   let redirected = false;
+  let sitemapMode = '';
   const server = http.createServer((req, res) => {
     if (redirected && req.url === '/docs/') { res.writeHead(302, { location: '/' }); res.end(); return; }
     if (broken && req.url === '/api/') { res.writeHead(404); res.end(); return; }
+    const origin = `http://${req.headers.host}`;
+    if (req.url === '/sitemap-website-0.xml' && sitemapMode === 'missing-child') { res.writeHead(404); res.end(); return; }
+    if (req.url === '/sitemap-index.xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      if (sitemapMode === 'empty-index') { res.end('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
+      res.end(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`);
+      return;
+    }
+    if (req.url === '/sitemap-website-0.xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      if (sitemapMode === 'empty-child') { res.end('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
+      res.end(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url></urlset>`);
+      return;
+    }
+    if (req.url === '/robots.txt') { res.setHeader('Content-Type', 'text/plain'); res.end(`User-agent: *\nSitemap: ${origin}/sitemap-index.xml\n`); return; }
     const page = req.url.endsWith('/');
     const type = req.url.endsWith('.js') ? 'text/javascript' : req.url.endsWith('.css') ? 'text/css'
       : req.url.endsWith('.wasm') ? 'application/wasm' : req.url.endsWith('.json') ? 'application/json'
@@ -117,4 +135,39 @@ test('production smoke detects missing pages and HTML returned for essential ass
   broken = false;
   redirected = true;
   assert.match((await checkProduction(site)).join('\n'), /Unexpected redirect/);
+  redirected = false;
+  for (const mode of ['empty-index', 'empty-child', 'missing-child']) {
+    sitemapMode = mode;
+    const errors = await checkProduction(site);
+    assert.equal(errors.length, 1, mode);
+    assert.match(errors[0], /sitemap:/);
+  }
+});
+
+test('published validation follows robots and rejects partial, stale, invalid or blocked inventories', async (t) => {
+  let mode = 'valid';
+  const ns = 'http://www.sitemaps.org/schemas/sitemap/0.9';
+  let origin;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/robots.txt') {
+      res.setHeader('Content-Type', 'text/plain');
+      res.end(`User-agent: *\n${mode === 'blocked' ? 'Disallow: /api/' : 'Allow: /'}\n${mode === 'unadvertised' ? '' : `Sitemap: ${origin}/sitemap-index.xml`}`);
+    } else if (req.url === '/sitemap-index.xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      res.end(`<sitemapindex xmlns="${ns}"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`);
+    } else {
+      res.setHeader('Content-Type', 'application/xml');
+      if (mode === 'header-blocked') res.setHeader('X-Robots-Tag', 'noindex');
+      res.end(`<urlset xmlns="${ns}"><url><loc>${origin}/</loc>${mode === 'invalid-xsd' ? '<unknown/>' : ''}</url>${mode === 'partial' ? '' : `<url><loc>${origin}/${mode === 'stale' ? 'old' : 'api'}/</loc></url>`}</urlset>`);
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  origin = `http://127.0.0.1:${server.address().port}`;
+  const inventory = { site: origin, urls: [origin + '/', origin + '/api/'] };
+  assert.deepEqual(await checkPublishedSitemap(origin, inventory), { pages: 2, sitemaps: 1, compared: true });
+  for (const [value, pattern] of [['partial', /differs from release artifact/], ['stale', /differs from release artifact/], ['invalid-xsd', /XSD validation failed/], ['blocked', /robots.txt blocks/], ['unadvertised', /must advertise/], ['header-blocked', /X-Robots-Tag/]]) {
+    mode = value;
+    await assert.rejects(checkPublishedSitemap(origin, inventory), pattern);
+  }
 });

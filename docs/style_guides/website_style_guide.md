@@ -224,6 +224,16 @@ Use audience-relevant search terms naturally where the page actually addresses t
 
 Give each page a distinct descriptive title, a clear main heading, and an accurate meta description. As editorial starting points, review titles around 50 to 60 characters and descriptions around 140 to 160 characters. These are not mandatory limits and must not cause padding or loss of meaning. Search engines may truncate or replace displayed text.
 
+### Sitemap freshness
+
+Use the [SEO and sitemap design](../architecture.md#seo-and-sitemaps) for sitemap
+layout and metadata provenance. Separate website and documentation URLs in the
+index. Supply `lastmod` only from a verified significant content update, including
+the original source history for imported Markdown; never from build or copy time.
+Check supplied dates and optional frequency hints, but do not require them or
+invent values to fill gaps. `changefreq` is not a crawl schedule and Google
+ignores it. See the Google sitemap reference in the design for current guidance.
+
 ### Example benchmark metadata
 
 **Title:** Krabka benchmarks: Kafka throughput and latency tests

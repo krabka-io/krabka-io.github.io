@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { checkSitemap } from './check-sitemap.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -148,7 +149,15 @@ for (const file of htmlFiles) {
 
 // 9. Check robots.txt and sitemap
 const robotsExists = fs.existsSync(path.join(DIST_DIR, 'robots.txt'));
-const sitemapExists = fs.existsSync(path.join(DIST_DIR, 'sitemap-index.xml')) || fs.existsSync(path.join(DIST_DIR, 'sitemap-0.xml'));
+const sitemapExists = fs.existsSync(path.join(DIST_DIR, 'sitemap-index.xml'));
+
+try {
+  const result = checkSitemap(DIST_DIR);
+  console.log(`Sitemap coverage: ${result.pages} pages in ${result.sitemaps} sitemap(s).`);
+} catch (error) {
+  issues.push({ file: 'sitemap-index.xml', fileIssues: [error.message] });
+  console.error(error.message);
+}
 
 console.log(`📊 Summary of Results:`);
 console.log(`  • Pages Audited: ${htmlFiles.length}`);
