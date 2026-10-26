@@ -98,13 +98,13 @@ export function routeInputs(root, url) {
     const resource = snapshot.resources.find((item) => route === `/docs/operator/crds/${kindSlug(item)}`);
     if (!index && !resource) return null;
     return { family: 'generated-crd', source,
-      inputs: [...importedInputs(root, source)].filter((file) => !generatedSnapshots.has(file)).sort(),
+      inputs: [...importedInputs(root, source, new Set(), generatedSnapshots)].filter((file) => !generatedSnapshots.has(file)).sort(),
       provenance: index ? Object.values(crds) : [crds[resource._sourcePath]],
       ...(!Object.keys(crds).length ? { gap: 'missing-crd-provenance' } : {}) };
   }
   if (authoredRoutes[route]) {
     const source = authoredRoutes[route];
-    const imports = [...importedInputs(root, source)].filter((file) => !generatedSnapshots.has(file));
+    const imports = [...importedInputs(root, source, new Set(), generatedSnapshots)].filter((file) => !generatedSnapshots.has(file));
     const readsBenchmarks = imports.includes('src/utils/benchmarks.mjs');
     return { family: generatedInputs[route] || catalogRoutes.has(route) ? 'data-driven' : 'authored', source,
       inputs: [...new Set([...imports, ...expandInputs(root, [...(generatedInputs[route] ?? []), ...(readsBenchmarks ? benchmarkInputs : [])])])].sort(),

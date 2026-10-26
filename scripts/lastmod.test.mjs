@@ -160,6 +160,32 @@ test('CRD kinds use their matching YAML history, index uses all YAML histories, 
   assert.equal(resolve(f, mapping('/kafka/')).date, '2026-10-04');
 });
 
+test('generated benchmark imports resolve to tracked sources before generation and retain change dates', (t) => {
+  const f = fixture(t);
+  const source = 'src/pages/benchmarks/explorer.astro';
+  const snapshot = 'src/data/benchmark-archive.json';
+  const archive = 'benchmarks/archive/fixture.tar.gz';
+  f.write(source, "import archive from '../../data/benchmark-archive.json';");
+  f.write('benchmarks/archive/README.md', 'Archive sources');
+  f.write(archive, 'Original archive');
+  f.write('.gitignore', `${snapshot}\n`);
+  f.commit();
+  const mapping = () => routeInputs(f.root, 'https://krabka.io/benchmarks/explorer/');
+  const before = mapping();
+  assert.ok(before.inputs.includes(archive));
+  assert.ok(!before.inputs.includes(snapshot));
+  assert.equal(resolve(f, before).date, '2026-10-01');
+  f.write(snapshot, '{"generated":true}');
+  assert.deepEqual(mapping(), before);
+  f.write(archive, 'Updated archive');
+  f.commit('2026-10-02T12:00:00Z');
+  assert.equal(resolve(f, mapping()).date, '2026-10-02');
+  fs.rmSync(path.join(f.root, snapshot));
+  assert.equal(resolve(f, mapping()).date, '2026-10-02');
+  f.write(source, "import missing from '../../data/unknown.json';");
+  assert.throws(mapping, /unresolved-import:.*unknown\.json/);
+});
+
 test('data-driven routes have concrete tracked inputs, not unreviewed gaps or generated snapshots', () => {
   for (const route of ['/', '/benchmarks', '/benchmarks/explorer', '/verification', '/docs/verification-playground', '/docs/proof-explorer']) {
     const mapping = routeInputs(process.cwd(), 'https://krabka.io' + route);
