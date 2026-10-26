@@ -2,6 +2,10 @@
 import CodeBlock from '../../components/CodeBlock.astro';
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
+import versions from '../../data/versions.json';
+
+const brokerVersion = versions.broker.version;
+const operatorVersion = versions.operator.version;
 
 const composeCode = `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml
 docker compose up -d`;
@@ -24,10 +28,8 @@ const composeCleanupCode = `docker compose down --volumes`;
 const helmCode = `kubectl apply -f https://krabka.io/quickstart/crds.yaml
 helm repo add krabka https://krabka.io/charts
 helm repo update
-helm install krabka-operator krabka/krabka-operator --version 1.0.1 --skip-crds \\
-  --namespace krabka-system --create-namespace \\
-  --set image.repository=ghcr.io/krabka-io/krabka-operator \\
-  --set-string image.digest=sha256:87449560ca14088bb01be5a827ae974b2097ab61ff800bc067fb5bb504f61669
+helm install krabka-operator krabka/krabka-operator --version ${operatorVersion} --skip-crds \\
+  --namespace krabka-system --create-namespace
 kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
 kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
 kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
@@ -45,13 +47,13 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
 ---
 
 <DocsLayout
-  title="Quickstart Guide"
-  description="Start a local krabka broker, check readiness, create a topic, and produce and read a record with containerized Kafka tools. Kubernetes steps included."
+  title="Quickstart guide"
+  description="Start a local Krabka broker, check readiness, create a topic, and produce and read a record with containerized Kafka tools. Kubernetes steps included."
   currentSlug="/docs/quickstart"
 >
   <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
     <div class="border-b border-white/10 pb-4">
-      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run krabka and read your first record</h1>
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run Krabka and read your first record</h1>
       <p class="mt-2 text-gray-400">Use the Kafka tools in a container to complete one round trip. The broker stays running for your next task.</p>
     </div>
 
@@ -59,9 +61,10 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     <ul class="list-disc pl-5 space-y-2">
       <li>Install Docker with Docker Compose, and start Docker.</li>
       <li>Use a Bash terminal with <code>curl</code>. On Windows, use a Bash terminal connected to Docker.</li>
-      <li>Use an empty working directory and keep port <code>9092</code> free. Run each local step in that directory.</li>
-      <li>The supplied broker image uses <code>linux/amd64</code>. Review the <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2">operations guides</a> before deploying your own cluster.</li>
+      <li>Use an empty working directory and keep ports <code>9092</code> and <code>9404</code> free. Run each local step in that directory.</li>
+      <li>The supplied <code>krabka-broker</code> {brokerVersion} image uses <code>linux/amd64</code>.</li>
     </ul>
+    <p>The single-node Compose configuration is for local evaluation. Review the <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2">operations guides</a> before deploying your own cluster.</p>
     <p>To try without installing software, open the <a href={getPath('/docs/browser-tools')} class="text-krab-400 underline underline-offset-2">browser tools</a>. Cluster Lab runs real brokers in your browser; its phone mode is for viewing.</p>
 
     <h2 id="local" class="text-xl font-bold text-white pt-2">1. Start a local broker</h2>
@@ -88,8 +91,8 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
 
     <h2 class="text-xl font-bold text-white pt-2">Choose your next task</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <a href={getPath('/get-started#clients')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Connect your application →</h3><p class="mt-1 text-gray-400">Use a client example, including a downloadable JavaScript project.</p></a>
-      <a href={getPath('/docs/operations')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Operate a cluster →</h3><p class="mt-1 text-gray-400">Find recovery and upgrade procedures with their version scope.</p></a>
+      <a href={getPath('/get-started#clients')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Connect your application</h3><p class="mt-1 text-gray-400">Use a client example, including a downloadable JavaScript project.</p></a>
+      <a href={getPath('/docs/operations')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Operate a cluster</h3><p class="mt-1 text-gray-400">Find recovery and upgrade procedures with their version scope.</p></a>
     </div>
 
     <details class="rounded-xl border border-white/10 p-5 space-y-3">
@@ -100,7 +103,7 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     </details>
 
     <h2 id="kubernetes" class="text-xl font-bold text-white pt-2">Kubernetes option</h2>
-    <p>Use a disposable Kubernetes cluster with <code>kubectl</code> and Helm configured. These commands use the default namespace for a three-node broker cluster and <code>krabka-system</code> for the operator. Use a cluster without another installation of these CRDs. This example runs krabka-operator 1.0.1 and krabka-broker 1.0.5.</p>
+    <p>Use a disposable Kubernetes cluster with <code>kubectl</code> and Helm configured. These commands use the default namespace for a three-node broker cluster and <code>krabka-system</code> for the operator. Use a cluster without another installation of these CRDs. This example runs <code>krabka-operator</code> {operatorVersion} and <code>krabka-broker</code> {brokerVersion}.</p>
     <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
       <div class="flex justify-between gap-3 items-center"><span>Start and wait for readiness</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCode} aria-label="Copy Kubernetes startup commands">Copy</button></div>
       <CodeBlock code={helmCode} lang="bash" />
@@ -113,7 +116,7 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     <p>The consumer prints <code>hello krabka</code>. See <a href={getPath('/docs/operator')} class="text-krab-400 underline underline-offset-2">operator configuration</a> to change this deployment.</p>
     <details class="rounded-xl border border-white/10 p-5 space-y-3">
       <summary class="cursor-pointer font-semibold text-white">Optional: clean up the Kubernetes example</summary>
-      <p>These commands remove the example cluster, topic, operator, and krabka CRDs. Deleting CRDs affects every resource of those types; run this only in the disposable cluster used for this example. Check your storage policy before removing persistent volumes.</p>
+      <p>These commands remove the example cluster, topic, operator, and Krabka CRDs. Deleting CRDs affects every resource of those types; run this only in the disposable cluster used for this example. Check your storage policy before removing persistent volumes.</p>
       <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCleanupCode} aria-label="Copy Kubernetes cleanup commands">Copy cleanup</button>
       <CodeBlock code={helmCleanupCode} lang="bash" />
     </details>

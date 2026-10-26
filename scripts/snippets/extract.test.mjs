@@ -9,6 +9,10 @@ test('extract the website literals, including shell escapes and release interpol
   assert(snippets.find(s => s.id === 'docs/quickstart/composeVerifyCode').code.includes("printf 'hello krabka\\n'"));
   assert(snippets.find(s => s.id === 'docs/quickstart/helmCode').code.includes(' \\\n'));
   assert(!snippets.find(s => s.id.endsWith('/javaGradle')).code.includes('${'));
+  const versions = JSON.parse(readFileSync('src/data/versions.json', 'utf8'));
+  const helm = snippets.find(s => s.id === 'docs/quickstart/helmCode').code;
+  assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
+  assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));
 });
 
 test('new or missing displayed snippets fail coverage', () => {
