@@ -180,8 +180,9 @@ outside this site's sitemap. Do not add their URLs to this build's page list.
 ### Optional metadata and Markdown dates
 
 See [SEO and sitemap design](architecture.md#seo-and-sitemaps) for the date
-pipeline and provenance requirements. Generation of `lastmod` is planned, not
-yet enabled. Validation is enabled now and accepts absent metadata.
+pipeline and provenance requirements. Generation uses the maximum per-file Git
+commit timestamp across each route's content inputs. Absent dates remain valid. The build writes a per-route
+`dist/lastmod-report.json` with evidence and omission reasons.
 
 - `lastmod`: accept a real `YYYY-MM-DD` date or a timezone-qualified W3C timestamp;
   reject impossible calendar dates, invalid times, duplicate values and nesting.
@@ -194,7 +195,7 @@ yet enabled. Validation is enabled now and accepts absent metadata.
 
 Never substitute build time, sync time, filesystem mtime or repository HEAD date
 for a page's last significant update. Missing reliable history means omitting
-that page's date, not failing the site. No metadata field is mandatory yet.
+that page's date, not failing the site. No metadata field is mandatory.
 
 ## Acceptance checks
 
@@ -211,8 +212,8 @@ that page's date, not failing the site. No metadata field is mandatory yet.
 - Scope fixtures reject foreign hosts, wrong schemes, mismatched ports and
   out-of-directory URLs. Optional-metadata regressions accept missing fields and
   reject invalid dates, frequency values, order, duplicates and namespaces;
-  index fixtures reject page-only hints. Date-provenance semantics still need
-  generation tests before enabling dates.
+  index fixtures reject page-only hints. Date-provenance tests check automatic Git
+  dates, ignored cosmetic commits, content-only dependencies and unchanged rebuilds.
 - A partial or stale published URL set fails comparison with the release
   artifact even when all fetched XML is well formed.
 
@@ -222,3 +223,33 @@ changes. A sitemap supports discovery; it does not guarantee indexing.
 
 Merge and deployment need separate maintainer approval. Local validation does
 not prove that a change has reached the live site.
+
+## Maintain page dates
+
+Page dates update automatically from content-file Git history. No per-page
+review entry or SHA-256 lockfile is required. Keep new routes in
+`scripts/lastmod-routes.mjs` and declare content inputs read outside static
+imports. Do not add global layout/chrome, styles or dependency configuration.
+Synced Markdown uses upstream per-file records; CRD routes use the matching
+YAML records plus website content inputs. Generated benchmark snapshots use
+the tracked source archives and reports.
+
+For a bulk cosmetic-only change, optionally add the commit SHA or an unambiguous
+prefix of at least seven hexadecimal characters to
+`scripts/lastmod-ignore-revs.txt`. The resolver skips those commits when walking
+file history, preserving the previous content date. The list also applies to
+upstream guide/CRD history at sync time. Leave ordinary content commits out.
+
+Inspect `dist/lastmod-report.json` for each route's inputs, per-file evidence,
+computed date or omission reason. Complete clean Git inputs emit dates without
+human review. Non-Git, shallow, dirty, untracked or unavailable inputs omit
+dates, as do unmapped routes and the live API-backed release/version indexes.
+Coverage is diagnostic; do not hide missing provenance to increase it.
+
+Run `node --test scripts/lastmod.test.mjs` with `TMPDIR` set to a private scratch
+directory. The fixtures check automatic maximum dates, ignored commits,
+content/chrome separation, clean and dirty inputs, shallow history, custom guide
+paths, renames, CRD kind matching, rewritten history, byte/count splits, URL
+removal and byte-identical rebuilds. The full website suite includes these
+tests. Run the four contributor gates before requesting review. No live
+deployment is part of these commands.

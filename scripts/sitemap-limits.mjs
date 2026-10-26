@@ -31,33 +31,29 @@ export function splitSitemap(xml, { maxBytes = MAX_BYTES, maxEntries = MAX_ENTRI
   return chunks;
 }
 
+const escape = (value) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+
+export function enforceSitemapLimits(base, limits = {}) {
+  const indexFile = path.join(base, 'sitemap-index.xml');
+  const index = fs.readFileSync(indexFile, 'utf8');
+  const references = [];
+  for (const child of readSitemap(index, 'sitemapindex', indexFile)) {
+    const name = path.basename(new URL(child).pathname);
+    const chunks = splitSitemap(fs.readFileSync(path.join(base, name), 'utf8'), limits);
+    chunks.forEach((chunk, i) => {
+      const part = i === 0 ? name : name.replace(/\.xml$/, `-part-${i}.xml`);
+      fs.writeFileSync(path.join(base, part), chunk);
+      references.push(`<sitemap><loc>${escape(new URL(part, child).href)}</loc></sitemap>`);
+    });
+  }
+  // Rebuild references structurally from the parsed locations. Index lastmod is
+  // deliberately absent, even if an integration supplied it before this hook.
+  const start = index.indexOf('>', index.indexOf('<sitemapindex')) + 1;
+  const end = index.lastIndexOf('</sitemapindex>');
+  if (!start || end < start) throw new Error('Expected sitemapindex');
+  fs.writeFileSync(indexFile, index.slice(0, start) + references.join('') + index.slice(end));
+}
+
 export default function sitemapLimits() {
-  return {
-    name: 'sitemap-protocol-limits',
-    hooks: {
-      'astro:build:done': ({ dir }) => {
-        const base = fileURLToPath(dir);
-        const indexFile = path.join(base, 'sitemap-index.xml');
-        let index = fs.readFileSync(indexFile, 'utf8');
-        for (const child of readSitemap(index, 'sitemapindex', indexFile)) {
-          const name = path.basename(new URL(child).pathname);
-          const file = path.join(base, name);
-          const content = fs.readFileSync(file, 'utf8');
-          const chunks = splitSitemap(content);
-          if (chunks.length <= 1) continue;
-          const references = [];
-          chunks.forEach((chunk, i) => {
-            const part = i === 0 ? name : name.replace(/\.xml$/, `-part-${i}.xml`);
-            fs.writeFileSync(path.join(base, part), chunk);
-            references.push(`<sitemap><loc>${new URL(part, child).href}</loc></sitemap>`);
-          });
-          const original = `<sitemap><loc>${child}</loc></sitemap>`;
-          if (!index.includes(original)) throw new Error('Unexpected index serialization; cannot safely shard sitemap');
-          index = index.replace(original, references.join(''));
-        }
-        // The final checker enforces the index's own byte and entry limits.
-        fs.writeFileSync(indexFile, index);
-      },
-    },
-  };
+  return { name: 'sitemap-protocol-limits', hooks: { 'astro:build:done': ({ dir }) => enforceSitemapLimits(fileURLToPath(dir)) } };
 }

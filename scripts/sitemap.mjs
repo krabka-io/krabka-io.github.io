@@ -9,7 +9,7 @@ export const MAX_BYTES = 52_428_800;
 const namespace = 'http://www.sitemaps.org/schemas/sitemap/0.9';
 
 // Validate calendar fields explicitly: Date.parse normalizes dates such as February 30.
-function validLastmod(value) {
+export function validLastmod(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
   if (!match) return false;
   const [, year, month, day, hour, minute, second, zone] = match;
@@ -24,9 +24,9 @@ function validLastmod(value) {
   return true;
 }
 
-export function readSitemap(xml, root, source) {
+export function readSitemap(xml, root, source, { maxBytes = MAX_BYTES } = {}) {
   const bytes = Buffer.isBuffer(xml) ? xml : Buffer.from(xml);
-  if (bytes.length > MAX_BYTES) throw new Error(`${source}: exceeds ${MAX_BYTES} uncompressed bytes`);
+  if (bytes.length > maxBytes) throw new Error(`${source}: exceeds ${MAX_BYTES} uncompressed bytes`);
   xml = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   if (/<\?xml[^>]*encoding\s*=\s*['"](?!utf-8['"])[^'"]+['"]/i.test(xml)) throw new Error(`${source}: sitemaps must use UTF-8`);
   const parser = sax.parser(true, { xmlns: true });
