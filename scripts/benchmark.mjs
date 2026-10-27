@@ -606,10 +606,23 @@ rpk:
     async function readBroker(broker) {
       const files = ['cpu.stat', 'memory.current', 'memory.stat', 'memory.events', 'cgroup.procs'];
       const [cpu, memory, stats, events, procs] = await Promise.all(files.map(file => fs.readFile(path.join(broker.cgroup, file), 'utf8')));
+      // Pressure stall information is missing on kernels built without PSI,
+      // and some memory.stat counters arrived with later kernels; those
+      // fields are null rather than a failed sample.
+      const [memoryPressure, ioPressure, cpuPressure] = await Promise.all(['memory.pressure', 'io.pressure', 'cpu.pressure']
+        .map(file => fs.readFile(path.join(broker.cgroup, file), 'utf8').catch(() => '')));
       const counter = (text, key) => {
         const match = text.match(new RegExp(`^${key} (\\d+)$`, 'm'));
         assert.ok(match, `resource counter unavailable: ${key}`);
         return Number(match[1]);
+      };
+      const optional = (text, key) => {
+        const match = text.match(new RegExp(`^${key} (\\d+)$`, 'm'));
+        return match ? Number(match[1]) : null;
+      };
+      const stall = (text, kind) => {
+        const match = text.match(new RegExp(`^${kind} .*total=(\\d+)$`, 'm'));
+        return match ? Number(match[1]) : null;
       };
       const pids = procs.trim().split(/\s+/).filter(Boolean);
       assert.ok(pids.length > 0, 'broker exited while sampling');
@@ -623,7 +636,17 @@ rpk:
       return { id: broker.id, cpu_usage_us: counter(cpu, 'usage_usec'), rss_bytes: rss,
         cpu_user_us: counter(cpu, 'user_usec'), cpu_system_us: counter(cpu, 'system_usec'),
         anon_bytes: counter(stats, 'anon'), memory_current_bytes: Number(memory.trim()),
-        inactive_file_bytes: counter(stats, 'inactive_file'), oom_kill: counter(events, 'oom_kill') };
+        inactive_file_bytes: counter(stats, 'inactive_file'), oom_kill: counter(events, 'oom_kill'),
+        // Page-cache reclaim inside the broker's cgroup: the file pages the
+        // kernel holds for it, the pages it scanned and freed to stay under
+        // the limit, how often the limit was reached, and the time its tasks
+        // stalled on memory, I/O and CPU (PSI "some" and "full" totals, in
+        // microseconds).
+        active_file_bytes: optional(stats, 'active_file'), file_dirty_bytes: optional(stats, 'file_dirty'),
+        file_writeback_bytes: optional(stats, 'file_writeback'), pgscan: optional(stats, 'pgscan'), pgsteal: optional(stats, 'pgsteal'),
+        memory_max_events: optional(events, 'max'), memory_high_events: optional(events, 'high'),
+        memory_stall_us: stall(memoryPressure, 'some'), memory_stall_full_us: stall(memoryPressure, 'full'),
+        io_stall_us: stall(ioPressure, 'some'), cpu_stall_us: stall(cpuPressure, 'some') };
     }
 
     async function measureResources(brokers, filename, action, poll = async () => {}) {
@@ -640,10 +663,41 @@ rpk:
       const deviceNames = provenance.host.storage.sampled_devices;
       const deviceSamples = [];
       const deviceFile = await fs.open(path.join(path.dirname(filename), 'devices.jsonl'), 'w');
+      // Host memory and reclaim counters, sampled with the cgroups, in
+      // host.jsonl: a broker whose page cache fills its cgroup stalls in the
+      // kernel's reclaim, and the cgroup counters alone cannot tell that
+      // from host-wide memory pressure. Pressure stall information is null on
+      // kernels built without PSI.
+      const hostFile = await fs.open(path.join(path.dirname(filename), 'host.jsonl'), 'w');
+      async function readHost() {
+        const [meminfo, vmstat, memoryPressure, ioPressure] = await Promise.all([
+          fs.readFile('/proc/meminfo', 'utf8'), fs.readFile('/proc/vmstat', 'utf8'),
+          fs.readFile('/proc/pressure/memory', 'utf8').catch(() => ''), fs.readFile('/proc/pressure/io', 'utf8').catch(() => '')]);
+        const bytes = key => {
+          const match = meminfo.match(new RegExp(`^${key.replace(/[()]/g, '\\$&')}:\\s+(\\d+) kB$`, 'm'));
+          return match ? Number(match[1]) * 1024 : null;
+        };
+        const count = key => {
+          const match = vmstat.match(new RegExp(`^${key} (\\d+)$`, 'm'));
+          return match ? Number(match[1]) : null;
+        };
+        const stall = (text, kind) => {
+          const match = text.match(new RegExp(`^${kind} .*total=(\\d+)$`, 'm'));
+          return match ? Number(match[1]) : null;
+        };
+        return { mem_free_bytes: bytes('MemFree'), mem_available_bytes: bytes('MemAvailable'), cached_bytes: bytes('Cached'),
+          dirty_bytes: bytes('Dirty'), writeback_bytes: bytes('Writeback'),
+          active_file_bytes: bytes('Active(file)'), inactive_file_bytes: bytes('Inactive(file)'),
+          pgscan_kswapd: count('pgscan_kswapd'), pgscan_direct: count('pgscan_direct'),
+          pgsteal_kswapd: count('pgsteal_kswapd'), pgsteal_direct: count('pgsteal_direct'),
+          allocstall: [...vmstat.matchAll(/^allocstall_\w+ (\d+)$/gm)].reduce((sum, match) => sum + Number(match[1]), 0),
+          memory_stall_us: stall(memoryPressure, 'some'), memory_stall_full_us: stall(memoryPressure, 'full'),
+          io_stall_us: stall(ioPressure, 'some') };
+      }
       const samplingController = new AbortController();
       let sampleError;
       async function sample() {
-        const [brokersSampled, diskstats] = await Promise.all([Promise.all(brokers.map(readBroker)), fs.readFile('/proc/diskstats', 'utf8')]);
+        const [brokersSampled, diskstats, host] = await Promise.all([Promise.all(brokers.map(readBroker)), fs.readFile('/proc/diskstats', 'utf8'), readHost()]);
         aggregateSample(brokersSampled);
         const elapsed = performance.now() - start;
         const current = { elapsed_ms: elapsed, brokers: brokersSampled };
@@ -652,8 +706,9 @@ rpk:
         deviceSamples.push(device);
         await sampleFile.write(`${JSON.stringify(current)}\n`);
         await deviceFile.write(`${JSON.stringify(device)}\n`);
+        await hostFile.write(`${JSON.stringify({ elapsed_ms: elapsed, host })}\n`);
       }
-      const closeFiles = () => Promise.all([sampleFile.close(), deviceFile.close()]);
+      const closeFiles = () => Promise.all([sampleFile.close(), deviceFile.close(), hostFile.close()]);
       try { await sample(); }
       catch (error) { await closeFiles(); throw error; }
       const sampling = (async () => {
