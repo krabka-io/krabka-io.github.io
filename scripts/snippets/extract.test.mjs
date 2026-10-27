@@ -5,10 +5,16 @@ import { astroSnippets, markdownSnippets, websiteSnippets } from './extract.mjs'
 
 test('extract the website literals, including shell escapes and release interpolation', () => {
   const snippets = websiteSnippets(process.cwd());
-  assert.equal(snippets.length, 24);
+  assert.equal(snippets.length, 25);
   assert(snippets.find(s => s.id === 'docs/quickstart/composeVerifyCode').code.includes("printf 'hello krabka\\n'"));
   assert(snippets.find(s => s.id === 'docs/quickstart/helmCode').code.includes(' \\\n'));
   assert(!snippets.find(s => s.id.endsWith('/javaGradle')).code.includes('${'));
+  const versions = JSON.parse(readFileSync('src/data/versions.json', 'utf8'));
+  const helm = snippets.find(s => s.id === 'docs/quickstart/helmCode').code;
+  assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
+  assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));
+  assert.equal(snippets.find(s => s.id === 'docs/quickstart/inspectSnippet').code,
+    snippets.find(s => s.id === 'get-started/inspectSnippet').code);
 });
 
 test('new or missing displayed snippets fail coverage', () => {

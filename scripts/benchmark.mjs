@@ -596,6 +596,8 @@ rpk:
         if (brokersChecked.every(settled)) break;
         await delay(3_000);
       }
+      // Decide before the sets become the arrays the report carries.
+      const allSettled = brokersChecked.every(settled);
       for (const checked of brokersChecked) {
         checked.direct = checked.verified.size;
         checked.verified = [...checked.verified].sort();
@@ -603,8 +605,7 @@ rpk:
       const expected = workload.config.topics * workload.config.partitionsPerTopic * rf;
       const found = brokersChecked.reduce((n, b) => n + b.partitions, 0);
       return { checked_at: new Date().toISOString(), arch: os.arch(), expected_partition_replicas: expected,
-        found_partition_replicas: found, brokers: brokersChecked,
-        verified: found === expected && brokersChecked.every(settled) };
+        found_partition_replicas: found, brokers: brokersChecked, verified: found === expected && allSettled };
     }
 
     async function readBroker(broker) {

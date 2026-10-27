@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm';
 
 export const pages = {
   'get-started': ['deploySnippets.docker', 'deploySnippets.helm', 'clientSnippets.rust', 'clientSnippets.go', 'clientSnippets.java', 'clientSnippets.python', 'clientSnippets.javascript', 'clientSnippets.cli', 'inspectSnippet', 'javascriptRunCode'],
-  'docs/quickstart': ['composeCode', 'composeReadyCode', 'composeVerifyCode', 'composeCleanupCode', 'helmCode', 'helmVerifyCode', 'helmCleanupCode'],
+  'docs/quickstart': ['composeCode', 'composeReadyCode', 'composeVerifyCode', 'inspectSnippet', 'composeCleanupCode', 'helmCode', 'helmVerifyCode', 'helmCleanupCode'],
   'docs/streams-rs': ['producerCode', 'consumerCode', 'shareConsumerCode', 'streamsCode'],
   'docs/streams-go': ['goInstallCode', 'goCode'],
   'docs/streams-java': ['javaGradle'],
@@ -19,8 +19,8 @@ export function readDeclaration(source, name, scope = {}, page = 'page') {
   return runInNewContext(`(${declaration[1]})`, scope, { timeout: 1000 });
 }
 
-export function astroSnippets(source, page, releaseNumber) {
-  const scope = { releaseNumber };
+export function astroSnippets(source, page, releaseNumber, operatorVersion) {
+  const scope = { releaseNumber, operatorVersion };
   for (const name of new Set(pages[page].map(key => key.split('.')[0]))) {
     scope[name] = readDeclaration(source, name, scope, page);
   }
@@ -53,6 +53,6 @@ export function websiteSnippets(root) {
   const versions = JSON.parse(readFileSync(`${root}/src/data/versions.json`));
   return Object.keys(pages).flatMap(page => astroSnippets(
     readFileSync(`${root}/src/pages/${page}.astro`, 'utf8'), page,
-    (versions['streams-java']?.activeRelease || 'v1.4.2').replace(/^v/, ''),
+    (versions['streams-java']?.activeRelease || 'v1.4.2').replace(/^v/, ''), versions.operator.version,
   ));
 }

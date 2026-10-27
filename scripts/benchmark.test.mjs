@@ -376,6 +376,40 @@ test('window metrics interpolate CPU and device counters at the window edges', (
     result: { publishRate: [1] } }), /outside the samples/);
 });
 
+test('the direct-mode verification passes verified and unwritten partitions and fails a buffered one', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const verifySource = source.slice(source.indexOf('async function verifyDirectIo('), source.indexOf('\n    async function readBroker('));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-direct-'));
+  try {
+    await fs.writeFile(path.join(directory, 'workload.stdout'), '----- Starting benchmark traffic\n');
+    const listings = {
+      direct: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02140002 8192'],
+      unwritten: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02100002 0'],
+      buffered: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02100002 8192'],
+    };
+    const workload = { config: { topics: 1, partitionsPerTopic: 2, testDurationMinutes: 1 } };
+    for (const [name, expected] of [['direct', { verified: true, unwritten: [] }], ['unwritten', { verified: true, unwritten: ['test-topic-1'] }],
+      ['buffered', { verified: false, unwritten: [] }]]) {
+      let attempts = 0;
+      const verifyDirectIo = runInNewContext(`(${verifySource.trim()})`, {
+        fs, path, os, JSON, Date, Math, Set, Number, directIoCheck,
+        delay: async () => {},
+        docker: async () => JSON.stringify([{ Config: { User: '65532' } }]),
+        oneShot: async () => { attempts++; return listings[name].join('\n'); },
+        provenance: { images: { krabka: { reference: 'krabka' }, kafka: { reference: 'kafka' } }, cpu_sets: { client: [6, 7] } },
+      });
+      const result = await verifyDirectIo([{ id: 'c0', name: 'broker-0' }], directory, workload, 1, new AbortController().signal);
+      assert.equal(result.verified, expected.verified, name);
+      assert.equal(result.found_partition_replicas, 2);
+      // The arrays come from the function's own realm; spread them before a strict comparison.
+      assert.deepEqual([...result.brokers[0].unwritten], expected.unwritten, name);
+      assert.deepEqual([...result.brokers[0].verified], expected.verified ? ['test-topic-0', ...(name === 'direct' ? ['test-topic-1'] : [])] : ['test-topic-0'], name);
+      assert.equal(result.brokers[0].direct, result.brokers[0].verified.length);
+      assert.equal(attempts, expected.verified ? 1 : 10, name);
+    }
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test('the O_DIRECT check needs the newest segment of every benchmark partition open with O_DIRECT', () => {
   const listing = ['/data/__consumer_offsets-0/00000000000000000000.log 02100002',
     '/data/test-topic-a-0/00000000000000000000.log 02100002',
