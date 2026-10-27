@@ -35,6 +35,9 @@ function command(job, name, run, condition) {
 
 function contract(doc, pkg) {
   const { build, deploy, 'production-smoke': smoke } = doc.jobs;
+  assert.deepEqual(doc.permissions, { contents: 'read' });
+  assert.deepEqual(deploy.permissions, { pages: 'write', 'id-token': 'write' });
+  assert.equal(build.permissions, undefined, 'build inherits read-only permissions');
   blocking(build, 'build');
   blocking(deploy, 'deploy', mainOnly);
   blocking(smoke, 'production-smoke', mainOnly);
@@ -257,6 +260,15 @@ test('deployment preserves blocking build, validation, upload and production smo
 const step = (doc, name, job = 'build') => doc.jobs[job].steps.find((entry) => entry.name === name);
 const validation = 'Check built links, SEO and page budgets';
 const mutations = {
+  'workflow Pages write': (doc) => {
+    doc.permissions.pages = 'write';
+  },
+  'build OIDC write': (doc) => {
+    doc.jobs.build.permissions = { 'id-token': 'write' };
+  },
+  'missing deploy OIDC': (doc) => {
+    delete doc.jobs.deploy.permissions['id-token'];
+  },
   'missing ready event': (doc) => {
     doc.on.pull_request.types = ['opened'];
   },
