@@ -53,12 +53,48 @@ CI builds the selected binaries first, then always runs `sync-docs`, `sync-proof
 and `build:site`. Browser checks accept `--suite=site`, `--suite=lab`, and
 `--suite=proofs`; no argument runs all three. Each suite writes separate evidence.
 
+## kafkactl bridge checks
+
+`kafkactl-lab-ci.yml` runs a separate, read-only workflow on pull requests to
+`main`, pushes to `main`, merge-queue events, and manual dispatch. It has no
+workflow path filters. `scripts/bridge-ci.mjs` selects bridge tests and builds
+only when these inputs change:
+
+- Files under `kafkactl-lab/`, including `go.mod` and `go.sum`.
+- The bridge CI or bridge release workflow.
+- The bridge selector, its tests, or its shared diff/extraction helpers.
+- Root Go module/workspace files or `.gitattributes`.
+
+Other website and documentation changes skip bridge tests and builds. Draft
+pull requests also skip them. The workflow handles `ready_for_review` and
+`converted_to_draft`; marking a PR ready checks its complete diff. Pushes and
+merge-queue events compare their own base/head range. Missing metadata or a
+failed diff selects bridge checks instead of silently skipping them. Manual
+dispatch always selects them.
+
+Selected runs use the Go version from `kafkactl-lab/go.mod` and disable CGO.
+They run `go test -mod=readonly -count=1 -v ./...` on Linux, then cross-compile
+Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 with `go build -mod=readonly`.
+These checks need no external Kafka broker. Cross-compilation checks buildability,
+not native runtime behavior or full browser/live-broker compatibility.
+
+The stable `kafkactl bridge gate` job always reports a result. It passes only if
+selection succeeds and either the selected test/build job succeeds or an
+unselected job is skipped. Selection failure, cancellation, or an unexpectedly
+skipped build cannot produce a passing gate. This workflow does not change branch
+protection; configure the gate as a required check separately.
+
+The existing tag/manual release workflow retains its five native-platform jobs
+and packaging steps. PR checks publish no binaries and do not update downloads.
+
 ## Verification
 
 `npm run test:website` includes classifier scenarios and mutation tests for the
 deploy and snippet contracts. These reject lost sync steps, disabled checks,
 ignored failures, path filters, incorrect conditions, missing ready events, and
-production cancellation. `npm run test:snippets` checks extraction coverage.
+production cancellation. Bridge scenarios also check draft/ready transitions,
+push and queue ranges, conservative fallbacks, and the gate's failure states.
+`npm run test:snippets` checks extraction coverage.
 
 Compare hosted Actions runner time and wall-clock time after push. Local timings
 are not a hosted-runner comparison. Keep full scheduled checks as the integration
