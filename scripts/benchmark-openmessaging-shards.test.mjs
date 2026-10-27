@@ -278,6 +278,7 @@ test('runs on one host share the OMB Maven repository and retry rate limits', as
       const m2 = volume(':/m2');
       repositories.push(m2);
       assert.ok(args.includes('-Daether.connector.http.retryHandler.count=8'));
+      assert.equal(args[args.indexOf('-s') + 1], '/m2/settings.xml');
       await fs.mkdir(path.join(source, 'benchmark-framework/target'), { recursive: true });
       await fs.writeFile(path.join(source, 'benchmark-framework/target/classpath.txt'),
         '/m2/dep.jar:/src/driver-kafka/target/driver-kafka.jar\n');
@@ -297,5 +298,8 @@ test('runs on one host share the OMB Maven repository and retry rate limits', as
     assert.deepEqual(repositories, [runtimes[0].m2, runtimes[1].m2]);
     assert.deepEqual(runtimes[0].provenance.jars, runtimes[1].provenance.jars);
     assert.ok(runtimes[0].classpath.startsWith('/src/benchmark-framework/target/classes:/m2/dep.jar'));
+    const settings = await fs.readFile(path.join(runtimes[0].m2, 'settings.xml'), 'utf8');
+    assert.match(settings, /<mirrorOf>central<\/mirrorOf>/);
+    assert.ok(settings.includes(OMB.maven_mirror));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

@@ -109,6 +109,11 @@ jobs:
           java-version: 17
       - name: Check measurement and failure handling
         run: npm run test:benchmark
+      - name: Restore the OMB Maven repository from the last run with this pin
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .benchmarks/m2-cache
+          key: omb-m2-${{ runner.os }}-${{ hashFiles('scripts/benchmark-openmessaging.mjs') }}
       - name: Authenticate private Google Cloud image pulls
         if: startsWith(inputs.krabka_image, 'us-central1-docker.pkg.dev/') || startsWith(inputs.krabka_comparison_image, 'us-central1-docker.pkg.dev/')
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet

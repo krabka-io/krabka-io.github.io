@@ -8,6 +8,7 @@ export const OMB = {
   repository: 'https://github.com/openmessaging/benchmark.git',
   commit: '5b1fa70951a323da26bd587174b58bb2c65b0b5c',
   build_image: 'maven@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc',
+  maven_mirror: 'https://maven-central.storage-download.googleapis.com/maven2/',
   kafka_client_version: '3.6.1',
   // Applied to the checkout before the build. Upstream's Kafka consumer sends
   // an async offset commit after every poll without waiting for the last one,
@@ -166,11 +167,29 @@ export async function prepareOmb(directory, command, oneShot,
   const image = JSON.parse(await command('docker', ['image', 'inspect', OMB.build_image]))[0];
   const m2 = path.join(cacheRoot, `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`);
   await fs.mkdir(m2, { recursive: true });
+  // The build's Maven settings, passed with `-s`: the image's `MAVEN_CONFIG`
+  // only places the image's reference files, and Maven looks for user
+  // settings under a home the build's uid does not have (`?/.m2`). Maven
+  // Central rate-limits the Google Cloud runners' egress (429 Too Many
+  // Requests for the plugin POMs in runs 40427360965 and 40439747507);
+  // Google's mirror of Maven Central serves the same artifacts to them
+  // without a limit, and the jars are hashed into the provenance below, so a
+  // mirror that served different bytes would fail the shard merge.
+  await fs.writeFile(path.join(m2, 'settings.xml'), `<settings>
+  <mirrors>
+    <mirror>
+      <id>google-maven-central</id>
+      <mirrorOf>central</mirrorOf>
+      <url>${OMB.maven_mirror}</url>
+    </mirror>
+  </mirrors>
+</settings>
+`);
   // Maven's resolver retries a 429 or 503 (its `serviceUnavailable` default)
   // this many times, this long apart, before it fails the build.
   await oneShot(['--user', `${process.getuid()}:${process.getgid()}`, '--cpus', '4', '--memory', '4g', '--memory-swap', '4g',
     '--env', 'MAVEN_CONFIG=/m2', '--volume', `${source}:/src`, '--volume', `${m2}:/m2`, '--workdir', '/src',
-    OMB.build_image, 'mvn', '-B', '-ntp', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
+    OMB.build_image, 'mvn', '-B', '-ntp', '-s', '/m2/settings.xml', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
     '-Daether.connector.http.retryHandler.count=8', '-Daether.connector.http.retryHandler.requestInterval=5000',
     '-Dcheckstyle.skip', '-Dspotless.check.skip=true', '-Dlicense.skip=true', '-Djacoco.skip', '-Dspotbugs.skip=true',
     '-pl', 'benchmark-framework', '-am', 'install'], 'omb-build',
