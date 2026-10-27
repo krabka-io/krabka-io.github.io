@@ -528,7 +528,17 @@ rpk:
         const cgroup = (await fs.readFile(`/proc/${pid}/cgroup`, 'utf8')).match(/^0::(.+)$/m)?.[1];
         assert.ok(cgroup, 'broker cgroup is inaccessible; Docker must be local');
         broker.cgroup = path.join('/sys/fs/cgroup', cgroup);
-        const swapLimit = (await fs.readFile(path.join(broker.cgroup, 'memory.swap.max'), 'utf8')).trim();
+        // Docker sets the limit at creation, but systemd applies a scope's
+        // properties moments after it starts: one Kafka trial on the cloud
+        // runners read `max` here with the 10 GiB swap limit recorded in the
+        // container's config, while the other vendors' trials of the same
+        // shard read `0`. Read again for a few seconds before failing the trial.
+        let swapLimit;
+        for (let attempt = 0; ; attempt++) {
+          swapLimit = (await fs.readFile(path.join(broker.cgroup, 'memory.swap.max'), 'utf8')).trim();
+          if (swapLimit === '0' || attempt === 9) break;
+          await delay(500);
+        }
         assert.equal(swapLimit, '0', 'broker swap must be disabled');
         await readBroker(broker); // Verify access to every required counter.
       }
