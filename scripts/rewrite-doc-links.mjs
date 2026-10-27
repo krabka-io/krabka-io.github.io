@@ -16,7 +16,7 @@ const guideId = (file) =>
 // intra-doc link, [`crate::Path`], which has no target off docs.rs: it becomes plain
 // code, or the page would show the brackets around it.
 const CODE_OR_LINK =
-  /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))|``[^`]+``|`[^`\n]+`)|\[([^\]]+)\]\(([^)]+)\)|\[(`[^`\n]+`)\](?![(\[:])/gm;
+  /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))|``[^`]+``|`[^`\n]+`)|\[([^\]]+)\]\(([^)]+)\)|\[(`[^`\n]+`)\](?![([:])/gm;
 
 /** Rewrite relative links in a synced guide so they resolve on krabka.io or GitHub. */
 export function rewriteDocLinks(

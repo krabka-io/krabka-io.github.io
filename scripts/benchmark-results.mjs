@@ -259,26 +259,42 @@ export function hostInterfered(trial) {
   return Boolean(host && (host.balloon_inflated_pages > 0 || host.allocstall > 0));
 }
 
-// O_DIRECT check for a broker's open files. `listing` is "path flags" lines
-// with fdinfo's octal flags. Every partition directory of `topicPrefix` must
-// hold its newest .log open with O_DIRECT; sealed segments may be open for
-// reads without it.
+// O_DIRECT check for a broker's open files. `listing` is "path flags [size]"
+// lines with fdinfo's octal flags and, when the listing has it, the file's
+// length in bytes. Every partition directory of `topicPrefix` whose newest
+// .log holds bytes must have it open with O_DIRECT; sealed segments may be
+// open for reads without it. A newest segment of zero bytes has had no
+// append yet, and krabka opens a segment's O_DIRECT handle at its first
+// append, so it is `unwritten` rather than `missing`: at a smoke run's
+// 5,000 records/s the client's sticky partitioner leaves some of 100
+// partitions untouched for the whole minute. A listing without sizes treats
+// every segment as written.
 export const O_DIRECT = { x64: 0o40000, arm64: 0o200000 };
 export function directIoCheck(listing, arch, topicPrefix = 'test-topic-') {
   assert.ok(O_DIRECT[arch], `O_DIRECT flag unknown for ${arch}`);
   const newest = new Map();
   const direct = new Set();
+  const sizes = new Map();
   for (const line of listing.trim().split('\n').filter(Boolean)) {
-    const [file, flags] = line.split(' ');
+    const [file, flags, size] = line.split(' ');
     const match = file.match(/^\/data\/([^/]+)\/(\d{20})\.log$/);
     if (!match || !match[1].startsWith(topicPrefix)) continue;
+    const key = `${match[1]}/${match[2]}`;
     if (!newest.has(match[1]) || match[2] > newest.get(match[1])) newest.set(match[1], match[2]);
-    if (Number.parseInt(flags, 8) & O_DIRECT[arch]) direct.add(`${match[1]}/${match[2]}`);
+    if (Number.parseInt(flags, 8) & O_DIRECT[arch]) direct.add(key);
+    if (/^\d+$/.test(size ?? '')) sizes.set(key, Math.max(sizes.get(key) ?? 0, Number(size)));
   }
-  const missing = [...newest]
-    .filter(([partition, base]) => !direct.has(`${partition}/${base}`))
+  const open = [...newest].filter(([partition, base]) => !direct.has(`${partition}/${base}`));
+  const unwritten = open
+    .filter(([partition, base]) => sizes.get(`${partition}/${base}`) === 0)
     .map(([p]) => p)
     .sort();
-  const verified = [...newest.keys()].filter((partition) => !missing.includes(partition)).sort();
-  return { partitions: newest.size, direct: newest.size - missing.length, missing, verified };
+  const missing = open
+    .filter(([partition, base]) => sizes.get(`${partition}/${base}`) !== 0)
+    .map(([p]) => p)
+    .sort();
+  const verified = [...newest.keys()]
+    .filter((partition) => !missing.includes(partition) && !unwritten.includes(partition))
+    .sort();
+  return { partitions: newest.size, direct: verified.length, unwritten, missing, verified };
 }

@@ -109,7 +109,7 @@ async function reload(page, name) {
   await setSpeed(page, SPEED);
 }
 
-async function threeBrokers(page, preset) {
+async function threeBrokers(page) {
   // Brokers 1 to 3, the producer 4, the consumers 5 and 6.
   const group = await until(
     page,
@@ -673,7 +673,7 @@ async function schemaRegistry(page, preset) {
   );
 }
 
-async function wordCount(page, preset) {
+async function wordCount(page) {
   // Brokers 1 to 3, the producer 4, the streams app 5, the consumer 6.
   const counting = await until(
     page,
@@ -749,7 +749,7 @@ async function wordCount(page, preset) {
 // Brokers 1 to 5, with 4 and 5 cut off from the rest; the producer 6, the
 // consumer 7. A minority cut off for longer than about two minutes of lab
 // time gives up and exits, so the heal comes soon after the majority serves.
-async function partition(page, preset) {
+async function partition(page) {
   const serving = (id) =>
     page.evaluate((id) => {
       const p = window.krabkaLab.external.process(id);

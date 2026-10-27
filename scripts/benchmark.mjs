@@ -1084,21 +1084,26 @@ rpk:
       const script =
         'ls -l /proc/1/fd 2>/dev/null | while read -r _ _ _ _ _ _ _ _ fd _ t; do case $t in /data/*.log) ' +
         'f=; while IFS=$\'\\t\' read -r k v; do [ "$k" = flags: ] && f=$v; done < /proc/1/fdinfo/$fd 2>/dev/null; ' +
-        'echo "$t $f";; esac; done';
+        's=$(stat -L -c %s /proc/1/fd/$fd 2>/dev/null); echo "$t $f ${s:-?}";; esac; done';
       // At a high rate a segment can fill in about a second, and a listing
       // taken just after a roll shows the new segment before its O_DIRECT
       // descriptor opens. Each partition replica passes once one of up to ten
-      // listings, 3 s apart, shows its newest segment open with O_DIRECT.
+      // listings, 3 s apart, shows its newest segment open with O_DIRECT, or
+      // is left unwritten when the last listing shows no bytes in it (see
+      // directIoCheck).
       const brokersChecked = brokers.map((broker) => ({
         broker: broker.name,
         partitions: 0,
         verified: new Set(),
+        unwritten: [],
         attempts: 0,
       }));
+      const settled = (checked) =>
+        checked.verified.size + checked.unwritten.length === checked.partitions;
       for (let attempt = 1; attempt <= 10; attempt++) {
         for (const [i, broker] of brokers.entries()) {
           const checked = brokersChecked[i];
-          if (attempt > 1 && checked.verified.size === checked.partitions) continue;
+          if (attempt > 1 && settled(checked)) continue;
           const listing = await oneShot(
             [
               '--pid',
@@ -1124,11 +1129,16 @@ rpk:
           const result = directIoCheck(listing, os.arch());
           checked.partitions = Math.max(checked.partitions, result.partitions);
           for (const partition of result.verified) checked.verified.add(partition);
+          checked.unwritten = result.unwritten.filter(
+            (partition) => !checked.verified.has(partition),
+          );
           checked.attempts = attempt;
         }
-        if (brokersChecked.every((b) => b.verified.size === b.partitions)) break;
+        if (brokersChecked.every(settled)) break;
         await delay(3_000);
       }
+      // Decide before the sets become the arrays the report carries.
+      const allSettled = brokersChecked.every(settled);
       for (const checked of brokersChecked) {
         checked.direct = checked.verified.size;
         checked.verified = [...checked.verified].sort();
@@ -1141,7 +1151,7 @@ rpk:
         expected_partition_replicas: expected,
         found_partition_replicas: found,
         brokers: brokersChecked,
-        verified: found === expected && brokersChecked.every((b) => b.direct === b.partitions),
+        verified: found === expected && allSettled,
       };
     }
 
@@ -1476,7 +1486,8 @@ rpk:
                     `O_DIRECT not verified: ${
                       directIoResult.error ??
                       `${directIoResult.found_partition_replicas} of ${directIoResult.expected_partition_replicas} partition replicas found, ` +
-                        `${directIoResult.brokers.reduce((n, b) => n + b.direct, 0)} with their newest segment open with O_DIRECT`
+                        `${directIoResult.brokers.reduce((n, b) => n + b.direct, 0)} with their newest segment open with O_DIRECT, ` +
+                        `${directIoResult.brokers.reduce((n, b) => n + b.unwritten.length, 0)} with no bytes in it yet`
                     }`,
                   );
                 }

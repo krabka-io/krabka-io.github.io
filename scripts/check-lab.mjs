@@ -532,14 +532,11 @@ async function main() {
       /^[0-9a-f-]{8,}/.test(scenarioId),
       scenarioId,
     );
-    const before = JSON.parse(
-      await waitFor(
-        page,
-        `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`,
-        'echo-a to count 20 frames',
-      ),
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`,
+      'echo-a to count 20 frames',
     );
-    const framesBefore = before.state.frames;
     await page.evaluate(() => window.krabkaLab.storage.flush());
     await page.evaluate(() => window.krabkaLab.world.setPaused(true));
     const framesAtPause = (await readNode(page, 1)).state.frames;

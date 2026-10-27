@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   readSitemap,
-  siteURL,
   scopedURL,
   validateXSD,
   advertisedSitemaps,
