@@ -2,7 +2,8 @@
 
 For the proposed SDK, permissions, merge-queue artifact promotion, and later
 cache/job changes, see the [CI optimization plan](ci-optimization-plan.md).
-That plan is not implemented yet; this page describes the current workflow.
+The SDK and least-privilege changes are implemented; promotion and output-cache
+changes remain proposed in this layer. This page describes its current workflow.
 
 The required `build` check runs on every pull request to `main`. There are no
 workflow path filters. The job keeps ordinary validation in one blocking chain;
@@ -43,6 +44,12 @@ The workflow summary records the selection. A lightweight build does not create
 placeholder binaries or restore an unrelated build. Its budget report explicitly
 lists the two unbuilt WASM payloads; all other budgets remain active. Lab-selected
 runs and release runs require both binaries and enforce their budgets.
+
+## Token permissions
+
+The workflow defaults to `contents: read`. Only the deployment job receives
+`pages: write` and `id-token: write`; build and browser jobs cannot publish Pages
+or request an OIDC token.
 
 ## Release and manual runs
 
