@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install only repository-pinned tools. Diagnostics use stderr; stdout is a path."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -118,7 +119,7 @@ def extract(archive, destination, root):
                 target.chmod(member.mode & 0o777)
 
 
-def install(tool, version=None, cache=None, host=None):
+def configuration(tool, version=None, cache=None, host=None):
     pins = json.loads(PINS.read_text())
     entry = pins[tool]
     host = host or host_platform()
@@ -134,6 +135,35 @@ def install(tool, version=None, cache=None, host=None):
         raise ValueError('tool download requires HTTPS')
     cache = Path(cache or Path(__file__).resolve().parents[1] / 'playground/.tools/verified').resolve()
     cache.mkdir(parents=True, exist_ok=True)
+    return entry, pin, host, cache
+
+
+def lock_path(entry, host, cache):
+    return cache / f'wasi-sdk-{entry["version"]}-{host}-{entry["platforms"][host]["sha256"]}.lock'
+
+
+def install(tool, version=None, cache=None, host=None, lock_fd=None):
+    entry, pin, host, cache = configuration(tool, version, cache, host)
+    with ExitStack() as ownership:
+        if tool == 'wasi-sdk':
+            # POSIX platforms only. An inherited descriptor keeps this same
+            # flock held in the build shell through compilation and cleanup.
+            import fcntl
+            expected = lock_path(entry, host, cache)
+            if lock_fd is None:
+                lock = ownership.enter_context(open(expected, 'a'))
+                lock_fd = lock.fileno()
+            else:
+                opened = os.fstat(lock_fd)
+                named = expected.stat()
+                if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+                    raise ValueError('SDK lock descriptor does not match the pinned installation')
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return reconstruct(tool, entry, pin, host, cache)
+
+
+def reconstruct(tool, entry, pin, host, cache):
+    sha = pin['sha256']
     artifact = cache / f'{tool}-{entry["version"]}-{host}-{sha}.download'
     if artifact.exists() and (artifact.is_symlink() or digest(artifact) != sha):
         raise ValueError(f'cached download checksum mismatch: {artifact}; remove it and retry')
@@ -149,8 +179,16 @@ def install(tool, version=None, cache=None, host=None):
                 raise ValueError(f'{tool} download checksum mismatch; nothing installed')
             os.replace(incoming, artifact)
     # Reconstruct from the verified archive on EVERY use: installed files and
-    # marker files are not trusted. Each caller owns its isolated installation.
-    work = Path(tempfile.mkdtemp(prefix=f'{tool}-install-', dir=cache))
+    # marker files are not trusted. SDK paths stay stable for Cargo fingerprints.
+    if tool == 'wasi-sdk':
+        work = cache / f'{tool}-{entry["version"]}-{host}-{sha}'
+        if work.is_symlink():
+            work.unlink()
+        elif work.exists():
+            shutil.rmtree(work)
+        work.mkdir(mode=0o700)
+    else:
+        work = Path(tempfile.mkdtemp(prefix=f'{tool}-install-', dir=cache))
     try:
         if pin['archive_root']:
             extract(artifact, work, pin['archive_root'])
@@ -173,8 +211,16 @@ def main():
     parser.add_argument('tool', choices=['wasm-bindgen', 'wasi-sdk', 'kind'])
     parser.add_argument('--version')
     parser.add_argument('--cache')
+    parser.add_argument('--lock-path', action='store_true', help='print the SDK lock path without installing')
+    parser.add_argument('--lock-fd', type=int, help='inherit SDK ownership from the build shell')
     args = parser.parse_args()
-    print(install(args.tool, args.version, args.cache).as_posix())
+    if args.lock_path:
+        if args.tool != 'wasi-sdk':
+            raise ValueError('only wasi-sdk uses a stable installation lock')
+        entry, _, host, cache = configuration(args.tool, args.version, args.cache)
+        print(lock_path(entry, host, cache).as_posix())
+    else:
+        print(install(args.tool, args.version, args.cache, lock_fd=args.lock_fd).as_posix())
 
 
 if __name__ == '__main__':
