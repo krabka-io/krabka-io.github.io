@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { changedPaths } from './ci-changes.mjs';
 
 export function bridgeInput(file) {
-  return /^(kafkactl-lab\/|\.github\/workflows\/(kafkactl-lab|kafkactl-lab-ci)\.yml$|scripts\/(bridge-ci(?:\.test)?|ci-changes)\.mjs$|scripts\/snippets\/extract\.mjs$)/.test(file)
-    || /^(go\.(mod|sum|work|work\.sum)|\.gitattributes)$/.test(file);
+  return (
+    /^(kafkactl-lab\/|\.github\/workflows\/(kafkactl-lab|kafkactl-lab-ci)\.yml$|scripts\/(bridge-ci(?:\.test)?|ci-changes)\.mjs$|scripts\/snippets\/extract\.mjs$)/.test(
+      file,
+    ) || /^(go\.(mod|sum|work|work\.sum)|\.gitattributes)$/.test(file)
+  );
 }
 
 export function selectBridge(eventName, event, diff = changedPaths) {
@@ -30,7 +33,10 @@ export function selectBridge(eventName, event, diff = changedPaths) {
       throw new Error('Unknown event');
     }
     const bridge = diff(base, head).some(bridgeInput);
-    return { bridge, reason: bridge ? 'bridge or shared Go/CI inputs changed' : 'no bridge inputs changed' };
+    return {
+      bridge,
+      reason: bridge ? 'bridge or shared Go/CI inputs changed' : 'no bridge inputs changed',
+    };
   } catch (error) {
     return { bridge: true, reason: `full fallback: ${error.message}` };
   }
@@ -39,13 +45,19 @@ export function selectBridge(eventName, event, diff = changedPaths) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let selected;
   try {
-    selected = selectBridge(process.env.GITHUB_EVENT_NAME,
-      JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')));
+    selected = selectBridge(
+      process.env.GITHUB_EVENT_NAME,
+      JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')),
+    );
   } catch (error) {
     selected = { bridge: true, reason: `full fallback: ${error.message}` };
   }
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `bridge=${selected.bridge}\n`);
+  if (process.env.GITHUB_OUTPUT)
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `bridge=${selected.bridge}\n`);
   console.log(JSON.stringify(selected, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-    `### Bridge CI selection\n\n${selected.reason.replace(/[\r\n]/g, ' ')}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY)
+    fs.appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `### Bridge CI selection\n\n${selected.reason.replace(/[\r\n]/g, ' ')}\n`,
+    );
 }
