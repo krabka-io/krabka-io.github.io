@@ -189,6 +189,12 @@ Each trial also samples `/proc/diskstats` with the 250 ms resource samples, in
 `devices.jsonl`, for the block devices under the run directory and Docker
 storage. `provenance.host.storage` records those mounts, their filesystem and
 mount options, the RAID level and each member device's model and firmware.
+`host.jsonl` samples `/proc/meminfo`, the `/proc/vmstat` reclaim counters and
+the host's memory and I/O pressure stall totals at the same times, and each
+broker sample in `resources.jsonl` carries its cgroup's file-page counts,
+reclaim scans, memory-limit events and pressure stall totals. Together they
+show whether a broker that fills its cgroup with page cache stalled in the
+kernel's reclaim, and whether the host as a whole was short of memory.
 `trial.json` has `metrics.measurement_window`, which covers only the OMB
 measurement: its start and end from the client log, broker CPU seconds,
 published messages (the mean publish rate times the window), messages per CPU
