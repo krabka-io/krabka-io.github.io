@@ -47,6 +47,13 @@ Each reconstruction gives the SDK a new path. Cargo can rebuild C dependencies
 and their Rust dependents because compiler and sysroot paths change. This favors
 cache integrity over warm-build speed; it does not preserve a stable SDK path.
 
+The [CI optimization plan](ci-optimization-plan.md#stable-sdk-reconstruction)
+proposes a stable SDK path with fresh verified reconstruction on every use.
+It is not implemented yet. Its ownership and cleanup changes must accompany the
+installer change; a stable path does not require trusting an old installation.
+The plan specifies the per-digest directory layout, start-of-build reconstruction,
+and exit cleanup bounded to that installation, never the shared cache root.
+
 The cache and checkout should be writable only by the developer or CI job.
 Verification does not protect against another process that changes files between
 verification and use. The installer is not a sandbox for a malicious pinned tool.
