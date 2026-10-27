@@ -1,9 +1,11 @@
 # Website CI optimization plan
 
-Status: proposed, reviewed 27 October 2026 against commit
+Status: SDK reconstruction implemented; hosted timing comparison pending. The
+remaining workflow and output-cache changes are proposed. Reviewed 27 October
+2026 against commit
 `60fac298189ea16a438ce75cd39050b3b5cbaa69`, with workflow/installer scope
-cross-checked through `b315812336be92a32386052bb2c56dfe428d2ec5`. No workflow or installer changes
-are implemented by this document. [CI selection](ci.md) and
+cross-checked through `b315812336be92a32386052bb2c56dfe428d2ec5`. This layer implements the stable SDK path and its ownership rules; it does not
+change the deployment workflow. [CI selection](ci.md) and
 [verified tool downloads](tool-downloads.md) describe current behavior.
 
 ## Evidence and priorities
