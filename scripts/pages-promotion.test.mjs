@@ -152,6 +152,24 @@ test('admin-bypass push without a producer falls back', async () => {
   );
 });
 
+test('batched final SHA selects its own run, never an intermediate group', async () => {
+  const { result } = await candidate(undefined, undefined, {
+    api: async (route) =>
+      route.includes('/artifacts?')
+        ? { artifacts: [artifact] }
+        : { workflow_runs: [{ ...run, id: 9, head_sha: 'c'.repeat(40) }, run] },
+  });
+  assert.equal(result.runId, 10);
+});
+
+test('successful producer with a missing artifact falls back', async () => {
+  const { result } = await candidate(undefined, undefined, {
+    api: async (route) =>
+      route.includes('/artifacts?') ? { artifacts: [] } : { workflow_runs: [run] },
+  });
+  assert.equal(result.artifactId, undefined);
+});
+
 test('lookup errors and invalid metadata fall back without failing the job', async () => {
   const env = {
     GITHUB_EVENT_NAME: 'push',

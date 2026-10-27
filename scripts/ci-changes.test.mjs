@@ -49,7 +49,14 @@ test('empty and combined changes retain site checks and combine suites', () => {
   });
 });
 test('every non-PR event gets full coverage, including branch manual runs', () => {
-  for (const event of ['push', 'schedule', 'repository_dispatch', 'workflow_dispatch', 'unknown']) {
+  for (const event of [
+    'push',
+    'merge_group',
+    'schedule',
+    'repository_dispatch',
+    'workflow_dispatch',
+    'unknown',
+  ]) {
     const { reason, ...result } = selectChecks(event, {}, () => {
       throw new Error('must not diff');
     });
