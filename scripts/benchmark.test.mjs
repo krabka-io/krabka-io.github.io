@@ -178,7 +178,7 @@ test('actual memory check waits for MemAvailable and records the shortfall befor
     ]);
     const recorded = await fs.readFile(path.join(artifacts, 'memory-shortfall.txt'), 'utf8');
     assert.match(recorded, /RF3 cluster startup: MemFree 12\.0 GiB/);
-    assert.match(recorded, /MemAvailable:   29360128 kB/);
+    assert.match(recorded, /MemAvailable: {3}29360128 kB/);
     assert.match(recorded, /1 100 00:01 init\nbroker-0 Up 2 minutes image\n/);
     const workflow = await fs.readFile(
       new URL('../.github/workflows/openmessaging.yml', import.meta.url),
