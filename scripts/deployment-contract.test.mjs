@@ -56,10 +56,11 @@ function contract(doc, pkg) {
   assert.deepEqual(doc.on.schedule, [{ cron: '0 4 * * *' }]);
   assert.deepEqual(doc.on.repository_dispatch.types, ['release-published']);
   assert.ok(Object.hasOwn(doc.on, 'workflow_dispatch'));
+  assert.deepEqual(doc.on.merge_group.branches, ['main'], 'merge-queue commits run the required build');
   assert.deepEqual(doc.concurrency, {
-    group: "${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}",
-    'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
-  }, 'PRs cancel only superseded PRs; production runs stay serialized through smoke');
+    group: "${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && format('pages-merge-group-{0}', github.ref) || 'pages-production' }}",
+    'cancel-in-progress': "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}",
+  }, 'PRs and merge-queue entries cancel only their own superseded runs; production runs stay serialized through smoke');
   const suites = [
     ['Build the real broker for the Cluster Lab', 'npm run build:broker', lab],
     ['Build the consensus playground', 'npm run build:playground', lab],
@@ -193,6 +194,8 @@ const mutations = {
       'node scripts/check-production.mjs https://krabka.io\nnode scripts/check-api-links.mjs';
   },
   'missing pull request trigger': (doc) => { delete doc.on.pull_request; },
+  'missing merge group trigger': (doc) => { delete doc.on.merge_group; },
+  'merge group cancels production': (doc) => { doc.concurrency.group = "${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}"; },
 };
 
 for (const [name, mutate] of Object.entries(mutations)) {
