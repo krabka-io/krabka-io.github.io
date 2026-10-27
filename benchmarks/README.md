@@ -194,7 +194,11 @@ the host's memory and I/O pressure stall totals at the same times, and each
 broker sample in `resources.jsonl` carries its cgroup's file-page counts,
 reclaim scans, memory-limit events and pressure stall totals. Together they
 show whether a broker that fills its cgroup with page cache stalled in the
-kernel's reclaim, and whether the host as a whole was short of memory.
+kernel's reclaim, and whether the host as a whole was short of memory. The
+host rows also carry anonymous, shared and unreclaimable slab memory, the
+virtio balloon inflate and deflate counters and the stolen CPU ticks, so that
+free memory which disappears without any broker cgroup growing can be traced
+to a process outside the cgroups or to the hypervisor.
 `trial.json` has `metrics.measurement_window`, which covers only the OMB
 measurement: its start and end from the client log, broker CPU seconds,
 published messages (the mean publish rate times the window), messages per CPU

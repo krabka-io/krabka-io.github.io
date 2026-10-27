@@ -140,7 +140,12 @@ test('actual resource reader retains user and system CPU through the sampler', a
     for (const { host } of hostRows) {
       assert.ok(host.mem_available_bytes > 0 && host.mem_free_bytes > 0 && host.cached_bytes >= 0, 'host memory unavailable');
       assert.ok(Number.isInteger(host.pgsteal_kswapd) && Number.isInteger(host.pgsteal_direct) && Number.isInteger(host.allocstall), 'host reclaim counters unavailable');
-      for (const field of ['memory_stall_us', 'memory_stall_full_us', 'io_stall_us']) assert.ok(host[field] === null || host[field] >= 0, field);
+      assert.ok(host.anon_bytes > 0 && host.shmem_bytes >= 0 && host.slab_unreclaimable_bytes > 0, 'host anonymous, shared and slab memory unavailable');
+      assert.ok(Number.isInteger(host.cpu_steal_ticks), 'host stolen CPU time unavailable');
+      // The balloon counters exist only on kernels with the virtio balloon driver.
+      for (const field of ['balloon_inflate', 'balloon_deflate', 'memory_stall_us', 'memory_stall_full_us', 'io_stall_us']) {
+        assert.ok(host[field] === null || host[field] >= 0, field);
+      }
     }
     for (const counter of ['user_usec', 'system_usec']) {
       await fs.writeFile(path.join(directory, 'cpu.stat'), cpu.replace(new RegExp(`^${counter}.*\\n`, 'm'), ''));
