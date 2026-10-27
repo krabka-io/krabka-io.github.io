@@ -9,13 +9,27 @@
 const MAGIC = 0xfd2fb528;
 
 // The default distributions (RFC 8878, 3.1.1.3.2.2).
-const LL_DEFAULT = [4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1];
-const ML_DEFAULT = [1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1];
-const OF_DEFAULT = [1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1];
+const LL_DEFAULT = [
+  4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+  -1, -1, -1, -1,
+];
+const ML_DEFAULT = [
+  1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1,
+];
+const OF_DEFAULT = [
+  1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1,
+];
 // Literal-length and match-length codes: baseline and extra bits (3.1.1.3.2.1).
-const LL_BASE = [16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+const LL_BASE = [
+  16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
+  65536,
+];
 const LL_BITS = [1, 1, 1, 1, 2, 2, 3, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-const ML_BASE = [35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027, 2051, 4099, 8195, 16387, 32771, 65539];
+const ML_BASE = [
+  35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027, 2051, 4099, 8195, 16387, 32771,
+  65539,
+];
 const ML_BITS = [1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
 const fail = (why) => {
@@ -28,7 +42,7 @@ const highBit = (v) => 31 - Math.clz32(v);
 // FSE weight decoder relies on to find its end.
 class BackBits {
   constructor(src, start, end) {
-    if (end <= start || src[end - 1] === 0) fail("a bitstream has no end marker");
+    if (end <= start || src[end - 1] === 0) fail('a bitstream has no end marker');
     this.src = src;
     this.start = start;
     this.pos = (end - 1 - start) * 8 + highBit(src[end - 1]);
@@ -39,7 +53,8 @@ class BackBits {
     if (hi <= lo) return 0;
     let acc = 0;
     let mul = 1;
-    for (let i = lo >> 3; i <= (hi - 1) >> 3; i++, mul *= 256) acc += this.src[this.start + i] * mul;
+    for (let i = lo >> 3; i <= (hi - 1) >> 3; i++, mul *= 256)
+      acc += this.src[this.start + i] * mul;
     return (Math.floor(acc / 2 ** (lo & 7)) % 2 ** (hi - lo)) * 2 ** (lo - at);
   }
   read(n) {
@@ -58,7 +73,7 @@ function readNormalized(src, at, end, maxSymbol, maxLog) {
   const read = (n) => {
     let v = 0;
     for (let i = 0; i < n; i++, bit++) {
-      if (bit >> 3 >= end) fail("FSE table description runs past its block");
+      if (bit >> 3 >= end) fail('FSE table description runs past its block');
       v += ((src[bit >> 3] >> (bit & 7)) & 1) * 2 ** i;
     }
     return v;
@@ -77,14 +92,14 @@ function readNormalized(src, at, end, maxSymbol, maxLog) {
   const norm = [];
   let previous0 = false;
   while (remaining > 1) {
-    if (norm.length > maxSymbol) fail("FSE table has too many symbols");
+    if (norm.length > maxSymbol) fail('FSE table has too many symbols');
     if (previous0) {
       let r;
       do {
         r = read(2);
         for (let k = 0; k < r; k++) norm.push(0);
       } while (r === 3);
-      if (norm.length > maxSymbol) fail("FSE table has too many symbols");
+      if (norm.length > maxSymbol) fail('FSE table has too many symbols');
     }
     const max = 2 * threshold - 1 - remaining;
     let count;
@@ -102,7 +117,7 @@ function readNormalized(src, at, end, maxSymbol, maxLog) {
       threshold >>= 1;
     }
   }
-  if (remaining !== 1) fail("FSE probabilities do not add up");
+  if (remaining !== 1) fail('FSE probabilities do not add up');
   return { norm, log, end: Math.ceil(bit / 8) };
 }
 
@@ -129,7 +144,7 @@ function fseTable(norm, log) {
       while (pos > high);
     }
   });
-  if (pos !== 0) fail("FSE table is not filled");
+  if (pos !== 0) fail('FSE table is not filled');
   for (let u = 0; u < size; u++) {
     const x = next[symbol[u]]++;
     bits[u] = log - highBit(x);
@@ -138,7 +153,12 @@ function fseTable(norm, log) {
   return { symbol, bits, base, log };
 }
 
-const rleTable = (s) => ({ symbol: Uint16Array.of(s), bits: Uint8Array.of(0), base: Uint32Array.of(0), log: 0 });
+const rleTable = (s) => ({
+  symbol: Uint16Array.of(s),
+  bits: Uint8Array.of(0),
+  base: Uint32Array.of(0),
+  log: 0,
+});
 
 // The Huffman tree description (4.2.1): a decoding table indexed by the next `max` bits.
 function readHuffman(src, at, end) {
@@ -147,7 +167,7 @@ function readHuffman(src, at, end) {
   let pos;
   if (header < 128) {
     pos = at + 1 + header;
-    if (pos > end) fail("Huffman weights run past the literals");
+    if (pos > end) fail('Huffman weights run past the literals');
     const { norm, log, end: tableEnd } = readNormalized(src, at + 1, pos, 255, 6);
     const t = fseTable(norm, log);
     const bs = new BackBits(src, tableEnd, pos);
@@ -166,19 +186,20 @@ function readHuffman(src, at, end) {
         weights.push(t.symbol[s1]);
         break;
       }
-      if (weights.length > 255) fail("too many Huffman weights");
+      if (weights.length > 255) fail('too many Huffman weights');
     }
   } else {
     const n = header - 127;
     pos = at + 1 + Math.ceil(n / 2);
-    for (let i = 0; i < n; i++) weights.push(i % 2 ? src[at + 1 + (i >> 1)] & 15 : src[at + 1 + (i >> 1)] >> 4);
+    for (let i = 0; i < n; i++)
+      weights.push(i % 2 ? src[at + 1 + (i >> 1)] & 15 : src[at + 1 + (i >> 1)] >> 4);
   }
   let total = 0;
   for (const w of weights) if (w) total += 1 << (w - 1);
-  if (!total) fail("Huffman weights are all zero");
+  if (!total) fail('Huffman weights are all zero');
   const max = highBit(total) + 1;
   const rest = (1 << max) - total;
-  if (rest & (rest - 1)) fail("Huffman weights do not complete a tree");
+  if (rest & (rest - 1)) fail('Huffman weights do not complete a tree');
   weights.push(highBit(rest) + 1);
   if (max > 11) fail(`Huffman codes of ${max} bits`);
   const start = new Uint32Array(max + 2);
@@ -208,7 +229,7 @@ function huffmanStream(src, start, end, table, out, from, count) {
     out[from + i] = table.symbol[k];
     bs.pos -= table.bits[k];
   }
-  if (bs.pos !== 0) fail("a Huffman stream does not end on its last bit");
+  if (bs.pos !== 0) fail('a Huffman stream does not end on its last bit');
 }
 
 // The literals section (3.1.1.3.1): { literals, end }.
@@ -223,7 +244,7 @@ function readLiterals(src, at, end, frame) {
     else if (format === 1) [size, pos] = [(b0 >> 4) + (src[at + 1] << 4), at + 2];
     else [size, pos] = [(b0 >> 4) + (src[at + 1] << 4) + (src[at + 2] << 12), at + 3];
     if (type === 0) {
-      if (pos + size > end) fail("raw literals run past the block");
+      if (pos + size > end) fail('raw literals run past the block');
       return { literals: src.subarray(pos, pos + size), end: pos + size };
     }
     return { literals: new Uint8Array(size).fill(src[pos]), end: pos + 1 };
@@ -236,12 +257,12 @@ function readLiterals(src, at, end, frame) {
   const compressed = Math.floor(value / 2 ** (4 + width)) % 2 ** width;
   let pos = at + headerLen;
   const stop = pos + compressed;
-  if (stop > end) fail("compressed literals run past the block");
+  if (stop > end) fail('compressed literals run past the block');
   if (type === 2) {
     const h = readHuffman(src, pos, stop);
     frame.huffman = h.table;
     pos = h.end;
-  } else if (!frame.huffman) fail("treeless literals with no earlier Huffman table");
+  } else if (!frame.huffman) fail('treeless literals with no earlier Huffman table');
   const out = new Uint8Array(regen);
   if (format === 0) huffmanStream(src, pos, stop, frame.huffman, out, 0, regen);
   else {
@@ -251,7 +272,7 @@ function readLiterals(src, at, end, frame) {
     const seg = (regen + 3) >> 2;
     let p = pos + 6;
     const ends = [p + s1, p + s1 + s2, p + s1 + s2 + s3, stop];
-    if (ends[2] > stop) fail("Huffman jump table runs past the literals");
+    if (ends[2] > stop) fail('Huffman jump table runs past the literals');
     for (let i = 0; i < 4; i++) {
       huffmanStream(src, p, ends[i], frame.huffman, out, i * seg, i < 3 ? seg : regen - 3 * seg);
       p = ends[i];
@@ -268,7 +289,7 @@ function sequenceTable(mode, src, pos, end, defaults, defaultLog, maxSymbol, max
     const d = readNormalized(src, pos, end, maxSymbol, maxLog);
     return { table: fseTable(d.norm, d.log), end: d.end };
   }
-  if (!previous) fail("a repeated sequence table with none before it");
+  if (!previous) fail('a repeated sequence table with none before it');
   return { table: previous, end: pos };
 }
 
@@ -276,12 +297,13 @@ function decodeBlock(src, at, end, out, frame) {
   const lit = readLiterals(src, at, end, frame);
   let pos = lit.end;
   let n = src[pos++];
-  if (n >= 128) n = n === 255 ? src[pos++] + (src[pos++] << 8) + 0x7f00 : ((n - 128) << 8) + src[pos++];
+  if (n >= 128)
+    n = n === 255 ? src[pos++] + (src[pos++] << 8) + 0x7f00 : ((n - 128) << 8) + src[pos++];
   const literals = lit.literals;
   let litPos = 0;
   if (n > 0) {
     const modes = src[pos++];
-    if (modes & 3) fail("reserved bits set in the sequence modes");
+    if (modes & 3) fail('reserved bits set in the sequence modes');
     const ll = sequenceTable(modes >> 6, src, pos, end, LL_DEFAULT, 6, 35, 9, frame.ll);
     const of = sequenceTable((modes >> 4) & 3, src, ll.end, end, OF_DEFAULT, 5, 31, 8, frame.of);
     const ml = sequenceTable((modes >> 2) & 3, src, of.end, end, ML_DEFAULT, 6, 52, 9, frame.ml);
@@ -297,7 +319,8 @@ function decodeBlock(src, at, end, out, frame) {
       const llCode = ll.table.symbol[sLL];
       if (ofCode > 31) fail(`offset code ${ofCode}`);
       let offset = 2 ** ofCode + bs.read(ofCode);
-      const matchLen = mlCode < 32 ? mlCode + 3 : ML_BASE[mlCode - 32] + bs.read(ML_BITS[mlCode - 32]);
+      const matchLen =
+        mlCode < 32 ? mlCode + 3 : ML_BASE[mlCode - 32] + bs.read(ML_BITS[mlCode - 32]);
       const litLen = llCode < 16 ? llCode : LL_BASE[llCode - 16] + bs.read(LL_BITS[llCode - 16]);
       if (offset > 3) {
         offset -= 3;
@@ -308,7 +331,7 @@ function decodeBlock(src, at, end, out, frame) {
         if (idx === 0) offset = rep[0];
         else {
           offset = idx === 3 ? rep[0] - 1 : rep[idx];
-          if (!offset) fail("repeat offset of zero");
+          if (!offset) fail('repeat offset of zero');
           if (idx === 1) rep[1] = rep[0];
           else {
             rep[2] = rep[1];
@@ -317,7 +340,7 @@ function decodeBlock(src, at, end, out, frame) {
           rep[0] = offset;
         }
       }
-      if (litPos + litLen > literals.length) fail("a sequence takes more literals than there are");
+      if (litPos + litLen > literals.length) fail('a sequence takes more literals than there are');
       out.push(literals.subarray(litPos, litPos + litLen));
       litPos += litLen;
       out.copyBack(offset, matchLen);
@@ -327,7 +350,7 @@ function decodeBlock(src, at, end, out, frame) {
         sOF = of.table.base[sOF] + bs.read(of.table.bits[sOF]);
       }
     }
-    if (bs.pos !== 0) fail("the sequences do not end on their last bit");
+    if (bs.pos !== 0) fail('the sequences do not end on their last bit');
   }
   out.push(literals.subarray(litPos));
 }
@@ -362,7 +385,7 @@ export function unzstd(src) {
   const out = new Output(src.length * 4);
   let pos = 0;
   while (pos < src.length) {
-    if (pos + 4 > src.length) fail("truncated frame magic");
+    if (pos + 4 > src.length) fail('truncated frame magic');
     const magic = view.getUint32(pos, true);
     if ((magic & 0xfffffff0) === 0x184d2a50) {
       pos += 8 + view.getUint32(pos + 4, true);
@@ -373,7 +396,7 @@ export function unzstd(src) {
     pos += 5;
     const fcsFlag = fhd >> 6;
     const single = (fhd >> 5) & 1;
-    if (fhd & 8) fail("reserved bit set in the frame header");
+    if (fhd & 8) fail('reserved bit set in the frame header');
     const checksum = (fhd >> 2) & 1;
     const dictBytes = [0, 1, 2, 4][fhd & 3];
     if (!single) pos++; // window descriptor: the whole frame is kept, so its size does not matter
@@ -382,15 +405,15 @@ export function unzstd(src) {
     if (dict) fail(`frame needs dictionary ${dict}`);
     pos += dictBytes + [single, 2, 4, 8][fcsFlag];
     const frame = { rep: [1, 4, 8], huffman: null, ll: null, of: null, ml: null };
-    for (let last = 0; !last;) {
-      if (pos + 3 > src.length) fail("truncated block header");
+    for (let last = 0; !last; ) {
+      if (pos + 3 > src.length) fail('truncated block header');
       const header = src[pos] | (src[pos + 1] << 8) | (src[pos + 2] << 16);
       pos += 3;
       last = header & 1;
       const type = (header >> 1) & 3;
       const size = header >>> 3;
       if (type === 0) {
-        if (pos + size > src.length) fail("raw block runs past the input");
+        if (pos + size > src.length) fail('raw block runs past the input');
         out.push(src.subarray(pos, pos + size));
         pos += size;
       } else if (type === 1) {
@@ -399,10 +422,10 @@ export function unzstd(src) {
         out.len += size;
         pos += 1;
       } else if (type === 2) {
-        if (pos + size > src.length) fail("compressed block runs past the input");
+        if (pos + size > src.length) fail('compressed block runs past the input');
         decodeBlock(src, pos, pos + size, out, frame);
         pos += size;
-      } else fail("reserved block type");
+      } else fail('reserved block type');
     }
     if (checksum) pos += 4;
   }

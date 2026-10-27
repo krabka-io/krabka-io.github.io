@@ -12,13 +12,68 @@
 // innerHTML.
 
 const KEYWORDS = new Set([
-  "abstract", "any", "as", "axiom", "break", "by", "clone", "coinductive", "coma", "constant", "continue",
-  "diverges", "do", "done", "downto", "else", "end", "ensures", "exception", "exists", "export", "external",
-  "for", "forall", "fun", "function", "ghost", "goal", "if", "import", "in", "inductive", "invariant", "lemma",
-  "let", "match", "meta", "module", "mutable", "not", "predicate", "private", "prop", "raise", "rec", "requires",
-  "return", "returns", "scope", "so", "then", "theory", "to", "try", "type", "use", "val", "variant", "while", "with",
+  'abstract',
+  'any',
+  'as',
+  'axiom',
+  'break',
+  'by',
+  'clone',
+  'coinductive',
+  'coma',
+  'constant',
+  'continue',
+  'diverges',
+  'do',
+  'done',
+  'downto',
+  'else',
+  'end',
+  'ensures',
+  'exception',
+  'exists',
+  'export',
+  'external',
+  'for',
+  'forall',
+  'fun',
+  'function',
+  'ghost',
+  'goal',
+  'if',
+  'import',
+  'in',
+  'inductive',
+  'invariant',
+  'lemma',
+  'let',
+  'match',
+  'meta',
+  'module',
+  'mutable',
+  'not',
+  'predicate',
+  'private',
+  'prop',
+  'raise',
+  'rec',
+  'requires',
+  'return',
+  'returns',
+  'scope',
+  'so',
+  'then',
+  'theory',
+  'to',
+  'try',
+  'type',
+  'use',
+  'val',
+  'variant',
+  'while',
+  'with',
 ]);
-const LITERALS = new Set(["true", "false", "None", "Some", "Ok", "Err", "Nil", "Cons"]);
+const LITERALS = new Set(['true', 'false', 'None', 'Some', 'Ok', 'Err', 'Nil', 'Cons']);
 
 // One alternation, tried in order at each position.
 const TOKEN = new RegExp(
@@ -30,12 +85,12 @@ const TOKEN = new RegExp(
     String.raw`(?<kw2>\b(?:let|val|axiom|goal|lemma|function|predicate)%[a-z_]+)`,
     String.raw`(?<word>[A-Za-z_][A-Za-z0-9_']*)`,
     String.raw`(?<op><->|->|\/\\|\\\/|<>|<=|>=|:=|[-+*\/<>=|&!~^%])`,
-  ].join("|"),
-  "y",
+  ].join('|'),
+  'y',
 );
 
 function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const span = (cls, text) => `<span class="px-hl-${cls}">${escapeHtml(text)}</span>`;
@@ -45,10 +100,10 @@ const span = (cls, text) => `<span class="px-hl-${cls}">${escapeHtml(text)}</spa
 function commentEnd(line, from, state) {
   let j = from;
   while (j < line.length && state.comment > 0) {
-    if (line[j] === "(" && line[j + 1] === "*") {
+    if (line[j] === '(' && line[j + 1] === '*') {
       state.comment += 1;
       j += 2;
-    } else if (line[j] === "*" && line[j + 1] === ")") {
+    } else if (line[j] === '*' && line[j + 1] === ')') {
       state.comment -= 1;
       j += 2;
     } else j += 1;
@@ -58,20 +113,20 @@ function commentEnd(line, from, state) {
 
 // Highlights one line. `state.comment` is the open `(*` depth carried between lines.
 function highlightLine(line, state) {
-  let out = "";
+  let out = '';
   let i = 0;
   const n = line.length;
   while (i < n) {
     if (state.comment > 0) {
       const j = commentEnd(line, i, state);
-      out += span("comment", line.slice(i, j));
+      out += span('comment', line.slice(i, j));
       i = j;
       continue;
     }
-    if (line[i] === "(" && line[i + 1] === "*" && line[i + 2] !== ")") {
+    if (line[i] === '(' && line[i + 1] === '*' && line[i + 2] !== ')') {
       state.comment = 1;
       const j = commentEnd(line, i + 2, state);
-      out += span("comment", line.slice(i, j));
+      out += span('comment', line.slice(i, j));
       i = j;
       continue;
     }
@@ -86,17 +141,17 @@ function highlightLine(line, state) {
     }
     const g = m.groups;
     const text = m[0];
-    if (g.string) out += span("string", text);
-    else if (g.attr) out += span(text.startsWith("[@expl") ? "expl" : "attr", text);
-    else if (g.kw2) out += span("keyword", text);
-    else if (g.number) out += span("number", text);
-    else if (g.path) out += span("type", text);
+    if (g.string) out += span('string', text);
+    else if (g.attr) out += span(text.startsWith('[@expl') ? 'expl' : 'attr', text);
+    else if (g.kw2) out += span('keyword', text);
+    else if (g.number) out += span('number', text);
+    else if (g.path) out += span('type', text);
     else if (g.word) {
-      if (KEYWORDS.has(text)) out += span("keyword", text);
-      else if (LITERALS.has(text)) out += span("literal", text);
-      else if (/^[A-Z]/.test(text)) out += span("type", text);
+      if (KEYWORDS.has(text)) out += span('keyword', text);
+      else if (LITERALS.has(text)) out += span('literal', text);
+      else if (/^[A-Z]/.test(text)) out += span('type', text);
       else out += escapeHtml(text);
-    } else if (g.op) out += span("op", text);
+    } else if (g.op) out += span('op', text);
     i += text.length;
   }
   return out;
@@ -106,8 +161,8 @@ export function highlightWhy(text) {
   const state = { comment: 0 };
   // A file ends with a newline; that is not another, empty line.
   return text
-    .replace(/\n$/, "")
-    .split("\n")
+    .replace(/\n$/, '')
+    .split('\n')
     .map((line) => `<span class="px-line">${highlightLine(line, state)}</span>`)
-    .join("\n");
+    .join('\n');
 }

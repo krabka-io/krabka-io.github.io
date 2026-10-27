@@ -27,12 +27,25 @@ import path from 'path';
 import crypto from 'crypto';
 import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'url';
-import { DIST_DIR, NETWORK_PROBE, STEP_TIMEOUT, args, checker, launchOrExit, newLabContext, nodeState, openLab, openScenario, serve, waitFor, watchErrors } from './lab-check-lib.mjs';
+import {
+  DIST_DIR,
+  NETWORK_PROBE,
+  STEP_TIMEOUT,
+  args,
+  checker,
+  launchOrExit,
+  newLabContext,
+  nodeState,
+  openLab,
+  openScenario,
+  serve,
+  waitFor,
+  watchErrors,
+} from './lab-check-lib.mjs';
 
 const WEBRTC = !args.has('--no-webrtc');
 const t = checker();
 const { check, failures } = t;
-
 
 // The node's snapshot entry, waiting for the first snapshot after a load.
 async function readNode(page, id) {
@@ -52,14 +65,27 @@ async function checkInflate() {
     check('Node has CompressionStream', false, 'needs Node 21.2 or later');
     return;
   }
-  const { inflateRaw } = await import(pathToFileURL(path.join(DIST_DIR, 'playground', 'lab', 'inflate.js')).href);
+  const { inflateRaw } = await import(
+    pathToFileURL(path.join(DIST_DIR, 'playground', 'lab', 'inflate.js')).href
+  );
   const deflate = async (bytes) =>
-    new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+    new Uint8Array(
+      await new Response(
+        new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw')),
+      ).arrayBuffer(),
+    );
   const make = {
     random: (n) => new Uint8Array(crypto.randomBytes(n)),
-    repetitive: (n) => Uint8Array.from({ length: n }, (_, i) => 'krabka-lab '.charCodeAt(i % 11) ^ (i >> 12 & 1)),
+    repetitive: (n) =>
+      Uint8Array.from({ length: n }, (_, i) => 'krabka-lab '.charCodeAt(i % 11) ^ ((i >> 12) & 1)),
     scenario: (n) => {
-      const text = JSON.stringify({ nodes: Array.from({ length: Math.ceil(n / 40) + 1 }, (_, i) => ({ id: i, kind: i % 3 ? 'krabka-broker' : 'consumer', x: (i * 37) % 900 })) });
+      const text = JSON.stringify({
+        nodes: Array.from({ length: Math.ceil(n / 40) + 1 }, (_, i) => ({
+          id: i,
+          kind: i % 3 ? 'krabka-broker' : 'consumer',
+          x: (i * 37) % 900,
+        })),
+      });
       return new TextEncoder().encode(text).slice(0, n);
     },
   };
@@ -76,12 +102,19 @@ async function checkInflate() {
       } catch (err) {
         out = err;
       }
-      if (!(out instanceof Uint8Array) || Buffer.compare(Buffer.from(out), Buffer.from(input)) !== 0) {
+      if (
+        !(out instanceof Uint8Array) ||
+        Buffer.compare(Buffer.from(out), Buffer.from(input)) !== 0
+      ) {
         bad.push(`${kind}/${size}: ${out instanceof Error ? out.message : `${out.length} bytes`}`);
       }
     }
   }
-  check(`inflateRaw round-trips CompressionStream('deflate-raw') output (${cases} cases, up to ${sizes[sizes.length - 1]} bytes)`, bad.length === 0, bad.slice(0, 3).join('; '));
+  check(
+    `inflateRaw round-trips CompressionStream('deflate-raw') output (${cases} cases, up to ${sizes[sizes.length - 1]} bytes)`,
+    bad.length === 0,
+    bad.slice(0, 3).join('; '),
+  );
   const packed = await deflate(make.repetitive(20000));
   let threw = false;
   try {
@@ -101,7 +134,11 @@ async function setPersistUI(page, on) {
   await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
   const box = page.locator('#krabka-lab .lab-storage input[type="checkbox"]');
   if ((await box.isChecked()) !== on) await box.click();
-  await waitFor(page, `window.krabkaLab.storage.persist === ${on}`, `persistence ${on ? 'on' : 'off'}`);
+  await waitFor(
+    page,
+    `window.krabkaLab.storage.persist === ${on}`,
+    `persistence ${on ? 'on' : 'off'}`,
+  );
 }
 
 // What the store holds for the echo counter of node 1.
@@ -124,12 +161,18 @@ async function main() {
   let loadingMode = null;
   const { server, port } = await serve(DIST_DIR, (req, res, pathname) => {
     if (!loadingMode) return false;
-    if (loadingMode === 'reload' && pathname === '/playground/broker/krabka-broker.wasm' && req.method === 'HEAD') {
+    if (
+      loadingMode === 'reload' &&
+      pathname === '/playground/broker/krabka-broker.wasm' &&
+      req.method === 'HEAD'
+    ) {
       res.writeHead(200).end(); // Exercise isolation setup without needing a broker build.
       return true;
     }
     if (pathname === '/docs/lab/' && loadingMode === 'unknown') {
-      const html = fs.readFileSync(path.join(DIST_DIR, 'docs/lab/index.html'), 'utf8').replace(/data-lab-wasm-size="[^"]*"/, '');
+      const html = fs
+        .readFileSync(path.join(DIST_DIR, 'docs/lab/index.html'), 'utf8')
+        .replace(/data-lab-wasm-size="[^"]*"/, '');
       res.writeHead(200, { 'content-type': 'text/html' }).end(html);
       return true;
     }
@@ -148,7 +191,7 @@ async function main() {
     let offset = 0;
     const send = () => {
       if (res.destroyed) return;
-      res.write(bytes.subarray(offset, offset += 64 * 1024));
+      res.write(bytes.subarray(offset, (offset += 64 * 1024)));
       if (offset >= bytes.length) res.end();
       else setTimeout(send, 30);
     };
@@ -162,46 +205,116 @@ async function main() {
     console.log('Cluster Lab: loading experience');
     for (const mode of ['known', 'gzip', 'unknown', 'reload', 'failure']) {
       loadingMode = mode;
-      const loadingContext = await newLabContext(browser, { width: mode === 'unknown' ? 390 : 1400, height: 844 });
+      const loadingContext = await newLabContext(browser, {
+        width: mode === 'unknown' ? 390 : 1400,
+        height: 844,
+      });
       try {
         const loadingPage = await loadingContext.newPage();
-        await loadingPage.emulateMedia({ reducedMotion: mode === 'known' ? 'no-preference' : 'reduce' });
-        await loadingPage.addInitScript(() => addEventListener('beforeunload', () => {
-          const loader = document.querySelector('.lab-loader');
-          sessionStorage.setItem('loading-at-reload', String(!!loader && !loader.classList.contains('leaving') && !document.querySelector('#krabka-lab').dataset.ready));
-        }));
+        await loadingPage.emulateMedia({
+          reducedMotion: mode === 'known' ? 'no-preference' : 'reduce',
+        });
+        await loadingPage.addInitScript(() =>
+          addEventListener('beforeunload', () => {
+            const loader = document.querySelector('.lab-loader');
+            sessionStorage.setItem(
+              'loading-at-reload',
+              String(
+                !!loader &&
+                  !loader.classList.contains('leaving') &&
+                  !document.querySelector('#krabka-lab').dataset.ready,
+              ),
+            );
+          }),
+        );
         await loadingPage.goto(`${base}/docs/lab/`, { waitUntil: 'commit' });
         await loadingPage.waitForSelector('.lab-loader');
-        check(`${mode}: loader is present before the workspace`, await loadingPage.locator('#krabka-lab').getAttribute('aria-busy') === 'true');
+        check(
+          `${mode}: loader is present before the workspace`,
+          (await loadingPage.locator('#krabka-lab').getAttribute('aria-busy')) === 'true',
+        );
         if (mode === 'failure') {
           await loadingPage.waitForSelector('.lab-error');
-          check('failed download offers reload and clears busy state', await loadingPage.getByRole('button', { name: 'Reload the lab' }).isVisible() && await loadingPage.locator('#krabka-lab').getAttribute('aria-busy') === null);
+          check(
+            'failed download offers reload and clears busy state',
+            (await loadingPage.getByRole('button', { name: 'Reload the lab' }).isVisible()) &&
+              (await loadingPage.locator('#krabka-lab').getAttribute('aria-busy')) === null,
+          );
           continue;
         }
         await loadingPage.waitForFunction((unknown) => {
           const bar = document.querySelector('.lab-loader-progress');
-          return bar && (unknown ? !bar.hasAttribute('value') && document.querySelector('.lab-loader-detail').textContent.includes('downloaded') : bar.value > 0 && bar.value < 85);
+          return (
+            bar &&
+            (unknown
+              ? !bar.hasAttribute('value') &&
+                document.querySelector('.lab-loader-detail').textContent.includes('downloaded')
+              : bar.value > 0 && bar.value < 85)
+          );
         }, mode === 'unknown');
         const first = await loadingPage.locator('progress').evaluate((bar) => bar.value);
-        if (mode !== 'unknown') await loadingPage.waitForFunction((value) => document.querySelector('progress')?.value > value, first);
+        if (mode !== 'unknown')
+          await loadingPage.waitForFunction(
+            (value) => document.querySelector('progress')?.value > value,
+            first,
+          );
         check(`${mode}: download progress updates while streaming`, true);
-        if (mode !== 'known') check(`${mode}: reduced motion disables the loading animation`, await loadingPage.locator('progress').evaluate((bar) => getComputedStyle(bar).animationName === 'none'));
+        if (mode !== 'known')
+          check(
+            `${mode}: reduced motion disables the loading animation`,
+            await loadingPage
+              .locator('progress')
+              .evaluate((bar) => getComputedStyle(bar).animationName === 'none'),
+          );
         const bounds = await loadingPage.locator('.lab-loader-card').boundingBox();
-        check(`${mode}: loading card fits the viewport`, bounds.x >= 0 && bounds.x + bounds.width <= loadingPage.viewportSize().width);
+        check(
+          `${mode}: loading card fits the viewport`,
+          bounds.x >= 0 && bounds.x + bounds.width <= loadingPage.viewportSize().width,
+        );
         fs.mkdirSync(path.join(DIST_DIR, '..', 'artifacts'), { recursive: true });
-        if (mode === 'known' || mode === 'unknown') await loadingPage.screenshot({ path: path.join(DIST_DIR, '..', 'artifacts', `lab-loading-${mode === 'unknown' ? 'mobile' : 'desktop'}.png`) });
+        if (mode === 'known' || mode === 'unknown')
+          await loadingPage.screenshot({
+            path: path.join(
+              DIST_DIR,
+              '..',
+              'artifacts',
+              `lab-loading-${mode === 'unknown' ? 'mobile' : 'desktop'}.png`,
+            ),
+          });
         await loadingPage.waitForSelector('#krabka-lab[data-ready="true"]');
         if (mode === 'known') {
           const reveal = await loadingPage.waitForFunction(() => {
             const loader = document.querySelector('.lab-loader.leaving');
-            return loader && { duration: getComputedStyle(loader).transitionDuration, animating: loader.getAnimations().some((animation) => animation.transitionProperty === 'opacity') };
+            return (
+              loader && {
+                duration: getComputedStyle(loader).transitionDuration,
+                animating: loader
+                  .getAnimations()
+                  .some((animation) => animation.transitionProperty === 'opacity'),
+              }
+            );
           });
           const state = await reveal.jsonValue();
           check('workspace reveal fades smoothly', state.animating, state.duration);
         }
         await loadingPage.waitForSelector('.lab-loader', { state: 'detached' });
-        check(`${mode}: ready workspace releases controls and clears busy state`, await loadingPage.locator('#krabka-lab').evaluate((root) => !root.hasAttribute('aria-busy') && [...root.children].every((child) => !child.inert)));
-        if (mode === 'reload') check('browser setup reload keeps the loader visible until isolated', await loadingPage.evaluate(() => crossOriginIsolated && sessionStorage.getItem('loading-at-reload') === 'true'));
+        check(
+          `${mode}: ready workspace releases controls and clears busy state`,
+          await loadingPage
+            .locator('#krabka-lab')
+            .evaluate(
+              (root) =>
+                !root.hasAttribute('aria-busy') &&
+                [...root.children].every((child) => !child.inert),
+            ),
+        );
+        if (mode === 'reload')
+          check(
+            'browser setup reload keeps the loader visible until isolated',
+            await loadingPage.evaluate(
+              () => crossOriginIsolated && sessionStorage.getItem('loading-at-reload') === 'true',
+            ),
+          );
       } finally {
         await loadingContext.close();
       }
@@ -220,16 +333,35 @@ async function main() {
 
     const nodeCount = await page.locator('#krabka-lab .lab-node').count();
     check('the network probe preset is on the canvas', nodeCount === 3, `${nodeCount} nodes`);
-    const names = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.map((n) => n.name).sort());
-    check('preset nodes are echo-a, echo-b and pinger', JSON.stringify(names) === JSON.stringify(['echo-a', 'echo-b', 'pinger']), names.join(','));
+    const names = await page.evaluate(() =>
+      window.krabkaLab.world
+        .scenario()
+        .nodes.map((n) => n.name)
+        .sort(),
+    );
+    check(
+      'preset nodes are echo-a, echo-b and pinger',
+      JSON.stringify(names) === JSON.stringify(['echo-a', 'echo-b', 'pinger']),
+      names.join(','),
+    );
 
     const t0 = await page.evaluate(() => window.krabkaLab.world.now());
     await waitFor(page, `window.krabkaLab.world.now() > ${t0} + 300`, 'the clock to advance');
     check('the simulated clock advances', true);
 
-    const pinger = JSON.parse(await waitFor(page, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes > 3 ? r : null; })()`, 'the pinger to receive echoes'));
+    const pinger = JSON.parse(
+      await waitFor(
+        page,
+        `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes > 3 ? r : null; })()`,
+        'the pinger to receive echoes',
+      ),
+    );
     check('the pinger receives echoes', pinger.state.echoes > 3, JSON.stringify(pinger.state));
-    check('the pinger reports a round trip', typeof pinger.state.mean_rtt_ms === 'number' && pinger.state.mean_rtt_ms >= 20, `rtt ${pinger.state.mean_rtt_ms}`);
+    check(
+      'the pinger reports a round trip',
+      typeof pinger.state.mean_rtt_ms === 'number' && pinger.state.mean_rtt_ms >= 20,
+      `rtt ${pinger.state.mean_rtt_ms}`,
+    );
 
     const dots = await page.locator('#krabka-lab .lab-frame').count();
     check('frames are drawn in flight', dots > 0, `${dots} dots`);
@@ -239,8 +371,14 @@ async function main() {
     await page.waitForSelector('#krabka-lab .lab-inspector .lab-insp-name');
     const inspName = await page.locator('#krabka-lab .lab-inspector .lab-insp-name').textContent();
     check('the inspector shows the selected node', inspName === 'pinger', inspName);
-    await waitFor(page, `!!document.querySelector('#krabka-lab .lab-inspector dd[data-field="echoes"]')`, 'the state view');
-    const echoesText = await page.locator('#krabka-lab .lab-inspector dd[data-field="echoes"]').textContent();
+    await waitFor(
+      page,
+      `!!document.querySelector('#krabka-lab .lab-inspector dd[data-field="echoes"]')`,
+      'the state view',
+    );
+    const echoesText = await page
+      .locator('#krabka-lab .lab-inspector dd[data-field="echoes"]')
+      .textContent();
     check('the state view lists the echo counter', /^\d/.test(echoesText), echoesText);
     await page.locator('#krabka-lab .lab-tab#lab-tab-raw').click();
     const raw = await page.locator('#krabka-lab .lab-raw').textContent();
@@ -253,9 +391,16 @@ async function main() {
         const panel = page.locator(`#krabka-lab ${selector}`).first();
         await panel.locator('.lab-expand').click();
         const bounds = await panel.boundingBox();
-        check(`${selector} expands at ${width}px`, bounds.width >= width - 1 && bounds.height >= 843, JSON.stringify(bounds));
+        check(
+          `${selector} expands at ${width}px`,
+          bounds.width >= width - 1 && bounds.height >= 843,
+          JSON.stringify(bounds),
+        );
         await page.keyboard.press('Escape');
-        check(`${selector} closes with Escape`, !(await panel.evaluate((el) => el.classList.contains('lab-expanded'))));
+        check(
+          `${selector} closes with Escape`,
+          !(await panel.evaluate((el) => el.classList.contains('lab-expanded'))),
+        );
       }
     }
     await page.setViewportSize({ width: 1400, height: 1000 });
@@ -267,64 +412,133 @@ async function main() {
       await page.setViewportSize({ width, height: 844 });
       await dock.locator('.lab-expand').click();
       const bounds = await dock.boundingBox();
-      check(`network bytes expands at ${width}px`, bounds.width >= width - 1 && bounds.height >= 843 && await network.evaluate((el) => el.open));
+      check(
+        `network bytes expands at ${width}px`,
+        bounds.width >= width - 1 &&
+          bounds.height >= 843 &&
+          (await network.evaluate((el) => el.open)),
+      );
       await dock.locator('.lab-expand').click();
-      check('the close button restores network bytes', !(await dock.evaluate((el) => el.classList.contains('lab-expanded'))));
+      check(
+        'the close button restores network bytes',
+        !(await dock.evaluate((el) => el.classList.contains('lab-expanded'))),
+      );
     }
     await page.setViewportSize({ width: 1400, height: 1000 });
     // The analyzer: every frame is captured; a selected frame opens full-window with its bytes.
     await page.locator('#krabka-lab .lab-net-views .lab-tab', { hasText: 'Frames' }).click();
-    await waitFor(page, `document.querySelectorAll('#krabka-lab .lab-net-spacer .lab-net-row').length > 0`, 'captured frames in the Network tab');
+    await waitFor(
+      page,
+      `document.querySelectorAll('#krabka-lab .lab-net-spacer .lab-net-row').length > 0`,
+      'captured frames in the Network tab',
+    );
     const captured = await page.evaluate(() => window.krabkaLab.capture.frames.length);
     check('the capture records the frames on the network', captured > 0, `${captured} frames`);
-    await page.locator('#krabka-lab .lab-net-spacer .lab-net-row', { hasText: 'data' }).last().click();
-    await waitFor(page, `document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hx .lab-bv-b').length > 0`, 'the selected frame in the hex view');
+    await page
+      .locator('#krabka-lab .lab-net-spacer .lab-net-row', { hasText: 'data' })
+      .last()
+      .click();
+    await waitFor(
+      page,
+      `document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hx .lab-bv-b').length > 0`,
+      'the selected frame in the hex view',
+    );
     const hovered = await page.evaluate(() => {
       const byte = document.querySelector('#krabka-lab .lab-net-detail .lab-bv-hx .lab-bv-b');
       byte.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
-      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hov').length))));
+      return new Promise((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            resolve(document.querySelectorAll('#krabka-lab .lab-net-detail .lab-bv-hov').length),
+          ),
+        ),
+      );
     });
-    check('a selected frame expands the details and its bytes light up under the pointer', hovered > 0 && await dock.evaluate((el) => el.classList.contains('lab-expanded')), `${hovered} lit bytes`);
+    check(
+      'a selected frame expands the details and its bytes light up under the pointer',
+      hovered > 0 && (await dock.evaluate((el) => el.classList.contains('lab-expanded'))),
+      `${hovered} lit bytes`,
+    );
     await dock.locator('.lab-expand').click();
     // The Network tab gives the dock most of the stage height; Events gives the canvas its room back.
     await page.locator('#krabka-lab .lab-dtab[data-tab="events"]').click();
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click();
     if (args.has('--expand-only')) {
-      console.log(`\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`);
+      console.log(
+        `\n${t.passed} checks passed${failures.length ? `, ${failures.length} failed` : ''}`,
+      );
       if (failures.length) process.exitCode = 1;
       return;
     }
 
     // Status line on the card.
-    const status = await page.locator('#krabka-lab .lab-node[data-node-id="3"]').getAttribute('data-status');
+    const status = await page
+      .locator('#krabka-lab .lab-node[data-node-id="3"]')
+      .getAttribute('data-status');
     check('the card carries a status line', /echoed/.test(status || ''), status);
 
     // Faults: kill echo-a (node 1), then restart it.
     await page.locator('#krabka-lab .lab-node[data-node-id="1"]').click();
     await page.locator('#krabka-lab .lab-faults button', { hasText: 'Kill' }).click();
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === false; })()`, 'echo-a to be down');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === false; })()`,
+      'echo-a to be down',
+    );
     check('Kill halts the node', true);
-    const eventKinds = await page.evaluate(() => [...document.querySelectorAll('#krabka-lab .lab-ev-kind')].map((e) => e.textContent));
-    check('the timeline logs the fault', eventKinds.includes('fault'), eventKinds.slice(-5).join(','));
+    const eventKinds = await page.evaluate(() =>
+      [...document.querySelectorAll('#krabka-lab .lab-ev-kind')].map((e) => e.textContent),
+    );
+    check(
+      'the timeline logs the fault',
+      eventKinds.includes('fault'),
+      eventKinds.slice(-5).join(','),
+    );
     await page.locator('#krabka-lab .lab-faults button', { hasText: 'Restart' }).click();
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === true; })()`, 'echo-a to be up');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === true; })()`,
+      'echo-a to be up',
+    );
     check('Restart brings it back', true);
 
     // Link faults: pick echo-a and the pinger, cut, heal.
     await page.locator('#krabka-lab .lab-node[data-node-id="3"]').click({ modifiers: ['Shift'] });
     await page.locator('#krabka-lab .lab-faults button', { hasText: 'Partition' }).click();
-    await waitFor(page, `(() => { const s = window.krabkaLab.world.snapshot(); return s.links.some((l) => l.cut); })()`, 'the link to be cut');
+    await waitFor(
+      page,
+      `(() => { const s = window.krabkaLab.world.snapshot(); return s.links.some((l) => l.cut); })()`,
+      'the link to be cut',
+    );
     check('Partition cuts the link', true);
     const overlay = await page.locator('#krabka-lab .lab-link-cut').count();
     check('the cut link is drawn', overlay === 1, `${overlay} overlays`);
     await page.locator('#krabka-lab .lab-faults button', { hasText: 'Heal' }).click();
-    await waitFor(page, `(() => { const s = window.krabkaLab.world.snapshot(); return !s.links.some((l) => l.cut); })()`, 'the link to heal');
+    await waitFor(
+      page,
+      `(() => { const s = window.krabkaLab.world.snapshot(); return !s.links.some((l) => l.cut); })()`,
+      'the link to heal',
+    );
     check('Heal restores it', true);
 
     // Persistence: the echo node's frame counter is durable.
-    const scenarioId = await waitFor(page, `window.krabkaLab.world.id || null`, 'the scenario to get an id');
-    check('the scenario got an identity on autosave', /^[0-9a-f-]{8,}/.test(scenarioId), scenarioId);
-    const before = JSON.parse(await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`, 'echo-a to count 20 frames'));
+    const scenarioId = await waitFor(
+      page,
+      `window.krabkaLab.world.id || null`,
+      'the scenario to get an id',
+    );
+    check(
+      'the scenario got an identity on autosave',
+      /^[0-9a-f-]{8,}/.test(scenarioId),
+      scenarioId,
+    );
+    const before = JSON.parse(
+      await waitFor(
+        page,
+        `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`,
+        'echo-a to count 20 frames',
+      ),
+    );
     const framesBefore = before.state.frames;
     await page.evaluate(() => window.krabkaLab.storage.flush());
     await page.evaluate(() => window.krabkaLab.world.setPaused(true));
@@ -333,26 +547,56 @@ async function main() {
 
     // The storage panel reports it.
     await page.locator('#krabka-lab .lab-dtab[data-tab="storage"]').click();
-    await waitFor(page, `(() => { const td = document.querySelector('#krabka-lab tr[data-storage-node="1"] td[data-field="bytes"]'); return td && td.textContent !== '0 B'; })()`, 'the storage panel to list echo-a');
+    await waitFor(
+      page,
+      `(() => { const td = document.querySelector('#krabka-lab tr[data-storage-node="1"] td[data-field="bytes"]'); return td && td.textContent !== '0 B'; })()`,
+      'the storage panel to list echo-a',
+    );
     check('the storage panel shows bytes kept for echo-a', true);
 
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
     const idAfterReload = await page.evaluate(() => window.krabkaLab.world.id);
-    check('a reload reopens the last scenario', idAfterReload === scenarioId, `${idAfterReload} vs ${scenarioId}`);
+    check(
+      'a reload reopens the last scenario',
+      idAfterReload === scenarioId,
+      `${idAfterReload} vs ${scenarioId}`,
+    );
     const restored = await readNode(page, 1);
-    check('the echo counter continues from the stored value after reload', restored.state.frames >= framesAtPause, `${restored.state.frames} < ${framesAtPause}`);
+    check(
+      'the echo counter continues from the stored value after reload',
+      restored.state.frames >= framesAtPause,
+      `${restored.state.frames} < ${framesAtPause}`,
+    );
 
     // Move away, then reopen the saved scenario from the Saved list.
     await page.locator('#krabka-lab .lab-dtab[data-tab="scenarios"]').click();
     await page.locator('#krabka-lab button', { hasText: 'New (empty)' }).click();
-    await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 0`, 'an empty scenario');
-    await page.waitForSelector(`#krabka-lab [data-saved-open="${scenarioId}"]`, { timeout: STEP_TIMEOUT });
+    await waitFor(
+      page,
+      `window.krabkaLab.world.scenario().nodes.length === 0`,
+      'an empty scenario',
+    );
+    await page.waitForSelector(`#krabka-lab [data-saved-open="${scenarioId}"]`, {
+      timeout: STEP_TIMEOUT,
+    });
     await page.locator(`#krabka-lab [data-saved-open="${scenarioId}"]`).click();
-    await waitFor(page, `window.krabkaLab.world.id === ${JSON.stringify(scenarioId)} && window.krabkaLab.world.scenario().nodes.length === 3`, 'the saved scenario to reopen');
+    await waitFor(
+      page,
+      `window.krabkaLab.world.id === ${JSON.stringify(scenarioId)} && window.krabkaLab.world.scenario().nodes.length === 3`,
+      'the saved scenario to reopen',
+    );
     const reopened = await readNode(page, 1);
-    check('reopening from the Saved list restores the echo counter', reopened.state.frames >= framesAtPause, `${reopened.state.frames} < ${framesAtPause}`);
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${reopened.state.frames}; })()`, 'the counter to keep counting');
+    check(
+      'reopening from the Saved list restores the echo counter',
+      reopened.state.frames >= framesAtPause,
+      `${reopened.state.frames} < ${framesAtPause}`,
+    );
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${reopened.state.frames}; })()`,
+      'the counter to keep counting',
+    );
     check('and the counter keeps counting from there', true);
 
     // "Persist to this browser" off: the ops fold into the in-memory mirror and
@@ -360,9 +604,17 @@ async function main() {
     await setPersistUI(page, false);
     const storedAtOff = await storedFrames(page, scenarioId);
     const liveAtOff = (await readNode(page, 1)).state.frames;
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${liveAtOff} + 3; })()`, 'echo-a to count on with persistence off');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${liveAtOff} + 3; })()`,
+      'echo-a to count on with persistence off',
+    );
     const storedWhileOff = await storedFrames(page, scenarioId);
-    check('with persistence off, new durable ops are not stored', storedAtOff != null && storedWhileOff === storedAtOff, `${storedAtOff} -> ${storedWhileOff}`);
+    check(
+      'with persistence off, new durable ops are not stored',
+      storedAtOff != null && storedWhileOff === storedAtOff,
+      `${storedAtOff} -> ${storedWhileOff}`,
+    );
 
     // Persistence back on: the store is replaced with the live state before any
     // later op, so the reload restores exactly what was live. Cutting the
@@ -377,38 +629,78 @@ async function main() {
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
     const restoredEcho = (await readNode(page, 1)).state.frames;
-    check('after persistence is back on, the restored echo counter equals the live one', restoredEcho === liveEcho, `${restoredEcho} vs ${liveEcho} live`);
+    check(
+      'after persistence is back on, the restored echo counter equals the live one',
+      restoredEcho === liveEcho,
+      `${restoredEcho} vs ${liveEcho} live`,
+    );
 
     // Forget while the node runs: its records go, and it is not written again
     // (its next op alone would be a partial image), so a reload starts it
     // from nothing.
     await page.evaluate(() => window.krabkaLab.fault({ kind: 'heal', a: 3, b: 1 }));
     const beforeForget = (await readNode(page, 1)).state.frames;
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${beforeForget} + 2; })()`, 'echo-a to count again after the heal');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${beforeForget} + 2; })()`,
+      'echo-a to count again after the heal',
+    );
     await page.evaluate(() => window.krabkaLab.forgetNode(1));
     const atForget = (await readNode(page, 1)).state.frames;
-    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${atForget} + 3; })()`, 'echo-a to count on after Forget');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames > ${atForget} + 3; })()`,
+      'echo-a to count on after Forget',
+    );
     await page.evaluate(() => window.krabkaLab.storage.flush());
-    const leftAfterForget = await page.evaluate((id) => window.krabkaLab.storage.usage(id).then((u) => u.nodes[1] || null), scenarioId);
-    check("Forget drops the node's stored data, and the running node is not stored again", leftAfterForget === null, JSON.stringify(leftAfterForget));
+    const leftAfterForget = await page.evaluate(
+      (id) => window.krabkaLab.storage.usage(id).then((u) => u.nodes[1] || null),
+      scenarioId,
+    );
+    check(
+      "Forget drops the node's stored data, and the running node is not stored again",
+      leftAfterForget === null,
+      JSON.stringify(leftAfterForget),
+    );
     const liveAtReload = (await readNode(page, 1)).state.frames;
     await page.evaluate(() => window.krabkaLab.saveNow());
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
     const forgotten = await readNode(page, 1);
-    check('after Forget, a reload starts the counter from nothing', forgotten.state.frames < 10 && forgotten.state.frames < liveAtReload, `${forgotten.state.frames}, was ${liveAtReload}`);
+    check(
+      'after Forget, a reload starts the counter from nothing',
+      forgotten.state.frames < 10 && forgotten.state.frames < liveAtReload,
+      `${forgotten.state.frames}, was ${liveAtReload}`,
+    );
 
     // Share link.
-    const link = await page.evaluate(() => import('/playground/lab/scenarios.js').then((m) => m.shareLink(window.krabkaLab.world.scenario())));
-    check('a share link carries the scenario in its hash', /#s=[dp][A-Za-z0-9_-]+$/.test(link), link.slice(0, 80));
+    const link = await page.evaluate(() =>
+      import('/playground/lab/scenarios.js').then((m) =>
+        m.shareLink(window.krabkaLab.world.scenario()),
+      ),
+    );
+    check(
+      'a share link carries the scenario in its hash',
+      /#s=[dp][A-Za-z0-9_-]+$/.test(link),
+      link.slice(0, 80),
+    );
     const page2 = await context.newPage();
     const page2Errors = watchErrors(page2, 'shared page', base);
     await page2.goto(link, { waitUntil: 'load' });
     await page2.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-    const sharedNodes = await page2.evaluate(() => window.krabkaLab.world.scenario().nodes.map((n) => n.name).sort());
+    const sharedNodes = await page2.evaluate(() =>
+      window.krabkaLab.world
+        .scenario()
+        .nodes.map((n) => n.name)
+        .sort(),
+    );
     const sharedId = await page2.evaluate(() => window.krabkaLab.world.id);
     const expectedNodes = JSON.stringify(['echo-a', 'echo-b', 'pinger']);
-    check('opening the link reproduces the nodes', JSON.stringify(sharedNodes) === expectedNodes, sharedNodes.join(','));
+    check(
+      'opening the link reproduces the nodes',
+      JSON.stringify(sharedNodes) === expectedNodes,
+      sharedNodes.join(','),
+    );
     check('a shared scenario gets its own identity', sharedId !== scenarioId, sharedId);
     await page2.close();
 
@@ -429,14 +721,26 @@ async function main() {
       (hash) =>
         import('/playground/lab/scenarios.js')
           .then((m) => m.scenarioFromHash(hash))
-          .then((doc) => doc.nodes.map((n) => n.name).sort(), (err) => `error: ${err.message}`),
+          .then(
+            (doc) => doc.nodes.map((n) => n.name).sort(),
+            (err) => `error: ${err.message}`,
+          ),
       new URL(link).hash,
     );
-    const inflatedNodes = await page3.evaluate(() => window.krabkaLab.world.scenario().nodes.map((n) => n.name).sort());
+    const inflatedNodes = await page3.evaluate(() =>
+      window.krabkaLab.world
+        .scenario()
+        .nodes.map((n) => n.name)
+        .sort(),
+    );
     const inflatedId = await page3.evaluate(() => window.krabkaLab.world.id);
     check(
       'without DecompressionStream the link opens through the JavaScript decoder',
-      noStream === 'undefined' && JSON.stringify(decodedNodes) === expectedNodes && JSON.stringify(inflatedNodes) === expectedNodes && inflatedId !== sharedId && inflatedId !== scenarioId,
+      noStream === 'undefined' &&
+        JSON.stringify(decodedNodes) === expectedNodes &&
+        JSON.stringify(inflatedNodes) === expectedNodes &&
+        inflatedId !== sharedId &&
+        inflatedId !== scenarioId,
       `${noStream}: decoded ${Array.isArray(decodedNodes) ? decodedNodes.join(',') : decodedNodes}, opened ${inflatedNodes.join(',')} as ${inflatedId}`,
     );
     await page3.close();
@@ -448,10 +752,20 @@ async function main() {
     await page.locator('#krabka-lab dialog select').first().selectOption('2');
     await page.locator('#krabka-lab dialog button[type="submit"]').click();
     await waitFor(page, `window.krabkaLab.world.scenario().nodes.length === 4`, 'the new node');
-    const added = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.id === 4));
-    check('the palette adds a configured node', added && added.kind === 'pinger' && added.config.target === 2, JSON.stringify(added));
+    const added = await page.evaluate(() =>
+      window.krabkaLab.world.scenario().nodes.find((n) => n.id === 4),
+    );
+    check(
+      'the palette adds a configured node',
+      added && added.kind === 'pinger' && added.config.target === 2,
+      JSON.stringify(added),
+    );
     await page.evaluate(() => window.krabkaLab.world.setPaused(false));
-    await waitFor(page, `(() => { const r = ${nodeState(4)}; return r && JSON.parse(r).state.echoes > 0; })()`, 'the new pinger to ping');
+    await waitFor(
+      page,
+      `(() => { const r = ${nodeState(4)}; return r && JSON.parse(r).state.echoes > 0; })()`,
+      'the new pinger to ping',
+    );
     check('and it runs', true);
 
     errors.push(...pageErrors, ...page2Errors, ...page3Errors);
@@ -471,64 +785,143 @@ async function main() {
         window.krabkaLab.fault({ kind: 'latency', a: 3, b: 1, ms: 200 });
         window.krabkaLab.fault({ kind: 'wipe', node: 3 });
       });
-      const sameTab = JSON.parse(await waitFor(hub, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes >= 6 ? r : null; })()`, 'same-tab echoes over the slow link')).state.mean_rtt_ms;
-      check(`in one tab, the round trip over a 200 ms link is 400 ms (${sameTab} ms)`, Math.abs(sameTab - 400) <= 5, `${sameTab} ms`);
+      const sameTab = JSON.parse(
+        await waitFor(
+          hub,
+          `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes >= 6 ? r : null; })()`,
+          'same-tab echoes over the slow link',
+        ),
+      ).state.mean_rtt_ms;
+      check(
+        `in one tab, the round trip over a 200 ms link is 400 ms (${sameTab} ms)`,
+        Math.abs(sameTab - 400) <= 5,
+        `${sameTab} ms`,
+      );
 
-      const invite = await hub.evaluate(() => window.krabkaLab.session.createInvite(window.location.href));
+      const invite = await hub.evaluate(() =>
+        window.krabkaLab.session.createInvite(window.location.href),
+      );
       check('the hub makes an invite link', /\?join=/.test(invite), invite.slice(0, 60));
       const spoke = await context.newPage();
       const spokeErrors = watchErrors(spoke, 'spoke', base);
       await spoke.goto(invite, { waitUntil: 'load' });
       await spoke.waitForSelector('#krabka-lab[data-ready="true"]', { timeout: STEP_TIMEOUT });
-      await spoke.waitForSelector('#krabka-lab textarea[data-field="answer-code"]', { timeout: STEP_TIMEOUT });
-      const answer = await spoke.locator('#krabka-lab textarea[data-field="answer-code"]').inputValue();
+      await spoke.waitForSelector('#krabka-lab textarea[data-field="answer-code"]', {
+        timeout: STEP_TIMEOUT,
+      });
+      const answer = await spoke
+        .locator('#krabka-lab textarea[data-field="answer-code"]')
+        .inputValue();
       check('the spoke produces an answer code', answer.length > 20);
       await hub.evaluate((code) => window.krabkaLab.session.acceptAnswer(code), answer);
-      await waitFor(hub, `window.krabkaLab.session.peerList().filter((p) => !p.self && p.state === 'connected').length === 1`, 'the peer to connect');
+      await waitFor(
+        hub,
+        `window.krabkaLab.session.peerList().filter((p) => !p.self && p.state === 'connected').length === 1`,
+        'the peer to connect',
+      );
       check('the data channel connects', true);
-      await waitFor(spoke, `window.krabkaLab.world.scenario().nodes.length === 3 && window.krabkaLab.session.role === 'spoke'`, 'the spoke to receive the scenario');
+      await waitFor(
+        spoke,
+        `window.krabkaLab.world.scenario().nodes.length === 3 && window.krabkaLab.session.role === 'spoke'`,
+        'the spoke to receive the scenario',
+      );
       check('the spoke receives the scenario', true);
 
       // Only the host edits the scenario: the spoke's inspector offers no Edit,
       // shows the configuration read-only, and its update path refuses.
       await spoke.locator('#krabka-lab .lab-node[data-node-id="2"]').click();
       await spoke.waitForSelector('#krabka-lab .lab-inspector .lab-insp-name');
-      const spokeEdit = await spoke.locator('#krabka-lab .lab-insp-actions button', { hasText: 'Edit' }).count();
-      check('a spoke offers no Edit in the inspector', spokeEdit === 0, `${spokeEdit} Edit buttons`);
+      const spokeEdit = await spoke
+        .locator('#krabka-lab .lab-insp-actions button', { hasText: 'Edit' })
+        .count();
+      check(
+        'a spoke offers no Edit in the inspector',
+        spokeEdit === 0,
+        `${spokeEdit} Edit buttons`,
+      );
       await spoke.locator('#krabka-lab .lab-tab#lab-tab-config').click();
       const readOnly = await spoke.locator('#krabka-lab [data-field="config-readonly"]').count();
-      const formInputs = await spoke.locator('#krabka-lab .lab-tabpanel[data-tab="config"] input, #krabka-lab .lab-tabpanel[data-tab="config"] select').count();
-      check('a spoke shows the configuration read-only', readOnly === 1 && formInputs === 0, `${readOnly} notes, ${formInputs} inputs`);
+      const formInputs = await spoke
+        .locator(
+          '#krabka-lab .lab-tabpanel[data-tab="config"] input, #krabka-lab .lab-tabpanel[data-tab="config"] select',
+        )
+        .count();
+      check(
+        'a spoke shows the configuration read-only',
+        readOnly === 1 && formInputs === 0,
+        `${readOnly} notes, ${formInputs} inputs`,
+      );
       const refused = await spoke.evaluate(() => {
         const spec = window.krabkaLab.world.spec(2);
-        return window.krabkaLab.inspector.hooks.onUpdateNode(2, { ...spec, name: 'renamed-by-spoke' });
+        return window.krabkaLab.inspector.hooks.onUpdateNode(2, {
+          ...spec,
+          name: 'renamed-by-spoke',
+        });
       });
       const namesAfter = await spoke.evaluate(() => window.krabkaLab.world.spec(2).name);
-      check('a spoke refuses a configuration update', refused === false && namesAfter === 'echo-b', `${refused}, ${namesAfter}`);
+      check(
+        'a spoke refuses a configuration update',
+        refused === false && namesAfter === 'echo-b',
+        `${refused}, ${namesAfter}`,
+      );
       const spokeId = await spoke.evaluate(() => window.krabkaLab.session.me);
       await hub.evaluate((peer) => window.krabkaLab.session.setHost(3, peer), spokeId);
-      await waitFor(spoke, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).hosted === true; })()`, 'the spoke to host the pinger');
+      await waitFor(
+        spoke,
+        `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).hosted === true; })()`,
+        'the spoke to host the pinger',
+      );
       check('the hub hands the pinger to the spoke', true);
       // The hub's snapshot refreshes every 50 ms, so wait for it, not sample it.
-      const hubView = JSON.parse(await waitFor(hub, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).hosted === false ? r : null; })()`, 'the hub to see the pinger as remote', 10_000).catch(() => 'null'));
+      const hubView = JSON.parse(
+        await waitFor(
+          hub,
+          `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).hosted === false ? r : null; })()`,
+          'the hub to see the pinger as remote',
+          10_000,
+        ).catch(() => 'null'),
+      );
       check('the hub sees it as remote', hubView != null && hubView.hosted === false);
       // The pinger restarts in the spoke on the same connection id, and echoes
       // of pings its old self sent from the hub may still arrive and count as
       // echoes with no round trip. So the round trip is the mean over a window
       // of ten fresh echoes, from two samples of `mean_rtt_ms` × `echoes`.
       const pingerAt = async (p, min) =>
-        JSON.parse(await waitFor(p, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes >= ${min} ? r : null; })()`, `${min} echoes across the channel`, 40_000)).state;
+        JSON.parse(
+          await waitFor(
+            p,
+            `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state.echoes >= ${min} ? r : null; })()`,
+            `${min} echoes across the channel`,
+            40_000,
+          ),
+        ).state;
       const first = await pingerAt(spoke, 10);
       const second = await pingerAt(spoke, first.echoes + 10);
-      const crossTab = Math.round((second.mean_rtt_ms * second.echoes - first.mean_rtt_ms * first.echoes) / (second.echoes - first.echoes));
+      const crossTab = Math.round(
+        (second.mean_rtt_ms * second.echoes - first.mean_rtt_ms * first.echoes) /
+          (second.echoes - first.echoes),
+      );
       check('pings cross the WebRTC channel and come back', true);
       // Each side holds its frames until its own clock reaches deliver_at, so
       // the link's 200 ms each way survive the hop; the rest is frame timing.
-      check(`across tabs, the round trip matches the same-tab one (${crossTab} ms vs ${sameTab} ms)`, crossTab >= sameTab - 5 && crossTab <= sameTab + 150, `${crossTab} ms across tabs, ${sameTab} ms in one`);
-      await waitFor(hub, `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state && JSON.parse(r).state.echoes > 0; })()`, 'the remote snapshot on the hub', 20_000);
-      check('the hub shows the remote node\'s snapshot', true);
+      check(
+        `across tabs, the round trip matches the same-tab one (${crossTab} ms vs ${sameTab} ms)`,
+        crossTab >= sameTab - 5 && crossTab <= sameTab + 150,
+        `${crossTab} ms across tabs, ${sameTab} ms in one`,
+      );
+      await waitFor(
+        hub,
+        `(() => { const r = ${nodeState(3)}; return r && JSON.parse(r).state && JSON.parse(r).state.echoes > 0; })()`,
+        'the remote snapshot on the hub',
+        20_000,
+      );
+      check("the hub shows the remote node's snapshot", true);
       await hub.evaluate(() => window.krabkaLab.fault({ kind: 'kill', node: 1 }));
-      await waitFor(spoke, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === false; })()`, 'the fault to mirror');
+      await waitFor(
+        spoke,
+        `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).alive === false; })()`,
+        'the fault to mirror',
+      );
       check('faults are mirrored to the peer', true);
       errors.push(...hubErrors, ...spokeErrors);
       await spoke.close();

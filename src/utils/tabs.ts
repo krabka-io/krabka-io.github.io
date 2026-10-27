@@ -4,7 +4,10 @@
  * this adds selection, a roving tabindex, and the Arrow/Home/End keys. Style the selected
  * tab with the `aria-selected:` variant so no class juggling is needed here.
  */
-export function initTabs(list: HTMLElement, onSelect?: (tab: HTMLElement, panel: HTMLElement) => void) {
+export function initTabs(
+  list: HTMLElement,
+  onSelect?: (tab: HTMLElement, panel: HTMLElement) => void,
+) {
   const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
 
   function select(tab: HTMLElement, focus = false) {
@@ -23,10 +26,15 @@ export function initTabs(list: HTMLElement, onSelect?: (tab: HTMLElement, panel:
     tab.addEventListener('click', () => select(tab));
     tab.addEventListener('keydown', (e) => {
       const to =
-        e.key === 'ArrowRight' ? (i + 1) % tabs.length :
-        e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length :
-        e.key === 'Home' ? 0 :
-        e.key === 'End' ? tabs.length - 1 : -1;
+        e.key === 'ArrowRight'
+          ? (i + 1) % tabs.length
+          : e.key === 'ArrowLeft'
+            ? (i - 1 + tabs.length) % tabs.length
+            : e.key === 'Home'
+              ? 0
+              : e.key === 'End'
+                ? tabs.length - 1
+                : -1;
       if (to < 0) return;
       e.preventDefault();
       select(tabs[to], true);

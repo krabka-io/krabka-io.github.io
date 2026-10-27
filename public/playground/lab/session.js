@@ -31,10 +31,10 @@
 //   takeover  { node }                        spoke asks to host a node
 //   bye       {}
 
-import { encodeShare, decodeShare } from "./codec.js";
-import { kindOf } from "./kinds.js";
+import { encodeShare, decodeShare } from './codec.js';
+import { kindOf } from './kinds.js';
 
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const GATHER_TIMEOUT_MS = 4000;
 const SNAPSHOT_PERIOD_MS = 250;
 // ICE reports "disconnected" for a Wi-Fi roam or a throttled tab and often
@@ -45,8 +45,29 @@ const CONNECT_TIMEOUT_MS = 30000;
 export const NAME_MAX = 24;
 const JOIN_RE = /[?&]join=([^&#]+)/;
 
-const ADJECTIVES = ["amber", "brisk", "coral", "dusky", "eager", "flint", "gilt", "hazel", "ivory", "jade", "kelp", "lunar", "misty", "north", "ochre", "pearl", "quiet", "rusty", "sable", "tidal"];
-const NOUNS = ["crab", "reef", "tide", "kelp", "gull", "shell", "wave", "cove", "dune", "buoy"];
+const ADJECTIVES = [
+  'amber',
+  'brisk',
+  'coral',
+  'dusky',
+  'eager',
+  'flint',
+  'gilt',
+  'hazel',
+  'ivory',
+  'jade',
+  'kelp',
+  'lunar',
+  'misty',
+  'north',
+  'ochre',
+  'pearl',
+  'quiet',
+  'rusty',
+  'sable',
+  'tidal',
+];
+const NOUNS = ['crab', 'reef', 'tide', 'kelp', 'gull', 'shell', 'wave', 'cove', 'dune', 'buoy'];
 
 export function randomPeerName() {
   const a = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
@@ -55,32 +76,32 @@ export function randomPeerName() {
 }
 
 export function randomPeerId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID().slice(0, 8);
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID().slice(0, 8);
   return Math.random().toString(36).slice(2, 10);
 }
 
 // A name from the other tab: text, trimmed, at most NAME_MAX characters.
 function cleanName(name) {
-  return typeof name === "string" ? name.trim().slice(0, NAME_MAX) : "";
+  return typeof name === 'string' ? name.trim().slice(0, NAME_MAX) : '';
 }
 
 export function joinCodeFromUrl(search) {
-  const m = JOIN_RE.exec(search || "");
+  const m = JOIN_RE.exec(search || '');
   return m ? m[1] : null;
 }
 
 export function webrtcAvailable() {
-  return typeof RTCPeerConnection === "function";
+  return typeof RTCPeerConnection === 'function';
 }
 
 // Wait until ICE gathering finished, or long enough that the candidates we
 // have are the ones we will get.
 function gathered(pc) {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, GATHER_TIMEOUT_MS);
-    pc.addEventListener("icegatheringstatechange", () => {
-      if (pc.iceGatheringState === "complete") {
+    pc.addEventListener('icegatheringstatechange', () => {
+      if (pc.iceGatheringState === 'complete') {
         clearTimeout(timer);
         resolve();
       }
@@ -92,14 +113,15 @@ class Peer {
   constructor(id, name) {
     this.id = id;
     this.name = name;
-    this.state = "connecting"; // connecting | connected | closed
+    this.state = 'connecting'; // connecting | connected | closed
     this.pc = null;
     this.channel = null;
     this.remoteId = null;
   }
 
   send(msg) {
-    if (this.state !== "connected" || !this.channel || this.channel.readyState !== "open") return false;
+    if (this.state !== 'connected' || !this.channel || this.channel.readyState !== 'open')
+      return false;
     try {
       this.channel.send(JSON.stringify(msg));
       return true;
@@ -110,7 +132,7 @@ class Peer {
 
   close() {
     clearTimeout(this.graceTimer);
-    this.state = "closed";
+    this.state = 'closed';
     try {
       this.channel?.close();
     } catch {
@@ -132,7 +154,7 @@ export class Session {
   // scenario() → doc
   constructor(hooks) {
     this.hooks = hooks;
-    this.role = "solo";
+    this.role = 'solo';
     this.me = randomPeerId();
     this.name = randomPeerName();
     this.peers = [];
@@ -140,7 +162,7 @@ export class Session {
     this.hub = null; // the spoke's peer entry for the hub
     this.pending = null; // the invite waiting for its answer
     this.snapshotTimer = 0;
-    this.lastHosting = "";
+    this.lastHosting = '';
     this.hostingFor = null; // the scenario id the hosting map is for
     this.roster = []; // a spoke's view of the other spokes, relayed by the hub
   }
@@ -152,10 +174,20 @@ export class Session {
   // Peers as the panels list them, this tab first. A spoke also lists the
   // other spokes the hub told it about; with the hub gone their state is unknown.
   peerList() {
-    const out = [{ id: this.me, name: this.name, state: "connected", self: true }, ...this.peers.map((p) => ({ id: p.remoteId || p.id, name: p.name, state: p.state, self: false }))];
-    if (this.role === "spoke") {
-      const hubUp = this.hub?.state === "connected";
-      for (const r of this.roster) if (!out.some((p) => p.id === r.id)) out.push({ id: r.id, name: r.name, state: hubUp ? r.state : "closed", self: false });
+    const out = [
+      { id: this.me, name: this.name, state: 'connected', self: true },
+      ...this.peers.map((p) => ({
+        id: p.remoteId || p.id,
+        name: p.name,
+        state: p.state,
+        self: false,
+      })),
+    ];
+    if (this.role === 'spoke') {
+      const hubUp = this.hub?.state === 'connected';
+      for (const r of this.roster)
+        if (!out.some((p) => p.id === r.id))
+          out.push({ id: r.id, name: r.name, state: hubUp ? r.state : 'closed', self: false });
     }
     return out;
   }
@@ -163,11 +195,11 @@ export class Session {
   get peersKey() {
     return this.peerList()
       .map((p) => `${p.id}:${p.name}:${p.state}`)
-      .join("|");
+      .join('|');
   }
 
   peerName(id) {
-    if (id == null) return "?";
+    if (id == null) return '?';
     if (id === this.me) return `${this.name} (this tab)`;
     const p = this.peerList().find((x) => x.id === id);
     return p ? p.name : `peer ${String(id).slice(0, 6)}`;
@@ -175,7 +207,7 @@ export class Session {
 
   offlinePeers() {
     const out = new Set();
-    for (const p of this.peerList()) if (!p.self && p.state !== "connected") out.add(p.id);
+    for (const p of this.peerList()) if (!p.self && p.state !== 'connected') out.add(p.id);
     return out;
   }
 
@@ -183,37 +215,37 @@ export class Session {
   // spokes, which only know the hub.
   changed() {
     this.hooks.onPeers();
-    if (this.role !== "hub") return;
+    if (this.role !== 'hub') return;
     const peers = this.peerList().map(({ id, name, state }) => ({ id, name, state }));
-    for (const p of this.peers) p.send({ t: "roster", peers });
+    for (const p of this.peers) p.send({ t: 'roster', peers });
   }
 
   // Rename this tab and tell everyone; the hub relays the name to the spokes.
   setName(name) {
     this.name = String(name).trim().slice(0, NAME_MAX) || this.name;
-    for (const p of this.peers) p.send({ t: "hello", name: this.name, id: this.me });
+    for (const p of this.peers) p.send({ t: 'hello', name: this.name, id: this.me });
     this.changed();
   }
 
   // The ids this tab runs, or null for every node in solo mode.
   myHostedIds() {
-    if (this.role === "solo") return null;
+    if (this.role === 'solo') return null;
     const ids = [];
     for (const [node, peer] of this.hosting) if (peer === this.me) ids.push(node);
     return ids;
   }
 
   hostOf(nodeId) {
-    if (this.role === "solo") return this.me;
-    return this.hosting.get(nodeId) ?? (this.role === "hub" ? this.me : null);
+    if (this.role === 'solo') return this.me;
+    return this.hosting.get(nodeId) ?? (this.role === 'hub' ? this.me : null);
   }
 
   // ---- hub -----------------------------------------------------------------------------------
 
   // Become the hub: every node of the scenario starts hosted here.
   becomeHub() {
-    if (this.role === "hub") return;
-    this.role = "hub";
+    if (this.role === 'hub') return;
+    this.role = 'hub';
     const doc = this.hooks.scenario();
     for (const n of doc.nodes || []) if (!this.hosting.has(n.id)) this.hosting.set(n.id, this.me);
     this.startSnapshots();
@@ -222,22 +254,28 @@ export class Session {
 
   // Make an invite link for one more spoke. Resolves to the URL.
   async createInvite(baseUrl) {
-    if (!this.available) throw new Error("this browser has no WebRTC");
+    if (!this.available) throw new Error('this browser has no WebRTC');
     this.becomeHub();
-    const peer = new Peer(randomPeerId(), "invited peer");
+    const peer = new Peer(randomPeerId(), 'invited peer');
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peer.pc = pc;
-    const channel = pc.createDataChannel("lab", { ordered: true });
+    const channel = pc.createDataChannel('lab', { ordered: true });
     this.attachChannel(peer, channel);
     this.watch(peer, pc);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await gathered(pc);
-    const code = await encodeShare({ t: "offer", sdp: pc.localDescription.sdp, hub: this.name, id: this.me, oid: peer.id });
+    const code = await encodeShare({
+      t: 'offer',
+      sdp: pc.localDescription.sdp,
+      hub: this.name,
+      id: this.me,
+      oid: peer.id,
+    });
     if (this.pending) this.pending.close();
     this.pending = peer;
     const url = new URL(baseUrl || window.location.href);
-    url.hash = "";
+    url.hash = '';
     url.search = `?join=${code}`;
     return url.toString();
   }
@@ -245,24 +283,29 @@ export class Session {
   // Accept the answer code a spoke produced for the pending invite.
   async acceptAnswer(code) {
     const peer = this.pending;
-    if (!peer) throw new Error("no invite is waiting for an answer");
+    if (!peer) throw new Error('no invite is waiting for an answer');
     const msg = await decodeShare(code);
-    if (msg.t !== "answer" || !msg.sdp) throw new Error("that is not an answer code");
+    if (msg.t !== 'answer' || !msg.sdp) throw new Error('that is not an answer code');
     // Answers carry the id of the invite they answer; older ones have none.
-    if (msg.oid && msg.oid !== peer.id) throw new Error("that answer belongs to an older invite; paste the answer for the newest link");
+    if (msg.oid && msg.oid !== peer.id)
+      throw new Error(
+        'that answer belongs to an older invite; paste the answer for the newest link',
+      );
     peer.name = cleanName(msg.name) || peer.name;
     peer.remoteId = msg.id || peer.id;
     try {
-      await peer.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+      await peer.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
     } catch {
-      throw new Error("that answer does not match this invite; paste the answer for the newest link");
+      throw new Error(
+        'that answer does not match this invite; paste the answer for the newest link',
+      );
     }
     this.pending = null;
     this.peers.push(peer);
     setTimeout(() => {
-      if (peer.state !== "connecting") return;
+      if (peer.state !== 'connecting') return;
       peer.close();
-      this.hooks.onError(new Error(`${peer.name} did not connect; make a new invite`), "session");
+      this.hooks.onError(new Error(`${peer.name} did not connect; make a new invite`), 'session');
       this.changed();
     }, CONNECT_TIMEOUT_MS);
     this.changed();
@@ -277,9 +320,11 @@ export class Session {
   // The hub moves a node to another peer. The node restarts in the new tab. A
   // pinned node stays on the hub.
   setHost(nodeId, peerId) {
-    if (this.role !== "hub") return false;
+    if (this.role !== 'hub') return false;
     if (peerId !== this.me && this.pinned(nodeId)) {
-      this.hooks.onLog("A real broker stays in this tab: its process and its volume live in this browser");
+      this.hooks.onLog(
+        'A real broker stays in this tab: its process and its volume live in this browser',
+      );
       return false;
     }
     this.hosting.set(nodeId, peerId);
@@ -290,9 +335,9 @@ export class Session {
 
   // A closed tab's nodes come back to the hub and the tab leaves the list.
   forgetPeer(peerId) {
-    if (this.role !== "hub") return;
+    if (this.role !== 'hub') return;
     for (const [node, peer] of this.hosting) if (peer === peerId) this.hosting.set(node, this.me);
-    this.peers = this.peers.filter((p) => (p.remoteId || p.id) !== peerId || p.state !== "closed");
+    this.peers = this.peers.filter((p) => (p.remoteId || p.id) !== peerId || p.state !== 'closed');
     this.broadcastScenario();
     this.changed();
   }
@@ -301,7 +346,7 @@ export class Session {
   // left the scenario are forgotten. Called when the scenario changes. A
   // different scenario starts on the hub again: its node ids mean other nodes.
   syncHosting() {
-    if (this.role !== "hub") return;
+    if (this.role !== 'hub') return;
     const doc = this.hooks.scenario();
     if (doc.id && this.hostingFor && doc.id !== this.hostingFor) this.hosting.clear();
     if (doc.id) this.hostingFor = doc.id;
@@ -313,9 +358,13 @@ export class Session {
   }
 
   broadcastScenario() {
-    if (this.role !== "hub") return;
+    if (this.role !== 'hub') return;
     this.syncHosting();
-    const msg = { t: "scenario", doc: this.hooks.scenario(), hosting: Object.fromEntries(this.hosting) };
+    const msg = {
+      t: 'scenario',
+      doc: this.hooks.scenario(),
+      hosting: Object.fromEntries(this.hosting),
+    };
     for (const p of this.peers) p.send(msg);
     const key = JSON.stringify(msg.hosting);
     if (key !== this.lastHosting) {
@@ -328,17 +377,17 @@ export class Session {
 
   // Join with an invite code. Resolves to the answer code to hand back.
   async join(code) {
-    if (!this.available) throw new Error("this browser has no WebRTC");
+    if (!this.available) throw new Error('this browser has no WebRTC');
     const msg = await decodeShare(code);
-    if (msg.t !== "offer" || !msg.sdp) throw new Error("that is not an invite code");
-    this.role = "spoke";
-    const peer = new Peer(msg.id || randomPeerId(), msg.hub || "host");
+    if (msg.t !== 'offer' || !msg.sdp) throw new Error('that is not an invite code');
+    this.role = 'spoke';
+    const peer = new Peer(msg.id || randomPeerId(), msg.hub || 'host');
     peer.remoteId = msg.id || peer.id;
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peer.pc = pc;
-    pc.addEventListener("datachannel", (e) => this.attachChannel(peer, e.channel));
+    pc.addEventListener('datachannel', (e) => this.attachChannel(peer, e.channel));
     this.watch(peer, pc);
-    await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
+    await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     await gathered(pc);
@@ -346,30 +395,42 @@ export class Session {
     this.peers = [peer];
     this.startSnapshots();
     this.hooks.onPeers();
-    return encodeShare({ t: "answer", sdp: pc.localDescription.sdp, name: this.name, id: this.me, oid: msg.oid });
+    return encodeShare({
+      t: 'answer',
+      sdp: pc.localDescription.sdp,
+      name: this.name,
+      id: this.me,
+      oid: msg.oid,
+    });
   }
 
   // Whether the request reached the hub.
   requestTakeover(nodeId) {
-    return this.role === "spoke" && this.hub && !this.pinned(nodeId) ? this.hub.send({ t: "takeover", node: nodeId }) : false;
+    return this.role === 'spoke' && this.hub && !this.pinned(nodeId)
+      ? this.hub.send({ t: 'takeover', node: nodeId })
+      : false;
   }
 
   // ---- the channel --------------------------------------------------------------------------------
 
   attachChannel(peer, channel) {
     peer.channel = channel;
-    channel.addEventListener("open", () => {
-      peer.state = "connected";
-      peer.send({ t: "hello", name: this.name, id: this.me });
-      if (this.role === "hub") {
+    channel.addEventListener('open', () => {
+      peer.state = 'connected';
+      peer.send({ t: 'hello', name: this.name, id: this.me });
+      if (this.role === 'hub') {
         this.syncHosting();
-        peer.send({ t: "scenario", doc: this.hooks.scenario(), hosting: Object.fromEntries(this.hosting) });
+        peer.send({
+          t: 'scenario',
+          doc: this.hooks.scenario(),
+          hosting: Object.fromEntries(this.hosting),
+        });
       }
       this.hooks.onLog(`${peer.name} connected`);
       this.changed();
     });
-    channel.addEventListener("close", () => this.lost(peer, "disconnected"));
-    channel.addEventListener("message", (e) => {
+    channel.addEventListener('close', () => this.lost(peer, 'disconnected'));
+    channel.addEventListener('message', (e) => {
       let msg;
       try {
         msg = JSON.parse(e.data);
@@ -383,61 +444,71 @@ export class Session {
   // The peer is gone for good: say so, and tell the spoke its hub is gone.
   lost(peer, why) {
     clearTimeout(peer.graceTimer);
-    if (peer.state === "closed") return;
-    peer.state = "closed";
+    if (peer.state === 'closed') return;
+    peer.state = 'closed';
     this.hooks.onLog(`${peer.name} ${why}`);
-    if (this.role === "spoke" && peer === this.hub) this.hooks.onHubLost();
+    if (this.role === 'spoke' && peer === this.hub) this.hooks.onHubLost();
     peer.close();
     this.changed();
   }
 
   watch(peer, pc) {
-    pc.addEventListener("connectionstatechange", () => {
+    pc.addEventListener('connectionstatechange', () => {
       const state = pc.connectionState;
       clearTimeout(peer.graceTimer);
-      if (state === "failed" || state === "closed") this.lost(peer, state);
-      else if (state === "disconnected") peer.graceTimer = setTimeout(() => this.lost(peer, state), DISCONNECT_GRACE_MS);
+      if (state === 'failed' || state === 'closed') this.lost(peer, state);
+      else if (state === 'disconnected')
+        peer.graceTimer = setTimeout(() => this.lost(peer, state), DISCONNECT_GRACE_MS);
     });
   }
 
   receive(from, msg) {
     switch (msg.t) {
-      case "hello":
+      case 'hello':
         from.name = cleanName(msg.name) || from.name;
         if (msg.id) from.remoteId = msg.id;
         this.changed();
         break;
-      case "roster":
-        if (this.role !== "spoke" || !Array.isArray(msg.peers)) return;
-        this.roster = msg.peers.filter((p) => p && typeof p.id === "string").map((p) => ({ id: p.id, name: cleanName(p.name) || `peer ${p.id.slice(0, 6)}`, state: p.state === "connected" ? "connected" : "closed" }));
+      case 'roster':
+        if (this.role !== 'spoke' || !Array.isArray(msg.peers)) return;
+        this.roster = msg.peers
+          .filter((p) => p && typeof p.id === 'string')
+          .map((p) => ({
+            id: p.id,
+            name: cleanName(p.name) || `peer ${p.id.slice(0, 6)}`,
+            state: p.state === 'connected' ? 'connected' : 'closed',
+          }));
         this.hooks.onPeers();
         break;
-      case "scenario":
-        if (this.role !== "spoke") return;
+      case 'scenario':
+        if (this.role !== 'spoke') return;
         this.hosting = new Map(Object.entries(msg.hosting || {}).map(([k, v]) => [Number(k), v]));
         this.hooks.onScenario(msg.doc, this.hosting);
         break;
-      case "frames":
+      case 'frames':
         this.routeFrames(msg.frames || [], from);
         break;
-      case "snapshot": {
+      case 'snapshot': {
         const owner = from.remoteId || from.id;
         this.hooks.onRemoteSnapshot(msg.node, msg.state);
-        if (this.role === "hub") for (const p of this.peers) if (p !== from) p.send({ t: "snapshot", node: msg.node, state: msg.state, owner });
+        if (this.role === 'hub')
+          for (const p of this.peers)
+            if (p !== from) p.send({ t: 'snapshot', node: msg.node, state: msg.state, owner });
         break;
       }
-      case "fault":
+      case 'fault':
         this.hooks.onFault(msg.fault);
-        if (this.role === "hub") for (const p of this.peers) if (p !== from) p.send({ t: "fault", fault: msg.fault });
+        if (this.role === 'hub')
+          for (const p of this.peers) if (p !== from) p.send({ t: 'fault', fault: msg.fault });
         break;
-      case "takeover":
-        if (this.role === "hub") {
+      case 'takeover':
+        if (this.role === 'hub') {
           const id = from.remoteId || from.id;
           this.hooks.onTakeover(Number(msg.node), id);
         }
         break;
-      case "bye":
-        this.lost(from, "left");
+      case 'bye':
+        this.lost(from, 'left');
         break;
       default:
     }
@@ -447,17 +518,17 @@ export class Session {
   // (`{ deliver_at, frame }`). A spoke sends them to the hub; the hub sends
   // each to the peer hosting the destination.
   sendEgress(timedFrames) {
-    if (this.role === "solo" || !timedFrames.length) return;
+    if (this.role === 'solo' || !timedFrames.length) return;
     const frames = timedFrames.map((t) => t.frame || t);
-    if (this.role === "spoke") {
-      this.hub?.send({ t: "frames", frames });
+    if (this.role === 'spoke') {
+      this.hub?.send({ t: 'frames', frames });
       return;
     }
     this.routeFrames(frames, null);
   }
 
   routeFrames(frames, from) {
-    if (this.role === "spoke") {
+    if (this.role === 'spoke') {
       // Everything the hub sends a spoke is for a node the spoke hosts.
       this.hooks.onIngress(frames);
       return;
@@ -466,7 +537,7 @@ export class Session {
     const byPeer = new Map();
     for (const f of frames) {
       const dst = f.dst && f.dst.node != null ? Number(f.dst.node) : null;
-      const host = dst == null ? this.me : this.hosting.get(dst) ?? this.me;
+      const host = dst == null ? this.me : (this.hosting.get(dst) ?? this.me);
       if (host === this.me) local.push(f);
       else {
         if (!byPeer.has(host)) byPeer.set(host, []);
@@ -476,14 +547,14 @@ export class Session {
     if (local.length) this.hooks.onIngress(local);
     for (const [host, list] of byPeer) {
       const peer = this.peers.find((p) => (p.remoteId || p.id) === host && p !== from);
-      if (peer) peer.send({ t: "frames", frames: list });
+      if (peer) peer.send({ t: 'frames', frames: list });
     }
   }
 
   // A fault this tab applied; everyone else applies it too.
   broadcastFault(fault) {
-    if (this.role === "solo") return;
-    for (const p of this.peers) p.send({ t: "fault", fault });
+    if (this.role === 'solo') return;
+    for (const p of this.peers) p.send({ t: 'fault', fault });
   }
 
   startSnapshots() {
@@ -492,18 +563,18 @@ export class Session {
   }
 
   shipSnapshots() {
-    if (this.role === "solo") return;
-    const targets = this.peers.filter((p) => p.state === "connected");
+    if (this.role === 'solo') return;
+    const targets = this.peers.filter((p) => p.state === 'connected');
     if (!targets.length) return;
     for (const { id, state } of this.hooks.hostedSnapshots()) {
-      const msg = { t: "snapshot", node: id, state, owner: this.me };
+      const msg = { t: 'snapshot', node: id, state, owner: this.me };
       for (const p of targets) p.send(msg);
     }
   }
 
   leave() {
     for (const p of this.peers) {
-      p.send({ t: "bye" });
+      p.send({ t: 'bye' });
       p.close();
     }
     this.pending?.close();
@@ -513,7 +584,7 @@ export class Session {
     this.hosting = new Map();
     this.hostingFor = null;
     this.roster = [];
-    this.role = "solo";
+    this.role = 'solo';
     if (this.snapshotTimer) clearInterval(this.snapshotTimer);
     this.snapshotTimer = 0;
     this.hooks.onPeers();

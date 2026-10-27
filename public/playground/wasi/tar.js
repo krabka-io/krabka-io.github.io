@@ -11,7 +11,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 function octal(value, width) {
-  return value.toString(8).padStart(width - 1, "0") + "\0";
+  return value.toString(8).padStart(width - 1, '0') + '\0';
 }
 
 function writeString(block, offset, width, text) {
@@ -29,13 +29,13 @@ function header({ name, type, size, mode, mtime }) {
   writeString(block, 136, 12, octal(Math.max(0, Math.floor(mtime)), 12));
   block.fill(0x20, 148, 156);
   block[156] = type.charCodeAt(0);
-  writeString(block, 257, 6, "ustar\0");
-  writeString(block, 263, 2, "00");
-  writeString(block, 265, 32, "krabka");
-  writeString(block, 297, 32, "krabka");
+  writeString(block, 257, 6, 'ustar\0');
+  writeString(block, 263, 2, '00');
+  writeString(block, 265, 32, 'krabka');
+  writeString(block, 297, 32, 'krabka');
   let sum = 0;
   for (const byte of block) sum += byte;
-  writeString(block, 148, 8, `${sum.toString(8).padStart(6, "0")}\0 `);
+  writeString(block, 148, 8, `${sum.toString(8).padStart(6, '0')}\0 `);
   return block;
 }
 
@@ -63,17 +63,33 @@ function padded(bytes) {
 export function encodeTar(entries) {
   const parts = [];
   for (const entry of entries) {
-    const name = entry.type === "dir" ? `${entry.path}/` : entry.path;
-    const data = entry.type === "dir" ? new Uint8Array(0) : entry.bytes;
+    const name = entry.type === 'dir' ? `${entry.path}/` : entry.path;
+    const data = entry.type === 'dir' ? new Uint8Array(0) : entry.bytes;
     const seconds = entry.mtimeMs / 1000;
     const plain = /^[\x20-\x7e]*$/.test(name) && name.length <= 100;
     if (!plain) {
-      const pax = encoder.encode(paxRecord("path", name) + paxRecord("mtime", seconds.toFixed(9)));
-      parts.push(header({ name: `PaxHeader/${name.slice(-80).replace(/[^\x20-\x7e]/g, "_")}`, type: "x", size: pax.length, mode: 0o644, mtime: seconds }));
+      const pax = encoder.encode(paxRecord('path', name) + paxRecord('mtime', seconds.toFixed(9)));
+      parts.push(
+        header({
+          name: `PaxHeader/${name.slice(-80).replace(/[^\x20-\x7e]/g, '_')}`,
+          type: 'x',
+          size: pax.length,
+          mode: 0o644,
+          mtime: seconds,
+        }),
+      );
       parts.push(padded(pax));
     }
-    const shortName = plain ? name : name.slice(0, 100).replace(/[^\x20-\x7e]/g, "_");
-    parts.push(header({ name: shortName, type: entry.type === "dir" ? "5" : "0", size: data.length, mode: entry.type === "dir" ? 0o755 : 0o644, mtime: seconds }));
+    const shortName = plain ? name : name.slice(0, 100).replace(/[^\x20-\x7e]/g, '_');
+    parts.push(
+      header({
+        name: shortName,
+        type: entry.type === 'dir' ? '5' : '0',
+        size: data.length,
+        mode: entry.type === 'dir' ? 0o755 : 0o644,
+        mtime: seconds,
+      }),
+    );
     if (data.length > 0) parts.push(padded(data));
   }
   parts.push(new Uint8Array(BLOCK * 2));
@@ -95,7 +111,7 @@ function readString(block, offset, width) {
 
 function readOctal(block, offset, width) {
   const text = readString(block, offset, width).trim();
-  return text === "" ? 0 : parseInt(text, 8);
+  return text === '' ? 0 : parseInt(text, 8);
 }
 
 function parsePax(bytes) {
@@ -107,8 +123,8 @@ function parsePax(bytes) {
     const length = Number(decoder.decode(bytes.subarray(at, space)));
     if (!Number.isInteger(length) || length <= 0 || at + length > bytes.length) break;
     const record = decoder.decode(bytes.subarray(space + 1, at + length)); // "key=value\n"
-    const equals = record.indexOf("=");
-    if (equals > 0) records[record.slice(0, equals)] = record.slice(equals + 1).replace(/\n$/, "");
+    const equals = record.indexOf('=');
+    if (equals > 0) records[record.slice(0, equals)] = record.slice(equals + 1).replace(/\n$/, '');
     at += length;
   }
   return records;
@@ -130,34 +146,40 @@ export function decodeTar(archive) {
     if (block.every((byte) => byte === 0)) break;
     let sum = 0;
     for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 0x20 : block[i];
-    if (sum !== readOctal(block, 148, 8)) throw new Error(`tar: bad header checksum at byte ${at - BLOCK}`);
+    if (sum !== readOctal(block, 148, 8))
+      throw new Error(`tar: bad header checksum at byte ${at - BLOCK}`);
     const type = String.fromCharCode(block[156] || 0x30);
     const size = readOctal(block, 124, 12);
     const data = archive.subarray(at, at + size);
     at += Math.ceil(size / BLOCK) * BLOCK;
-    if (type === "x") {
+    if (type === 'x') {
       pax = { ...pax, ...parsePax(data) };
       continue;
     }
-    if (type === "g") continue;
-    if (type === "L") {
+    if (type === 'g') continue;
+    if (type === 'L') {
       longName = readString(data, 0, data.length);
       continue;
     }
     const prefix = readString(block, 345, 155);
-    let name = pax.path ?? longName ?? (prefix ? `${prefix}/${readString(block, 0, 100)}` : readString(block, 0, 100));
-    const mtimeMs = (pax.mtime !== undefined ? Number(pax.mtime) : readOctal(block, 136, 12)) * 1000;
+    let name =
+      pax.path ??
+      longName ??
+      (prefix ? `${prefix}/${readString(block, 0, 100)}` : readString(block, 0, 100));
+    const mtimeMs =
+      (pax.mtime !== undefined ? Number(pax.mtime) : readOctal(block, 136, 12)) * 1000;
     pax = {};
     longName = null;
-    name = name.replace(/^(\.\/)+/, "").replace(/^\/+/, "");
-    const path = name.replace(/\/+$/, "");
-    if (path === "" || path === ".") continue;
-    if (path.split("/").some((part) => part === ".." || part === "")) {
+    name = name.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
+    const path = name.replace(/\/+$/, '');
+    if (path === '' || path === '.') continue;
+    if (path.split('/').some((part) => part === '..' || part === '')) {
       skipped.push(`${name} (unsafe path)`);
       continue;
     }
-    if (type === "5") entries.push({ path, type: "dir", bytes: new Uint8Array(0), mtimeMs });
-    else if (type === "0" || type === "7") entries.push({ path, type: "file", bytes: data.slice(), mtimeMs });
+    if (type === '5') entries.push({ path, type: 'dir', bytes: new Uint8Array(0), mtimeMs });
+    else if (type === '0' || type === '7')
+      entries.push({ path, type: 'file', bytes: data.slice(), mtimeMs });
     else skipped.push(`${name} (entry type ${JSON.stringify(type)})`);
   }
   return { entries, skipped };

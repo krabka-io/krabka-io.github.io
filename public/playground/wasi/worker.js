@@ -10,13 +10,13 @@
 // the guest runs, and a final `exit` (`reason` "return", "exit" or "trap"), or
 // `failed` if the guest never started.
 
-import { ProcExit, Wasi } from "./wasi.js";
+import { ProcExit, Wasi } from './wasi.js';
 
 function describe(err) {
   return {
-    name: String((err && err.name) || "Error"),
+    name: String((err && err.name) || 'Error'),
     message: String(err && err.message !== undefined ? err.message : err),
-    stack: String((err && err.stack) || ""),
+    stack: String((err && err.stack) || ''),
   };
 }
 
@@ -27,12 +27,12 @@ async function run({ module, ring, clock, config, image }) {
   const instance = await WebAssembly.instantiate(module, wasi.imports(module));
   wasi.attach(instance);
   const entry = instance.exports._start;
-  if (typeof entry !== "function") {
-    throw new Error("the module exports no _start: only WASI commands run here, not reactors");
+  if (typeof entry !== 'function') {
+    throw new Error('the module exports no _start: only WASI commands run here, not reactors');
   }
   wasi.flushOutput();
   post({
-    t: "running",
+    t: 'running',
     instantiateMs: performance.now() - started,
     layout: wasi.layout,
     env: wasi.envList,
@@ -41,23 +41,26 @@ async function run({ module, ring, clock, config, image }) {
   let exit;
   try {
     entry();
-    exit = { reason: "return", code: 0 };
+    exit = { reason: 'return', code: 0 };
   } catch (err) {
-    exit = err instanceof ProcExit ? { reason: "exit", code: err.code } : { reason: "trap", code: null, error: describe(err) };
+    exit =
+      err instanceof ProcExit
+        ? { reason: 'exit', code: err.code }
+        : { reason: 'trap', code: null, error: describe(err) };
   }
   try {
     wasi.finish();
   } catch (err) {
     exit.finishError = describe(err);
   }
-  post({ t: "exit", ...exit, stats: wasi.snapshot() });
+  post({ t: 'exit', ...exit, stats: wasi.snapshot() });
 }
 
 let started = false;
 self.onmessage = (event) => {
   const message = event.data;
-  if (!message || message.t !== "start" || started) return;
+  if (!message || message.t !== 'start' || started) return;
   started = true;
-  run(message).catch((err) => self.postMessage({ t: "failed", error: describe(err) }));
+  run(message).catch((err) => self.postMessage({ t: 'failed', error: describe(err) }));
 };
-self.postMessage({ t: "hello" });
+self.postMessage({ t: 'hello' });

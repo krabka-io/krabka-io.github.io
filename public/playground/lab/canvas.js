@@ -16,8 +16,8 @@
 // The canvas keeps one `<g>` per node, topic and edge and updates it in
 // place, so the reader's focus and the hover state survive snapshots.
 
-import { svg, el, button, setAttrs, clamp, plural } from "./dom.js";
-import { kindOf, derivedEdges, topicNames, internalTopics, statusLine } from "./kinds.js";
+import { svg, el, button, setAttrs, clamp, plural } from './dom.js';
+import { kindOf, derivedEdges, topicNames, internalTopics, statusLine } from './kinds.js';
 
 const CARD_W = 184;
 const CARD_H = 64;
@@ -36,8 +36,8 @@ const MAX_ZOOM = 2.5;
 const MIN_FIT_ZOOM = 0.8;
 // Edges drawn faint: connections and a streams app's internal topics, not
 // the data flow of the scenario's own topics.
-const FAINT_EDGES = new Set(["bootstrap", "ping", "registry", "changelog", "repartition"]);
-const BROKER_KIND = "krabka-broker";
+const FAINT_EDGES = new Set(['bootstrap', 'ping', 'registry', 'changelog', 'repartition']);
+const BROKER_KIND = 'krabka-broker';
 // Room around the brokers inside the cluster frame; the top holds its label
 // above the cards' badges.
 const FRAME_PAD = 18;
@@ -79,47 +79,69 @@ export class Canvas {
     this.touches = new Map();
     this.pinch = null;
 
-    this.wrap = el("div", "lab-canvas-wrap");
-    this.svg = svg("svg", { class: "lab-canvas", tabindex: "0", role: "application", "aria-label": "Cluster canvas" });
+    this.wrap = el('div', 'lab-canvas-wrap');
+    this.svg = svg('svg', {
+      class: 'lab-canvas',
+      tabindex: '0',
+      role: 'application',
+      'aria-label': 'Cluster canvas',
+    });
     this.svg.appendChild(this.defs());
-    this.viewport = svg("g", { class: "lab-viewport" });
-    this.layerCluster = svg("g", { class: "lab-cluster", "aria-hidden": "true" });
-    this.clusterRect = svg("rect", { class: "lab-cluster-frame", rx: 16 });
-    this.clusterLabel = svg("text", { class: "lab-cluster-label" });
+    this.viewport = svg('g', { class: 'lab-viewport' });
+    this.layerCluster = svg('g', { class: 'lab-cluster', 'aria-hidden': 'true' });
+    this.clusterRect = svg('rect', { class: 'lab-cluster-frame', rx: 16 });
+    this.clusterLabel = svg('text', { class: 'lab-cluster-label' });
     this.layerCluster.append(this.clusterRect, this.clusterLabel);
-    this.layerEdges = svg("g", { class: "lab-layer-edges" });
-    this.layerLinks = svg("g", { class: "lab-layer-links" });
-    this.layerTopics = svg("g", { class: "lab-layer-topics" });
-    this.layerFrames = svg("g", { class: "lab-layer-frames" });
-    this.layerNodes = svg("g", { class: "lab-layer-nodes" });
-    this.viewport.append(this.layerCluster, this.layerEdges, this.layerLinks, this.layerTopics, this.layerFrames, this.layerNodes);
+    this.layerEdges = svg('g', { class: 'lab-layer-edges' });
+    this.layerLinks = svg('g', { class: 'lab-layer-links' });
+    this.layerTopics = svg('g', { class: 'lab-layer-topics' });
+    this.layerFrames = svg('g', { class: 'lab-layer-frames' });
+    this.layerNodes = svg('g', { class: 'lab-layer-nodes' });
+    this.viewport.append(
+      this.layerCluster,
+      this.layerEdges,
+      this.layerLinks,
+      this.layerTopics,
+      this.layerFrames,
+      this.layerNodes,
+    );
     this.svg.appendChild(this.viewport);
     this.wrap.appendChild(this.svg);
 
-    this.tools = el("div", "lab-canvas-tools");
+    this.tools = el('div', 'lab-canvas-tools');
     this.tools.append(
-      button("Fit", "lab-btn-sm", () => this.fit({ whole: true }), { title: "Fit every node in view (F)" }),
-      button("−", "lab-btn-sm", () => this.zoomBy(1 / 1.25), { ariaLabel: "Zoom out" }),
-      button("+", "lab-btn-sm", () => this.zoomBy(1.25), { ariaLabel: "Zoom in" }),
-      button("?", "lab-btn-sm lab-help-btn", () => hooks.onHelp?.(), { title: "Shortcuts and tips (?)", ariaLabel: "Shortcuts and tips" }),
+      button('Fit', 'lab-btn-sm', () => this.fit({ whole: true }), {
+        title: 'Fit every node in view (F)',
+      }),
+      button('−', 'lab-btn-sm', () => this.zoomBy(1 / 1.25), { ariaLabel: 'Zoom out' }),
+      button('+', 'lab-btn-sm', () => this.zoomBy(1.25), { ariaLabel: 'Zoom in' }),
+      button('?', 'lab-btn-sm lab-help-btn', () => hooks.onHelp?.(), {
+        title: 'Shortcuts and tips (?)',
+        ariaLabel: 'Shortcuts and tips',
+      }),
     );
-    this.allBtn = button("All connections", "lab-btn-sm lab-all-edges", () => this.setAllEdges(!this.allEdges), {
-      title: "Draw every client-to-broker connection instead of one edge to the cluster",
-    });
-    this.allBtn.setAttribute("aria-pressed", "false");
+    this.allBtn = button(
+      'All connections',
+      'lab-btn-sm lab-all-edges',
+      () => this.setAllEdges(!this.allEdges),
+      {
+        title: 'Draw every client-to-broker connection instead of one edge to the cluster',
+      },
+    );
+    this.allBtn.setAttribute('aria-pressed', 'false');
     this.tools.prepend(this.allBtn);
     this.wrap.appendChild(this.tools);
 
-    this.empty = el("div", "lab-empty");
-    const card = el("div", "lab-empty-card");
+    this.empty = el('div', 'lab-empty');
+    const card = el('div', 'lab-empty-card');
     card.append(
-      el("strong", null, "The canvas is empty"),
-      el("p", null, "Load a ready-made cluster, or build one node by node."),
+      el('strong', null, 'The canvas is empty'),
+      el('p', null, 'Load a ready-made cluster, or build one node by node.'),
     );
-    const emptyActions = el("div", "lab-palette-actions");
+    const emptyActions = el('div', 'lab-palette-actions');
     emptyActions.append(
-      button("Load a preset", "lab-btn-sm lab-primary", () => hooks.onOpenTab?.("scenarios")),
-      button("Add a node", "lab-btn-sm", () => hooks.onOpenTab?.("build")),
+      button('Load a preset', 'lab-btn-sm lab-primary', () => hooks.onOpenTab?.('scenarios')),
+      button('Add a node', 'lab-btn-sm', () => hooks.onOpenTab?.('build')),
     );
     card.appendChild(emptyActions);
     this.empty.appendChild(card);
@@ -129,41 +151,50 @@ export class Canvas {
     // has no Shift or wheel: its second node comes from the long-press menu.
     // Stacked, the canvas sits in a page that scrolls: the wheel scrolls it and
     // only Ctrl+wheel (or a trackpad pinch) zooms.
-    this.hint = el("ul", "lab-canvas-hint");
-    this.hint.setAttribute("aria-label", "Canvas gestures");
-    this.stacked = window.matchMedia("(max-width: 1024px)");
-    this.coarse = window.matchMedia("(pointer: coarse)");
+    this.hint = el('ul', 'lab-canvas-hint');
+    this.hint.setAttribute('aria-label', 'Canvas gestures');
+    this.stacked = window.matchMedia('(max-width: 1024px)');
+    this.coarse = window.matchMedia('(pointer: coarse)');
     const labelHint = () => {
       const gestures = this.coarse.matches
         ? // Most useful first: the strip drops its later items as it narrows.
-          [["Long-press", "a card: second node, more"], ["Pinch", "zoom"], ["Drag", "move or pan"], ["Tap", "inspect a node"]]
+          [
+            ['Long-press', 'a card: second node, more'],
+            ['Pinch', 'zoom'],
+            ['Drag', 'move or pan'],
+            ['Tap', 'inspect a node'],
+          ]
         : [
-            ["Click", "inspect a node"],
-            ["Shift+click", "a second node for a link"],
-            ["Drag", "move or pan"],
-            ["Right-click", "more actions"],
-            [this.stacked.matches ? "Ctrl+wheel" : "Wheel", "zoom"],
+            ['Click', 'inspect a node'],
+            ['Shift+click', 'a second node for a link'],
+            ['Drag', 'move or pan'],
+            ['Right-click', 'more actions'],
+            [this.stacked.matches ? 'Ctrl+wheel' : 'Wheel', 'zoom'],
           ];
       this.hint.replaceChildren(
         ...gestures.map(([keys, what]) => {
-          const li = el("li");
-          li.append(el("kbd", null, keys), ` ${what}`);
+          const li = el('li');
+          li.append(el('kbd', null, keys), ` ${what}`);
           return li;
         }),
       );
     };
     labelHint();
-    this.stacked.addEventListener("change", labelHint);
-    this.coarse.addEventListener("change", labelHint);
+    this.stacked.addEventListener('change', labelHint);
+    this.coarse.addEventListener('change', labelHint);
     this.wrap.appendChild(this.hint);
 
     // Said while the view is zoomed in past what fits, until the reader moves it.
-    this.note = el("div", "lab-canvas-note", "Zoomed in to stay readable: drag to pan, Fit shows all.");
+    this.note = el(
+      'div',
+      'lab-canvas-note',
+      'Zoomed in to stay readable: drag to pan, Fit shows all.',
+    );
     this.note.hidden = true;
     this.wrap.appendChild(this.note);
 
-    this.menu = el("div", "lab-menu");
-    this.menu.setAttribute("role", "menu");
+    this.menu = el('div', 'lab-menu');
+    this.menu.setAttribute('role', 'menu');
     this.menu.hidden = true;
     this.wrap.appendChild(this.menu);
 
@@ -192,13 +223,21 @@ export class Canvas {
   }
 
   defs() {
-    const defs = svg("defs");
+    const defs = svg('defs');
     for (const [id, cls] of [
-      ["lab-arrow", "lab-arrow-tip"],
-      ["lab-arrow-faint", "lab-arrow-tip-faint"],
+      ['lab-arrow', 'lab-arrow-tip'],
+      ['lab-arrow-faint', 'lab-arrow-tip-faint'],
     ]) {
-      const marker = svg("marker", { id, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" });
-      marker.appendChild(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: cls }));
+      const marker = svg('marker', {
+        id,
+        viewBox: '0 0 10 10',
+        refX: '9',
+        refY: '5',
+        markerWidth: '7',
+        markerHeight: '7',
+        orient: 'auto-start-reverse',
+      });
+      marker.appendChild(svg('path', { d: 'M 0 0 L 10 5 L 0 10 z', class: cls }));
       defs.appendChild(marker);
     }
     return defs;
@@ -225,7 +264,8 @@ export class Canvas {
       const cur = this.positions.get(n.id);
       if (!cur || cur.x !== n.x || cur.y !== n.y) this.positions.set(n.id, { x: n.x, y: n.y });
     }
-    for (const id of [...this.positions.keys()]) if (!nodes.some((n) => n.id === id)) this.positions.delete(id);
+    for (const id of [...this.positions.keys()])
+      if (!nodes.some((n) => n.id === id)) this.positions.delete(id);
     this.trackActivity(snap, nodes);
     this.autoPlace(nodes);
     this.syncNodes(nodes);
@@ -240,7 +280,10 @@ export class Canvas {
     this.hint.hidden = visible === 0;
     // A node added or removed moves the graph's edges (and its topic pills):
     // keep everything in view until the reader takes the view over.
-    const ids = nodes.map((n) => n.id).sort().join();
+    const ids = nodes
+      .map((n) => n.id)
+      .sort()
+      .join();
     const changed = ids !== this.nodeIds;
     this.nodeIds = ids;
     if (visible > 0 && !this.userMovedView && (!this.fitted || changed)) {
@@ -261,15 +304,21 @@ export class Canvas {
       const spec = this.scenario?.nodes?.find((s) => s.id === n.id);
       const target = spec?.config?.bootstrap?.[0];
       const anchor = target != null ? this.positions.get(Number(target)) : null;
-      const brokers = nodes.filter((b) => b.kind === "krabka-broker");
-      const base = anchor || (brokers.length ? this.positions.get(brokers[0].id) : null) || { x: 60, y: 60 };
+      const brokers = nodes.filter((b) => b.kind === 'krabka-broker');
+      const base = anchor ||
+        (brokers.length ? this.positions.get(brokers[0].id) : null) || { x: 60, y: 60 };
       // The nearest row under the broker that no card is on: where cards sit
       // close together the gap is narrower than the usual 96.
       const x = base.x - 40;
-      const free = (y) => !nodes.some((o) => {
-        const p = o.id !== n.id && this.positions.get(o.id);
-        return p && Math.abs(p.x - x) < (CARD_W + GHOST_W) / 2 + 8 && Math.abs(p.y - y) < (CARD_H + GHOST_H) / 2 + 8;
-      });
+      const free = (y) =>
+        !nodes.some((o) => {
+          const p = o.id !== n.id && this.positions.get(o.id);
+          return (
+            p &&
+            Math.abs(p.x - x) < (CARD_W + GHOST_W) / 2 + 8 &&
+            Math.abs(p.y - y) < (CARD_H + GHOST_H) / 2 + 8
+          );
+        });
       const dy = [96, 88, 104, 80, 112, 72, 120, 64].find((d) => free(base.y + d)) ?? 96;
       this.positions.set(n.id, { x, y: base.y + dy });
     }
@@ -302,32 +351,63 @@ export class Canvas {
     const ghost = Boolean(k.hidden);
     const w = ghost ? GHOST_W : CARD_W;
     const h = ghost ? GHOST_H : CARD_H;
-    const g = svg("g", { class: `lab-node${ghost ? " lab-node-ghost" : ""}`, tabindex: "0", role: "button" });
+    const g = svg('g', {
+      class: `lab-node${ghost ? ' lab-node-ghost' : ''}`,
+      tabindex: '0',
+      role: 'button',
+    });
     g.dataset.nodeId = String(n.id);
-    const rect = svg("rect", { class: "lab-card", x: -w / 2, y: -h / 2, width: w, height: h, rx: ghost ? 8 : 12 });
+    const rect = svg('rect', {
+      class: 'lab-card',
+      x: -w / 2,
+      y: -h / 2,
+      width: w,
+      height: h,
+      rx: ghost ? 8 : 12,
+    });
     rect.style.stroke = k.color;
     g.appendChild(rect);
-    const glyphBg = svg("circle", { class: "lab-glyph-bg", cx: -w / 2 + (ghost ? 14 : 22), cy: 0, r: ghost ? 9 : 14 });
+    const glyphBg = svg('circle', {
+      class: 'lab-glyph-bg',
+      cx: -w / 2 + (ghost ? 14 : 22),
+      cy: 0,
+      r: ghost ? 9 : 14,
+    });
     glyphBg.style.fill = k.color;
-    const glyph = svg("text", { class: "lab-glyph", x: -w / 2 + (ghost ? 14 : 22), y: ghost ? 4 : 5, "text-anchor": "middle" });
+    const glyph = svg('text', {
+      class: 'lab-glyph',
+      x: -w / 2 + (ghost ? 14 : 22),
+      y: ghost ? 4 : 5,
+      'text-anchor': 'middle',
+    });
     glyph.textContent = k.glyph;
     g.append(glyphBg, glyph);
     const tx = -w / 2 + (ghost ? 30 : 44);
-    const name = svg("text", { class: "lab-card-name", x: tx, y: ghost ? 4 : -9 });
+    const name = svg('text', { class: 'lab-card-name', x: tx, y: ghost ? 4 : -9 });
     g.appendChild(name);
     let kind = null;
     let status = null;
     if (!ghost) {
-      kind = svg("text", { class: "lab-card-kind", x: tx, y: 6 });
-      status = svg("text", { class: "lab-card-status", x: tx, y: 22 });
+      kind = svg('text', { class: 'lab-card-kind', x: tx, y: 6 });
+      status = svg('text', { class: 'lab-card-status', x: tx, y: 22 });
       g.append(kind, status);
     }
     // Badges straddle the top edge, above the title, so a long name is never covered.
-    const badges = svg("g", { class: "lab-badges", transform: `translate(${w / 2 - 6}, ${-h / 2 - 7})` });
+    const badges = svg('g', {
+      class: 'lab-badges',
+      transform: `translate(${w / 2 - 6}, ${-h / 2 - 7})`,
+    });
     g.appendChild(badges);
-    const halo = svg("rect", { class: "lab-card-halo", x: -w / 2 - 4, y: -h / 2 - 4, width: w + 8, height: h + 8, rx: ghost ? 11 : 15 });
+    const halo = svg('rect', {
+      class: 'lab-card-halo',
+      x: -w / 2 - 4,
+      y: -h / 2 - 4,
+      width: w + 8,
+      height: h + 8,
+      rx: ghost ? 11 : 15,
+    });
     g.insertBefore(halo, rect);
-    return { g, rect, name, kind, status, badges, w, h, ghost, lastKey: "" };
+    return { g, rect, name, kind, status, badges, w, h, ghost, lastKey: '' };
   }
 
   updateNode(entry, n) {
@@ -335,27 +415,39 @@ export class Canvas {
     const st = statusLine(n);
     const hostedBy = this.hosting ? this.hosting.get(n.id) : null;
     const remote = !n.hosted;
-    const peerLabel = remote ? this.hooks.peerName(hostedBy) : "";
+    const peerLabel = remote ? this.hooks.peerName(hostedBy) : '';
     const offline = remote && hostedBy != null && this.offline.has(hostedBy);
     const sel = this.selection.indexOf(n.id);
-    const key = [n.name, st, n.alive, n.isolated, n.hosted, peerLabel, offline, sel, n.paused, n.skew_ms, n.disk].join("|"); // J3: paused, skew, disk
+    const key = [
+      n.name,
+      st,
+      n.alive,
+      n.isolated,
+      n.hosted,
+      peerLabel,
+      offline,
+      sel,
+      n.paused,
+      n.skew_ms,
+      n.disk,
+    ].join('|'); // J3: paused, skew, disk
     if (key === entry.lastKey) return;
     entry.lastKey = key;
     // Text is cut to the card's measured room; the status drops whole fields
     // from the end first. The full text stays in the title and aria-label.
     const room = entry.w - (entry.ghost ? 38 : 52);
-    fitText(entry.name, [n.name || `${n.kind}-${n.id}`], "", room, entry.ghost ? 14 : 16);
-    if (entry.kind) fitText(entry.kind, [k.label.toLowerCase(), `#${n.id}`], " · ", room, 22);
-    if (entry.status) fitText(entry.status, st.split(" · "), " · ", room, 18);
+    fitText(entry.name, [n.name || `${n.kind}-${n.id}`], '', room, entry.ghost ? 14 : 16);
+    if (entry.kind) fitText(entry.kind, [k.label.toLowerCase(), `#${n.id}`], ' · ', room, 22);
+    if (entry.status) fitText(entry.status, st.split(' · '), ' · ', room, 18);
     const g = entry.g;
-    g.classList.toggle("lab-down", !n.alive);
-    g.classList.toggle("lab-isolated", n.isolated);
-    g.classList.toggle("lab-remote", remote);
-    g.classList.toggle("lab-offline", offline);
-    g.setAttribute("aria-pressed", String(sel >= 0));
-    g.classList.toggle("lab-selected", sel === 0);
-    g.classList.toggle("lab-pick-b", sel === 1);
-    g.classList.toggle("lab-real", Boolean(k.real));
+    g.classList.toggle('lab-down', !n.alive);
+    g.classList.toggle('lab-isolated', n.isolated);
+    g.classList.toggle('lab-remote', remote);
+    g.classList.toggle('lab-offline', offline);
+    g.setAttribute('aria-pressed', String(sel >= 0));
+    g.classList.toggle('lab-selected', sel === 0);
+    g.classList.toggle('lab-pick-b', sel === 1);
+    g.classList.toggle('lab-real', Boolean(k.real));
     g.dataset.kind = n.kind;
     g.dataset.hosted = String(Boolean(n.hosted));
     g.dataset.alive = String(Boolean(n.alive));
@@ -363,46 +455,53 @@ export class Canvas {
     g.dataset.status = st;
     // A node whose host tab dropped off is not "up", whatever its last snapshot says.
     const bits = [n.name, k.label];
-    if (!n.alive) bits.push("down");
-    else if (!offline) bits.push("up");
-    if (k.real) bits.push("runs the real code");
-    if (n.isolated) bits.push("isolated");
+    if (!n.alive) bits.push('down');
+    else if (!offline) bits.push('up');
+    if (k.real) bits.push('runs the real code');
+    if (n.isolated) bits.push('isolated');
     // J3: the process faults (pause, clock skew, disk mode).
-    if (n.paused) bits.push("paused");
-    if (n.skew_ms) bits.push(`clock skewed ${n.skew_ms > 0 ? "+" : ""}${n.skew_ms} ms`);
-    if (n.disk && n.disk !== "ok") bits.push(`disk ${n.disk}`);
-    if (remote && hostedBy != null) bits.push(offline ? "host offline" : `hosted by ${peerLabel}`);
+    if (n.paused) bits.push('paused');
+    if (n.skew_ms) bits.push(`clock skewed ${n.skew_ms > 0 ? '+' : ''}${n.skew_ms} ms`);
+    if (n.disk && n.disk !== 'ok') bits.push(`disk ${n.disk}`);
+    if (remote && hostedBy != null) bits.push(offline ? 'host offline' : `hosted by ${peerLabel}`);
     if (st) bits.push(st);
-    g.setAttribute("aria-label", bits.join(", "));
-    let title = g.querySelector(":scope > title");
+    g.setAttribute('aria-label', bits.join(', '));
+    let title = g.querySelector(':scope > title');
     if (!title) {
-      title = svg("title");
+      title = svg('title');
       g.prepend(title);
     }
-    title.textContent = bits.join(", ");
+    title.textContent = bits.join(', ');
     // Badges, right-aligned from the card's top-right corner (see makeNode).
-    entry.badges.innerHTML = "";
+    entry.badges.innerHTML = '';
     const badges = [];
     // A node that runs the real code, not the lab's model of it.
-    if (k.real) badges.push(["real", "lab-badge-real"]);
-    if (!n.alive) badges.push(["down", "lab-badge-down"]);
-    if (n.isolated) badges.push(["isolated", "lab-badge-isolated"]);
+    if (k.real) badges.push(['real', 'lab-badge-real']);
+    if (!n.alive) badges.push(['down', 'lab-badge-down']);
+    if (n.isolated) badges.push(['isolated', 'lab-badge-isolated']);
     // J3: the process faults.
-    if (n.paused && n.alive) badges.push(["paused", "lab-badge-isolated"]);
-    if (n.skew_ms) badges.push([`skew ${n.skew_ms > 0 ? "+" : ""}${Math.abs(n.skew_ms) >= 1000 ? `${n.skew_ms / 1000}s` : `${n.skew_ms}ms`}`, "lab-badge-offline"]);
-    if (n.disk && n.disk !== "ok") badges.push([`disk ${n.disk}`, "lab-badge-down"]);
-    if (offline) badges.push(["host offline", "lab-badge-offline"]);
+    if (n.paused && n.alive) badges.push(['paused', 'lab-badge-isolated']);
+    if (n.skew_ms)
+      badges.push([
+        `skew ${n.skew_ms > 0 ? '+' : ''}${Math.abs(n.skew_ms) >= 1000 ? `${n.skew_ms / 1000}s` : `${n.skew_ms}ms`}`,
+        'lab-badge-offline',
+      ]);
+    if (n.disk && n.disk !== 'ok') badges.push([`disk ${n.disk}`, 'lab-badge-down']);
+    if (offline) badges.push(['host offline', 'lab-badge-offline']);
     // A node with no known host (the admin before hosting is settled) has no one to name.
-    else if (remote && hostedBy != null) badges.push([`@${peerLabel}`, "lab-badge-remote"]);
+    else if (remote && hostedBy != null) badges.push([`@${peerLabel}`, 'lab-badge-remote']);
     let x = 0;
     for (const [text, cls] of badges) {
-      const t = svg("text", { class: "lab-badge-text", y: 11, "text-anchor": "middle" });
+      const t = svg('text', { class: 'lab-badge-text', y: 11, 'text-anchor': 'middle' });
       entry.badges.appendChild(t);
-      fitText(t, [text], "", 84, 14);
+      fitText(t, [text], '', 84, 14);
       const w = (t.getComputedTextLength() || text.length * 6.2) + 10;
       x -= w;
-      t.setAttribute("x", x + w / 2);
-      entry.badges.insertBefore(svg("rect", { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 15, rx: 7 }), t);
+      t.setAttribute('x', x + w / 2);
+      entry.badges.insertBefore(
+        svg('rect', { class: `lab-badge ${cls}`, x, y: 0, width: w, height: 15, rx: 7 }),
+        t,
+      );
       x -= 4;
     }
   }
@@ -418,32 +517,49 @@ export class Canvas {
       seen.add(name);
       let g = this.topicEls.get(name);
       if (!g) {
-        g = svg("g", { class: "lab-topic" });
+        g = svg('g', { class: 'lab-topic' });
         g.dataset.topic = name;
-        g.appendChild(svg("title"));
-        g.appendChild(svg("rect", { class: "lab-topic-bg", x: -TOPIC_W / 2, y: -TOPIC_H / 2, width: TOPIC_W, height: TOPIC_H, rx: TOPIC_H / 2 }));
-        const t = svg("text", { class: "lab-topic-name", x: 0, y: -1, "text-anchor": "middle" });
-        const sub = svg("text", { class: "lab-topic-sub", x: 0, y: 11, "text-anchor": "middle" });
+        g.appendChild(svg('title'));
+        g.appendChild(
+          svg('rect', {
+            class: 'lab-topic-bg',
+            x: -TOPIC_W / 2,
+            y: -TOPIC_H / 2,
+            width: TOPIC_W,
+            height: TOPIC_H,
+            rx: TOPIC_H / 2,
+          }),
+        );
+        const t = svg('text', { class: 'lab-topic-name', x: 0, y: -1, 'text-anchor': 'middle' });
+        const sub = svg('text', { class: 'lab-topic-sub', x: 0, y: 11, 'text-anchor': 'middle' });
         g.append(t, sub);
         this.layerTopics.appendChild(g);
         this.topicEls.set(name, g);
       }
       const spec = specs.get(name);
       const role = internal.get(name);
-      g.classList.toggle("lab-topic-internal", Boolean(role) && !spec);
+      g.classList.toggle('lab-topic-internal', Boolean(role) && !spec);
       const sub = spec
-        ? [plural(spec.partitions, "partition"), `rf ${spec.replication_factor === -1 ? "default" : spec.replication_factor}`]
+        ? [
+            plural(spec.partitions, 'partition'),
+            `rf ${spec.replication_factor === -1 ? 'default' : spec.replication_factor}`,
+          ]
         : role
-          ? [role, "internal"]
-          : ["topic"];
+          ? [role, 'internal']
+          : ['topic'];
       // Measuring forces layout: only when the words changed.
-      const text = [name, ...sub].join("|");
+      const text = [name, ...sub].join('|');
       if (g.dataset.text !== text) {
         g.dataset.text = text;
-        fitText(g.querySelector(".lab-topic-name"), [name], "", TOPIC_W - 20, 17);
-        fitText(g.querySelector(".lab-topic-sub"), sub, " · ", TOPIC_W - 20, 24);
+        fitText(g.querySelector('.lab-topic-name'), [name], '', TOPIC_W - 20, 17);
+        fitText(g.querySelector('.lab-topic-sub'), sub, ' · ', TOPIC_W - 20, 24);
       }
-      g.querySelector("title").textContent = role && !spec ? `${name}: the streams app's ${role} topic, which the streams group creates` : spec ? `${name}: ${sub.join(" · ")}` : name;
+      g.querySelector('title').textContent =
+        role && !spec
+          ? `${name}: the streams app's ${role} topic, which the streams group creates`
+          : spec
+            ? `${name}: ${sub.join(' · ')}`
+            : name;
     }
     for (const [name, g] of this.topicEls) {
       if (!seen.has(name)) {
@@ -470,7 +586,9 @@ export class Canvas {
       if (pts.length) {
         x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
         y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-        const producers = pts.length === 1 || pts.every((p) => Math.abs(p.y - pts[0].y) < 1 && Math.abs(p.x - pts[0].x) < 1);
+        const producers =
+          pts.length === 1 ||
+          pts.every((p) => Math.abs(p.y - pts[0].y) < 1 && Math.abs(p.x - pts[0].x) < 1);
         if (producers) y += 100;
       } else {
         const all = [...this.positions.values()];
@@ -484,7 +602,14 @@ export class Canvas {
       // for good, so this ends.
       const blocks = [...this.positions.values()].map((p) => ({ ...p, w: CARD_W, h: CARD_H }));
       for (const q of placed) blocks.push({ ...q, w: TOPIC_W, h: TOPIC_H });
-      for (let hit; (hit = blocks.find((b) => Math.abs(b.x - x) < (b.w + TOPIC_W) / 2 + 4 && Math.abs(b.y - y) < (b.h + TOPIC_H) / 2 + 4)); ) {
+      for (
+        let hit;
+        (hit = blocks.find(
+          (b) =>
+            Math.abs(b.x - x) < (b.w + TOPIC_W) / 2 + 4 &&
+            Math.abs(b.y - y) < (b.h + TOPIC_H) / 2 + 4,
+        ));
+      ) {
         y = hit.y + (hit.h + TOPIC_H) / 2 + 16;
       }
       const pos = { x, y };
@@ -497,7 +622,7 @@ export class Canvas {
 
   setAllEdges(on) {
     this.allEdges = on;
-    this.allBtn.setAttribute("aria-pressed", String(on));
+    this.allBtn.setAttribute('aria-pressed', String(on));
     this.syncEdges();
     this.layout();
   }
@@ -511,7 +636,8 @@ export class Canvas {
     if (!box) return { ids, box: null };
     for (const [id, p] of this.positions) {
       if (ids.includes(id)) continue;
-      if (p.x > box.x && p.x < box.x + box.w && p.y > box.y && p.y < box.y + box.h) return { ids, box: null };
+      if (p.x > box.x && p.x < box.x + box.w && p.y > box.y && p.y < box.y + box.h)
+        return { ids, box: null };
     }
     return { ids, box };
   }
@@ -534,7 +660,12 @@ export class Canvas {
       maxY = Math.max(maxY, p.y + h / 2);
     }
     if (minX === Infinity) return null;
-    return { x: minX - pad, y: minY - padTop, w: maxX - minX + 2 * pad, h: maxY - minY + pad + padTop };
+    return {
+      x: minX - pad,
+      y: minY - padTop,
+      w: maxX - minX + 2 * pad,
+      h: maxY - minY + pad + padTop,
+    };
   }
 
   // Lab time of the last frame on each broker pair: from the frames in flight
@@ -554,7 +685,8 @@ export class Canvas {
     this.delivered = counts;
     for (const f of snap.in_flight || []) mark(f.src, f.dst);
     // A reset world starts its clock again: what flowed in the old one is gone.
-    for (const [key, at] of this.activity) if (at > snap.now || snap.now - at > ACTIVE_MS) this.activity.delete(key);
+    for (const [key, at] of this.activity)
+      if (at > snap.now || snap.now - at > ACTIVE_MS) this.activity.delete(key);
   }
 
   syncEdges() {
@@ -577,8 +709,11 @@ export class Canvas {
       seen.add(key);
       let line = this.edgeEls.get(key);
       if (!line) {
-        line = svg("line", { class: `lab-edge lab-edge-${e.type}` });
-        line.setAttribute("marker-end", FAINT_EDGES.has(e.type) ? "url(#lab-arrow-faint)" : "url(#lab-arrow)");
+        line = svg('line', { class: `lab-edge lab-edge-${e.type}` });
+        line.setAttribute(
+          'marker-end',
+          FAINT_EDGES.has(e.type) ? 'url(#lab-arrow-faint)' : 'url(#lab-arrow)',
+        );
         this.layerEdges.appendChild(line);
         this.edgeEls.set(key, line);
       }
@@ -599,19 +734,20 @@ export class Canvas {
       seen.add(key);
       let g = this.linkEls.get(key);
       if (!g) {
-        g = svg("g", { class: "lab-link" });
-        g.appendChild(svg("line", { class: "lab-link-line" }));
-        const label = svg("text", { class: "lab-link-label", "text-anchor": "middle" });
+        g = svg('g', { class: 'lab-link' });
+        g.appendChild(svg('line', { class: 'lab-link-line' }));
+        const label = svg('text', { class: 'lab-link-label', 'text-anchor': 'middle' });
         g.appendChild(label);
         this.layerLinks.appendChild(g);
         this.linkEls.set(key, g);
       }
-      g.classList.toggle("lab-link-cut", Boolean(l.cut));
+      g.classList.toggle('lab-link-cut', Boolean(l.cut));
       const bits = [];
-      if (l.cut) bits.push("✂ cut");
+      if (l.cut) bits.push('✂ cut');
       if (l.latency_ms !== this.defaultLatency) bits.push(`${l.latency_ms} ms`);
-      if (l.loss_permille) bits.push(`${(l.loss_permille / 10).toFixed(l.loss_permille % 10 ? 1 : 0)}% loss`);
-      g.querySelector(".lab-link-label").textContent = bits.join(" · ");
+      if (l.loss_permille)
+        bits.push(`${(l.loss_permille / 10).toFixed(l.loss_permille % 10 ? 1 : 0)}% loss`);
+      g.querySelector('.lab-link-label').textContent = bits.join(' · ');
       g.dataset.a = String(l.a);
       g.dataset.b = String(l.b);
     }
@@ -628,24 +764,24 @@ export class Canvas {
   layout() {
     for (const [id, entry] of this.nodeEls) {
       const p = this.positions.get(id);
-      if (p) entry.g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
+      if (p) entry.g.setAttribute('transform', `translate(${p.x}, ${p.y})`);
     }
     // A dragged card can enter or leave the brokers' box: the edges follow.
     const mode = this.clusterMode();
     if (Boolean(mode.box) !== Boolean(this.frame)) this.syncEdges();
     this.frame = mode.box;
-    this.layerCluster.style.display = this.frame ? "" : "none";
+    this.layerCluster.style.display = this.frame ? '' : 'none';
     if (this.frame) {
       const f = this.frame;
       setAttrs(this.clusterRect, { x: f.x, y: f.y, width: f.w, height: f.h });
       setAttrs(this.clusterLabel, { x: f.x + 14, y: f.y + 17 });
-      this.clusterLabel.textContent = `cluster · ${plural(mode.ids.length, "broker")}`;
+      this.clusterLabel.textContent = `cluster · ${plural(mode.ids.length, 'broker')}`;
     }
     this.layoutActive();
     this.placeTopics(this.edges || []);
     for (const [name, g] of this.topicEls) {
       const p = this.topicPositions.get(name);
-      if (p) g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
+      if (p) g.setAttribute('transform', `translate(${p.x}, ${p.y})`);
     }
     for (const e of this.edges || []) {
       const key = `${endKey(e.from)}>${endKey(e.to)}:${e.type}`;
@@ -653,7 +789,7 @@ export class Canvas {
       const a = this.endPoint(e.from);
       const b = this.endPoint(e.to);
       if (!line || !a || !b) {
-        if (line) line.setAttribute("visibility", "hidden");
+        if (line) line.setAttribute('visibility', 'hidden');
         continue;
       }
       const start = trim(a, b, this.endSize(e.from));
@@ -661,16 +797,16 @@ export class Canvas {
       setAttrs(line, { x1: start.x, y1: start.y, x2: end.x, y2: end.y, visibility: null });
     }
     for (const [key, g] of this.linkEls) {
-      const [a, b] = key.split("-").map(Number);
+      const [a, b] = key.split('-').map(Number);
       const pa = this.positions.get(a);
       const pb = this.positions.get(b);
       if (!pa || !pb) {
-        g.setAttribute("visibility", "hidden");
+        g.setAttribute('visibility', 'hidden');
         continue;
       }
-      g.removeAttribute("visibility");
-      setAttrs(g.querySelector("line"), { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y });
-      setAttrs(g.querySelector("text"), { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 - 6 });
+      g.removeAttribute('visibility');
+      setAttrs(g.querySelector('line'), { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y });
+      setAttrs(g.querySelector('text'), { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 - 6 });
     }
   }
 
@@ -683,7 +819,7 @@ export class Canvas {
       this.activeEls.delete(key);
     }
     for (const [key, at] of this.activity) {
-      const [a, b] = key.split("-").map(Number);
+      const [a, b] = key.split('-').map(Number);
       const pa = this.positions.get(a);
       const pb = this.positions.get(b);
       let line = this.activeEls.get(key);
@@ -693,7 +829,7 @@ export class Canvas {
         continue;
       }
       if (!line) {
-        line = svg("line", { class: "lab-edge lab-edge-active" });
+        line = svg('line', { class: 'lab-edge lab-edge-active' });
         this.layerEdges.appendChild(line);
         this.activeEls.set(key, line);
       }
@@ -706,14 +842,18 @@ export class Canvas {
   }
 
   endPoint(end) {
-    if (end.cluster) return this.frame ? { x: this.frame.x + this.frame.w / 2, y: this.frame.y + this.frame.h / 2 } : null;
+    if (end.cluster)
+      return this.frame
+        ? { x: this.frame.x + this.frame.w / 2, y: this.frame.y + this.frame.h / 2 }
+        : null;
     if (end.node != null) return this.positions.get(end.node) || null;
     if (end.topic != null) return this.topicPositions.get(end.topic) || null;
     return null;
   }
 
   endSize(end) {
-    if (end.cluster) return this.frame ? { w: this.frame.w, h: this.frame.h } : { w: CARD_W, h: CARD_H };
+    if (end.cluster)
+      return this.frame ? { w: this.frame.w, h: this.frame.h } : { w: CARD_W, h: CARD_H };
     if (end.topic != null) return { w: TOPIC_W, h: TOPIC_H };
     const entry = end.node != null ? this.nodeEls.get(end.node) : null;
     return entry ? { w: entry.w, h: entry.h } : { w: CARD_W, h: CARD_H };
@@ -745,30 +885,30 @@ export class Canvas {
       const y = a.y + dy * p + oy;
       let dot = this.dotPool[i];
       if (!dot) {
-        dot = svg("g", { class: "lab-frame" });
-        dot.appendChild(svg("circle", { r: 4 }));
-        dot.appendChild(svg("text", { class: "lab-frame-label", x: 6, y: -6 }));
+        dot = svg('g', { class: 'lab-frame' });
+        dot.appendChild(svg('circle', { r: 4 }));
+        dot.appendChild(svg('text', { class: 'lab-frame-label', x: 6, y: -6 }));
         this.layerFrames.appendChild(dot);
         this.dotPool[i] = dot;
       }
-      dot.setAttribute("transform", `translate(${x}, ${y})`);
-      dot.style.display = "";
+      dot.setAttribute('transform', `translate(${x}, ${y})`);
+      dot.style.display = '';
       const srcKind = this.snapshot?.nodes?.find((n) => n.id === f.src)?.kind;
-      dot.querySelector("circle").style.fill = kindOf(srcKind).color;
-      const label = dot.querySelector("text");
-      const text = labelled ? f.label : "";
+      dot.querySelector('circle').style.fill = kindOf(srcKind).color;
+      const label = dot.querySelector('text');
+      const text = labelled ? f.label : '';
       if (label.textContent !== text) label.textContent = text;
-      dot.classList.toggle("lab-frame-close", f.label === "close");
+      dot.classList.toggle('lab-frame-close', f.label === 'close');
       i += 1;
     }
-    for (; i < this.dotPool.length; i++) this.dotPool[i].style.display = "none";
+    for (; i < this.dotPool.length; i++) this.dotPool[i].style.display = 'none';
   }
 
   // ---- view ----------------------------------------------------------------------------------------------
 
   applyView() {
     const { x, y, k } = this.view;
-    this.viewport.setAttribute("transform", `translate(${x}, ${y}) scale(${k})`);
+    this.viewport.setAttribute('transform', `translate(${x}, ${y}) scale(${k})`);
   }
 
   size() {
@@ -778,7 +918,10 @@ export class Canvas {
 
   toWorld(clientX, clientY) {
     const r = this.svg.getBoundingClientRect();
-    return { x: (clientX - r.left - this.view.x) / this.view.k, y: (clientY - r.top - this.view.y) / this.view.k };
+    return {
+      x: (clientX - r.left - this.view.x) / this.view.k,
+      y: (clientY - r.top - this.view.y) / this.view.k,
+    };
   }
 
   zoomAt(clientX, clientY, factor) {
@@ -810,8 +953,16 @@ export class Canvas {
       const h = entry ? entry.h : CARD_H;
       pts.push({ x: p.x - w / 2, y: p.y - h / 2 }, { x: p.x + w / 2, y: p.y + h / 2 });
     }
-    for (const p of this.topicPositions.values()) pts.push({ x: p.x - TOPIC_W / 2, y: p.y - TOPIC_H / 2 }, { x: p.x + TOPIC_W / 2, y: p.y + TOPIC_H / 2 });
-    if (this.frame) pts.push({ x: this.frame.x, y: this.frame.y }, { x: this.frame.x + this.frame.w, y: this.frame.y + this.frame.h });
+    for (const p of this.topicPositions.values())
+      pts.push(
+        { x: p.x - TOPIC_W / 2, y: p.y - TOPIC_H / 2 },
+        { x: p.x + TOPIC_W / 2, y: p.y + TOPIC_H / 2 },
+      );
+    if (this.frame)
+      pts.push(
+        { x: this.frame.x, y: this.frame.y },
+        { x: this.frame.x + this.frame.w, y: this.frame.y + this.frame.h },
+      );
     if (!pts.length) {
       this.view = { x: 40, y: 40, k: 1 };
       this.note.hidden = true;
@@ -854,10 +1005,10 @@ export class Canvas {
 
   bindPointer() {
     const s = this.svg;
-    s.addEventListener("pointerdown", (e) => {
+    s.addEventListener('pointerdown', (e) => {
       this.closeMenu();
       if (e.button === 2) return;
-      if (e.pointerType === "touch") {
+      if (e.pointerType === 'touch') {
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         // A second finger turns whatever the first was doing into a pinch.
         if (this.touches.size > 1) {
@@ -865,19 +1016,26 @@ export class Canvas {
           return;
         }
       }
-      const nodeG = e.target.closest?.(".lab-node");
+      const nodeG = e.target.closest?.('.lab-node');
       const start = { x: e.clientX, y: e.clientY };
       if (nodeG) {
         const id = Number(nodeG.dataset.nodeId);
         const p = this.positions.get(id) || { x: 0, y: 0 };
-        this.drag = { id, start, origin: { ...p }, moved: false, pointerId: e.pointerId, shift: e.shiftKey };
-        nodeG.classList.add("lab-dragging");
+        this.drag = {
+          id,
+          start,
+          origin: { ...p },
+          moved: false,
+          pointerId: e.pointerId,
+          shift: e.shiftKey,
+        };
+        nodeG.classList.add('lab-dragging');
         try {
           s.setPointerCapture(e.pointerId);
         } catch {
           // Capture is a convenience; dragging works without it.
         }
-        if (e.pointerType === "touch") {
+        if (e.pointerType === 'touch') {
           this.longPress = setTimeout(() => {
             this.longPress = null;
             if (this.drag && !this.drag.moved) {
@@ -888,7 +1046,13 @@ export class Canvas {
         }
         e.preventDefault();
       } else if (e.button === 0) {
-        this.drag = { pan: true, start, origin: { x: this.view.x, y: this.view.y }, moved: false, pointerId: e.pointerId };
+        this.drag = {
+          pan: true,
+          start,
+          origin: { x: this.view.x, y: this.view.y },
+          moved: false,
+          pointerId: e.pointerId,
+        };
         try {
           s.setPointerCapture(e.pointerId);
         } catch {
@@ -897,8 +1061,9 @@ export class Canvas {
         e.preventDefault();
       }
     });
-    s.addEventListener("pointermove", (e) => {
-      if (this.touches.has(e.pointerId)) this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    s.addEventListener('pointermove', (e) => {
+      if (this.touches.has(e.pointerId))
+        this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pinch) {
         this.movePinch();
         return;
@@ -940,7 +1105,7 @@ export class Canvas {
       this.drag = null;
       if (!d.pan) {
         const entry = this.nodeEls.get(d.id);
-        if (entry) entry.g.classList.remove("lab-dragging");
+        if (entry) entry.g.classList.remove('lab-dragging');
         if (d.moved) {
           const p = this.positions.get(d.id);
           if (p) this.hooks.onMove(d.id, Math.round(p.x), Math.round(p.y));
@@ -952,30 +1117,36 @@ export class Canvas {
         this.hooks.onDeselect();
       }
     };
-    s.addEventListener("pointerup", finish);
-    s.addEventListener("pointercancel", (e) => {
+    s.addEventListener('pointerup', finish);
+    s.addEventListener('pointercancel', (e) => {
       release(e);
       this.cancelDrag();
     });
-    s.addEventListener("contextmenu", (e) => {
-      const nodeG = e.target.closest?.(".lab-node");
+    s.addEventListener('contextmenu', (e) => {
+      const nodeG = e.target.closest?.('.lab-node');
       e.preventDefault();
       if (nodeG) this.openMenu(Number(nodeG.dataset.nodeId), e.clientX, e.clientY);
       else this.closeMenu();
     });
     s.addEventListener(
-      "wheel",
+      'wheel',
       (e) => {
-        if (this.stacked.matches && !e.ctrlKey && !e.metaKey && !this.wrap.classList.contains("lab-expanded")) return;
+        if (
+          this.stacked.matches &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !this.wrap.classList.contains('lab-expanded')
+        )
+          return;
         e.preventDefault();
         const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015));
         this.zoomAt(e.clientX, e.clientY, factor);
       },
       { passive: false },
     );
-    s.addEventListener("dblclick", (e) => {
-      const nodeG = e.target.closest?.(".lab-node");
-      if (nodeG) this.hooks.onCommand(Number(nodeG.dataset.nodeId), "edit");
+    s.addEventListener('dblclick', (e) => {
+      const nodeG = e.target.closest?.('.lab-node');
+      if (nodeG) this.hooks.onCommand(Number(nodeG.dataset.nodeId), 'edit');
     });
   }
 
@@ -991,7 +1162,11 @@ export class Canvas {
   // Distance and midpoint of the first two fingers.
   pinchState() {
     const [a, b] = [...this.touches.values()];
-    return { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+    return {
+      dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      cx: (a.x + b.x) / 2,
+      cy: (a.y + b.y) / 2,
+    };
   }
 
   // Zoom by the change in finger distance around the midpoint, and follow the midpoint.
@@ -1015,15 +1190,15 @@ export class Canvas {
     }
     if (d && !d.pan) {
       const entry = this.nodeEls.get(d.id);
-      if (entry) entry.g.classList.remove("lab-dragging");
+      if (entry) entry.g.classList.remove('lab-dragging');
       this.positions.set(d.id, d.origin);
       this.layout();
     }
   }
 
   bindKeys() {
-    this.svg.addEventListener("keydown", (e) => {
-      const nodeG = e.target.closest?.(".lab-node");
+    this.svg.addEventListener('keydown', (e) => {
+      const nodeG = e.target.closest?.('.lab-node');
       if (!nodeG) return;
       const id = Number(nodeG.dataset.nodeId);
       const step = e.shiftKey ? 1 : 10;
@@ -1035,43 +1210,43 @@ export class Canvas {
         this.hooks.onMove(id, next.x, next.y);
       };
       switch (e.key) {
-        case "Enter":
-        case " ":
+        case 'Enter':
+        case ' ':
           e.preventDefault();
           this.hooks.onSelect(id, { additive: e.shiftKey });
           break;
-        case "Delete":
-        case "Backspace":
+        case 'Delete':
+        case 'Backspace':
           e.preventDefault();
-          this.hooks.onCommand(id, "remove");
+          this.hooks.onCommand(id, 'remove');
           break;
-        case "ArrowLeft":
+        case 'ArrowLeft':
           e.preventDefault();
           move(-step, 0);
           break;
-        case "ArrowRight":
+        case 'ArrowRight':
           e.preventDefault();
           move(step, 0);
           break;
-        case "ArrowUp":
+        case 'ArrowUp':
           e.preventDefault();
           move(0, -step);
           break;
-        case "ArrowDown":
+        case 'ArrowDown':
           e.preventDefault();
           move(0, step);
           break;
-        case "ContextMenu":
-        case "F10":
-          if (e.key === "F10" && !e.shiftKey) return;
+        case 'ContextMenu':
+        case 'F10':
+          if (e.key === 'F10' && !e.shiftKey) return;
           e.preventDefault();
           {
             const r = nodeG.getBoundingClientRect();
             this.openMenu(id, r.left + r.width / 2, r.top + r.height / 2);
           }
           break;
-        case "e":
-          this.hooks.onCommand(id, "edit");
+        case 'e':
+          this.hooks.onCommand(id, 'edit');
           break;
         default:
       }
@@ -1084,20 +1259,20 @@ export class Canvas {
     this.closeMenu();
     const items = this.hooks.menuItems(id) || [];
     if (!items.length) return;
-    this.menu.innerHTML = "";
+    this.menu.innerHTML = '';
     this.menu.dataset.nodeId = String(id);
     const buttons = [];
     for (const it of items) {
       if (it.separator) {
-        this.menu.appendChild(el("div", "lab-menu-sep"));
+        this.menu.appendChild(el('div', 'lab-menu-sep'));
         continue;
       }
-      const b = el("button", `lab-menu-item${it.danger ? " lab-menu-danger" : ""}`);
-      b.type = "button";
-      b.setAttribute("role", "menuitem");
+      const b = el('button', `lab-menu-item${it.danger ? ' lab-menu-danger' : ''}`);
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
       b.textContent = it.label;
       b.disabled = Boolean(it.disabled);
-      b.addEventListener("click", () => {
+      b.addEventListener('click', () => {
         this.closeMenu();
         this.hooks.onCommand(id, it.command);
       });
@@ -1118,13 +1293,13 @@ export class Canvas {
     this.menu.onkeydown = (e) => {
       const list = buttons.filter((b) => !b.disabled);
       const i = list.indexOf(document.activeElement);
-      if (e.key === "ArrowDown") {
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
         list[(i + 1) % list.length]?.focus();
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         list[(i - 1 + list.length) % list.length]?.focus();
-      } else if (e.key === "Escape" || e.key === "Tab") {
+      } else if (e.key === 'Escape' || e.key === 'Tab') {
         e.preventDefault();
         this.closeMenu(true);
       }
@@ -1132,14 +1307,14 @@ export class Canvas {
     this.menuOutside = (e) => {
       if (!this.menu.contains(e.target)) this.closeMenu();
     };
-    setTimeout(() => document.addEventListener("pointerdown", this.menuOutside, true), 0);
+    setTimeout(() => document.addEventListener('pointerdown', this.menuOutside, true), 0);
   }
 
   closeMenu(refocus = false) {
     if (this.menu.hidden) return;
     this.menu.hidden = true;
-    this.menu.innerHTML = "";
-    if (this.menuOutside) document.removeEventListener("pointerdown", this.menuOutside, true);
+    this.menu.innerHTML = '';
+    if (this.menuOutside) document.removeEventListener('pointerdown', this.menuOutside, true);
     this.menuOutside = null;
     if (refocus && this.menuFocusReturn) this.menuFocusReturn.focus();
   }
@@ -1152,7 +1327,7 @@ function pairKey(a, b) {
 }
 
 function endKey(end) {
-  if (end.cluster) return "c";
+  if (end.cluster) return 'c';
   return end.node != null ? `n${end.node}` : `t${end.topic}`;
 }
 
@@ -1170,8 +1345,8 @@ function trim(a, b, size) {
 
 // By code point, so an emoji is never split in two.
 function truncate(s, n) {
-  const chars = Array.from(String(s ?? ""));
-  return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : chars.join("");
+  const chars = Array.from(String(s ?? ''));
+  return chars.length > n ? `${chars.slice(0, n - 1).join('')}…` : chars.join('');
 }
 
 // Puts as many of `parts` (joined by `sep`) into the SVG text `node` as fit in
@@ -1190,7 +1365,7 @@ function fitText(node, parts, sep, maxW, n) {
   }
   const chars = Array.from(parts[0]);
   for (let m = Math.min(chars.length, n) - 1; m > 0; m--) {
-    node.textContent = `${chars.slice(0, m).join("").trimEnd()}…`;
+    node.textContent = `${chars.slice(0, m).join('').trimEnd()}…`;
     if (node.getComputedTextLength() <= maxW) return;
   }
 }

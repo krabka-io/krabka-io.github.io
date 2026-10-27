@@ -21,22 +21,25 @@
 // time), so a cached module is the right one and a new build is a miss. A
 // module fetched without `v` goes to the network as before.
 
-const COEP = new URL(self.location.href).searchParams.get("coep") === "require-corp" ? "require-corp" : "credentialless";
-const WASM_CACHE = "krabka-lab-wasm";
+const COEP =
+  new URL(self.location.href).searchParams.get('coep') === 'require-corp'
+    ? 'require-corp'
+    : 'credentialless';
+const WASM_CACHE = 'krabka-lab-wasm';
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
-self.addEventListener("fetch", (event) => {
+self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (request.method === "GET" && url.pathname.endsWith(".wasm") && url.searchParams.get("v")) {
+  if (request.method === 'GET' && url.pathname.endsWith('.wasm') && url.searchParams.get('v')) {
     event.respondWith(cachedModule(event, url));
     return;
   }
-  const isDocument = request.mode === "navigate";
-  const isWorker = request.destination === "worker" || request.destination === "sharedworker";
+  const isDocument = request.mode === 'navigate';
+  const isWorker = request.destination === 'worker' || request.destination === 'sharedworker';
   if (!isDocument && !isWorker) return;
   event.respondWith(isolate(request));
 });
@@ -52,12 +55,14 @@ async function cachedModule(event, url) {
     // No Cache Storage (private browsing, quota): the network serves it.
   }
   const response = await fetch(request);
-  if (cache && response.ok && response.type === "basic") {
+  if (cache && response.ok && response.type === 'basic') {
     // Stored beside the page's own read of the body; an older build of the same module goes.
     const copy = response.clone();
     event.waitUntil(
       (async () => {
-        for (const old of await cache.keys()) if (new URL(old.url).pathname === url.pathname && old.url !== request.url) await cache.delete(old);
+        for (const old of await cache.keys())
+          if (new URL(old.url).pathname === url.pathname && old.url !== request.url)
+            await cache.delete(old);
         await cache.put(request, copy);
       })().catch(() => {}),
     );
@@ -68,11 +73,12 @@ async function cachedModule(event, url) {
 async function isolate(request) {
   const response = await fetch(request);
   // Opaque and redirect responses cannot be rewritten; the browser follows redirects itself.
-  if (response.status === 0 || response.type === "opaqueredirect" || response.type === "opaque") return response;
+  if (response.status === 0 || response.type === 'opaqueredirect' || response.type === 'opaque')
+    return response;
   const headers = new Headers(response.headers);
-  headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  headers.set("Cross-Origin-Embedder-Policy", COEP);
-  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', COEP);
+  headers.set('Cross-Origin-Resource-Policy', 'same-origin');
   const nullBody = [204, 205, 304].includes(response.status);
   return new Response(nullBody ? null : response.body, {
     status: response.status,

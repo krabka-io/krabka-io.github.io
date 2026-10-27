@@ -21,20 +21,33 @@ export const OMB = {
 // Catalog from https://openmessaging.cloud/docs/benchmarks/; two max-rate
 // single-partition files were renamed upstream to include producer/consumer counts.
 export const OMB_WORKLOADS = [
-  'simple-workload', '1-topic-1-partition-1kb', '1-topic-1-partition-100b',
-  '1-topic-16-partitions-1kb', 'backlog-1-topic-1-partition-1kb',
-  'backlog-1-topic-16-partitions-1kb', 'max-rate-1-topic-1-partition-1p-1c-1kb',
-  'max-rate-1-topic-1-partition-1p-1c-100b', '1-topic-3-partition-100b-3producers',
-  'max-rate-1-topic-16-partitions-1kb', 'max-rate-1-topic-16-partitions-100b',
-  'max-rate-1-topic-100-partitions-1kb', 'max-rate-1-topic-100-partitions-100b',
+  'simple-workload',
+  '1-topic-1-partition-1kb',
+  '1-topic-1-partition-100b',
+  '1-topic-16-partitions-1kb',
+  'backlog-1-topic-1-partition-1kb',
+  'backlog-1-topic-16-partitions-1kb',
+  'max-rate-1-topic-1-partition-1p-1c-1kb',
+  'max-rate-1-topic-1-partition-1p-1c-100b',
+  '1-topic-3-partition-100b-3producers',
+  'max-rate-1-topic-16-partitions-1kb',
+  'max-rate-1-topic-16-partitions-100b',
+  'max-rate-1-topic-100-partitions-1kb',
+  'max-rate-1-topic-100-partitions-100b',
 ];
 
 export function ombCases(selection = 'all') {
   const names = selection === 'all' ? OMB_WORKLOADS : selection.split(',');
-  assert.ok(names.length && new Set(names).size === names.length, 'empty or duplicate OMB workloads');
-  for (const name of names) assert.ok(OMB_WORKLOADS.includes(name)
-    || name === '1m-10-topics-1-partition-100b', `unknown OMB workload: ${name}`);
-  return names.map(id => ({ id, upstream_file: `workloads/${id}.yaml` }));
+  assert.ok(
+    names.length && new Set(names).size === names.length,
+    'empty or duplicate OMB workloads',
+  );
+  for (const name of names)
+    assert.ok(
+      OMB_WORKLOADS.includes(name) || name === '1m-10-topics-1-partition-100b',
+      `unknown OMB workload: ${name}`,
+    );
+  return names.map((id) => ({ id, upstream_file: `workloads/${id}.yaml` }));
 }
 
 export function ombWorkload(source, smoke, durationMinutes) {
@@ -43,23 +56,37 @@ export function ombWorkload(source, smoke, durationMinutes) {
   let effective = source.replace(/^(payloadFile:\s*)["']?([^"'\n]+)["']?\s*$/m, '$1"/src/$2"');
   if (durationMinutes !== undefined) {
     assert.ok(Number.isInteger(durationMinutes) && durationMinutes >= 1, 'invalid test duration');
-    effective = effective.replace(/^testDurationMinutes:.*$/m, `testDurationMinutes: ${durationMinutes}`);
+    effective = effective.replace(
+      /^testDurationMinutes:.*$/m,
+      `testDurationMinutes: ${durationMinutes}`,
+    );
   }
   if (smoke) {
-    effective = effective.replace(/^testDurationMinutes:.*$/m, 'testDurationMinutes: 1')
+    effective = effective
+      .replace(/^testDurationMinutes:.*$/m, 'testDurationMinutes: 1')
       .replace(/^producerRate:.*$/m, 'producerRate: 5000')
       .replace(/^consumerBacklogSizeGB:.*$/m, 'consumerBacklogSizeGB: 0');
     effective += '\nwarmupDurationMinutes: 0\n';
   }
-  const value = key => Number(effective.match(new RegExp(`^${key}:\\s*(\\d+)`, 'm'))?.[1]);
-  const config = Object.fromEntries(['topics', 'partitionsPerTopic', 'messageSize', 'testDurationMinutes',
-    'producerRate', 'consumerBacklogSizeGB'].map(key => [key, value(key)]));
+  const value = (key) => Number(effective.match(new RegExp(`^${key}:\\s*(\\d+)`, 'm'))?.[1]);
+  const config = Object.fromEntries(
+    [
+      'topics',
+      'partitionsPerTopic',
+      'messageSize',
+      'testDurationMinutes',
+      'producerRate',
+      'consumerBacklogSizeGB',
+    ].map((key) => [key, value(key)]),
+  );
   assert.ok(Object.values(config).every(Number.isFinite), 'missing OMB workload field');
   return { yaml: effective, config, sha256: createHash('sha256').update(source).digest('hex') };
 }
 
 export function ombTimeoutMs(config, smoke) {
-  return (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 90 : 30)) * 60_000;
+  return (
+    (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 90 : 30)) * 60_000
+  );
 }
 
 // Headroom over the requested backlog that a backlog topic retains.
@@ -75,7 +102,9 @@ export function ombRetentionBytes(config) {
   if (!(config.consumerBacklogSizeGB > 0)) return -1;
   const partitions = config.topics * config.partitionsPerTopic;
   assert.ok(Number.isInteger(partitions) && partitions > 0, 'invalid OMB partition count');
-  return Math.ceil(OMB_BACKLOG_RETENTION_RATIO * config.consumerBacklogSizeGB * 1024 ** 3 / partitions);
+  return Math.ceil(
+    (OMB_BACKLOG_RETENTION_RATIO * config.consumerBacklogSizeGB * 1024 ** 3) / partitions,
+  );
 }
 
 // Trials a run leaves out on purpose. provenance.omitted lists each one as
@@ -83,7 +112,9 @@ export function ombRetentionBytes(config) {
 // never completed can be omitted (see split in benchmark-openmessaging-shards.mjs),
 // and at least two brokers stay in every comparison.
 export function ombOmission(provenance, vendor, rf, workload) {
-  return (provenance.omitted ?? []).find(o => o.vendor === vendor && o.rf === rf && o.workload === workload);
+  return (provenance.omitted ?? []).find(
+    (o) => o.vendor === vendor && o.rf === rf && o.workload === workload,
+  );
 }
 
 export function checkOmbOmissions(provenance, vendors = ['krabka', 'kafka', 'redpanda']) {
@@ -92,26 +123,48 @@ export function checkOmbOmissions(provenance, vendors = ['krabka', 'kafka', 'red
   const keys = new Set();
   for (const o of omitted) {
     assert.ok(vendors.includes(o.vendor), `omitted trial names unknown broker ${o.vendor}`);
-    assert.ok(provenance.replication_factors.includes(o.rf), 'omitted trial is outside the run\'s replication factors');
-    assert.ok(provenance.cases.some(c => c.id === o.workload), `omitted trial names unknown workload ${o.workload}`);
-    assert.ok(typeof o.reason === 'string' && o.reason.trim(), `omitted ${o.vendor} ${o.workload} RF${o.rf} needs a reason`);
+    assert.ok(
+      provenance.replication_factors.includes(o.rf),
+      "omitted trial is outside the run's replication factors",
+    );
+    assert.ok(
+      provenance.cases.some((c) => c.id === o.workload),
+      `omitted trial names unknown workload ${o.workload}`,
+    );
+    assert.ok(
+      typeof o.reason === 'string' && o.reason.trim(),
+      `omitted ${o.vendor} ${o.workload} RF${o.rf} needs a reason`,
+    );
     const key = `${o.vendor}/${o.rf}/${o.workload}`;
     assert.ok(!keys.has(key), `${key} is omitted twice`);
     keys.add(key);
   }
-  for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
-    // A run of one broker (--vendors) compares nothing and omits nothing.
-    const kept = vendors.filter(vendor => !keys.has(`${vendor}/${rf}/${workload.id}`));
-    if (kept.length < vendors.length) assert.ok(kept.length >= 2, `${workload.id} at RF${rf} needs at least two measured brokers`);
-  }
+  for (const workload of provenance.cases)
+    for (const rf of provenance.replication_factors) {
+      // A run of one broker (--vendors) compares nothing and omits nothing.
+      const kept = vendors.filter((vendor) => !keys.has(`${vendor}/${rf}/${workload.id}`));
+      if (kept.length < vendors.length)
+        assert.ok(
+          kept.length >= 2,
+          `${workload.id} at RF${rf} needs at least two measured brokers`,
+        );
+    }
   return omitted;
 }
 
 export function ombDriver(vendor, rf, maxPollIntervalMs, retentionBytes = -1, preallocate = false) {
   assert.ok(['krabka', 'kafka', 'redpanda'].includes(vendor) && [1, 3].includes(rf));
-  assert.ok(maxPollIntervalMs === undefined || (Number.isInteger(maxPollIntervalMs)
-    && maxPollIntervalMs > 0 && maxPollIntervalMs <= 2 ** 31 - 1), 'invalid poll interval');
-  assert.ok(retentionBytes === -1 || (Number.isSafeInteger(retentionBytes) && retentionBytes > 0), 'invalid retention.bytes');
+  assert.ok(
+    maxPollIntervalMs === undefined ||
+      (Number.isInteger(maxPollIntervalMs) &&
+        maxPollIntervalMs > 0 &&
+        maxPollIntervalMs <= 2 ** 31 - 1),
+    'invalid poll interval',
+  );
+  assert.ok(
+    retentionBytes === -1 || (Number.isSafeInteger(retentionBytes) && retentionBytes > 0),
+    'invalid retention.bytes',
+  );
   return `name: ${vendor}-rf${rf}
 driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
 replicationFactor: ${rf}
@@ -146,8 +199,17 @@ ${maxPollIntervalMs === undefined ? '' : `  max.poll.interval.ms=${maxPollInterv
 // hashed into the provenance either way, so shards still compare their
 // builds byte for byte. Runs on one host build one at a time, so the shared
 // repository sees no concurrent writers.
-export async function prepareOmb(directory, command, oneShot,
-  cacheRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.benchmarks', 'm2-cache')) {
+export async function prepareOmb(
+  directory,
+  command,
+  oneShot,
+  cacheRoot = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '.benchmarks',
+    'm2-cache',
+  ),
+) {
   const source = path.join(directory, 'openmessaging');
   await fs.mkdir(source);
   await command('git', ['-c', 'init.templateDir=', 'init', source]);
@@ -159,37 +221,97 @@ export async function prepareOmb(directory, command, oneShot,
   const patches = {};
   for (const patch of OMB.patches) {
     const file = path.join(root, patch);
-    patches[patch] = createHash('sha256').update(await fs.readFile(file)).digest('hex');
+    patches[patch] = createHash('sha256')
+      .update(await fs.readFile(file))
+      .digest('hex');
     await command('git', ['-C', source, 'apply', '--whitespace=nowarn', file]);
   }
-  await command('docker', ['pull', '--platform', 'linux/amd64', OMB.build_image], { timeout: 600_000 });
+  await command('docker', ['pull', '--platform', 'linux/amd64', OMB.build_image], {
+    timeout: 600_000,
+  });
   const image = JSON.parse(await command('docker', ['image', 'inspect', OMB.build_image]))[0];
-  const m2 = path.join(cacheRoot, `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`);
+  const m2 = path.join(
+    cacheRoot,
+    `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`,
+  );
   await fs.mkdir(m2, { recursive: true });
   // Maven's resolver retries a 429 or 503 (its `serviceUnavailable` default)
   // this many times, this long apart, before it fails the build.
-  await oneShot(['--user', `${process.getuid()}:${process.getgid()}`, '--cpus', '4', '--memory', '4g', '--memory-swap', '4g',
-    '--env', 'MAVEN_CONFIG=/m2', '--volume', `${source}:/src`, '--volume', `${m2}:/m2`, '--workdir', '/src',
-    OMB.build_image, 'mvn', '-B', '-ntp', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
-    '-Daether.connector.http.retryHandler.count=8', '-Daether.connector.http.retryHandler.requestInterval=5000',
-    '-Dcheckstyle.skip', '-Dspotless.check.skip=true', '-Dlicense.skip=true', '-Djacoco.skip', '-Dspotbugs.skip=true',
-    '-pl', 'benchmark-framework', '-am', 'install'], 'omb-build',
-  { timeout: 1_800_000, output: path.join(directory, 'omb-build') });
-  const classpath = (await fs.readFile(path.join(source, 'benchmark-framework/target/classpath.txt'), 'utf8')).trim();
-  const jars = Object.fromEntries(await Promise.all(classpath.split(':').map(async jar => {
-    assert.ok(jar.startsWith('/m2/') || jar.startsWith('/src/'), `unexpected OMB classpath entry: ${jar}`);
-    const local = jar.startsWith('/m2/') ? path.join(m2, jar.slice(4)) : path.join(source, jar.slice(5));
-    return [jar, createHash('sha256').update(await fs.readFile(local)).digest('hex')];
-  })));
-  return { source, m2, classpath: `/src/benchmark-framework/target/classes:${classpath}`,
-    provenance: { ...OMB, patches, build_image_id: image.Id, jars } };
+  await oneShot(
+    [
+      '--user',
+      `${process.getuid()}:${process.getgid()}`,
+      '--cpus',
+      '4',
+      '--memory',
+      '4g',
+      '--memory-swap',
+      '4g',
+      '--env',
+      'MAVEN_CONFIG=/m2',
+      '--volume',
+      `${source}:/src`,
+      '--volume',
+      `${m2}:/m2`,
+      '--workdir',
+      '/src',
+      OMB.build_image,
+      'mvn',
+      '-B',
+      '-ntp',
+      '-Dmaven.repo.local=/m2',
+      '-Dmaven.test.skip=true',
+      '-Daether.connector.http.retryHandler.count=8',
+      '-Daether.connector.http.retryHandler.requestInterval=5000',
+      '-Dcheckstyle.skip',
+      '-Dspotless.check.skip=true',
+      '-Dlicense.skip=true',
+      '-Djacoco.skip',
+      '-Dspotbugs.skip=true',
+      '-pl',
+      'benchmark-framework',
+      '-am',
+      'install',
+    ],
+    'omb-build',
+    { timeout: 1_800_000, output: path.join(directory, 'omb-build') },
+  );
+  const classpath = (
+    await fs.readFile(path.join(source, 'benchmark-framework/target/classpath.txt'), 'utf8')
+  ).trim();
+  const jars = Object.fromEntries(
+    await Promise.all(
+      classpath.split(':').map(async (jar) => {
+        assert.ok(
+          jar.startsWith('/m2/') || jar.startsWith('/src/'),
+          `unexpected OMB classpath entry: ${jar}`,
+        );
+        const local = jar.startsWith('/m2/')
+          ? path.join(m2, jar.slice(4))
+          : path.join(source, jar.slice(5));
+        return [
+          jar,
+          createHash('sha256')
+            .update(await fs.readFile(local))
+            .digest('hex'),
+        ];
+      }),
+    ),
+  );
+  return {
+    source,
+    m2,
+    classpath: `/src/benchmark-framework/target/classes:${classpath}`,
+    provenance: { ...OMB, patches, build_image_id: image.Id, jars },
+  };
 }
 
 // A retriable offset-commit failure from the patched consumer (see
 // omb-kafka-coalesce-commits.patch): a leader or coordinator move fails one
 // commit, the consumer puts its offsets back and the next commit carries them.
 // Redpanda's fork logs these as warnings. They are counted, not failed.
-const RETRIABLE_COMMIT_FAILURE = /\]\s+ERROR\s+KafkaBenchmarkConsumer - Offset commit with offsets \{[^\n]*\} failed\r?\norg\.apache\.kafka\.clients\.consumer\.RetriableCommitFailedException\b/g;
+const RETRIABLE_COMMIT_FAILURE =
+  /\]\s+ERROR\s+KafkaBenchmarkConsumer - Offset commit with offsets \{[^\n]*\} failed\r?\norg\.apache\.kafka\.clients\.consumer\.RetriableCommitFailedException\b/g;
 
 export function retriableCommitFailures(logs = '') {
   return (logs.match(RETRIABLE_COMMIT_FAILURE) ?? []).length;
@@ -204,22 +326,45 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
   // close fails with an IllegalStateException; LocalWorker logs either. Both
   // follow the final aggregated results, so they say nothing about the
   // measurement.
-  const errors = logs.replace(/\]\s+ERROR\s+LocalWorker - Got error\r?\n(?:org\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory|java\.lang\.IllegalStateException: Cannot perform operation after producer has been closed)\b/g, '')
+  const errors = logs
+    .replace(
+      /\]\s+ERROR\s+LocalWorker - Got error\r?\n(?:org\.apache\.kafka\.common\.KafkaException: Producer closed while allocating memory|java\.lang\.IllegalStateException: Cannot perform operation after producer has been closed)\b/g,
+      '',
+    )
     .replace(RETRIABLE_COMMIT_FAILURE, '');
   assert.ok(!/\]\s+ERROR\s/.test(errors), 'OMB logged an error; inspect workload logs');
   assert.equal(result.driver, `${vendor}-rf${rf}`, 'wrong OMB driver');
-  for (const [key, expected] of [['topics', config.topics], ['partitions', config.partitionsPerTopic], ['messageSize', config.messageSize]]) {
+  for (const [key, expected] of [
+    ['topics', config.topics],
+    ['partitions', config.partitionsPerTopic],
+    ['messageSize', config.messageSize],
+  ]) {
     assert.equal(result[key], expected, `wrong OMB ${key}`);
   }
   const minimumSamples = config.testDurationMinutes * 6;
   for (const key of ['publishRate', 'consumeRate', 'publishErrorRate', 'backlog']) {
-    assert.ok(Array.isArray(result[key]) && result[key].length >= minimumSamples, `missing/truncated OMB ${key}`);
-    assert.ok(result[key].every(value => Number.isFinite(value) && value >= 0), `invalid OMB ${key}`);
+    assert.ok(
+      Array.isArray(result[key]) && result[key].length >= minimumSamples,
+      `missing/truncated OMB ${key}`,
+    );
+    assert.ok(
+      result[key].every((value) => Number.isFinite(value) && value >= 0),
+      `invalid OMB ${key}`,
+    );
     assert.equal(result[key].length, result.publishRate.length, 'inconsistent OMB series');
   }
-  assert.ok(result.publishRate.some(value => value > 0), 'OMB published no messages');
-  assert.ok(result.consumeRate.some(value => value > 0), 'OMB consumed no messages');
-  assert.ok(result.publishErrorRate.every(value => value === 0), 'OMB publish errors');
+  assert.ok(
+    result.publishRate.some((value) => value > 0),
+    'OMB published no messages',
+  );
+  assert.ok(
+    result.consumeRate.some((value) => value > 0),
+    'OMB consumed no messages',
+  );
+  assert.ok(
+    result.publishErrorRate.every((value) => value === 0),
+    'OMB publish errors',
+  );
   for (const key of ['aggregatedPublishLatency99pct', 'aggregatedEndToEndLatency99pct']) {
     assert.ok(Number.isFinite(result[key]) && result[key] >= 0, `missing OMB ${key}`);
   }
@@ -228,34 +373,52 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
 export async function writeOmbReport(directory, provenance, trials) {
   const vendors = provenance.vendors ?? ['krabka', 'kafka', 'redpanda'];
   const omitted = checkOmbOmissions(provenance, vendors);
-  assert.equal(trials.length,
-    (provenance.cases.length * provenance.replication_factors.length * vendors.length - omitted.length) * provenance.repetitions,
-    'incomplete OMB matrix');
+  assert.equal(
+    trials.length,
+    (provenance.cases.length * provenance.replication_factors.length * vendors.length -
+      omitted.length) *
+      provenance.repetitions,
+    'incomplete OMB matrix',
+  );
   const actual = new Set();
   for (const trial of trials) {
     validateOmbResult(trial.omb, trial.vendor, trial.rf, trial.case.config);
     actual.add(`${trial.vendor}/${trial.rf}/${trial.repetition}/${trial.case.id}`);
   }
   assert.equal(actual.size, trials.length, 'duplicate OMB trials');
-  for (const workload of provenance.cases) for (const rf of provenance.replication_factors) {
-    for (const vendor of vendors) for (let repetition = 1; repetition <= provenance.repetitions; repetition++) {
-      const key = `${vendor}/${rf}/${repetition}/${workload.id}`;
-      if (ombOmission(provenance, vendor, rf, workload.id)) assert.ok(!actual.has(key), `omitted OMB trial ${key} is present`);
-      else assert.ok(actual.has(key), 'missing OMB trial');
+  for (const workload of provenance.cases)
+    for (const rf of provenance.replication_factors) {
+      for (const vendor of vendors)
+        for (let repetition = 1; repetition <= provenance.repetitions; repetition++) {
+          const key = `${vendor}/${rf}/${repetition}/${workload.id}`;
+          if (ombOmission(provenance, vendor, rf, workload.id))
+            assert.ok(!actual.has(key), `omitted OMB trial ${key} is present`);
+          else assert.ok(actual.has(key), 'missing OMB trial');
+        }
     }
-  }
-  const mean = values => values.reduce((a, b) => a + b, 0) / values.length;
-  const lines = ['# OpenMessaging broker comparison', '',
-    `Run: ${provenance.run_id}. Mode: ${provenance.mode}. Status: complete.`, '',
-    `Upstream: ${OMB.repository} at ${OMB.commit}; Kafka client ${OMB.kafka_client_version} for every broker.`, '',
+  const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
+  const lines = [
+    '# OpenMessaging broker comparison',
+    '',
+    `Run: ${provenance.run_id}. Mode: ${provenance.mode}. Status: complete.`,
+    '',
+    `Upstream: ${OMB.repository} at ${OMB.commit}; Kafka client ${OMB.kafka_client_version} for every broker.`,
+    '',
     'Shared host, sequential fresh clusters; 4 logical CPUs and 10 GiB per broker. Buffered acknowledgments; Redpanda uses Raft majorities.',
-    'OMB reports latency and rates, not exact delivery/duplicate verification. Resource windows include client startup, warm-up, probing, measurement and shutdown.', '',
-    ...Object.entries(provenance.images).map(([vendor, image]) => `- ${vendor}: ${image.reference}`), '',
+    'OMB reports latency and rates, not exact delivery/duplicate verification. Resource windows include client startup, warm-up, probing, measurement and shutdown.',
+    '',
+    ...Object.entries(provenance.images).map(
+      ([vendor, image]) => `- ${vendor}: ${image.reference}`,
+    ),
+    '',
     '| Workload | RF | Broker | Round | Publish msg/s | Consume msg/s | Publish p99 ms | End-to-end p99 ms | CPU seconds | Peak RSS MiB |',
-    '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|'];
+    '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|',
+  ];
   for (const trial of trials) {
     const result = trial.omb;
-    lines.push(`| ${trial.case.id} | ${trial.rf} | ${trial.vendor} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`);
+    lines.push(
+      `| ${trial.case.id} | ${trial.rf} | ${trial.vendor} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`,
+    );
   }
   if (omitted.length) {
     lines.push('', '## Not measured', '');

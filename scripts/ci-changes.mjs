@@ -6,29 +6,47 @@ import { fileURLToPath } from 'node:url';
 import { pages } from './snippets/extract.mjs';
 
 const all = () => ({ site: true, lab: true, proofs: true, snippets: true });
-const snippetPages = new Set(Object.keys(pages).map(page => `src/pages/${page}.astro`));
+const snippetPages = new Set(Object.keys(pages).map((page) => `src/pages/${page}.astro`));
 
 export function classifyPaths(paths) {
   const selected = { site: true, lab: false, proofs: false, snippets: false };
   for (const file of paths) {
     let known = false;
-    if (snippetPages.has(file) || /^(public\/(quickstart|charts)\/|scripts\/(snippets\/|check-snippets\.mjs))/.test(file)) {
+    if (
+      snippetPages.has(file) ||
+      /^(public\/(quickstart|charts)\/|scripts\/(snippets\/|check-snippets\.mjs))/.test(file)
+    ) {
       selected.snippets = known = true;
     }
-    if (/^(playground\/|public\/playground\/|kafkactl-lab\/|scripts\/check-(lab|real-broker|wasi))/.test(file)
-        || /^src\/pages\/docs\/(lab|playground)\.astro$/.test(file)) {
+    if (
+      /^(playground\/|public\/playground\/|kafkactl-lab\/|scripts\/check-(lab|real-broker|wasi))/.test(
+        file,
+      ) ||
+      /^src\/pages\/docs\/(lab|playground)\.astro$/.test(file)
+    ) {
       selected.lab = known = true;
       // Rust snippets use the playground's dependency pins and local patches.
       if (file.startsWith('playground/')) selected.snippets = true;
     }
-    if (/^(why3-web\/|public\/(proofs|why3-web)\/|scripts\/(check-proof|sync-proofs|repin-kernels|fixtures\/.*\.coma))/.test(file)
-        || /^src\/pages\/(verification|docs\/(proof-explorer|verification-playground))\.astro$/.test(file)) {
+    if (
+      /^(why3-web\/|public\/(proofs|why3-web)\/|scripts\/(check-proof|sync-proofs|repin-kernels|fixtures\/.*\.coma))/.test(
+        file,
+      ) ||
+      /^src\/pages\/(verification|docs\/(proof-explorer|verification-playground))\.astro$/.test(
+        file,
+      )
+    ) {
       selected.proofs = known = true;
     }
     // Shared templates, styles, data, dependencies, configuration and scripts
     // fall through to all suites. Only these ordinary content inputs are cheap.
-    if (/^(src\/(pages|content)\/|public\/(brand|images|fonts)\/|benchmarks\/|docs\/)/.test(file)
-        || /^(README\.md|AGENTS\.md|CLAUDE\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE|LICENSES\/.*|trademark\.md)$/.test(file)) known = true;
+    if (
+      /^(src\/(pages|content)\/|public\/(brand|images|fonts)\/|benchmarks\/|docs\/)/.test(file) ||
+      /^(README\.md|AGENTS\.md|CLAUDE\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE|LICENSES\/.*|trademark\.md)$/.test(
+        file,
+      )
+    )
+      known = true;
     if (!known) return all();
   }
   return selected;
@@ -36,11 +54,17 @@ export function classifyPaths(paths) {
 
 export function changedPaths(base, head, cwd = process.cwd()) {
   for (const sha of [base, head]) {
-    if (typeof sha !== 'string' || !/^[a-f\d]{40,64}$/i.test(sha)) throw new Error('Missing or invalid PR commit');
+    if (typeof sha !== 'string' || !/^[a-f\d]{40,64}$/i.test(sha))
+      throw new Error('Missing or invalid PR commit');
   }
   // Disable rename detection so moving an input out of a suite still selects it.
-  return execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', `${base}...${head}`, '--'],
-    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
+  return execFileSync(
+    'git',
+    ['diff', '--no-renames', '--name-only', '-z', `${base}...${head}`, '--'],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 },
+  )
+    .split('\0')
+    .filter(Boolean);
 }
 
 export function selectChecks(eventName, event, diff = changedPaths) {
@@ -71,10 +95,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   } catch (error) {
     selected = { ...all(), reason: `full fallback: ${error.message}` };
   }
-  const outputs = Object.entries(selected).filter(([key]) => key !== 'reason')
-    .map(([key, value]) => `${key}=${value}\n`).join('');
+  const outputs = Object.entries(selected)
+    .filter(([key]) => key !== 'reason')
+    .map(([key, value]) => `${key}=${value}\n`)
+    .join('');
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, outputs);
   console.log(JSON.stringify(selected, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-    `### CI selection\n\n${outputs.replaceAll('\n', '  \n')}\n${selected.reason.replace(/[\r\n]/g, ' ')}\n`);
+  if (process.env.GITHUB_STEP_SUMMARY)
+    fs.appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `### CI selection\n\n${outputs.replaceAll('\n', '  \n')}\n${selected.reason.replace(/[\r\n]/g, ' ')}\n`,
+    );
 }

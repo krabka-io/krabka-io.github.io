@@ -52,6 +52,9 @@ jobs:
           "${RUNNER_TEMP}/sitemap-validator/bin/python3" -m pip install -r scripts/requirements-sitemap.txt
           echo "${RUNNER_TEMP}/sitemap-validator/bin" >> "${GITHUB_PATH}"
 
+      - name: Check formatting
+        run: npm run format:check
+
       - name: Check website validation and sync guards
         run: npm run test:website
 

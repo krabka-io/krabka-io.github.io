@@ -50,7 +50,8 @@ function repo(name) {
   }
   const sha = git(dir, 'rev-parse', ref).trim();
   return {
-    name, sha,
+    name,
+    sha,
     read: (p) => git(dir, 'show', `${sha}:${p}`),
     list: (p) => git(dir, 'ls-tree', '--name-only', `${sha}:${p}`).split('\n').filter(Boolean),
   };
@@ -90,12 +91,30 @@ const broker = repo('krabka-broker');
 const SCHEMAS = 'crates/protocol/schemas';
 const out = {
   sources: { 'krabka-protocol': protocol.sha, 'krabka-broker': broker.sha },
-  requests: {}, responses: {}, headers: {}, data: {}, apiNames: {}, private: {}, metadata: {}, errors: {},
+  requests: {},
+  responses: {},
+  headers: {},
+  data: {},
+  apiNames: {},
+  private: {},
+  metadata: {},
+  errors: {},
 };
-for (const file of protocol.list(SCHEMAS).filter((f) => f.endsWith('.json')).sort()) {
+for (const file of protocol
+  .list(SCHEMAS)
+  .filter((f) => f.endsWith('.json'))
+  .sort()) {
   const s = parseCommented(protocol.read(`${SCHEMAS}/${file}`));
-  const msg = { name: s.name, valid: s.validVersions, flexible: s.flexibleVersions || 'none', fields: (s.fields || []).map(compactField) };
-  if (s.commonStructs?.length) msg.common = Object.fromEntries(s.commonStructs.map((c) => [c.name, (c.fields || []).map(compactField)]));
+  const msg = {
+    name: s.name,
+    valid: s.validVersions,
+    flexible: s.flexibleVersions || 'none',
+    fields: (s.fields || []).map(compactField),
+  };
+  if (s.commonStructs?.length)
+    msg.common = Object.fromEntries(
+      s.commonStructs.map((c) => [c.name, (c.fields || []).map(compactField)]),
+    );
   if (s.type === 'request') {
     out.requests[s.apiKey] = msg;
     out.apiNames[s.apiKey] = s.name.replace(/Request$/, '');
@@ -115,15 +134,26 @@ if (!Object.keys(out.metadata).length) throw new Error('no metadata record apiKe
 
 // krabka's private controller RPCs: hand-written codecs, so names only.
 const wireRs = broker.read('crates/raft/src/wire.rs');
-for (const [, doc, name, key] of wireRs.matchAll(/((?:\/\/\/[^\n]*\n)*)pub const API_KEY_([A-Z_]+): i16 = (\d+);/g)) {
+for (const [, doc, name, key] of wireRs.matchAll(
+  /((?:\/\/\/[^\n]*\n)*)pub const API_KEY_([A-Z_]+): i16 = (\d+);/g,
+)) {
   const pascal = name.toLowerCase().replace(/(^|_)([a-z])/g, (_, __, c) => c.toUpperCase());
-  out.private[key] = { name: pascal, about: doc.replace(/\/\/\/ ?/g, '').replace(/\s+/g, ' ').trim() };
+  out.private[key] = {
+    name: pascal,
+    about: doc
+      .replace(/\/\/\/ ?/g, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  };
   out.apiNames[key] = `${pascal} (krabka)`;
 }
 
 const table = broker.read('crates/broker/src/codes/tests/kafka_error_table.rs');
-for (const [, name, code] of table.matchAll(/\("([A-Z0-9_]+)",\s*(-?\d+)\)/g)) out.errors[code] = name;
+for (const [, name, code] of table.matchAll(/\("([A-Z0-9_]+)",\s*(-?\d+)\)/g))
+  out.errors[code] = name;
 if (!Object.keys(out.errors).length) throw new Error('no error codes in kafka_error_table.rs');
 
 fs.writeFileSync(OUT, JSON.stringify(out));
-console.log(`krabka-protocol ${protocol.sha.slice(0, 7)}, krabka-broker ${broker.sha.slice(0, 7)}: ${Object.keys(out.requests).length} requests, ${Object.keys(out.data).length} data schemas, ${Object.keys(out.metadata).length} metadata records, ${Object.keys(out.private).length} private APIs, ${Object.keys(out.errors).length} errors → ${path.relative(ROOT, OUT)} (${(fs.statSync(OUT).size / 1024).toFixed(0)} KiB)`);
+console.log(
+  `krabka-protocol ${protocol.sha.slice(0, 7)}, krabka-broker ${broker.sha.slice(0, 7)}: ${Object.keys(out.requests).length} requests, ${Object.keys(out.data).length} data schemas, ${Object.keys(out.metadata).length} metadata records, ${Object.keys(out.private).length} private APIs, ${Object.keys(out.errors).length} errors → ${path.relative(ROOT, OUT)} (${(fs.statSync(OUT).size / 1024).toFixed(0)} KiB)`,
+);

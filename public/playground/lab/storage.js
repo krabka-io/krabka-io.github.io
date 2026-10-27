@@ -31,9 +31,9 @@
 // state and forgetting one is a range delete. Nothing here leaves the
 // browser; there is no server.
 
-export const DB_NAME = "krabka-lab";
+export const DB_NAME = 'krabka-lab';
 export const DB_VERSION = 1;
-const PERSIST_KEY = "krabka-lab.persist";
+const PERSIST_KEY = 'krabka-lab.persist';
 
 // Array keys compare element-wise and a shorter prefix sorts first; numbers
 // sort before strings and arrays sort after everything else, so these two
@@ -43,21 +43,22 @@ const HIGHEST = [];
 
 export function storageAvailable() {
   try {
-    return typeof indexedDB !== "undefined" && indexedDB != null;
+    return typeof indexedDB !== 'undefined' && indexedDB != null;
   } catch {
     return false;
   }
 }
 
 export function bytesToBase64(bytes) {
-  let binary = "";
+  let binary = '';
   const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  for (let i = 0; i < bytes.length; i += chunk)
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   return btoa(binary);
 }
 
 export function base64ToBytes(text) {
-  const binary = atob(text || "");
+  const binary = atob(text || '');
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
@@ -68,15 +69,15 @@ export function base64ToBytes(text) {
 // A drained op with its bytes decoded once, for both the mirror and the store.
 function decodeOp(op) {
   const out = { ...op, node: Number(op.node) };
-  if (op.op === "append") {
+  if (op.op === 'append') {
     out.index = Number(op.index);
     out.bytes = base64ToBytes(op.bytes);
-  } else if (op.op === "put") {
+  } else if (op.op === 'put') {
     out.key = String(op.key);
     out.value = base64ToBytes(op.value);
-  } else if (op.op === "truncate_before" || op.op === "truncate_from") {
+  } else if (op.op === 'truncate_before' || op.op === 'truncate_from') {
     out.index = Number(op.index);
-  } else if (op.op === "delete") {
+  } else if (op.op === 'delete') {
     out.key = String(op.key);
   }
   return out;
@@ -133,7 +134,7 @@ export class DurableMirror {
   apply(op) {
     const img = this.image(op.node);
     switch (op.op) {
-      case "append": {
+      case 'append': {
         let log = img.logs.get(op.store);
         if (!log) {
           log = [];
@@ -148,17 +149,17 @@ export class DurableMirror {
         }
         break;
       }
-      case "truncate_before": {
+      case 'truncate_before': {
         const log = img.logs.get(op.store);
         if (log) log.splice(0, lowerBound(log, op.index));
         break;
       }
-      case "truncate_from": {
+      case 'truncate_from': {
         const log = img.logs.get(op.store);
         if (log) log.length = lowerBound(log, op.index);
         break;
       }
-      case "put": {
+      case 'put': {
         let kv = img.kv.get(op.store);
         if (!kv) {
           kv = new Map();
@@ -167,14 +168,14 @@ export class DurableMirror {
         kv.set(op.key, op.value);
         break;
       }
-      case "delete":
+      case 'delete':
         img.kv.get(op.store)?.delete(op.key);
         break;
-      case "clear":
+      case 'clear':
         img.logs.delete(op.store);
         img.kv.delete(op.store);
         break;
-      case "clear_all":
+      case 'clear_all':
         img.logs.clear();
         img.kv.clear();
         break;
@@ -190,8 +191,10 @@ export class DurableMirror {
     const kv = [];
     for (const [node, img] of this.nodes) {
       if (nodes && !nodes.has(node)) continue;
-      for (const [store, log] of img.logs) for (const e of log) logs.push({ scenario, node, store, index: e.index, bytes: e.bytes });
-      for (const [store, map] of img.kv) for (const [key, value] of map) kv.push({ scenario, node, store, key, value });
+      for (const [store, log] of img.logs)
+        for (const e of log) logs.push({ scenario, node, store, index: e.index, bytes: e.bytes });
+      for (const [store, map] of img.kv)
+        for (const [key, value] of map) kv.push({ scenario, node, store, key, value });
     }
     return { logs, kv };
   }
@@ -202,7 +205,8 @@ export class DurableMirror {
     for (const [node, img] of this.nodes) {
       if (nodes && !nodes.has(node)) continue;
       const logs = {};
-      for (const [store, log] of img.logs) logs[store] = log.map((e) => ({ index: e.index, bytes: bytesToBase64(e.bytes) }));
+      for (const [store, log] of img.logs)
+        logs[store] = log.map((e) => ({ index: e.index, bytes: bytesToBase64(e.bytes) }));
       const kv = {};
       for (const [store, map] of img.kv) {
         const obj = {};
@@ -220,15 +224,15 @@ export class DurableMirror {
 function request(req) {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error("IndexedDB request failed"));
+    req.onerror = () => reject(req.error || new Error('IndexedDB request failed'));
   });
 }
 
 function done(tx) {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
-    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
   });
 }
 
@@ -245,13 +249,14 @@ function each(store, range, fn) {
       fn(cursor.value);
       cursor.continue();
     };
-    req.onerror = () => reject(req.error || new Error("cursor failed"));
+    req.onerror = () => reject(req.error || new Error('cursor failed'));
   });
 }
 
 const scenarioRange = (s) => IDBKeyRange.bound([s, LOWEST], [s, HIGHEST]);
 const nodeRange = (s, n) => IDBKeyRange.bound([s, n, LOWEST], [s, n, HIGHEST]);
-const storeRange = (s, n, store) => IDBKeyRange.bound([s, n, store, LOWEST], [s, n, store, HIGHEST]);
+const storeRange = (s, n, store) =>
+  IDBKeyRange.bound([s, n, store, LOWEST], [s, n, store, HIGHEST]);
 
 // Delete a scenario's records: every node's (`nodes` null) or the listed ones'.
 function deleteScope(logs, kv, scenario, nodes) {
@@ -286,7 +291,7 @@ export class LabStorage {
     this.writes = 0;
     let persist = true;
     try {
-      persist = localStorage.getItem(PERSIST_KEY) !== "0";
+      persist = localStorage.getItem(PERSIST_KEY) !== '0';
     } catch {
       // No localStorage: keep the default.
     }
@@ -309,11 +314,11 @@ export class LabStorage {
   // Turn persistence on or off. Turning it on stores the mirror for
   // `scenarioId` (see `syncFromMirror`), so the ops skipped while it was off
   // leave no gap. `nodes`: null for every node, or the ids this tab hosts.
-  setPersist(on, scenarioId = "", nodes = null) {
+  setPersist(on, scenarioId = '', nodes = null) {
     const was = this.persist;
     this.persist = Boolean(on) && this.available;
     try {
-      localStorage.setItem(PERSIST_KEY, this.persist ? "1" : "0");
+      localStorage.setItem(PERSIST_KEY, this.persist ? '1' : '0');
     } catch {
       // Not remembered; the toggle still applies to this page.
     }
@@ -329,7 +334,7 @@ export class LabStorage {
     const scope = nodes ? new Set(nodes.map(Number)) : null;
     // A snapshot now: ops drained after this point are written after it.
     const records = this.mirror.records(scenarioId, scope);
-    this.pending.push({ kind: "replace", scenarioId, nodes: scope ? [...scope] : null, records });
+    this.pending.push({ kind: 'replace', scenarioId, nodes: scope ? [...scope] : null, records });
     if (scope) for (const n of scope) this.forgotten.delete(n);
     else this.forgotten.clear();
     this.schedule();
@@ -346,15 +351,18 @@ export class LabStorage {
         req = indexedDB.open(DB_NAME, DB_VERSION);
       } catch (err) {
         this.available = false;
-        this.hooks.onError(err, "open storage");
+        this.hooks.onError(err, 'open storage');
         resolve(null);
         return;
       }
       req.onupgradeneeded = () => {
         const db = req.result;
-        if (!db.objectStoreNames.contains("logs")) db.createObjectStore("logs", { keyPath: ["scenario", "node", "store", "index"] });
-        if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv", { keyPath: ["scenario", "node", "store", "key"] });
-        if (!db.objectStoreNames.contains("scenarios")) db.createObjectStore("scenarios", { keyPath: "id" });
+        if (!db.objectStoreNames.contains('logs'))
+          db.createObjectStore('logs', { keyPath: ['scenario', 'node', 'store', 'index'] });
+        if (!db.objectStoreNames.contains('kv'))
+          db.createObjectStore('kv', { keyPath: ['scenario', 'node', 'store', 'key'] });
+        if (!db.objectStoreNames.contains('scenarios'))
+          db.createObjectStore('scenarios', { keyPath: 'id' });
       };
       req.onsuccess = () => {
         this.db = req.result;
@@ -367,7 +375,7 @@ export class LabStorage {
       };
       req.onerror = () => {
         this.available = false;
-        this.hooks.onError(req.error || new Error("IndexedDB refused to open"), "open storage");
+        this.hooks.onError(req.error || new Error('IndexedDB refused to open'), 'open storage');
         resolve(null);
       };
       req.onblocked = () => resolve(null);
@@ -387,7 +395,7 @@ export class LabStorage {
       const op = decodeOp(raw);
       this.mirror.apply(op);
       const store = this.persist && scenarioId;
-      if (op.op === "clear_all") {
+      if (op.op === 'clear_all') {
         // A node that restarts from nothing is consistent again from here on.
         this.forgotten.delete(op.node);
         if (store) writable.push(op);
@@ -398,7 +406,7 @@ export class LabStorage {
       }
     }
     if (!writable.length) return;
-    this.pending.push({ kind: "ops", scenarioId, ops: writable });
+    this.pending.push({ kind: 'ops', scenarioId, ops: writable });
     this.schedule();
   }
 
@@ -413,51 +421,57 @@ export class LabStorage {
     const jobs = this.pending;
     this.pending = [];
     if (!jobs.length) return;
-    this.chain = this.chain.then(() => this.writeJobs(jobs)).catch((err) => this.hooks.onError(err, "write durable state"));
+    this.chain = this.chain
+      .then(() => this.writeJobs(jobs))
+      .catch((err) => this.hooks.onError(err, 'write durable state'));
   }
 
   async writeJobs(jobs) {
     const db = await this.open();
     if (!db) return;
-    const tx = db.transaction(["logs", "kv"], "readwrite");
-    const logs = tx.objectStore("logs");
-    const kv = tx.objectStore("kv");
+    const tx = db.transaction(['logs', 'kv'], 'readwrite');
+    const logs = tx.objectStore('logs');
+    const kv = tx.objectStore('kv');
     for (const job of jobs) {
       const s = job.scenarioId;
-      if (job.kind === "replace") {
+      if (job.kind === 'replace') {
         deleteScope(logs, kv, s, job.nodes);
         for (const r of job.records.logs) logs.put(r);
         for (const r of job.records.kv) kv.put(r);
         this.writes += job.records.logs.length + job.records.kv.length;
         continue;
       }
-      if (job.kind === "delete") {
+      if (job.kind === 'delete') {
         deleteScope(logs, kv, s, job.nodes);
         continue;
       }
       for (const op of job.ops) {
         const n = op.node;
         switch (op.op) {
-          case "append":
+          case 'append':
             logs.put({ scenario: s, node: n, store: op.store, index: op.index, bytes: op.bytes });
             break;
-          case "truncate_before":
-            logs.delete(IDBKeyRange.bound([s, n, op.store, LOWEST], [s, n, op.store, op.index], false, true));
+          case 'truncate_before':
+            logs.delete(
+              IDBKeyRange.bound([s, n, op.store, LOWEST], [s, n, op.store, op.index], false, true),
+            );
             break;
-          case "truncate_from":
-            logs.delete(IDBKeyRange.bound([s, n, op.store, op.index], [s, n, op.store, HIGHEST], false, true));
+          case 'truncate_from':
+            logs.delete(
+              IDBKeyRange.bound([s, n, op.store, op.index], [s, n, op.store, HIGHEST], false, true),
+            );
             break;
-          case "put":
+          case 'put':
             kv.put({ scenario: s, node: n, store: op.store, key: op.key, value: op.value });
             break;
-          case "delete":
+          case 'delete':
             kv.delete([s, n, op.store, op.key]);
             break;
-          case "clear":
+          case 'clear':
             logs.delete(storeRange(s, n, op.store));
             kv.delete(storeRange(s, n, op.store));
             break;
-          case "clear_all":
+          case 'clear_all':
             logs.delete(nodeRange(s, n));
             kv.delete(nodeRange(s, n));
             break;
@@ -486,7 +500,7 @@ export class LabStorage {
     await this.flush();
     const db = await this.open();
     if (!db) return images;
-    const tx = db.transaction(["logs", "kv"], "readonly");
+    const tx = db.transaction(['logs', 'kv'], 'readonly');
     const range = scenarioRange(scenarioId);
     const image = (node) => {
       const key = String(node);
@@ -494,11 +508,11 @@ export class LabStorage {
       return images[key];
     };
     // The cursor yields keys in order, so log entries arrive sorted by index.
-    await each(tx.objectStore("logs"), range, (r) => {
+    await each(tx.objectStore('logs'), range, (r) => {
       const img = image(r.node);
       (img.logs[r.store] ||= []).push({ index: r.index, bytes: bytesToBase64(r.bytes) });
     });
-    await each(tx.objectStore("kv"), range, (r) => {
+    await each(tx.objectStore('kv'), range, (r) => {
       const img = image(r.node);
       (img.kv[r.store] ||= {})[r.key] = bytesToBase64(r.value);
     });
@@ -512,10 +526,11 @@ export class LabStorage {
     if (!scenarioId) return out;
     const db = await this.open();
     if (!db) return out;
-    const tx = db.transaction(["logs", "kv"], "readonly");
+    const tx = db.transaction(['logs', 'kv'], 'readonly');
     const range = scenarioRange(scenarioId);
-    const node = (id) => (out.nodes[id] ||= { bytes: 0, logEntries: 0, kvEntries: 0, stores: new Set() });
-    await each(tx.objectStore("logs"), range, (r) => {
+    const node = (id) =>
+      (out.nodes[id] ||= { bytes: 0, logEntries: 0, kvEntries: 0, stores: new Set() });
+    await each(tx.objectStore('logs'), range, (r) => {
       const n = node(r.node);
       const size = r.bytes ? r.bytes.byteLength : 0;
       n.bytes += size;
@@ -524,7 +539,7 @@ export class LabStorage {
       out.total.bytes += size;
       out.total.logEntries += 1;
     });
-    await each(tx.objectStore("kv"), range, (r) => {
+    await each(tx.objectStore('kv'), range, (r) => {
       const n = node(r.node);
       const size = r.value ? r.value.byteLength : 0;
       n.bytes += size;
@@ -545,7 +560,7 @@ export class LabStorage {
     if (!scenarioId) return;
     const n = Number(nodeId);
     this.forgotten.add(n);
-    this.pending.push({ kind: "delete", scenarioId, nodes: [n] });
+    this.pending.push({ kind: 'delete', scenarioId, nodes: [n] });
     await this.flush();
   }
 
@@ -555,7 +570,7 @@ export class LabStorage {
   async forgetScenario(scenarioId, nodes = [], whole = true) {
     if (!scenarioId) return;
     for (const n of nodes) this.forgotten.add(Number(n));
-    this.pending.push({ kind: "delete", scenarioId, nodes: whole ? null : nodes.map(Number) });
+    this.pending.push({ kind: 'delete', scenarioId, nodes: whole ? null : nodes.map(Number) });
     await this.flush();
   }
 
@@ -564,8 +579,13 @@ export class LabStorage {
   async saveScenario(doc) {
     const db = await this.open();
     if (!db || !doc.id) return false;
-    const tx = db.transaction("scenarios", "readwrite");
-    tx.objectStore("scenarios").put({ id: doc.id, name: doc.name || "", json: JSON.stringify(doc), updated: Date.now() });
+    const tx = db.transaction('scenarios', 'readwrite');
+    tx.objectStore('scenarios').put({
+      id: doc.id,
+      name: doc.name || '',
+      json: JSON.stringify(doc),
+      updated: Date.now(),
+    });
     await done(tx);
     return true;
   }
@@ -573,17 +593,19 @@ export class LabStorage {
   async listScenarios() {
     const db = await this.open();
     if (!db) return [];
-    const tx = db.transaction("scenarios", "readonly");
-    const rows = await request(tx.objectStore("scenarios").getAll());
+    const tx = db.transaction('scenarios', 'readonly');
+    const rows = await request(tx.objectStore('scenarios').getAll());
     await done(tx);
-    return rows.map((r) => ({ id: r.id, name: r.name, updated: r.updated })).sort((a, b) => b.updated - a.updated);
+    return rows
+      .map((r) => ({ id: r.id, name: r.name, updated: r.updated }))
+      .sort((a, b) => b.updated - a.updated);
   }
 
   async loadScenario(id) {
     const db = await this.open();
     if (!db) return null;
-    const tx = db.transaction("scenarios", "readonly");
-    const row = await request(tx.objectStore("scenarios").get(id));
+    const tx = db.transaction('scenarios', 'readonly');
+    const row = await request(tx.objectStore('scenarios').get(id));
     await done(tx);
     return row ? JSON.parse(row.json) : null;
   }
@@ -591,12 +613,12 @@ export class LabStorage {
   // Delete a saved scenario: its document and every stored record.
   async deleteScenario(id) {
     if (!id) return;
-    this.pending.push({ kind: "delete", scenarioId: id, nodes: null });
+    this.pending.push({ kind: 'delete', scenarioId: id, nodes: null });
     await this.flush();
     const db = await this.open();
     if (!db) return;
-    const tx = db.transaction("scenarios", "readwrite");
-    tx.objectStore("scenarios").delete(id);
+    const tx = db.transaction('scenarios', 'readwrite');
+    tx.objectStore('scenarios').delete(id);
     await done(tx);
   }
 }

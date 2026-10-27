@@ -10,7 +10,11 @@ test('archived performance titles distinguish both run IDs and dates', () => {
     ['2026-10-23-pinned-kafka-run-39865512647', 'rf3-regression-v2'],
   ];
   const titles = reports.map(([run, workload]) => {
-    const title = docTitle(`Performance budget: ${workload}`, `broker/operations/performance-budget-runs/${run}/performance-budget`, 'Broker');
+    const title = docTitle(
+      `Performance budget: ${workload}`,
+      `broker/operations/performance-budget-runs/${run}/performance-budget`,
+      'Broker',
+    );
     assert.ok(`${title} | krabka docs`.length <= 80);
     assert.ok(title.includes(run.slice(0, 10)));
     assert.ok(title.includes(run.split('-run-')[1]));
@@ -21,7 +25,13 @@ test('archived performance titles distinguish both run IDs and dates', () => {
 });
 
 test('ordinary guide titles and component labels are unchanged', () => {
-  assert.equal(docTitle('Configuration', 'broker/config-reference', 'Broker'), 'Configuration (Broker)');
-  assert.equal(docTitle('Performance budget', 'broker/operations/performance-budget', 'Broker'), 'Performance budget (Broker)');
+  assert.equal(
+    docTitle('Configuration', 'broker/config-reference', 'Broker'),
+    'Configuration (Broker)',
+  );
+  assert.equal(
+    docTitle('Performance budget', 'broker/operations/performance-budget', 'Broker'),
+    'Performance budget (Broker)',
+  );
   assert.equal(docTitle('Guide', 'other/guide'), 'Guide');
 });

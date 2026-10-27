@@ -62,7 +62,8 @@ function highestSemverTag(tags: string[]): string | null {
     const newer =
       !best ||
       parts[0] > best.parts[0] ||
-      (parts[0] === best.parts[0] && (parts[1] > best.parts[1] || (parts[1] === best.parts[1] && parts[2] > best.parts[2])));
+      (parts[0] === best.parts[0] &&
+        (parts[1] > best.parts[1] || (parts[1] === best.parts[1] && parts[2] > best.parts[2])));
     if (newer) best = { tag, parts };
   }
   return best?.tag ?? null;
@@ -70,16 +71,21 @@ function highestSemverTag(tags: string[]): string | null {
 
 function tagRelease(repo: string, tags: string[]): { tagName: string; url: string } | null {
   const tagName = highestSemverTag(tags);
-  return tagName ? { tagName, url: `https://github.com/krabka-io/${repo}/releases/tag/${tagName}` } : null;
+  return tagName
+    ? { tagName, url: `https://github.com/krabka-io/${repo}/releases/tag/${tagName}` }
+    : null;
 }
 
 export async function getEcosystemVersions(): Promise<VersionSnapshot> {
   const builtAt = new Date().toISOString();
   let snapshotCommitDate: string | null = null;
   try {
-    snapshotCommitDate = execSync('git log -1 --format=%cI -- src/data/ecosystem-versions.json', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 2000,
-    }).trim() || null;
+    snapshotCommitDate =
+      execSync('git log -1 --format=%cI -- src/data/ecosystem-versions.json', {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+        timeout: 2000,
+      }).trim() || null;
   } catch {
     // Source archives may not have Git metadata.
   }
@@ -88,9 +94,17 @@ export async function getEcosystemVersions(): Promise<VersionSnapshot> {
     releaseTrack: releaseTrack(item.releaseVersion),
     dataSource: 'Cached',
     changelogUrl: item.releaseUrl || `https://github.com/krabka-io/${item.repo}/commits/main`,
-    compareUrl: item.releaseVersion ? `https://github.com/krabka-io/${item.repo}/compare/${item.releaseVersion}...main` : null,
+    compareUrl: item.releaseVersion
+      ? `https://github.com/krabka-io/${item.repo}/compare/${item.releaseVersion}...main`
+      : null,
   }));
-  const cached: VersionSnapshot = { repos: cachedRepos, source: 'Cached', builtAt, checkedAt: null, snapshotCommitDate };
+  const cached: VersionSnapshot = {
+    repos: cachedRepos,
+    source: 'Cached',
+    builtAt,
+    checkedAt: null,
+    snapshotCommitDate,
+  };
   const token = resolveGitHubToken();
 
   // If no token is found, return the cached fallback data immediately
@@ -141,7 +155,9 @@ export async function getEcosystemVersions(): Promise<VersionSnapshot> {
     });
 
     if (!response.ok) {
-      console.warn(`GitHub GraphQL responded with status ${response.status}; using cached versions.`);
+      console.warn(
+        `GitHub GraphQL responded with status ${response.status}; using cached versions.`,
+      );
       return cached;
     }
 
@@ -152,13 +168,18 @@ export async function getEcosystemVersions(): Promise<VersionSnapshot> {
     const resolved: EcosystemRepo[] = await Promise.all(
       fallbackData.map(async (fallbackItem) => {
         const liveRepo = liveNodes.find((n: { name: string }) => n.name === fallbackItem.repo);
-        if (!liveRepo?.defaultBranchRef?.target?.oid) return cachedRepos.find((item) => item.repo === fallbackItem.repo)!;
+        if (!liveRepo?.defaultBranchRef?.target?.oid)
+          return cachedRepos.find((item) => item.repo === fallbackItem.repo)!;
         // A repository can tag a version without publishing a GitHub Release.
         // Fall back to its highest semver tag, so the page and `versions.json` agree.
         const release =
           liveRepo?.latestRelease ??
-          tagRelease(fallbackItem.repo, liveRepo?.tags?.nodes?.map((n: { name: string }) => n.name) ?? []);
-        const mainSha = liveRepo?.defaultBranchRef?.target?.oid?.slice(0, 7) || fallbackItem.mainCommit;
+          tagRelease(
+            fallbackItem.repo,
+            liveRepo?.tags?.nodes?.map((n: { name: string }) => n.name) ?? [],
+          );
+        const mainSha =
+          liveRepo?.defaultBranchRef?.target?.oid?.slice(0, 7) || fallbackItem.mainCommit;
 
         let aheadBy: number | null = null;
         let compareUrl: string | null = null;
@@ -171,7 +192,7 @@ export async function getEcosystemVersions(): Promise<VersionSnapshot> {
               {
                 headers,
                 signal: AbortSignal.timeout(3000),
-              }
+              },
             );
             if (cmpRes.ok) {
               const cmpData = await cmpRes.json();
@@ -201,14 +222,20 @@ export async function getEcosystemVersions(): Promise<VersionSnapshot> {
           aheadBy: releaseVersion ? aheadBy : null,
           releaseTrack: releaseTrack(releaseVersion),
           dataSource: 'GitHub' as const,
-          changelogUrl: releaseUrl || `https://github.com/krabka-io/${fallbackItem.repo}/commits/main`,
+          changelogUrl:
+            releaseUrl || `https://github.com/krabka-io/${fallbackItem.repo}/commits/main`,
           compareUrl,
         };
-      })
+      }),
     );
 
     const liveCount = resolved.filter((item) => item.dataSource === 'GitHub').length;
-    return { ...cached, repos: resolved, source: liveCount === resolved.length ? 'GitHub' : liveCount ? 'Mixed' : 'Cached', checkedAt: liveCount ? new Date().toISOString() : null };
+    return {
+      ...cached,
+      repos: resolved,
+      source: liveCount === resolved.length ? 'GitHub' : liveCount ? 'Mixed' : 'Cached',
+      checkedAt: liveCount ? new Date().toISOString() : null,
+    };
   } catch (err) {
     console.warn('Failed to query GitHub for live repo status; using cached versions.', err);
     return cached;
@@ -259,7 +286,9 @@ async function loadReleases(): Promise<Release[]> {
         tag: item.releaseVersion!,
         name: `${item.repo} ${item.releaseVersion}`,
         url: item.releaseUrl!,
-        date: (versions as Record<string, { releaseDate?: string }>)[versionKeys[item.repo]]?.releaseDate ?? null,
+        date:
+          (versions as Record<string, { releaseDate?: string }>)[versionKeys[item.repo]]
+            ?.releaseDate ?? null,
         notes: '',
       }))
       .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
@@ -270,7 +299,11 @@ async function loadReleases(): Promise<Release[]> {
   try {
     const response = await fetch('https://api.github.com/graphql', {
       method: 'POST',
-      headers: { 'User-Agent': 'krabka-website-builder', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: {
+        'User-Agent': 'krabka-website-builder',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         query: `query {
           organization(login: "krabka-io") {
@@ -298,7 +331,9 @@ async function loadReleases(): Promise<Release[]> {
             repo: n.name,
             tag: r.tagName,
             // Some repositories title a release by its tag alone; name the repository too.
-            name: r.name?.toLowerCase().includes(n.name.replace('krabka-', '')) ? r.name : `${n.name} ${r.name || r.tagName}`,
+            name: r.name?.toLowerCase().includes(n.name.replace('krabka-', ''))
+              ? r.name
+              : `${n.name} ${r.name || r.tagName}`,
             url: r.url,
             date: r.publishedAt,
             notes: (r.description ?? '').trim(),

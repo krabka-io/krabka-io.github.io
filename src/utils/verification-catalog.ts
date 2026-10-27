@@ -268,7 +268,10 @@ export function renderInline(markdown: string, options: InlineOptions = {}): str
   });
   html = html.replace(BOLD_RE, '<strong>$1</strong>');
 
-  return html.replace(new RegExp(`${PLACEHOLDER}(\\d+)${PLACEHOLDER}`, 'g'), (_m, i: string) => codes[Number(i)] ?? '');
+  return html.replace(
+    new RegExp(`${PLACEHOLDER}(\\d+)${PLACEHOLDER}`, 'g'),
+    (_m, i: string) => codes[Number(i)] ?? '',
+  );
 }
 
 /** Plain text of inline markdown: link labels kept, syntax removed. */
@@ -337,11 +340,20 @@ export function renderBlocks(lines: string[], options: InlineOptions = {}): stri
         }
         i += 1;
       }
-      blocks.push(`<ul>${items.map((item) => `<li>${renderInline(item, options)}</li>`).join('')}</ul>`);
+      blocks.push(
+        `<ul>${items.map((item) => `<li>${renderInline(item, options)}</li>`).join('')}</ul>`,
+      );
       continue;
     }
     const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== '' && !lines[i].startsWith('|') && !lines[i].startsWith('```') && !/^\s*[-*] /.test(lines[i]) && !lines[i].startsWith('#')) {
+    while (
+      i < lines.length &&
+      lines[i].trim() !== '' &&
+      !lines[i].startsWith('|') &&
+      !lines[i].startsWith('```') &&
+      !/^\s*[-*] /.test(lines[i]) &&
+      !lines[i].startsWith('#')
+    ) {
       para.push(lines[i].trim());
       i += 1;
     }
@@ -455,14 +467,19 @@ function kernelRefs(cell: string): KernelRef[] {
   return refs;
 }
 
-function parseLedger(lines: string[], section: RawSection | undefined): { rows: LedgerRow[]; notes: string[] } {
+function parseLedger(
+  lines: string[],
+  section: RawSection | undefined,
+): { rows: LedgerRow[]; notes: string[] } {
   if (!section) return { rows: [], notes: [] };
   const table = readTable(lines, section.start, section.end, 'Kernel and contract');
   const notes = sectionProse(lines, section);
   // Since the broker split the ledger, the table sits under "### Production
   // kernels" and its lead-in and trailing paragraphs say how to read it. The
   // "### Cross-module theorems" prose is long and stays in the catalog page.
-  const kernelsAt = lines.findIndex((line, i) => i >= section.start && i < section.end && /^### Production kernels\s*$/.test(line));
+  const kernelsAt = lines.findIndex(
+    (line, i) => i >= section.start && i < section.end && /^### Production kernels\s*$/.test(line),
+  );
   if (kernelsAt !== -1) notes.push(...renderBlocks(lines.slice(kernelsAt + 1, section.end)));
   if (!table) return { rows: [], notes };
 
@@ -494,7 +511,14 @@ function parseLedger(lines: string[], section: RawSection | undefined): { rows: 
       host_html: renderInline(host),
       proofs: extractLinks(proof),
       preconditions_html: noPreconditions ? '' : renderInline(preconditions),
-      search: [claim, stripInline(host), stripInline(preconditions), ...kernels.map((k) => k.label), ...modules, areaForModule(module)]
+      search: [
+        claim,
+        stripInline(host),
+        stripInline(preconditions),
+        ...kernels.map((k) => k.label),
+        ...modules,
+        areaForModule(module),
+      ]
         .join(' ')
         .toLowerCase(),
     });
@@ -546,7 +570,10 @@ function subsections(lines: string[], section: RawSection): SubSection[] {
   return subs;
 }
 
-function parseStateright(lines: string[], section: RawSection | undefined): { inventory: InventoryArea[]; models: ModelNote[]; unmatched: string[] } {
+function parseStateright(
+  lines: string[],
+  section: RawSection | undefined,
+): { inventory: InventoryArea[]; models: ModelNote[]; unmatched: string[] } {
   if (!section) return { inventory: [], models: [], unmatched: [] };
   const table = readTable(lines, section.start, section.end, 'Area');
   const inventory: InventoryArea[] = [];
@@ -577,7 +604,14 @@ function parseStateright(lines: string[], section: RawSection | undefined): { in
     const attach = (entry: InventoryEntry, paragraph: string) => {
       let note = notes.get(entry.path);
       if (!note) {
-        note = { path: entry.path, url: entry.url, label: entry.label, area: areaName, paragraphs_html: [], search: '' };
+        note = {
+          path: entry.path,
+          url: entry.url,
+          label: entry.label,
+          area: areaName,
+          paragraphs_html: [],
+          search: '',
+        };
         notes.set(entry.path, note);
       }
       note.paragraphs_html.push(renderInline(paragraph));
@@ -588,12 +622,16 @@ function parseStateright(lines: string[], section: RawSection | undefined): { in
 
     for (const paragraph of sub.paragraphs) {
       // 1. A link to the model file itself.
-      const linked = extractLinks(paragraph).map((l) => repoPathOf(l.url)).filter((p): p is string => p !== null);
+      const linked = extractLinks(paragraph)
+        .map((l) => repoPathOf(l.url))
+        .filter((p): p is string => p !== null);
       let entry = entries.find((e) => linked.includes(e.path));
       // 2. The inventory label appears in the paragraph's opening clause.
       if (!entry) {
         const opening = normalizeLabel(paragraph.slice(0, Math.min(paragraph.length, 160)));
-        entry = entries.find((e) => pending.has(e.path) && opening.includes(normalizeLabel(e.label)));
+        entry = entries.find(
+          (e) => pending.has(e.path) && opening.includes(normalizeLabel(e.label)),
+        );
       }
       if (entry) {
         attach(entry, paragraph);
@@ -636,7 +674,9 @@ export function parseVerificationCatalog(markdown: string): VerificationCatalog 
 
   const { rows, notes } = parseLedger(lines, ledgerSection);
   const { inventory, models, unmatched } = parseStateright(lines, staterightSection);
-  const modelNotes = staterightSection ? sectionProse(lines, staterightSection).filter((block) => !isLeadIn(block)) : [];
+  const modelNotes = staterightSection
+    ? sectionProse(lines, staterightSection).filter((block) => !isLeadIn(block))
+    : [];
 
   return {
     ledger: rows,
@@ -656,5 +696,13 @@ function isLeadIn(html: string): boolean {
 }
 
 export function emptyCatalog(): VerificationCatalog {
-  return { ledger: [], ledgerNotes: [], modelNotes: [], inventory: [], models: [], unmatchedParagraphs: [], sections: [] };
+  return {
+    ledger: [],
+    ledgerNotes: [],
+    modelNotes: [],
+    inventory: [],
+    models: [],
+    unmatchedParagraphs: [],
+    sections: [],
+  };
 }

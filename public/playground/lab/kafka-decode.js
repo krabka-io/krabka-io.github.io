@@ -13,7 +13,7 @@
 // the bytes came out of a decompressed batch). `kind` picks the colour,
 // `status` is "ok" | "bad" | "warn" for checks (a CRC, an error code).
 
-import { crc32c, decompress, CODECS } from "./codecs.js";
+import { crc32c, decompress, CODECS } from './codecs.js';
 
 let schemasPromise = null;
 // Node checks hand the parsed JSON in; the page fetches it beside this module.
@@ -21,7 +21,7 @@ export function setSchemas(schemas) {
   schemasPromise = Promise.resolve(schemas);
 }
 export function loadSchemas() {
-  schemasPromise ??= fetch(new URL("./kafka-schemas.json", import.meta.url)).then((r) => {
+  schemasPromise ??= fetch(new URL('./kafka-schemas.json', import.meta.url)).then((r) => {
     if (!r.ok) throw new Error(`kafka-schemas.json: HTTP ${r.status}`);
     return r.json();
   });
@@ -29,7 +29,7 @@ export function loadSchemas() {
 }
 
 // Kafka's fixed id of the KRaft metadata topic (Uuid.METADATA_TOPIC_ID).
-export const METADATA_TOPIC_ID = "AAAAAAAAAAAAAAAAAAAAAQ";
+export const METADATA_TOPIC_ID = 'AAAAAAAAAAAAAAAAAAAAAQ';
 export const KAFKA_PORTS = new Set([9092, 9093]);
 
 export class Truncated extends Error {
@@ -49,15 +49,56 @@ export class Reader {
   need(n) {
     if (this.pos + n > this.end) throw new Truncated(this.end, this.pos + n - this.end);
   }
-  i8() { this.need(1); return this.view.getInt8(this.pos++); }
-  u8() { this.need(1); return this.bytes[this.pos++]; }
-  i16() { this.need(2); const v = this.view.getInt16(this.pos); this.pos += 2; return v; }
-  u16() { this.need(2); const v = this.view.getUint16(this.pos); this.pos += 2; return v; }
-  i32() { this.need(4); const v = this.view.getInt32(this.pos); this.pos += 4; return v; }
-  u32() { this.need(4); const v = this.view.getUint32(this.pos); this.pos += 4; return v; }
-  i64() { this.need(8); const v = this.view.getBigInt64(this.pos); this.pos += 8; return v; }
-  f64() { this.need(8); const v = this.view.getFloat64(this.pos); this.pos += 8; return v; }
-  take(n) { this.need(n); const v = this.bytes.subarray(this.pos, this.pos + n); this.pos += n; return v; }
+  i8() {
+    this.need(1);
+    return this.view.getInt8(this.pos++);
+  }
+  u8() {
+    this.need(1);
+    return this.bytes[this.pos++];
+  }
+  i16() {
+    this.need(2);
+    const v = this.view.getInt16(this.pos);
+    this.pos += 2;
+    return v;
+  }
+  u16() {
+    this.need(2);
+    const v = this.view.getUint16(this.pos);
+    this.pos += 2;
+    return v;
+  }
+  i32() {
+    this.need(4);
+    const v = this.view.getInt32(this.pos);
+    this.pos += 4;
+    return v;
+  }
+  u32() {
+    this.need(4);
+    const v = this.view.getUint32(this.pos);
+    this.pos += 4;
+    return v;
+  }
+  i64() {
+    this.need(8);
+    const v = this.view.getBigInt64(this.pos);
+    this.pos += 8;
+    return v;
+  }
+  f64() {
+    this.need(8);
+    const v = this.view.getFloat64(this.pos);
+    this.pos += 8;
+    return v;
+  }
+  take(n) {
+    this.need(n);
+    const v = this.bytes.subarray(this.pos, this.pos + n);
+    this.pos += n;
+    return v;
+  }
   uvarint() {
     let v = 0;
     for (let shift = 0; shift < 35; shift += 7) {
@@ -65,9 +106,12 @@ export class Reader {
       v += (b & 0x7f) * 2 ** shift;
       if (b < 0x80) return v;
     }
-    throw new Error("varint longer than 5 bytes");
+    throw new Error('varint longer than 5 bytes');
   }
-  varint() { const u = this.uvarint(); return u % 2 ? -(u + 1) / 2 : u / 2; }
+  varint() {
+    const u = this.uvarint();
+    return u % 2 ? -(u + 1) / 2 : u / 2;
+  }
   varlong() {
     let v = 0n;
     for (let shift = 0n; shift < 70n; shift += 7n) {
@@ -75,110 +119,178 @@ export class Reader {
       v |= BigInt(b & 0x7f) << shift;
       if (b < 0x80) return (v >> 1n) ^ -(v & 1n);
     }
-    throw new Error("varlong longer than 10 bytes");
+    throw new Error('varlong longer than 10 bytes');
   }
 }
 
 // A version range of the schemas: "none", "3", "3+", "3-7".
 export function inVersion(range, v) {
-  if (!range || range === "none") return false;
-  const plus = range.endsWith("+");
-  const [lo, hi] = range.replace("+", "").split("-").map(Number);
+  if (!range || range === 'none') return false;
+  const plus = range.endsWith('+');
+  const [lo, hi] = range.replace('+', '').split('-').map(Number);
   if (plus) return v >= lo;
   return hi === undefined ? v === lo : v >= lo && v <= hi;
 }
 
-const utf8 = new TextDecoder("utf-8", { fatal: true });
-const latin = new TextDecoder("latin1");
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+const latin = new TextDecoder('latin1');
 export function uuidB64(bytes) {
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
-const hex = (bytes, max = 24) => Array.from(bytes.subarray(0, max), (b) => b.toString(16).padStart(2, "0")).join(" ") + (bytes.length > max ? " …" : "");
-export const fmtInt = (v) => (typeof v === "bigint" ? v.toString() : String(v));
+const hex = (bytes, max = 24) =>
+  Array.from(bytes.subarray(0, max), (b) => b.toString(16).padStart(2, '0')).join(' ') +
+  (bytes.length > max ? ' …' : '');
+export const fmtInt = (v) => (typeof v === 'bigint' ? v.toString() : String(v));
 
 const node = (label, start, end, buf, extra = {}) => ({ label, start, end, buf, ...extra });
 
 // ---- schema-driven messages ---------------------------------------------------------------
 
-const PRIMITIVE = new Set(["int8", "int16", "uint16", "int32", "uint32", "int64", "float64", "bool", "uuid", "string", "bytes", "records"]);
+const PRIMITIVE = new Set([
+  'int8',
+  'int16',
+  'uint16',
+  'int32',
+  'uint32',
+  'int64',
+  'float64',
+  'bool',
+  'uuid',
+  'string',
+  'bytes',
+  'records',
+]);
 
 // A value's text and colour for a primitive field.
 function annotate(field, value, schemas, out) {
   const name = field.n;
-  if (field.t === "int16" && /ErrorCode$/.test(name)) {
-    const err = schemas.errors[value] ?? "UNKNOWN";
+  if (field.t === 'int16' && /ErrorCode$/.test(name)) {
+    const err = schemas.errors[value] ?? 'UNKNOWN';
     out.value = `${value} ${err}`;
-    out.kind = "err";
-    out.status = value === 0 ? "ok" : "bad";
+    out.kind = 'err';
+    out.status = value === 0 ? 'ok' : 'bad';
     if (value !== 0) out.error = { code: value, name: err };
-  } else if (field.t === "int16" && /ApiKey$/.test(name) && schemas.apiNames[value]) {
+  } else if (field.t === 'int16' && /ApiKey$/.test(name) && schemas.apiNames[value]) {
     out.value = `${value} ${schemas.apiNames[value]}`;
   }
 }
 
 async function readPrimitive(t, r, flexible, nullable, schemas, ctx, field, buf) {
   const start = r.pos;
-  const out = { kind: "int" };
+  const out = { kind: 'int' };
   switch (t) {
-    case "int8": out.value = r.i8(); break;
-    case "int16": out.value = r.i16(); break;
-    case "uint16": out.value = r.u16(); break;
-    case "int32": out.value = r.i32(); break;
-    case "uint32": out.value = r.u32(); break;
-    case "int64": out.value = r.i64(); break;
-    case "float64": out.value = r.f64(); break;
-    case "bool": out.value = r.u8() !== 0; out.kind = "bool"; break;
-    case "uuid": {
+    case 'int8':
+      out.value = r.i8();
+      break;
+    case 'int16':
+      out.value = r.i16();
+      break;
+    case 'uint16':
+      out.value = r.u16();
+      break;
+    case 'int32':
+      out.value = r.i32();
+      break;
+    case 'uint32':
+      out.value = r.u32();
+      break;
+    case 'int64':
+      out.value = r.i64();
+      break;
+    case 'float64':
+      out.value = r.f64();
+      break;
+    case 'bool':
+      out.value = r.u8() !== 0;
+      out.kind = 'bool';
+      break;
+    case 'uuid': {
       const b = r.take(16);
       out.value = uuidB64(b);
       out.note = hex(b, 16);
-      out.kind = "str";
+      out.kind = 'str';
       break;
     }
-    case "string": {
+    case 'string': {
       const lenStart = r.pos;
       const len = flexible ? r.uvarint() - 1 : r.i16();
-      out.kind = "str";
-      out.children = [node(flexible ? "Length (compact, +1)" : "Length", lenStart, r.pos, buf, { value: len, kind: "len" })];
+      out.kind = 'str';
+      out.children = [
+        node(flexible ? 'Length (compact, +1)' : 'Length', lenStart, r.pos, buf, {
+          value: len,
+          kind: 'len',
+        }),
+      ];
       if (len < 0) out.value = null;
       else {
         const s = r.take(len);
         out.value = latin.decode(s);
-        try { out.value = utf8.decode(s); } catch { /* keep latin1 */ }
-        out.children.push(node("Characters", r.pos - len, r.pos, buf, { value: JSON.stringify(out.value), kind: "str" }));
+        try {
+          out.value = utf8.decode(s);
+        } catch {
+          /* keep latin1 */
+        }
+        out.children.push(
+          node('Characters', r.pos - len, r.pos, buf, {
+            value: JSON.stringify(out.value),
+            kind: 'str',
+          }),
+        );
       }
       break;
     }
-    case "bytes":
-    case "records": {
+    case 'bytes':
+    case 'records': {
       const lenStart = r.pos;
       const len = flexible ? r.uvarint() - 1 : r.i32();
-      out.kind = "bytes";
-      out.children = [node(flexible ? "Length (compact, +1)" : "Length", lenStart, r.pos, buf, { value: len, kind: "len" })];
+      out.kind = 'bytes';
+      out.children = [
+        node(flexible ? 'Length (compact, +1)' : 'Length', lenStart, r.pos, buf, {
+          value: len,
+          kind: 'len',
+        }),
+      ];
       if (len < 0) out.value = null;
       else {
         const dataStart = r.pos;
         const avail = Math.min(len, r.end - r.pos);
         r.pos += avail;
         out.value = `${len} bytes`;
-        if (t === "records" && len > 0) {
-          const batches = await decodeBatches(r.bytes, dataStart, dataStart + avail, buf, schemas, ctx);
+        if (t === 'records' && len > 0) {
+          const batches = await decodeBatches(
+            r.bytes,
+            dataStart,
+            dataStart + avail,
+            buf,
+            schemas,
+            ctx,
+          );
           out.children.push(...batches.nodes);
           out.batches = batches.summaries;
-          out.value = `${len} bytes · ${batches.summaries.length} batch${batches.summaries.length === 1 ? "" : "es"}`;
-        } else if (len > 0) out.children.push(node("Data", dataStart, dataStart + avail, buf, { value: hex(r.bytes.subarray(dataStart, dataStart + avail)), kind: "bytes" }));
+          out.value = `${len} bytes · ${batches.summaries.length} batch${batches.summaries.length === 1 ? '' : 'es'}`;
+        } else if (len > 0)
+          out.children.push(
+            node('Data', dataStart, dataStart + avail, buf, {
+              value: hex(r.bytes.subarray(dataStart, dataStart + avail)),
+              kind: 'bytes',
+            }),
+          );
         if (avail < len) {
           // The bytes stop inside this field: keep what was read, stop the message here.
-          out.status = "warn";
+          out.status = 'warn';
           out.note = `${avail} of ${len} bytes captured`;
           ctx.state.stopped = new Truncated(r.end, len - avail);
         }
       }
       break;
     }
-    default: throw new Error(`no decoder for type ${t}`);
+    default:
+      throw new Error(`no decoder for type ${t}`);
   }
-  if (nullable === false && out.value === null) out.status = "warn";
+  if (nullable === false && out.value === null) out.status = 'warn';
   annotate(field, out.value, schemas, out);
   return node(field.n, start, r.pos, buf, { about: field.a, ...out });
 }
@@ -194,19 +306,41 @@ async function readField(field, r, ctx) {
   const fieldFlexible = field.fv ? inVersion(field.fv, version) : flexible;
   const nullable = inVersion(field.nv, version);
   const t = field.t;
-  if (t.startsWith("[]")) {
+  if (t.startsWith('[]')) {
     const elem = t.slice(2);
     const start = r.pos;
     const count = fieldFlexible ? r.uvarint() - 1 : r.i32();
-    const lenNode = node(fieldFlexible ? "Count (compact, +1)" : "Count", start, r.pos, buf, { value: count, kind: "len" });
-    const out = node(field.n, start, r.pos, buf, { about: field.a, kind: "array", value: count < 0 ? null : `[${count}]`, children: [lenNode] });
+    const lenNode = node(fieldFlexible ? 'Count (compact, +1)' : 'Count', start, r.pos, buf, {
+      value: count,
+      kind: 'len',
+    });
+    const out = node(field.n, start, r.pos, buf, {
+      about: field.a,
+      kind: 'array',
+      value: count < 0 ? null : `[${count}]`,
+      children: [lenNode],
+    });
     for (let i = 0; i < count && !ctx.state.stopped; i++) {
       const itemStart = r.pos;
       let item;
-      if (PRIMITIVE.has(elem)) item = await readPrimitive(elem, r, fieldFlexible, false, schemas, ctx, { n: `[${i}]`, t: elem }, buf);
+      if (PRIMITIVE.has(elem))
+        item = await readPrimitive(
+          elem,
+          r,
+          fieldFlexible,
+          false,
+          schemas,
+          ctx,
+          { n: `[${i}]`, t: elem },
+          buf,
+        );
       else {
         const children = await readStruct(structFields(field, elem, common), r, ctx);
-        item = node(`[${i}]`, itemStart, r.pos, buf, { kind: "struct", children, value: summarize(children) });
+        item = node(`[${i}]`, itemStart, r.pos, buf, {
+          kind: 'struct',
+          children,
+          value: summarize(children),
+        });
       }
       out.children.push(item);
       out.end = r.pos;
@@ -216,17 +350,24 @@ async function readField(field, r, ctx) {
   }
   if (PRIMITIVE.has(t)) {
     const n = await readPrimitive(t, r, fieldFlexible, nullable, schemas, ctx, field, buf);
-    if (["Name", "Topic", "TopicName"].includes(field.n) && typeof n.value === "string") ctx.topic = n.value;
-    if (field.n === "TopicId" && n.value === METADATA_TOPIC_ID) ctx.topic = "__cluster_metadata";
+    if (['Name', 'Topic', 'TopicName'].includes(field.n) && typeof n.value === 'string')
+      ctx.topic = n.value;
+    if (field.n === 'TopicId' && n.value === METADATA_TOPIC_ID) ctx.topic = '__cluster_metadata';
     return n;
   }
   const start = r.pos;
   if (nullable) {
     const marker = r.i8();
-    if (marker < 0) return node(field.n, start, r.pos, buf, { about: field.a, kind: "struct", value: null });
+    if (marker < 0)
+      return node(field.n, start, r.pos, buf, { about: field.a, kind: 'struct', value: null });
   }
   const children = await readStruct(structFields(field, t, common), r, ctx);
-  return node(field.n, start, r.pos, buf, { about: field.a, kind: "struct", children, value: summarize(children) });
+  return node(field.n, start, r.pos, buf, {
+    about: field.a,
+    kind: 'struct',
+    children,
+    value: summarize(children),
+  });
 }
 
 // A one-line digest of a struct: its first few scalar fields.
@@ -234,10 +375,17 @@ function summarize(children) {
   const parts = [];
   for (const c of children) {
     if (parts.length >= 3) break;
-    if (c.value === undefined || c.kind === "struct" || c.kind === "array" || c.kind === "tags" || c.kind === "len") continue;
-    parts.push(`${c.label}=${c.value === null ? "null" : String(c.value).slice(0, 32)}`);
+    if (
+      c.value === undefined ||
+      c.kind === 'struct' ||
+      c.kind === 'array' ||
+      c.kind === 'tags' ||
+      c.kind === 'len'
+    )
+      continue;
+    parts.push(`${c.label}=${c.value === null ? 'null' : String(c.value).slice(0, 32)}`);
   }
-  return parts.join(" ");
+  return parts.join(' ');
 }
 
 async function readStruct(fields, r, parentCtx) {
@@ -249,7 +397,13 @@ async function readStruct(fields, r, parentCtx) {
   // `ctx.state` is shared by every level, and what was read stays in the tree.
   const stop = (err) => {
     ctx.state.stopped = err;
-    out.push(node("Stopped here", r.pos, r.end, buf, { kind: "bytes", status: err instanceof Truncated ? "warn" : "bad", value: err.message }));
+    out.push(
+      node('Stopped here', r.pos, r.end, buf, {
+        kind: 'bytes',
+        status: err instanceof Truncated ? 'warn' : 'bad',
+        value: err.message,
+      }),
+    );
     return out;
   };
   for (const f of fields) {
@@ -262,28 +416,50 @@ async function readStruct(fields, r, parentCtx) {
     }
   }
   if (ctx.state.stopped) return out;
-  if (flexible) try {
-    const start = r.pos;
-    const count = r.uvarint();
-    const tags = node("Tagged fields", start, r.pos, buf, { kind: "tags", value: count, children: [node("Count", start, r.pos, buf, { value: count, kind: "len" })] });
-    for (let i = 0; i < count; i++) {
-      const tagStart = r.pos;
-      const tag = r.uvarint();
-      const size = r.uvarint();
-      const headerEnd = r.pos;
-      const field = fields.find((f) => f.tag === tag && inVersion(f.tv, version));
-      const sub = new Reader(r.bytes, r.pos, Math.min(r.end, r.pos + size));
-      let item;
-      if (field) item = await readField(field, sub, { ...ctx, flexible: true });
-      else item = node(`Unknown tag ${tag}`, sub.pos, sub.pos + size, buf, { value: hex(r.bytes.subarray(r.pos, r.pos + size)), kind: "bytes", status: "warn" });
-      r.pos += size;
-      tags.children.push(node(`Tag ${tag}`, tagStart, r.pos, buf, { kind: "tags", value: field ? field.n : "unknown", children: [node("Tag and size", tagStart, headerEnd, buf, { value: `${tag}, ${size} bytes`, kind: "len" }), item] }));
+  if (flexible)
+    try {
+      const start = r.pos;
+      const count = r.uvarint();
+      const tags = node('Tagged fields', start, r.pos, buf, {
+        kind: 'tags',
+        value: count,
+        children: [node('Count', start, r.pos, buf, { value: count, kind: 'len' })],
+      });
+      for (let i = 0; i < count; i++) {
+        const tagStart = r.pos;
+        const tag = r.uvarint();
+        const size = r.uvarint();
+        const headerEnd = r.pos;
+        const field = fields.find((f) => f.tag === tag && inVersion(f.tv, version));
+        const sub = new Reader(r.bytes, r.pos, Math.min(r.end, r.pos + size));
+        let item;
+        if (field) item = await readField(field, sub, { ...ctx, flexible: true });
+        else
+          item = node(`Unknown tag ${tag}`, sub.pos, sub.pos + size, buf, {
+            value: hex(r.bytes.subarray(r.pos, r.pos + size)),
+            kind: 'bytes',
+            status: 'warn',
+          });
+        r.pos += size;
+        tags.children.push(
+          node(`Tag ${tag}`, tagStart, r.pos, buf, {
+            kind: 'tags',
+            value: field ? field.n : 'unknown',
+            children: [
+              node('Tag and size', tagStart, headerEnd, buf, {
+                value: `${tag}, ${size} bytes`,
+                kind: 'len',
+              }),
+              item,
+            ],
+          }),
+        );
+      }
+      tags.end = r.pos;
+      out.push(count > 0 ? tags : Object.assign(tags, { label: 'Tagged fields (none)' }));
+    } catch (err) {
+      return stop(err);
     }
-    tags.end = r.pos;
-    out.push(count > 0 ? tags : Object.assign(tags, { label: "Tagged fields (none)" }));
-  } catch (err) {
-    return stop(err);
-  }
   return out;
 }
 
@@ -292,14 +468,29 @@ async function readStruct(fields, r, parentCtx) {
 export async function decodeMessage(msg, version, r, schemas, ctx = {}) {
   const flexible = inVersion(msg.flexible, version);
   ctx.state ??= { stopped: null };
-  return readStruct(msg.fields, r, { ...ctx, version, flexible, schemas, common: msg.common, buf: ctx.buf || "main" });
+  return readStruct(msg.fields, r, {
+    ...ctx,
+    version,
+    flexible,
+    schemas,
+    common: msg.common,
+    buf: ctx.buf || 'main',
+  });
 }
 
 // ---- frames ---------------------------------------------------------------------------------
 
 // The header of a request without decoding its body: what pairing needs.
 export function isSspiFrame(bytes) {
-  return bytes?.length >= 5 && bytes[0] === 83 && bytes[1] === 83 && bytes[2] === 80 && bytes[3] === 73 && bytes[4] >= 1 && bytes[4] <= 3;
+  return (
+    bytes?.length >= 5 &&
+    bytes[0] === 83 &&
+    bytes[1] === 83 &&
+    bytes[2] === 80 &&
+    bytes[3] === 73 &&
+    bytes[4] >= 1 &&
+    bytes[4] <= 3
+  );
 }
 
 export function peekRequest(bytes) {
@@ -326,12 +517,32 @@ function collectErrors(n, out = []) {
 export async function decodeFrame(bytes, { size = bytes.length, request, answers = null } = {}) {
   const schemas = await loadSchemas();
   const r = new Reader(bytes);
-  const root = node(request ? "Kafka request" : "Kafka response", 0, bytes.length, "main", { kind: "struct", children: [] });
-  const out = { root, apiKey: null, version: null, corr: null, clientId: null, errors: [], truncated: bytes.length < size, problems: [] };
+  const root = node(request ? 'Kafka request' : 'Kafka response', 0, bytes.length, 'main', {
+    kind: 'struct',
+    children: [],
+  });
+  const out = {
+    root,
+    apiKey: null,
+    version: null,
+    corr: null,
+    clientId: null,
+    errors: [],
+    truncated: bytes.length < size,
+    problems: [],
+  };
   try {
     const declared = r.i32();
-    root.children.push(node("Message size", 0, 4, "main", { value: declared, kind: "len", about: "Bytes after this 4-byte prefix.", status: declared + 4 === size ? undefined : "warn" }));
-    if (declared + 4 !== size) out.problems.push(`size prefix says ${declared + 4} bytes, the frame has ${size}`);
+    root.children.push(
+      node('Message size', 0, 4, 'main', {
+        value: declared,
+        kind: 'len',
+        about: 'Bytes after this 4-byte prefix.',
+        status: declared + 4 === size ? undefined : 'warn',
+      }),
+    );
+    if (declared + 4 !== size)
+      out.problems.push(`size prefix says ${declared + 4} bytes, the frame has ${size}`);
     let msg;
     let version;
     if (request) {
@@ -345,8 +556,14 @@ export async function decodeFrame(bytes, { size = bytes.length, request, answers
       const hv = msg && inVersion(msg.flexible, version) ? 2 : 1;
       const headerStart = r.pos;
       const header = await decodeMessage(schemas.headers.RequestHeader, hv, r, schemas);
-      out.clientId = header.find((n) => n.label === "ClientId")?.value ?? null;
-      root.children.push(node(`Request header v${hv}`, headerStart, r.pos, "main", { kind: "struct", children: header, value: `${schemas.apiNames[peek.apiKey] ?? `api ${peek.apiKey}`} v${version} · correlation ${peek.corr}` }));
+      out.clientId = header.find((n) => n.label === 'ClientId')?.value ?? null;
+      root.children.push(
+        node(`Request header v${hv}`, headerStart, r.pos, 'main', {
+          kind: 'struct',
+          children: header,
+          value: `${schemas.apiNames[peek.apiKey] ?? `api ${peek.apiKey}`} v${version} · correlation ${peek.corr}`,
+        }),
+      );
     } else {
       out.corr = peekCorrelation(bytes);
       if (answers) {
@@ -358,10 +575,21 @@ export async function decodeFrame(bytes, { size = bytes.length, request, answers
       const hv = msg && answers.apiKey !== 18 && inVersion(msg.flexible, version) ? 1 : 0;
       const headerStart = r.pos;
       const header = await decodeMessage(schemas.headers.ResponseHeader, hv, r, schemas);
-      root.children.push(node(`Response header v${hv}`, headerStart, r.pos, "main", { kind: "struct", children: header, value: `correlation ${out.corr}` }));
+      root.children.push(
+        node(`Response header v${hv}`, headerStart, r.pos, 'main', {
+          kind: 'struct',
+          children: header,
+          value: `correlation ${out.corr}`,
+        }),
+      );
       // A broker that does not support the ApiVersions version asked for
       // answers UNSUPPORTED_VERSION at version 0, which every client can read.
-      if (answers?.apiKey === 18 && version > 0 && r.end - r.pos >= 2 && r.view.getInt16(r.pos) === 35) {
+      if (
+        answers?.apiKey === 18 &&
+        version > 0 &&
+        r.end - r.pos >= 2 &&
+        r.view.getInt16(r.pos) === 35
+      ) {
         version = 0;
         root.note = `UNSUPPORTED_VERSION answers at v0, not the v${answers.version} asked for`;
       }
@@ -369,10 +597,31 @@ export async function decodeFrame(bytes, { size = bytes.length, request, answers
     const priv = schemas.private?.[out.apiKey];
     if (!msg && priv) {
       // krabka's own controller RPCs have hand-written codecs and no schema: name them, show the bytes.
-      root.children.push(node(`${priv.name} ${request ? "request" : "response"} body (krabka-private)`, r.pos, bytes.length, "main", { kind: "bytes", about: priv.about, value: `${bytes.length - r.pos} bytes, hand-written codec` }));
+      root.children.push(
+        node(
+          `${priv.name} ${request ? 'request' : 'response'} body (krabka-private)`,
+          r.pos,
+          bytes.length,
+          'main',
+          {
+            kind: 'bytes',
+            about: priv.about,
+            value: `${bytes.length - r.pos} bytes, hand-written codec`,
+          },
+        ),
+      );
     } else if (!msg) {
-      const why = request || answers ? `API key ${out.apiKey} has no schema here` : "no captured request has this correlation id";
-      root.children.push(node("Body (not decoded)", r.pos, bytes.length, "main", { kind: "bytes", status: "warn", value: why }));
+      const why =
+        request || answers
+          ? `API key ${out.apiKey} has no schema here`
+          : 'no captured request has this correlation id';
+      root.children.push(
+        node('Body (not decoded)', r.pos, bytes.length, 'main', {
+          kind: 'bytes',
+          status: 'warn',
+          value: why,
+        }),
+      );
       out.problems.push(why);
     } else {
       const bodyStart = r.pos;
@@ -381,15 +630,32 @@ export async function decodeFrame(bytes, { size = bytes.length, request, answers
       const body = await decodeMessage(msg, version, r, schemas, ctx);
       const err = ctx.state.stopped;
       const cut = err instanceof Truncated && out.truncated;
-      root.children.push(node(`${msg.name} v${version}${err ? " (stopped)" : ""}`, bodyStart, err ? bytes.length : r.pos, "main", { kind: "struct", children: body, status: err ? (cut ? "warn" : "bad") : undefined }));
-      if (err) out.problems.push(cut ? `the capture kept ${bytes.length} of ${size} bytes` : err.message);
+      root.children.push(
+        node(
+          `${msg.name} v${version}${err ? ' (stopped)' : ''}`,
+          bodyStart,
+          err ? bytes.length : r.pos,
+          'main',
+          { kind: 'struct', children: body, status: err ? (cut ? 'warn' : 'bad') : undefined },
+        ),
+      );
+      if (err)
+        out.problems.push(cut ? `the capture kept ${bytes.length} of ${size} bytes` : err.message);
       else if (r.pos < bytes.length) {
-        root.children.push(node("Trailing bytes", r.pos, bytes.length, "main", { kind: "bytes", status: "warn" }));
+        root.children.push(
+          node('Trailing bytes', r.pos, bytes.length, 'main', { kind: 'bytes', status: 'warn' }),
+        );
         out.problems.push(`${bytes.length - r.pos} bytes after the body`);
       }
     }
   } catch (err) {
-    root.children.push(node("Undecoded bytes", r.pos, bytes.length, "main", { kind: "bytes", status: "bad", value: err.message }));
+    root.children.push(
+      node('Undecoded bytes', r.pos, bytes.length, 'main', {
+        kind: 'bytes',
+        status: 'bad',
+        value: err.message,
+      }),
+    );
     out.problems.push(err.message);
   }
   out.errors = collectErrors(root);
@@ -398,16 +664,30 @@ export async function decodeFrame(bytes, { size = bytes.length, request, answers
 
 // ---- record batches -------------------------------------------------------------------------
 
-const CONTROL_TYPES = { 0: ["ABORT", "EndTxnMarker"], 1: ["COMMIT", "EndTxnMarker"], 2: ["LEADER_CHANGE", "LeaderChangeMessage"], 3: ["SNAPSHOT_HEADER", "SnapshotHeaderRecord"], 4: ["SNAPSHOT_FOOTER", "SnapshotFooterRecord"], 5: ["KRAFT_VERSION", "KRaftVersionRecord"], 6: ["KRAFT_VOTERS", "VotersRecord"] };
+const CONTROL_TYPES = {
+  0: ['ABORT', 'EndTxnMarker'],
+  1: ['COMMIT', 'EndTxnMarker'],
+  2: ['LEADER_CHANGE', 'LeaderChangeMessage'],
+  3: ['SNAPSHOT_HEADER', 'SnapshotHeaderRecord'],
+  4: ['SNAPSHOT_FOOTER', 'SnapshotFooterRecord'],
+  5: ['KRAFT_VERSION', 'KRaftVersionRecord'],
+  6: ['KRAFT_VOTERS', 'VotersRecord'],
+};
 
 // `int16 version` followed by a data schema at that version.
 async function versionPrefixed(name, r, schemas, buf) {
   const msg = schemas.data[name];
   const start = r.pos;
   const version = r.i16();
-  const children = [node("Version", start, r.pos, buf, { value: version, kind: "int" })];
+  const children = [node('Version', start, r.pos, buf, { value: version, kind: 'int' })];
   if (!msg || !inVersion(msg.valid, version)) {
-    children.push(node(`${name} body`, r.pos, r.end, buf, { kind: "bytes", status: "warn", value: `version ${version} has no schema here` }));
+    children.push(
+      node(`${name} body`, r.pos, r.end, buf, {
+        kind: 'bytes',
+        status: 'warn',
+        value: `version ${version} has no schema here`,
+      }),
+    );
     r.pos = r.end;
   } else children.push(...(await decodeMessage(msg, version, r, schemas, { buf })));
   return { children, value: `${name} v${version}` };
@@ -419,48 +699,101 @@ async function interpret(which, bytes, start, end, buf, ctx, batch, schemas) {
   const span = bytes.subarray(start, end);
   try {
     if (batch.control) {
-      if (which === "key") {
+      if (which === 'key') {
         const version = r.i16();
         const type = r.i16();
         batch.controlType = type;
-        return { value: `control ${CONTROL_TYPES[type]?.[0] ?? type}`, children: [node("Version", start, start + 2, buf, { value: version, kind: "int" }), node("Type", start + 2, start + 4, buf, { value: `${type} ${CONTROL_TYPES[type]?.[0] ?? "unknown"}`, kind: "int" })] };
+        return {
+          value: `control ${CONTROL_TYPES[type]?.[0] ?? type}`,
+          children: [
+            node('Version', start, start + 2, buf, { value: version, kind: 'int' }),
+            node('Type', start + 2, start + 4, buf, {
+              value: `${type} ${CONTROL_TYPES[type]?.[0] ?? 'unknown'}`,
+              kind: 'int',
+            }),
+          ],
+        };
       }
       const schema = CONTROL_TYPES[batch.controlType]?.[1];
       if (schema) return versionPrefixed(schema, r, schemas, buf);
-    } else if (ctx.topic === "__cluster_metadata" && which === "value") {
+    } else if (ctx.topic === '__cluster_metadata' && which === 'value') {
       const frameVersion = r.uvarint();
       const apiKey = r.uvarint();
       const apiVersion = r.uvarint();
       const name = schemas.metadata[apiKey];
-      const envelope = node("Envelope", start, r.pos, buf, { value: `frame v${frameVersion} · apiKey ${apiKey} · v${apiVersion}`, kind: "len", about: "MetadataRecordSerde: frame version, record apiKey and apiVersion, as unsigned varints." });
-      if (!name) return { value: `metadata apiKey ${apiKey}`, children: [envelope, node("Body", r.pos, end, buf, { kind: "bytes", status: "warn", value: "no schema for this apiKey" })] };
+      const envelope = node('Envelope', start, r.pos, buf, {
+        value: `frame v${frameVersion} · apiKey ${apiKey} · v${apiVersion}`,
+        kind: 'len',
+        about:
+          'MetadataRecordSerde: frame version, record apiKey and apiVersion, as unsigned varints.',
+      });
+      if (!name)
+        return {
+          value: `metadata apiKey ${apiKey}`,
+          children: [
+            envelope,
+            node('Body', r.pos, end, buf, {
+              kind: 'bytes',
+              status: 'warn',
+              value: 'no schema for this apiKey',
+            }),
+          ],
+        };
       const body = await decodeMessage(schemas.data[name], apiVersion, r, schemas, { buf });
       return { value: `${name} v${apiVersion}`, children: [envelope, ...body], record: name };
-    } else if (/^__consumer_offsets/.test(ctx.topic || "")) {
+    } else if (/^__consumer_offsets/.test(ctx.topic || '')) {
       const version = new DataView(bytes.buffer, bytes.byteOffset).getInt16(start);
-      if (which === "key" && version <= 1) {
+      if (which === 'key' && version <= 1) {
         batch.offsetKey = true;
-        return versionPrefixed("OffsetCommitKey", r, schemas, buf);
+        return versionPrefixed('OffsetCommitKey', r, schemas, buf);
       }
-      if (which === "value" && batch.offsetKey) return versionPrefixed("OffsetCommitValue", r, schemas, buf);
-      return { value: which === "key" ? `group metadata key v${version}` : `${span.length} bytes`, children: [] };
+      if (which === 'value' && batch.offsetKey)
+        return versionPrefixed('OffsetCommitValue', r, schemas, buf);
+      return {
+        value: which === 'key' ? `group metadata key v${version}` : `${span.length} bytes`,
+        children: [],
+      };
     }
   } catch (err) {
-    return { value: `${span.length} bytes`, children: [node("Not decoded", start, end, buf, { kind: "bytes", status: "warn", value: err.message })] };
+    return {
+      value: `${span.length} bytes`,
+      children: [
+        node('Not decoded', start, end, buf, { kind: 'bytes', status: 'warn', value: err.message }),
+      ],
+    };
   }
   // Confluent's schema registry framing: magic 0, then a 4-byte schema id.
   if (span.length >= 5 && span[0] === 0 && !ctx.plain) {
     const id = new DataView(bytes.buffer, bytes.byteOffset).getInt32(start + 1);
-    if (id > 0 && id < 1e6) return { value: `schema registry framing · schema id ${id} · ${span.length - 5} payload bytes`, children: [node("Magic byte", start, start + 1, buf, { value: 0, kind: "int" }), node("Schema id", start + 1, start + 5, buf, { value: id, kind: "int" }), node("Payload", start + 5, end, buf, { value: hex(span.subarray(5)), kind: "bytes" })] };
+    if (id > 0 && id < 1e6)
+      return {
+        value: `schema registry framing · schema id ${id} · ${span.length - 5} payload bytes`,
+        children: [
+          node('Magic byte', start, start + 1, buf, { value: 0, kind: 'int' }),
+          node('Schema id', start + 1, start + 5, buf, { value: id, kind: 'int' }),
+          node('Payload', start + 5, end, buf, { value: hex(span.subarray(5)), kind: 'bytes' }),
+        ],
+      };
   }
   try {
     const text = utf8.decode(span);
     if (!/[\u0000-\u0008\u000e-\u001f]/.test(text)) {
-      let kind = "text";
-      try { JSON.parse(text); kind = "JSON"; } catch { /* plain text */ }
-      return { value: JSON.stringify(text.length > 120 ? `${text.slice(0, 120)}…` : text), note: kind, children: [] };
+      let kind = 'text';
+      try {
+        JSON.parse(text);
+        kind = 'JSON';
+      } catch {
+        /* plain text */
+      }
+      return {
+        value: JSON.stringify(text.length > 120 ? `${text.slice(0, 120)}…` : text),
+        note: kind,
+        children: [],
+      };
     }
-  } catch { /* not UTF-8 */ }
+  } catch {
+    /* not UTF-8 */
+  }
   return { value: hex(span), children: [] };
 }
 
@@ -470,21 +803,21 @@ async function decodeRecord(bytes, r, buf, batch, ctx, schemas, index) {
   const field = (label, fn, extra = {}) => {
     const s = r.pos;
     const value = fn();
-    kids.push(node(label, s, r.pos, buf, { value: fmtInt(value), kind: "int", ...extra }));
+    kids.push(node(label, s, r.pos, buf, { value: fmtInt(value), kind: 'int', ...extra }));
     return value;
   };
-  const length = field("Length (varint)", () => r.varint(), { kind: "len" });
+  const length = field('Length (varint)', () => r.varint(), { kind: 'len' });
   const end = r.pos + length;
   const rr = new Reader(bytes, r.pos, Math.min(end, r.end));
   const sub = (label, fn, extra) => {
     const s = rr.pos;
     const value = fn();
-    kids.push(node(label, s, rr.pos, buf, { value: fmtInt(value), kind: "int", ...extra }));
+    kids.push(node(label, s, rr.pos, buf, { value: fmtInt(value), kind: 'int', ...extra }));
     return value;
   };
-  sub("Attributes", () => rr.i8());
-  const tsDelta = sub("Timestamp delta (varlong)", () => rr.varlong());
-  const offDelta = sub("Offset delta (varint)", () => rr.varint());
+  sub('Attributes', () => rr.i8());
+  const tsDelta = sub('Timestamp delta (varlong)', () => rr.varlong());
+  const offDelta = sub('Offset delta (varint)', () => rr.varint());
   const offset = batch.baseOffset + BigInt(offDelta);
   const timestamp = batch.baseTimestamp + tsDelta;
   kids[kids.length - 2].note = `timestamp ${timestamp}`;
@@ -492,40 +825,68 @@ async function decodeRecord(bytes, r, buf, batch, ctx, schemas, index) {
   const part = async (which) => {
     const lenStart = rr.pos;
     const len = rr.varint();
-    kids.push(node(`${which === "key" ? "Key" : "Value"} length (varint)`, lenStart, rr.pos, buf, { value: len, kind: "len" }));
+    kids.push(
+      node(`${which === 'key' ? 'Key' : 'Value'} length (varint)`, lenStart, rr.pos, buf, {
+        value: len,
+        kind: 'len',
+      }),
+    );
     if (len < 0) return null;
     rr.need(len);
     const s = rr.pos;
     rr.pos += len;
     const meaning = await interpret(which, bytes, s, s + len, buf, ctx, batch, schemas);
-    kids.push(node(which === "key" ? "Key" : "Value", s, s + len, buf, { kind: which === "key" ? "key" : "value", value: meaning.value, note: meaning.note, children: meaning.children?.length ? meaning.children : undefined }));
+    kids.push(
+      node(which === 'key' ? 'Key' : 'Value', s, s + len, buf, {
+        kind: which === 'key' ? 'key' : 'value',
+        value: meaning.value,
+        note: meaning.note,
+        children: meaning.children?.length ? meaning.children : undefined,
+      }),
+    );
     return meaning;
   };
   // Per record: this record's key says whether its value is an offset commit.
   batch.offsetKey = false;
-  const key = await part("key");
-  const value = await part("value");
+  const key = await part('key');
+  const value = await part('value');
   const hStart = rr.pos;
   const headerCount = rr.varint();
-  const headers = node("Headers", hStart, rr.pos, buf, { value: headerCount, kind: "array", children: [node("Count (varint)", hStart, rr.pos, buf, { value: headerCount, kind: "len" })] });
+  const headers = node('Headers', hStart, rr.pos, buf, {
+    value: headerCount,
+    kind: 'array',
+    children: [node('Count (varint)', hStart, rr.pos, buf, { value: headerCount, kind: 'len' })],
+  });
   for (let i = 0; i < headerCount; i++) {
     const s = rr.pos;
     const kl = rr.varint();
     const k = latin.decode(rr.take(kl));
     const vl = rr.varint();
     const v = vl < 0 ? null : rr.take(vl);
-    let text = v === null ? "null" : hex(v);
-    try { if (v) text = JSON.stringify(utf8.decode(v)); } catch { /* bytes */ }
-    headers.children.push(node(`[${i}] ${k}`, s, rr.pos, buf, { value: text, kind: "str" }));
+    let text = v === null ? 'null' : hex(v);
+    try {
+      if (v) text = JSON.stringify(utf8.decode(v));
+    } catch {
+      /* bytes */
+    }
+    headers.children.push(node(`[${i}] ${k}`, s, rr.pos, buf, { value: text, kind: 'str' }));
   }
   headers.end = rr.pos;
   kids.push(headers);
-  if (rr.pos !== end) kids.push(node("Unread record bytes", rr.pos, end, buf, { kind: "bytes", status: "bad" }));
+  if (rr.pos !== end)
+    kids.push(node('Unread record bytes', rr.pos, end, buf, { kind: 'bytes', status: 'bad' }));
   r.pos = end;
   return node(`Record ${index} · offset ${offset}`, start, end, buf, {
-    kind: "record", children: kids,
-    value: [key ? `key ${key.value}` : "null key", value ? value.value : "null value"].join(" · "),
-    summary: { offset, timestamp, key: key?.value ?? null, value: value?.value ?? null, record: value?.record },
+    kind: 'record',
+    children: kids,
+    value: [key ? `key ${key.value}` : 'null key', value ? value.value : 'null value'].join(' · '),
+    summary: {
+      offset,
+      timestamp,
+      key: key?.value ?? null,
+      value: value?.value ?? null,
+      record: value?.record,
+    },
   });
 }
 
@@ -538,18 +899,40 @@ export async function decodeBatches(bytes, start, end, buf, schemas, ctx = {}) {
   let pos = start;
   while (pos < end) {
     if (end - pos < 12) {
-      nodes.push(node("Partial batch header", pos, end, buf, { kind: "bytes", status: "warn", value: `${end - pos} bytes: a fetch may end mid-batch` }));
+      nodes.push(
+        node('Partial batch header', pos, end, buf, {
+          kind: 'bytes',
+          status: 'warn',
+          value: `${end - pos} bytes: a fetch may end mid-batch`,
+        }),
+      );
       break;
     }
     const length = view.getInt32(pos + 8);
     const batchEnd = pos + 12 + length;
     if (length < 49 || bytes[pos + 16] !== 2) {
       const magic = bytes[pos + 16];
-      nodes.push(node(magic === 0 || magic === 1 ? `Message set, magic ${magic} (not decoded)` : "Not a RecordBatch", pos, end, buf, { kind: "bytes", status: "bad", value: `batch length ${length}, magic ${magic}` }));
+      nodes.push(
+        node(
+          magic === 0 || magic === 1
+            ? `Message set, magic ${magic} (not decoded)`
+            : 'Not a RecordBatch',
+          pos,
+          end,
+          buf,
+          { kind: 'bytes', status: 'bad', value: `batch length ${length}, magic ${magic}` },
+        ),
+      );
       break;
     }
     if (batchEnd > end) {
-      nodes.push(node(`Partial batch at offset ${view.getBigInt64(pos)}`, pos, end, buf, { kind: "bytes", status: "warn", value: `${end - pos} of ${12 + length} bytes: a fetch may end mid-batch, or the capture kept a prefix` }));
+      nodes.push(
+        node(`Partial batch at offset ${view.getBigInt64(pos)}`, pos, end, buf, {
+          kind: 'bytes',
+          status: 'warn',
+          value: `${end - pos} of ${12 + length} bytes: a fetch may end mid-batch, or the capture kept a prefix`,
+        }),
+      );
       break;
     }
     const r = new Reader(bytes, pos, batchEnd);
@@ -557,47 +940,79 @@ export async function decodeBatches(bytes, start, end, buf, schemas, ctx = {}) {
     const f = (label, read, extra = {}) => {
       const s = r.pos;
       const value = read();
-      const n = node(label, s, r.pos, buf, { value: fmtInt(value), kind: "int", ...extra });
+      const n = node(label, s, r.pos, buf, { value: fmtInt(value), kind: 'int', ...extra });
       kids.push(n);
       return [value, n];
     };
-    const [baseOffset] = f("Base offset", () => r.i64(), { about: "Offset of the first record in this batch." });
-    f("Batch length", () => r.i32(), { kind: "len", about: "Bytes after this field: from the leader epoch to the end of the batch." });
-    const [epoch] = f("Partition leader epoch", () => r.i32(), { about: "The leader epoch when the leader appended this batch." });
-    f("Magic", () => r.i8(), { about: "RecordBatch format version: 2." });
+    const [baseOffset] = f('Base offset', () => r.i64(), {
+      about: 'Offset of the first record in this batch.',
+    });
+    f('Batch length', () => r.i32(), {
+      kind: 'len',
+      about: 'Bytes after this field: from the leader epoch to the end of the batch.',
+    });
+    const [epoch] = f('Partition leader epoch', () => r.i32(), {
+      about: 'The leader epoch when the leader appended this batch.',
+    });
+    f('Magic', () => r.i8(), { about: 'RecordBatch format version: 2.' });
     const crcStored = view.getUint32(r.pos);
     const crcComputed = crc32c(bytes.subarray(pos + 21, batchEnd));
     const crcOk = crcStored === crcComputed;
-    f("CRC-32C", () => r.u32(), {
-      kind: "crc", value: `0x${crcStored.toString(16).padStart(8, "0")}`, status: crcOk ? "ok" : "bad",
-      note: crcOk ? "matches the computed CRC" : `computed 0x${crcComputed.toString(16).padStart(8, "0")}`,
-      about: "CRC-32C (Castagnoli) of the bytes from Attributes to the end of the batch, computed here and compared.",
+    f('CRC-32C', () => r.u32(), {
+      kind: 'crc',
+      value: `0x${crcStored.toString(16).padStart(8, '0')}`,
+      status: crcOk ? 'ok' : 'bad',
+      note: crcOk
+        ? 'matches the computed CRC'
+        : `computed 0x${crcComputed.toString(16).padStart(8, '0')}`,
+      about:
+        'CRC-32C (Castagnoli) of the bytes from Attributes to the end of the batch, computed here and compared.',
     });
-    const [attrs, attrNode] = f("Attributes", () => r.i16());
+    const [attrs, attrNode] = f('Attributes', () => r.i16());
     const codec = attrs & 7;
-    const flags = [CODECS[codec] ?? `codec ${codec}`, attrs & 8 ? "LogAppendTime" : "CreateTime"];
-    if (attrs & 16) flags.push("transactional");
-    if (attrs & 32) flags.push("control");
-    if (attrs & 64) flags.push("delete horizon");
-    attrNode.value = `0x${attrs.toString(16).padStart(4, "0")} · ${flags.join(" · ")}`;
-    const [lastDelta] = f("Last offset delta", () => r.i32());
-    const [baseTimestamp] = f("Base timestamp", () => r.i64(), { kind: "ts" });
-    const [maxTimestamp] = f("Max timestamp", () => r.i64(), { kind: "ts" });
-    const [producerId] = f("Producer id", () => r.i64());
-    const [producerEpoch] = f("Producer epoch", () => r.i16());
-    const [baseSequence] = f("Base sequence", () => r.i32());
-    const [count] = f("Record count", () => r.i32());
+    const flags = [CODECS[codec] ?? `codec ${codec}`, attrs & 8 ? 'LogAppendTime' : 'CreateTime'];
+    if (attrs & 16) flags.push('transactional');
+    if (attrs & 32) flags.push('control');
+    if (attrs & 64) flags.push('delete horizon');
+    attrNode.value = `0x${attrs.toString(16).padStart(4, '0')} · ${flags.join(' · ')}`;
+    const [lastDelta] = f('Last offset delta', () => r.i32());
+    const [baseTimestamp] = f('Base timestamp', () => r.i64(), { kind: 'ts' });
+    const [maxTimestamp] = f('Max timestamp', () => r.i64(), { kind: 'ts' });
+    const [producerId] = f('Producer id', () => r.i64());
+    const [producerEpoch] = f('Producer epoch', () => r.i16());
+    const [baseSequence] = f('Base sequence', () => r.i32());
+    const [count] = f('Record count', () => r.i32());
     const batch = {
-      pos, size: 12 + length, baseOffset, lastOffset: baseOffset + BigInt(lastDelta), epoch, count, codec, attrs,
-      transactional: Boolean(attrs & 16), control: Boolean(attrs & 32), baseTimestamp, maxTimestamp,
-      producerId, producerEpoch, baseSequence, crcStored, crcComputed, crcOk, records: [], problems: [],
+      pos,
+      size: 12 + length,
+      baseOffset,
+      lastOffset: baseOffset + BigInt(lastDelta),
+      epoch,
+      count,
+      codec,
+      attrs,
+      transactional: Boolean(attrs & 16),
+      control: Boolean(attrs & 32),
+      baseTimestamp,
+      maxTimestamp,
+      producerId,
+      producerEpoch,
+      baseSequence,
+      crcStored,
+      crcComputed,
+      crcOk,
+      records: [],
+      problems: [],
     };
     const recordsStart = r.pos;
     let recBytes = bytes;
     let recBuf = buf;
     let rpos = recordsStart;
     let rend = batchEnd;
-    const recordsNode = node(`Records (${count})`, recordsStart, batchEnd, buf, { kind: "array", children: [] });
+    const recordsNode = node(`Records (${count})`, recordsStart, batchEnd, buf, {
+      kind: 'array',
+      children: [],
+    });
     if (codec !== 0) {
       try {
         recBytes = await decompress(codec, bytes.subarray(recordsStart, batchEnd));
@@ -606,9 +1021,20 @@ export async function decodeBatches(bytes, start, end, buf, schemas, ctx = {}) {
         rpos = 0;
         rend = recBytes.length;
         recordsNode.value = `${CODECS[codec]}: ${batchEnd - recordsStart} → ${recBytes.length} bytes`;
-        recordsNode.children.push(node(`${CODECS[codec]} payload`, recordsStart, batchEnd, buf, { kind: "bytes", value: `${batchEnd - recordsStart} compressed bytes` }));
+        recordsNode.children.push(
+          node(`${CODECS[codec]} payload`, recordsStart, batchEnd, buf, {
+            kind: 'bytes',
+            value: `${batchEnd - recordsStart} compressed bytes`,
+          }),
+        );
       } catch (err) {
-        recordsNode.children.push(node(`${CODECS[codec]} payload (not decompressed)`, recordsStart, batchEnd, buf, { kind: "bytes", status: "warn", value: err.message }));
+        recordsNode.children.push(
+          node(`${CODECS[codec]} payload (not decompressed)`, recordsStart, batchEnd, buf, {
+            kind: 'bytes',
+            status: 'warn',
+            value: err.message,
+          }),
+        );
         batch.problems.push(err.message);
         recBytes = null;
       }
@@ -622,20 +1048,34 @@ export async function decodeBatches(bytes, start, end, buf, schemas, ctx = {}) {
           recordsNode.children.push(rec);
           batch.records.push(rec.summary);
         } catch (err) {
-          recordsNode.children.push(node(`Record ${i} (stopped)`, rr.pos, rr.end, recBuf, { kind: "bytes", status: "bad", value: err.message }));
+          recordsNode.children.push(
+            node(`Record ${i} (stopped)`, rr.pos, rr.end, recBuf, {
+              kind: 'bytes',
+              status: 'bad',
+              value: err.message,
+            }),
+          );
           batch.problems.push(`record ${i}: ${err.message}`);
           break;
         }
       }
-      if (batch.records.length !== count && !batch.problems.length) batch.problems.push(`${batch.records.length} records decoded, the header says ${count}`);
+      if (batch.records.length !== count && !batch.problems.length)
+        batch.problems.push(`${batch.records.length} records decoded, the header says ${count}`);
     }
     kids.push(recordsNode);
-    if (!crcOk) batch.problems.push("CRC mismatch");
-    const label = batch.control ? `Control batch · offset ${baseOffset}` : `Batch · offsets ${baseOffset}–${batch.lastOffset}`;
-    nodes.push(node(label, pos, batchEnd, buf, {
-      kind: "batch", children: kids, status: batch.problems.length ? "bad" : "ok", batch,
-      value: `${count} record${count === 1 ? "" : "s"} · ${12 + length} B · ${flags[0]}${batch.control ? " · control" : ""} · CRC ${crcOk ? "ok" : "BAD"}`,
-    }));
+    if (!crcOk) batch.problems.push('CRC mismatch');
+    const label = batch.control
+      ? `Control batch · offset ${baseOffset}`
+      : `Batch · offsets ${baseOffset}–${batch.lastOffset}`;
+    nodes.push(
+      node(label, pos, batchEnd, buf, {
+        kind: 'batch',
+        children: kids,
+        status: batch.problems.length ? 'bad' : 'ok',
+        batch,
+        value: `${count} record${count === 1 ? '' : 's'} · ${12 + length} B · ${flags[0]}${batch.control ? ' · control' : ''} · CRC ${crcOk ? 'ok' : 'BAD'}`,
+      }),
+    );
     summaries.push(batch);
     pos = batchEnd;
   }

@@ -18,24 +18,46 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { DIST_DIR, ROOT, checker, launchOrExit, newLabContext, openLab, openScenario, serve, setSpeed, waitFor, watchErrors } from './lab-check-lib.mjs';
+import {
+  DIST_DIR,
+  ROOT,
+  checker,
+  launchOrExit,
+  newLabContext,
+  openLab,
+  openScenario,
+  serve,
+  setSpeed,
+  waitFor,
+  watchErrors,
+} from './lab-check-lib.mjs';
 
 const SPEED = 5;
 const t = checker({ detail: true });
 const { check } = t;
-const option = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const option = (name) =>
+  process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
 // The experiment travels with the scenario: through a share link, and
 // through an export and an import of the scenario JSON.
 async function roundTrips(page, preset) {
   const r = await page.evaluate(async () => {
-    const { shareLink, scenarioFromHash, validateScenario } = await import('/playground/lab/scenarios.js');
+    const { shareLink, scenarioFromHash, validateScenario } =
+      await import('/playground/lab/scenarios.js');
     const doc = window.krabkaLab.world.scenario();
     const shared = await scenarioFromHash(new URL(await shareLink(doc)).hash);
     const imported = validateScenario(JSON.parse(JSON.stringify(doc, null, 2)));
-    return { want: JSON.stringify(doc.experiment), shared: JSON.stringify(shared.experiment), imported: JSON.stringify(imported.experiment) };
+    return {
+      want: JSON.stringify(doc.experiment),
+      shared: JSON.stringify(shared.experiment),
+      imported: JSON.stringify(imported.experiment),
+    };
   });
-  check(`${preset.id}: the experiment survives Copy link and Export/Import`, r.want && r.shared === r.want && r.imported === r.want, r.want?.slice(0, 80));
+  check(
+    `${preset.id}: the experiment survives Copy link and Export/Import`,
+    r.want && r.shared === r.want && r.imported === r.want,
+    r.want?.slice(0, 80),
+  );
 }
 
 async function runPreset(page, preset) {
@@ -43,9 +65,17 @@ async function runPreset(page, preset) {
   // Run experiment, from the Scenarios tab.
   await page.locator('#krabka-lab .lab-dtab[data-tab="scenarios"]').click();
   const editor = await page.locator('#krabka-lab .lab-exp-editor').inputValue();
-  check(`${preset.id}: the Scenarios tab shows the experiment`, JSON.stringify(JSON.parse(editor)) === JSON.stringify(exp));
+  check(
+    `${preset.id}: the Scenarios tab shows the experiment`,
+    JSON.stringify(JSON.parse(editor)) === JSON.stringify(exp),
+  );
   await page.locator('#krabka-lab .lab-exp button', { hasText: 'Run experiment' }).click();
-  await waitFor(page, `window.krabkaLab.experiment?.state === 'running'`, 'the run to start', 120_000);
+  await waitFor(
+    page,
+    `window.krabkaLab.experiment?.state === 'running'`,
+    'the run to start',
+    120_000,
+  );
   await setSpeed(page, SPEED);
   // Wall time: the lab time at SPEED, with room for the brokers to lag.
   const budget = (exp.end / SPEED) * 4 + 120_000;
@@ -57,15 +87,34 @@ async function runPreset(page, preset) {
     if (line !== last && process.argv.includes('--verbose')) console.log(`    ${line}`);
     last = line;
     if (!['running', 'starting'].includes(r.state)) break;
-    if (Date.now() - started > budget) throw new Error(`the experiment did not end within ${Math.round(budget / 1000)} s (${line})`);
+    if (Date.now() - started > budget)
+      throw new Error(`the experiment did not end within ${Math.round(budget / 1000)} s (${line})`);
     await page.waitForTimeout(1000);
   }
   const r = await page.evaluate(() => window.krabkaLab.experiment.toJSON());
-  for (const s of r.steps) check(`${preset.id}: step at ${s.at} ms, ${s.label}`, s.status === 'done', `${s.status}${s.t != null ? ` at ${s.t} ms` : ''}${s.error ? `: ${s.error}` : ''}`);
-  for (const c of r.checks) check(`${preset.id}: ${c.at != null ? `at ${c.at}` : `by ${c.by ?? r.end}`} ms, ${c.label}`, c.status === 'pass', `${c.status}${c.t != null ? ` at ${c.t} ms` : ''}: ${c.observed}`);
-  check(`${preset.id}: the run ends ${r.state === 'passed' ? 'passed' : r.state}`, r.state === 'passed', `${r.passed} of ${r.checks.length} checks passed`);
+  for (const s of r.steps)
+    check(
+      `${preset.id}: step at ${s.at} ms, ${s.label}`,
+      s.status === 'done',
+      `${s.status}${s.t != null ? ` at ${s.t} ms` : ''}${s.error ? `: ${s.error}` : ''}`,
+    );
+  for (const c of r.checks)
+    check(
+      `${preset.id}: ${c.at != null ? `at ${c.at}` : `by ${c.by ?? r.end}`} ms, ${c.label}`,
+      c.status === 'pass',
+      `${c.status}${c.t != null ? ` at ${c.t} ms` : ''}: ${c.observed}`,
+    );
+  check(
+    `${preset.id}: the run ends ${r.state === 'passed' ? 'passed' : r.state}`,
+    r.state === 'passed',
+    `${r.passed} of ${r.checks.length} checks passed`,
+  );
   const shown = await page.locator('#krabka-lab .lab-exp-results .lab-exp-row').count();
-  check(`${preset.id}: the results panel lists every step and check`, shown === r.steps.length + r.checks.length, `${shown} rows`);
+  check(
+    `${preset.id}: the results panel lists every step and check`,
+    shown === r.steps.length + r.checks.length,
+    `${shown} rows`,
+  );
 }
 
 async function main() {
@@ -76,14 +125,24 @@ async function main() {
       process.exit(1);
     }
     if (!fs.existsSync(path.join(DIST_DIR, 'playground', 'broker', 'krabka-broker.wasm'))) {
-      console.error('dist/playground/broker/krabka-broker.wasm is missing: run `npm run build:broker` and `npm run build` first.');
+      console.error(
+        'dist/playground/broker/krabka-broker.wasm is missing: run `npm run build:broker` and `npm run build` first.',
+      );
       process.exit(2);
     }
   }
-  const { PRESETS } = await import(pathToFileURL(path.join(ROOT, 'public', 'playground', 'lab', 'presets.js')).href);
+  const { PRESETS } = await import(
+    pathToFileURL(path.join(ROOT, 'public', 'playground', 'lab', 'presets.js')).href
+  );
   const only = option('only');
-  const presets = PRESETS.filter((p) => p.scenario.experiment && (!only || only.split(',').includes(p.id)));
-  check('at least one preset carries an experiment', presets.length > 0, presets.map((p) => p.id).join(', '));
+  const presets = PRESETS.filter(
+    (p) => p.scenario.experiment && (!only || only.split(',').includes(p.id)),
+  );
+  check(
+    'at least one preset carries an experiment',
+    presets.length > 0,
+    presets.map((p) => p.id).join(', '),
+  );
   const browser = await launchOrExit();
   const served = external ? null : await serve(DIST_DIR);
   const base = external ?? `http://127.0.0.1:${served.port}`;

@@ -70,7 +70,7 @@ export const FAULT_DISK_MS = 3; // host ms one fd_sync / fd_datasync takes in DI
 export const FAULT_SKEW = 0; // BigInt64 index (byte 16): added to REALTIME, in ns
 export const FAULT_BYTES = 24;
 export const DISK = Object.freeze({ OK: 0, SLOW: 1, FULL: 2, EIO: 3 });
-export const DISK_MODES = Object.freeze(["ok", "slow", "full", "eio"]);
+export const DISK_MODES = Object.freeze(['ok', 'slow', 'full', 'eio']);
 
 /**
  * The guest's MONOTONIC clock reads host time plus this offset (10^8 s), so
@@ -94,6 +94,6 @@ export const DEFAULTS = Object.freeze({
   journalIntervalMs: 50, // shortest gap between two journal flushes
   journalMaxInFlight: 64 << 20, // journal bytes posted but not committed before the guest waits
   dialTimeoutMs: 30_000, // an ondial promise that has not settled by then refuses the dial
-  mountPath: "/data",
+  mountPath: '/data',
   maxLineBytes: 16 * 1024, // longer stdout/stderr lines are split
 });

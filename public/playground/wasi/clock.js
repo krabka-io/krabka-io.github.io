@@ -22,7 +22,7 @@ import {
   CLOCK_REALTIME_BASE,
   CLOCK_SEQ,
   MONOTONIC_OFFSET_NS,
-} from "./protocol.js";
+} from './protocol.js';
 
 /** Wall time in whole microseconds since the Unix epoch, from the shared monotonic clock. */
 export function wallMicros() {
@@ -49,18 +49,23 @@ export class WasiClock {
    * @param {number} [options.realtimeBaseMs] The guest's REALTIME at host time 0, in ms since the
    *   Unix epoch (default: now minus `timeMs`, so REALTIME starts at the wall clock).
    */
-  constructor({ mode = "real", timeMs = 0, realtimeBaseMs } = {}) {
-    if (mode !== "real" && mode !== "host") throw new TypeError(`clock mode must be "real" or "host", not ${mode}`);
+  constructor({ mode = 'real', timeMs = 0, realtimeBaseMs } = {}) {
+    if (mode !== 'real' && mode !== 'host')
+      throw new TypeError(`clock mode must be "real" or "host", not ${mode}`);
     this.buffer = new SharedArrayBuffer(CLOCK_BYTES);
     this.i32 = new Int32Array(this.buffer, 0, 2);
     this.i64 = new BigInt64Array(this.buffer, 8, 3);
     this.subscribers = new Set();
-    this.#publish(mode === "host" ? CLOCK_HOST : CLOCK_REAL, msToNs(timeMs), msToNs(realtimeBaseMs ?? Date.now() - timeMs));
+    this.#publish(
+      mode === 'host' ? CLOCK_HOST : CLOCK_REAL,
+      msToNs(timeMs),
+      msToNs(realtimeBaseMs ?? Date.now() - timeMs),
+    );
   }
 
   /** "real" or "host". */
   get mode() {
-    return Atomics.load(this.i32, CLOCK_MODE) === CLOCK_HOST ? "host" : "real";
+    return Atomics.load(this.i32, CLOCK_MODE) === CLOCK_HOST ? 'host' : 'real';
   }
 
   /** Host time now, in milliseconds. */
@@ -84,7 +89,10 @@ export class WasiClock {
   set(ms) {
     const target = msToNs(ms);
     const now = this.nowNs();
-    if (target < now) throw new RangeError(`the clock cannot go backwards (now ${nsToMs(now)} ms, asked for ${ms} ms)`);
+    if (target < now)
+      throw new RangeError(
+        `the clock cannot go backwards (now ${nsToMs(now)} ms, asked for ${ms} ms)`,
+      );
     this.#publish(Atomics.load(this.i32, CLOCK_MODE), target);
   }
 

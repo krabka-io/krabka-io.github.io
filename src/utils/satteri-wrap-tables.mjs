@@ -41,7 +41,8 @@ const ATOM_MAX = 28;
 const isCell = (el) => el?.tagName === 'td' || el?.tagName === 'th';
 const text = (value) => ({ type: 'text', value });
 const wbr = () => ({ type: 'element', tagName: 'wbr', properties: {}, children: [] });
-const breakable = (value) => value.split(BREAK_AT).flatMap((part, i) => (i ? [wbr(), text(part)] : [text(part)]));
+const breakable = (value) =>
+  value.split(BREAK_AT).flatMap((part, i) => (i ? [wbr(), text(part)] : [text(part)]));
 
 function cellsOf(row) {
   return (row.children ?? []).filter((c) => c.type === 'element' && isCell(c));
@@ -77,7 +78,12 @@ const wrapTables = {
     visit(node, ctx) {
       const parent = ctx.parent(node);
       // A table that already sits in a wrapper (raw HTML in a guide) stays as is.
-      if (parent && parent.type === 'element' && Array.isArray(parent.properties?.className) && parent.properties.className.includes('table-wrap')) {
+      if (
+        parent &&
+        parent.type === 'element' &&
+        Array.isArray(parent.properties?.className) &&
+        parent.properties.className.includes('table-wrap')
+      ) {
         return;
       }
       const rows = rowsOf(node);
@@ -108,12 +114,18 @@ const wrapTables = {
     // split() keeps each match at an odd index.
     ctx.replaceNode(
       node,
-      parts
-        .flatMap((part, i) => {
-          if (!(i % 2)) return part ? [text(part)] : [];
-          if (!KIP_ID.test(part)) return breakable(part);
-          return [{ type: 'element', tagName: 'span', properties: { className: ['kip-id'] }, children: [text(part)] }];
-        }),
+      parts.flatMap((part, i) => {
+        if (!(i % 2)) return part ? [text(part)] : [];
+        if (!KIP_ID.test(part)) return breakable(part);
+        return [
+          {
+            type: 'element',
+            tagName: 'span',
+            properties: { className: ['kip-id'] },
+            children: [text(part)],
+          },
+        ];
+      }),
     );
   },
 };

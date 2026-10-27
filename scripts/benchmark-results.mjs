@@ -14,15 +14,28 @@ export function aggregateSample(brokers) {
   assert.ok(brokers.length > 0, 'no brokers sampled');
   const total = { cpu_usage_us: 0, rss_bytes: 0, anon_bytes: 0, working_set_bytes: 0 };
   for (const broker of brokers) {
-    for (const key of ['cpu_usage_us', 'rss_bytes', 'anon_bytes', 'memory_current_bytes', 'inactive_file_bytes', 'oom_kill']) {
-      assert.ok(Number.isFinite(broker[key]) && broker[key] >= 0, `missing or invalid counter: ${key}`);
+    for (const key of [
+      'cpu_usage_us',
+      'rss_bytes',
+      'anon_bytes',
+      'memory_current_bytes',
+      'inactive_file_bytes',
+      'oom_kill',
+    ]) {
+      assert.ok(
+        Number.isFinite(broker[key]) && broker[key] >= 0,
+        `missing or invalid counter: ${key}`,
+      );
     }
     assert.ok(broker.rss_bytes > 0, 'broker RSS unavailable');
     assert.equal(broker.oom_kill, 0, 'broker OOM kill');
     total.cpu_usage_us += broker.cpu_usage_us;
     total.rss_bytes += broker.rss_bytes;
     total.anon_bytes += broker.anon_bytes;
-    total.working_set_bytes += Math.max(0, broker.memory_current_bytes - broker.inactive_file_bytes);
+    total.working_set_bytes += Math.max(
+      0,
+      broker.memory_current_bytes - broker.inactive_file_bytes,
+    );
   }
   return total;
 }
@@ -30,15 +43,27 @@ export function aggregateSample(brokers) {
 function resourceTotals(samples) {
   assert.ok(samples.length >= 2, 'at least two resource samples required');
   const count = samples[0].brokers.length;
-  assert.ok(samples.every(s => s.brokers.length === count), 'incomplete cluster samples');
-  assert.ok(samples.every(s => Number.isFinite(s.elapsed_ms) && s.elapsed_ms >= 0), 'invalid sample time');
-  const totals = samples.map(s => aggregateSample(s.brokers));
+  assert.ok(
+    samples.every((s) => s.brokers.length === count),
+    'incomplete cluster samples',
+  );
+  assert.ok(
+    samples.every((s) => Number.isFinite(s.elapsed_ms) && s.elapsed_ms >= 0),
+    'invalid sample time',
+  );
+  const totals = samples.map((s) => aggregateSample(s.brokers));
   for (let i = 1; i < samples.length; i++) {
     assert.ok(samples[i].elapsed_ms > samples[i - 1].elapsed_ms, 'sample times must increase');
     for (let broker = 0; broker < count; broker++) {
-      assert.equal(samples[i].brokers[broker].id, samples[0].brokers[broker].id, 'broker identity changed');
-      assert.ok(samples[i].brokers[broker].cpu_usage_us >= samples[i - 1].brokers[broker].cpu_usage_us,
-        'CPU counter reset');
+      assert.equal(
+        samples[i].brokers[broker].id,
+        samples[0].brokers[broker].id,
+        'broker identity changed',
+      );
+      assert.ok(
+        samples[i].brokers[broker].cpu_usage_us >= samples[i - 1].brokers[broker].cpu_usage_us,
+        'CPU counter reset',
+      );
     }
   }
   return totals;
@@ -58,8 +83,11 @@ export function resourceTimeSeries(samples, startedAt) {
         cpu_seconds: (totals[i].cpu_usage_us - totals[0].cpu_usage_us) / 1e6,
         // Average CPU cores used over the actual preceding interval. The first
         // sample is a baseline, not a measured zero-CPU interval.
-        cpu_cores: i === 0 ? null : (totals[i].cpu_usage_us - totals[i - 1].cpu_usage_us)
-          / ((sample.elapsed_ms - samples[i - 1].elapsed_ms) * 1000),
+        cpu_cores:
+          i === 0
+            ? null
+            : (totals[i].cpu_usage_us - totals[i - 1].cpu_usage_us) /
+              ((sample.elapsed_ms - samples[i - 1].elapsed_ms) * 1000),
       },
     })),
   };
@@ -72,12 +100,14 @@ export function resourceSummary(samples, acknowledged) {
   return {
     cpu_seconds: cpuUs / 1e6,
     cpu_us_per_record: cpuUs / acknowledged,
-    rss_peak_bytes: Math.max(...totals.map(t => t.rss_bytes)),
-    anon_peak_bytes: Math.max(...totals.map(t => t.anon_bytes)),
-    working_set_peak_bytes: Math.max(...totals.map(t => t.working_set_bytes)),
+    rss_peak_bytes: Math.max(...totals.map((t) => t.rss_bytes)),
+    anon_peak_bytes: Math.max(...totals.map((t) => t.anon_bytes)),
+    working_set_peak_bytes: Math.max(...totals.map((t) => t.working_set_bytes)),
     resource_samples: samples.length,
     sampling_interval_ms: 250,
-    max_sample_gap_ms: Math.max(...samples.slice(1).map((s, i) => s.elapsed_ms - samples[i].elapsed_ms)),
+    max_sample_gap_ms: Math.max(
+      ...samples.slice(1).map((s, i) => s.elapsed_ms - samples[i].elapsed_ms),
+    ),
     measurement_wall_seconds: (samples.at(-1).elapsed_ms - samples[0].elapsed_ms) / 1000,
   };
 }
@@ -91,8 +121,14 @@ export function parseDiskstats(text, names) {
     const fields = line.trim().split(/\s+/);
     if (fields.length < 14 || !names.includes(fields[2])) continue;
     const n = fields.slice(3).map(Number);
-    devices[fields[2]] = { reads: n[0], read_bytes: n[2] * 512, writes: n[4], written_bytes: n[6] * 512,
-      io_ms: n[9], weighted_io_ms: n[10] };
+    devices[fields[2]] = {
+      reads: n[0],
+      read_bytes: n[2] * 512,
+      writes: n[4],
+      written_bytes: n[6] * 512,
+      io_ms: n[9],
+      weighted_io_ms: n[10],
+    };
   }
   for (const name of names) assert.ok(devices[name], `device counters unavailable: ${name}`);
   return devices;
@@ -104,18 +140,26 @@ export function parseDiskstats(text, names) {
 // which precedes the client, so it gives the date and orders midnight.
 export function ombMeasurementWindow(stdout, startedAt) {
   const lines = stdout.split('\n');
-  const begin = lines.findIndex(line => line.includes('----- Starting benchmark traffic'));
+  const begin = lines.findIndex((line) => line.includes('----- Starting benchmark traffic'));
   assert.ok(begin >= 0, 'OMB measurement start not found');
-  const end = lines.findIndex((line, i) => i > begin && line.includes('----- Aggregated Pub Latency'));
+  const end = lines.findIndex(
+    (line, i) => i > begin && line.includes('----- Aggregated Pub Latency'),
+  );
   assert.ok(end > begin, 'OMB measurement end not found');
   const anchor = Date.parse(startedAt);
   assert.ok(Number.isFinite(anchor), 'invalid sampler anchor');
   let previous = anchor;
-  const at = line => {
+  const at = (line) => {
     const match = line.match(/^(\d\d):(\d\d):(\d\d)\.(\d{3}) /);
     assert.ok(match, `OMB log line has no time: ${line.slice(0, 40)}`);
     const day = new Date(previous);
-    let time = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), ...match.slice(1, 4).map(Number), Number(match[4]));
+    let time = Date.UTC(
+      day.getUTCFullYear(),
+      day.getUTCMonth(),
+      day.getUTCDate(),
+      ...match.slice(1, 4).map(Number),
+      Number(match[4]),
+    );
     // The sampler starts before the client; allow a few seconds of skew.
     while (time < previous - 5_000) time += 86_400_000;
     previous = time;
@@ -124,16 +168,23 @@ export function ombMeasurementWindow(stdout, startedAt) {
   const started = at(lines[begin]);
   const ended = at(lines[end]);
   assert.ok(ended > started, 'empty OMB measurement window');
-  return { started_at: new Date(started).toISOString(), ended_at: new Date(ended).toISOString(), seconds: (ended - started) / 1000 };
+  return {
+    started_at: new Date(started).toISOString(),
+    ended_at: new Date(ended).toISOString(),
+    seconds: (ended - started) / 1000,
+  };
 }
 
 // Linear interpolation of a counter at `t` ms, from samples with elapsed_ms.
 function counterAt(samples, value, t) {
-  assert.ok(t >= samples[0].elapsed_ms && t <= samples.at(-1).elapsed_ms, 'measurement window outside the samples');
-  const i = samples.findIndex(s => s.elapsed_ms >= t);
+  assert.ok(
+    t >= samples[0].elapsed_ms && t <= samples.at(-1).elapsed_ms,
+    'measurement window outside the samples',
+  );
+  const i = samples.findIndex((s) => s.elapsed_ms >= t);
   if (samples[i].elapsed_ms === t || i === 0) return value(samples[i]);
   const [a, b] = [samples[i - 1], samples[i]];
-  return value(a) + (value(b) - value(a)) * (t - a.elapsed_ms) / (b.elapsed_ms - a.elapsed_ms);
+  return value(a) + ((value(b) - value(a)) * (t - a.elapsed_ms)) / (b.elapsed_ms - a.elapsed_ms);
 }
 
 // Broker CPU, published messages and device use over the OMB measurement
@@ -143,19 +194,31 @@ export function windowMetrics({ samples, deviceSamples, startedAt, window, resul
   const anchor = Date.parse(startedAt);
   const from = Date.parse(window.started_at) - anchor;
   const to = Date.parse(window.ended_at) - anchor;
-  const cpu = s => aggregateSample(s.brokers).cpu_usage_us;
+  const cpu = (s) => aggregateSample(s.brokers).cpu_usage_us;
   const cpuSeconds = (counterAt(samples, cpu, to) - counterAt(samples, cpu, from)) / 1e6;
   const meanRate = result.publishRate.reduce((a, b) => a + b, 0) / result.publishRate.length;
   const messages = meanRate * window.seconds;
   assert.ok(cpuSeconds > 0 && messages > 0, 'invalid window CPU or message count');
   const devices = {};
   for (const name of Object.keys(deviceSamples[0]?.devices ?? {})) {
-    const delta = key => counterAt(deviceSamples, s => s.devices[name][key], to) - counterAt(deviceSamples, s => s.devices[name][key], from);
-    devices[name] = { utilization: delta('io_ms') / (to - from), read_bytes: delta('read_bytes'), written_bytes: delta('written_bytes'),
-      reads: delta('reads'), writes: delta('writes') };
+    const delta = (key) =>
+      counterAt(deviceSamples, (s) => s.devices[name][key], to) -
+      counterAt(deviceSamples, (s) => s.devices[name][key], from);
+    devices[name] = {
+      utilization: delta('io_ms') / (to - from),
+      read_bytes: delta('read_bytes'),
+      written_bytes: delta('written_bytes'),
+      reads: delta('reads'),
+      writes: delta('writes'),
+    };
   }
-  return { ...window, cpu_seconds: cpuSeconds, published_messages: Math.round(messages),
-    messages_per_cpu_second: messages / cpuSeconds, devices };
+  return {
+    ...window,
+    cpu_seconds: cpuSeconds,
+    published_messages: Math.round(messages),
+    messages_per_cpu_second: messages / cpuSeconds,
+    devices,
+  };
 }
 
 // O_DIRECT check for a broker's open files. `listing` is "path flags" lines
@@ -174,7 +237,10 @@ export function directIoCheck(listing, arch, topicPrefix = 'test-topic-') {
     if (!newest.has(match[1]) || match[2] > newest.get(match[1])) newest.set(match[1], match[2]);
     if (Number.parseInt(flags, 8) & O_DIRECT[arch]) direct.add(`${match[1]}/${match[2]}`);
   }
-  const missing = [...newest].filter(([partition, base]) => !direct.has(`${partition}/${base}`)).map(([p]) => p).sort();
-  const verified = [...newest.keys()].filter(partition => !missing.includes(partition)).sort();
+  const missing = [...newest]
+    .filter(([partition, base]) => !direct.has(`${partition}/${base}`))
+    .map(([p]) => p)
+    .sort();
+  const verified = [...newest.keys()].filter((partition) => !missing.includes(partition)).sort();
   return { partitions: newest.size, direct: newest.size - missing.length, missing, verified };
 }

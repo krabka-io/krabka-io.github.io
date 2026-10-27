@@ -121,7 +121,9 @@ function functionNames(spec: ExplorerSpecInput): string[] {
 /** The ledger row that proves an explorer kernel: same module, and it names the function. */
 export function ledgerRowFor(spec: ExplorerSpecInput, ledger: LedgerRow[]): LedgerRow | undefined {
   const names = functionNames(spec);
-  return ledger.find((row) => row.kernels.some((k) => k.module === spec.module && names.includes(k.label)));
+  return ledger.find((row) =>
+    row.kernels.some((k) => k.module === spec.module && names.includes(k.label)),
+  );
 }
 
 function catalogNoteFor(model: ModelSpecInput, notes: ModelNote[]): ModelNote | undefined {
@@ -163,7 +165,19 @@ export function buildVerificationData(
     const drives = model.drives ?? [];
     const properties = model.properties ?? [];
     const pinned = model.pinned_states ?? [];
-    const search = [model.name, model.id, model.area, model.repo, model.path, model.summary, model.bounds ?? '', model.outside ?? '', ...drives, ...properties, note?.search ?? '']
+    const search = [
+      model.name,
+      model.id,
+      model.area,
+      model.repo,
+      model.path,
+      model.summary,
+      model.bounds ?? '',
+      model.outside ?? '',
+      ...drives,
+      ...properties,
+      note?.search ?? '',
+    ]
       .join(' ')
       .toLowerCase();
     return {

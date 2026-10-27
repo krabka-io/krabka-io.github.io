@@ -31,17 +31,38 @@ export const COMPONENTS = [
     repo: 'krabka-broker',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-broker'),
     docsSubdir: 'broker',
-    required: ['verification.md', 'config-reference.md', 'operations/backup-restore.md', 'operations/deploy.md', 'operations/runbooks/restore-from-archive.md', 'operations/metrics.md', 'operations/scaling.md'],
+    required: [
+      'verification.md',
+      'config-reference.md',
+      'operations/backup-restore.md',
+      'operations/deploy.md',
+      'operations/runbooks/restore-from-archive.md',
+      'operations/metrics.md',
+      'operations/scaling.md',
+    ],
   },
   {
-    name: 'operator', repo: 'krabka-operator', docsSubdir: 'operator',
+    name: 'operator',
+    repo: 'krabka-operator',
+    docsSubdir: 'operator',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-operator'),
     guides: [{ source: 'README.md', destination: 'reference.md' }],
     crdsDir: 'charts/krabka-operator/crds',
-    requiredKinds: ['Kafka', 'KafkaNodePool', 'KafkaTopic', 'KafkaUser', 'KafkaConnector', 'KafkaRebalance', 'SchemaRegistry', 'KafkaGrpcGateway'],
+    requiredKinds: [
+      'Kafka',
+      'KafkaNodePool',
+      'KafkaTopic',
+      'KafkaUser',
+      'KafkaConnector',
+      'KafkaRebalance',
+      'SchemaRegistry',
+      'KafkaGrpcGateway',
+    ],
   },
   {
-    name: 'rebalancer', repo: 'krabka-rebalancer', docsSubdir: 'rebalancer',
+    name: 'rebalancer',
+    repo: 'krabka-rebalancer',
+    docsSubdir: 'rebalancer',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-rebalancer'),
     guides: [
       { source: 'crates/rebalancer/README.md', destination: 'reference.md' },
@@ -49,7 +70,9 @@ export const COMPONENTS = [
     ],
   },
   {
-    name: 'gateway', repo: 'krabka-gateway', docsSubdir: 'gateway',
+    name: 'gateway',
+    repo: 'krabka-gateway',
+    docsSubdir: 'gateway',
     localRepoDir: path.resolve(ROOT_DIR, '..', 'krabka-gateway'),
     guides: [
       { source: 'README.md', destination: 'reference.md' },
@@ -67,14 +90,23 @@ function markdownFiles(dir, prefix = '') {
     const relative = path.posix.join(prefix, entry.name);
     // Publish the existing top-level guides and the operations/runbook tree.
     // Contributor style guides and design proposals remain in their repository.
-    if (entry.isDirectory()) return prefix || entry.name === 'operations' ? markdownFiles(path.join(dir, entry.name), relative) : [];
-    return entry.isFile() && /\.md$/i.test(entry.name) && relative.toLowerCase() !== 'index.md' ? [relative] : [];
+    if (entry.isDirectory())
+      return prefix || entry.name === 'operations'
+        ? markdownFiles(path.join(dir, entry.name), relative)
+        : [];
+    return entry.isFile() && /\.md$/i.test(entry.name) && relative.toLowerCase() !== 'index.md'
+      ? [relative]
+      : [];
   });
 }
 
 // Publish only after every required component has been fetched and validated.
 // A failed fetch or missing guide leaves the previous content and provenance intact.
-export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DIR, { ignoreRevs = ignoredRevisions(ROOT_DIR) } = {}) {
+export function syncGuides(
+  components = COMPONENTS,
+  contentDir = CONTENT_DOCS_DIR,
+  { ignoreRevs = ignoredRevisions(ROOT_DIR) } = {},
+) {
   fs.mkdirSync(path.dirname(contentDir), { recursive: true });
   const staged = fs.mkdtempSync(path.join(path.dirname(contentDir), '.docs-stage-'));
   const clones = fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-docs-'));
@@ -92,33 +124,90 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
       if (!fs.existsSync(path.join(sourceRepoDir, comp.guides?.[0]?.source ?? 'docs'))) {
         const tempCloneDir = path.join(clones, comp.repo);
         console.log(`  → Fetching docs from GitHub (krabka-io/${comp.repo})...`);
-        execFileSync('git', ['clone', '--filter=blob:none', '--sparse', `https://github.com/krabka-io/${comp.repo}.git`, tempCloneDir], { stdio: 'pipe', timeout: 120000 });
-        const directories = comp.guides ? [...new Set(comp.guides.map(({ source }) => path.posix.dirname(source)).filter((dir) => dir !== '.'))] : ['docs'];
+        execFileSync(
+          'git',
+          [
+            'clone',
+            '--filter=blob:none',
+            '--sparse',
+            `https://github.com/krabka-io/${comp.repo}.git`,
+            tempCloneDir,
+          ],
+          { stdio: 'pipe', timeout: 120000 },
+        );
+        const directories = comp.guides
+          ? [
+              ...new Set(
+                comp.guides
+                  .map(({ source }) => path.posix.dirname(source))
+                  .filter((dir) => dir !== '.'),
+              ),
+            ]
+          : ['docs'];
         if (comp.crdsDir) directories.push(comp.crdsDir);
-        if (directories.length) execFileSync('git', ['-C', tempCloneDir, 'sparse-checkout', 'set', ...directories], { stdio: 'pipe', timeout: 120000 });
+        if (directories.length)
+          execFileSync('git', ['-C', tempCloneDir, 'sparse-checkout', 'set', ...directories], {
+            stdio: 'pipe',
+            timeout: 120000,
+          });
         sourceRepoDir = tempCloneDir;
       }
       const sourceDocsDir = path.join(sourceRepoDir, 'docs');
-      if (!comp.guides && !fs.existsSync(sourceDocsDir)) throw new Error(`No documentation directory for ${comp.name}`);
+      if (!comp.guides && !fs.existsSync(sourceDocsDir))
+        throw new Error(`No documentation directory for ${comp.name}`);
       try {
-        const [commit, date] = execFileSync('git', ['-C', sourceRepoDir, 'log', '-1', '--format=%H%x09%cI'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split('\t');
-        const branch = execFileSync('git', ['-C', sourceRepoDir, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        const [commit, date] = execFileSync(
+          'git',
+          ['-C', sourceRepoDir, 'log', '-1', '--format=%H%x09%cI'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+          .trim()
+          .split('\t');
+        const branch = execFileSync(
+          'git',
+          ['-C', sourceRepoDir, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+        ).trim();
         sources[comp.docsSubdir] = { repo: comp.repo, branch, commit, date };
       } catch {
         // Non-git local documentation has no commit provenance.
       }
-      const guides = comp.guides ?? markdownFiles(sourceDocsDir).map((file) => ({ source: `docs/${file}`, destination: file }));
+      const guides =
+        comp.guides ??
+        markdownFiles(sourceDocsDir).map((file) => ({ source: `docs/${file}`, destination: file }));
       const files = guides.map(({ destination }) => destination);
       if (!files.length) throw new Error(`No markdown guides found for ${comp.name}`);
       for (const required of comp.required ?? []) {
         const file = files.find((file) => file.toLowerCase() === required.toLowerCase());
-        if (!file || !fs.readFileSync(path.join(sourceRepoDir, guides.find(({ destination }) => destination === file).source), 'utf8').trim()) throw new Error(`${comp.name}: required guide ${required} is missing or empty`);
+        if (
+          !file ||
+          !fs
+            .readFileSync(
+              path.join(
+                sourceRepoDir,
+                guides.find(({ destination }) => destination === file).source,
+              ),
+              'utf8',
+            )
+            .trim()
+        )
+          throw new Error(`${comp.name}: required guide ${required} is missing or empty`);
       }
-      if (new Set(files.map((file) => file.toLowerCase())).size !== files.length) throw new Error(`${comp.name}: duplicate documentation paths after case normalization`);
+      if (new Set(files.map((file) => file.toLowerCase())).size !== files.length)
+        throw new Error(`${comp.name}: duplicate documentation paths after case normalization`);
       const publishedFiles = new Set(files.map((file) => file.toLowerCase()));
-      const publishedPaths = new Map(guides.map(({ source, destination }) => [source.toLowerCase(), destination]));
-      if (sources[comp.docsSubdir]) sources[comp.docsSubdir].files = Object.fromEntries(guides.map(({ source, destination }) => [destination, source]));
-      const records = provenance.components[comp.docsSubdir] = { repo: comp.repo, files: {}, crds: {} };
+      const publishedPaths = new Map(
+        guides.map(({ source, destination }) => [source.toLowerCase(), destination]),
+      );
+      if (sources[comp.docsSubdir])
+        sources[comp.docsSubdir].files = Object.fromEntries(
+          guides.map(({ source, destination }) => [destination, source]),
+        );
+      const records = (provenance.components[comp.docsSubdir] = {
+        repo: comp.repo,
+        files: {},
+        crds: {},
+      });
       for (const { source, destination: file } of guides) {
         const srcFile = path.join(sourceRepoDir, source);
         const destFile = path.join(destDocsDir, file);
@@ -127,29 +216,79 @@ export function syncGuides(components = COMPONENTS, contentDir = CONTENT_DOCS_DI
         if (!content.trim()) throw new Error(`${comp.name}: required guide ${source} is empty`);
 
         // Rewrite relative markdown links and code links to prevent 404 errors
-        content = rewriteDocLinks(content, { docsSubdir: comp.docsSubdir, repo: comp.repo, sourceFile: file, sourcePath: comp.guides ? source : undefined, sourceRef: sources[comp.docsSubdir]?.commit ?? 'main', publishedFiles, publishedPaths });
+        content = rewriteDocLinks(content, {
+          docsSubdir: comp.docsSubdir,
+          repo: comp.repo,
+          sourceFile: file,
+          sourcePath: comp.guides ? source : undefined,
+          sourceRef: sources[comp.docsSubdir]?.commit ?? 'main',
+          publishedFiles,
+          publishedPaths,
+        });
 
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.writeFileSync(destFile, content);
-        records.files[file] = { ...sourceFileProvenance(sourceRepoDir, comp.repo, source, sources[comp.docsSubdir]?.commit, { ignoreRevs }), renderedHash: contentHash(content) };
-        if (records.files[file].sourceHash !== originalHash) records.files[file].reason = 'source-changed-during-sync';
+        records.files[file] = {
+          ...sourceFileProvenance(
+            sourceRepoDir,
+            comp.repo,
+            source,
+            sources[comp.docsSubdir]?.commit,
+            { ignoreRevs },
+          ),
+          renderedHash: contentHash(content),
+        };
+        if (records.files[file].sourceHash !== originalHash)
+          records.files[file].reason = 'source-changed-during-sync';
       }
       if (comp.crdsDir) {
         const crdsDir = path.join(sourceRepoDir, comp.crdsDir);
-        const resources = fs.readdirSync(crdsDir).filter((file) => /\.ya?ml$/i.test(file)).sort().map((file) => {
-          const sourcePath = `${comp.crdsDir}/${file}`;
-          records.crds[sourcePath] = sourceFileProvenance(sourceRepoDir, comp.repo, sourcePath, sources[comp.docsSubdir]?.commit, { ignoreRevs });
-          const crd = load(fs.readFileSync(path.join(crdsDir, file), 'utf8'));
-          if (crd?.kind !== 'CustomResourceDefinition' || !crd.spec?.names?.kind || !crd.spec?.versions?.length || crd.spec.versions.some((version) => !version.schema?.openAPIV3Schema)) throw new Error(`${comp.name}: invalid CRD ${file}`);
-          return { ...crd, _sourcePath: `${comp.crdsDir}/${file}` };
-        });
-        for (const kind of comp.requiredKinds ?? []) if (!resources.some((crd) => crd.spec.names.kind === kind)) throw new Error(`${comp.name}: required CRD ${kind} is missing`);
-        if (new Set(resources.map((crd) => crd.spec.names.kind)).size !== resources.length) throw new Error(`${comp.name}: duplicate CRD kind`);
-        fs.writeFileSync(path.join(destDocsDir, 'crds.json'), JSON.stringify({ resources, source: { repo: comp.repo, path: comp.crdsDir, ...sources[comp.docsSubdir] } }, null, 2) + '\n');
+        const resources = fs
+          .readdirSync(crdsDir)
+          .filter((file) => /\.ya?ml$/i.test(file))
+          .sort()
+          .map((file) => {
+            const sourcePath = `${comp.crdsDir}/${file}`;
+            records.crds[sourcePath] = sourceFileProvenance(
+              sourceRepoDir,
+              comp.repo,
+              sourcePath,
+              sources[comp.docsSubdir]?.commit,
+              { ignoreRevs },
+            );
+            const crd = load(fs.readFileSync(path.join(crdsDir, file), 'utf8'));
+            if (
+              crd?.kind !== 'CustomResourceDefinition' ||
+              !crd.spec?.names?.kind ||
+              !crd.spec?.versions?.length ||
+              crd.spec.versions.some((version) => !version.schema?.openAPIV3Schema)
+            )
+              throw new Error(`${comp.name}: invalid CRD ${file}`);
+            return { ...crd, _sourcePath: `${comp.crdsDir}/${file}` };
+          });
+        for (const kind of comp.requiredKinds ?? [])
+          if (!resources.some((crd) => crd.spec.names.kind === kind))
+            throw new Error(`${comp.name}: required CRD ${kind} is missing`);
+        if (new Set(resources.map((crd) => crd.spec.names.kind)).size !== resources.length)
+          throw new Error(`${comp.name}: duplicate CRD kind`);
+        fs.writeFileSync(
+          path.join(destDocsDir, 'crds.json'),
+          JSON.stringify(
+            {
+              resources,
+              source: { repo: comp.repo, path: comp.crdsDir, ...sources[comp.docsSubdir] },
+            },
+            null,
+            2,
+          ) + '\n',
+        );
       }
       console.log(`  ✓ Synced and transformed ${files.length} markdown guide(s) to ${destDocsDir}`);
     }
-    fs.writeFileSync(path.join(staged, 'lastmod-provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
+    fs.writeFileSync(
+      path.join(staged, 'lastmod-provenance.json'),
+      JSON.stringify(provenance, null, 2) + '\n',
+    );
     fs.writeFileSync(path.join(staged, 'sources.json'), JSON.stringify(sources, null, 2) + '\n');
     if (fs.existsSync(contentDir)) fs.renameSync(contentDir, backup);
     try {
@@ -249,7 +388,15 @@ async function main() {
     for (const tag of tags) {
       const parts = semverParts(tag);
       if (!parts) continue;
-      if (!best || parts.some((n, i) => n !== best.parts[i] && n > best.parts[i] && parts.slice(0, i).every((v, j) => v === best.parts[j]))) {
+      if (
+        !best ||
+        parts.some(
+          (n, i) =>
+            n !== best.parts[i] &&
+            n > best.parts[i] &&
+            parts.slice(0, i).every((v, j) => v === best.parts[j]),
+        )
+      ) {
         best = { tag, parts };
       }
     }
@@ -260,36 +407,50 @@ async function main() {
     const headers = { Accept: 'application/vnd.github+json' };
     if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
     try {
-      const res = await fetch(`https://api.github.com/repos/krabka-io/${repoName}/releases/latest`, {
-        headers,
-        signal: AbortSignal.timeout(5000),
-      });
+      const res = await fetch(
+        `https://api.github.com/repos/krabka-io/${repoName}/releases/latest`,
+        {
+          headers,
+          signal: AbortSignal.timeout(5000),
+        },
+      );
       if (res.ok) return (await res.json()).tag_name ?? null;
       if (res.status === 404) {
         // Repositories that tag without publishing a GitHub Release.
-        const tags = await fetch(`https://api.github.com/repos/krabka-io/${repoName}/tags?per_page=100`, {
-          headers,
-          signal: AbortSignal.timeout(5000),
-        });
+        const tags = await fetch(
+          `https://api.github.com/repos/krabka-io/${repoName}/tags?per_page=100`,
+          {
+            headers,
+            signal: AbortSignal.timeout(5000),
+          },
+        );
         if (tags.ok) return highestSemverTag((await tags.json()).map((t) => t.name));
       }
     } catch {
       // fall through to gh
     }
     try {
-      const out = execSync(`gh release view -R krabka-io/${repoName} --json tagName --jq .tagName`, {
-        stdio: 'pipe',
-        timeout: 5000,
-      }).toString().trim();
+      const out = execSync(
+        `gh release view -R krabka-io/${repoName} --json tagName --jq .tagName`,
+        {
+          stdio: 'pipe',
+          timeout: 5000,
+        },
+      )
+        .toString()
+        .trim();
       if (out) return out;
     } catch {
       // `gh release view` only knows GitHub Releases; fall through to the tags.
     }
     try {
-      const out = execSync(`gh api "repos/krabka-io/${repoName}/tags?per_page=100" --jq '.[].name'`, {
-        stdio: 'pipe',
-        timeout: 5000,
-      }).toString();
+      const out = execSync(
+        `gh api "repos/krabka-io/${repoName}/tags?per_page=100" --jq '.[].name'`,
+        {
+          stdio: 'pipe',
+          timeout: 5000,
+        },
+      ).toString();
       return highestSemverTag(out.split('\n').filter(Boolean));
     } catch {
       return null;
@@ -307,9 +468,12 @@ async function main() {
   }
 
   fs.writeFileSync(versionsFilePath, JSON.stringify(versionsData, null, 2) + '\n');
-  console.log('  ✓ Synchronized src/data/versions.json with live repository versions & active release tags.');
+  console.log(
+    '  ✓ Synchronized src/data/versions.json with live repository versions & active release tags.',
+  );
 
   console.log('\n✅ [sync-docs] Documentation synchronization complete!\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  await main();

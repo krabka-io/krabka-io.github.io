@@ -7,9 +7,21 @@ import { readSitemap } from './sitemap.mjs';
 import { repositoryState, resolveLastmod, ignoredRevisions } from './lastmod-provenance.mjs';
 import { routeInputs } from './lastmod-routes.mjs';
 
-const unescape = (text) => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, entity) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity]);
+const unescape = (text) =>
+  text.replace(
+    /&(amp|lt|gt|quot|apos);/g,
+    (_, entity) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity],
+  );
 
-export function applyLastmod(dir, { root = process.cwd(), map = routeInputs, state = repositoryState(root), ignoreRevs = ignoredRevisions(root) } = {}) {
+export function applyLastmod(
+  dir,
+  {
+    root = process.cwd(),
+    map = routeInputs,
+    state = repositoryState(root),
+    ignoreRevs = ignoredRevisions(root),
+  } = {},
+) {
   const cache = new Map();
   const indexFile = path.join(dir, 'sitemap-index.xml');
   let index = fs.readFileSync(indexFile, 'utf8');
@@ -21,11 +33,20 @@ export function applyLastmod(dir, { root = process.cwd(), map = routeInputs, sta
     readSitemap(xml, 'urlset', file, { maxBytes: Infinity });
     const updated = xml.replace(/<url(?:\s[^>]*)?>[\s\S]*?<\/url>/g, (entry) => {
       const url = unescape(/<loc>([\s\S]*?)<\/loc>/.exec(entry)[1]);
-      const record = resolveLastmod({ root, url, mapping: map(root, url), state, ignoreRevs, cache });
+      const record = resolveLastmod({
+        root,
+        url,
+        mapping: map(root, url),
+        state,
+        ignoreRevs,
+        cache,
+      });
       records.push(record);
       // A single owner for dates; no stale generated or hand-supplied fallback.
       entry = entry.replace(/<lastmod>[\s\S]*?<\/lastmod>/g, '');
-      return record.date ? entry.replace('</loc>', `</loc><lastmod>${record.date}</lastmod>`) : entry;
+      return record.date
+        ? entry.replace('</loc>', `</loc><lastmod>${record.date}</lastmod>`)
+        : entry;
     });
     readSitemap(updated, 'urlset', file, { maxBytes: Infinity });
     fs.writeFileSync(file, updated);
@@ -34,12 +55,20 @@ export function applyLastmod(dir, { root = process.cwd(), map = routeInputs, sta
   index = index.replace(/<lastmod>[\s\S]*?<\/lastmod>/g, '');
   fs.writeFileSync(indexFile, index);
   records.sort((a, b) => a.url.localeCompare(b.url));
-  fs.writeFileSync(path.join(dir, 'lastmod-report.json'), JSON.stringify({ version: 1, records }, null, 2) + '\n');
+  fs.writeFileSync(
+    path.join(dir, 'lastmod-report.json'),
+    JSON.stringify({ version: 1, records }, null, 2) + '\n',
+  );
   const dated = records.filter((record) => record.date).length;
-  console.log(`Lastmod: ${dated}/${records.length} Git-derived dates; ${records.length - dated} omissions (dist/lastmod-report.json).`);
+  console.log(
+    `Lastmod: ${dated}/${records.length} Git-derived dates; ${records.length - dated} omissions (dist/lastmod-report.json).`,
+  );
   return records;
 }
 
 export default function sitemapLastmod() {
-  return { name: 'sitemap-git-lastmod', hooks: { 'astro:build:done': ({ dir }) => applyLastmod(fileURLToPath(dir)) } };
+  return {
+    name: 'sitemap-git-lastmod',
+    hooks: { 'astro:build:done': ({ dir }) => applyLastmod(fileURLToPath(dir)) },
+  };
 }

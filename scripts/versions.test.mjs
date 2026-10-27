@@ -40,10 +40,24 @@ test('a partial GitHub result marks missing repositories as cached and drops sta
   process.env.GITHUB_TOKEN = 'test-token';
   globalThis.fetch = async (url) => {
     if (url !== 'https://api.github.com/graphql') throw new Error('Comparison unavailable');
-    return Response.json({ data: { organization: { repositories: { nodes: [{
-      name: 'krabka-broker', latestRelease: { tagName: 'v0.8.0', url: 'https://github.com/krabka-io/krabka-broker/releases/tag/v0.8.0' },
-      defaultBranchRef: { target: { oid: '123456789abcdef' } },
-    }] } } } });
+    return Response.json({
+      data: {
+        organization: {
+          repositories: {
+            nodes: [
+              {
+                name: 'krabka-broker',
+                latestRelease: {
+                  tagName: 'v0.8.0',
+                  url: 'https://github.com/krabka-io/krabka-broker/releases/tag/v0.8.0',
+                },
+                defaultBranchRef: { target: { oid: '123456789abcdef' } },
+              },
+            ],
+          },
+        },
+      },
+    });
   };
   try {
     const snapshot = await getEcosystemVersions();
@@ -54,7 +68,11 @@ test('a partial GitHub result marks missing repositories as cached and drops sta
     assert.equal(broker.releaseVersion, 'v0.8.0');
     assert.equal(broker.mainCommit, '1234567');
     assert.equal(broker.aheadBy, null);
-    assert.ok(snapshot.repos.filter((item) => item.repo !== 'krabka-broker').every((item) => item.dataSource === 'Cached'));
+    assert.ok(
+      snapshot.repos
+        .filter((item) => item.repo !== 'krabka-broker')
+        .every((item) => item.dataSource === 'Cached'),
+    );
   } finally {
     globalThis.fetch = fetchBefore;
     if (tokenBefore === undefined) delete process.env.GITHUB_TOKEN;

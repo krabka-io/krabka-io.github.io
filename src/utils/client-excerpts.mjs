@@ -9,32 +9,50 @@ import assert from 'node:assert/strict';
 // through the first line after it matching `to` (or just that line).
 export const clientExcerpts = [
   {
-    id: 'java', label: 'Java', lang: 'java',
+    id: 'java',
+    label: 'Java',
+    lang: 'java',
     library: (code) => code.match(/kafka-clients:(\S+)/)?.[1].replace(/^/, 'kafka-clients '),
     segments: [{ from: /^\s*Properties props = /, to: /producer\.send\(/ }],
     address: /bootstrap\.servers/,
   },
   {
-    id: 'python', label: 'Python', lang: 'python',
+    id: 'python',
+    label: 'Python',
+    lang: 'python',
     library: (code) => code.match(/pip install (confluent-kafka\S*)/)?.[1].replace('==', ' '),
-    segments: [{ from: /^from confluent_kafka import/ }, { from: /^producer = Producer\(/ }, { from: /^producer\.produce\(/, to: /^\)/ }],
+    segments: [
+      { from: /^from confluent_kafka import/ },
+      { from: /^producer = Producer\(/ },
+      { from: /^producer\.produce\(/, to: /^\)/ },
+    ],
     drop: [/on_delivery=/],
     address: /bootstrap\.servers/,
   },
   {
-    id: 'go', label: 'Go', lang: 'go',
+    id: 'go',
+    label: 'Go',
+    lang: 'go',
     library: (code) => code.match(/github\.com\/twmb\/franz-go/) && 'franz-go',
     segments: [{ from: /kgo\.NewClient\(/ }, { from: /^\s*rec := /, to: /ProduceSync\(/ }],
     address: /SeedBrokers\(/,
   },
   {
-    id: 'javascript', label: 'Node.js', lang: 'javascript',
+    id: 'javascript',
+    label: 'Node.js',
+    lang: 'javascript',
     library: (code) => code.match(/npm install (kafkajs\S*)/)?.[1].replace('@', ' '),
-    segments: [{ from: /^const \{ Kafka \} = require/ }, { from: /const kafka = new Kafka\(/, to: /await producer\.connect\(/ }, { from: /await producer\.send\(\{/, to: /^\s*\}\);/ }],
+    segments: [
+      { from: /^const \{ Kafka \} = require/ },
+      { from: /const kafka = new Kafka\(/, to: /await producer\.connect\(/ },
+      { from: /await producer\.send\(\{/, to: /^\s*\}\);/ },
+    ],
     address: /brokers:/,
   },
   {
-    id: 'cli', label: 'CLI', lang: 'bash',
+    id: 'cli',
+    label: 'CLI',
+    lang: 'bash',
     library: (code) => code.match(/apache\/kafka/) && 'Apache Kafka tools',
     // One command, so the CLI tab also highlights exactly one line.
     segments: [{ from: /kafka-console-producer\.sh/ }],
@@ -59,7 +77,9 @@ export function cutExcerpt(code, spec) {
       end = lines.findIndex((l, i) => i >= start && to.test(l));
       assert(end >= 0, `${spec.id}: excerpt end ${to} no longer matches the tested snippet`);
     }
-    let segment = lines.slice(start, end + 1).filter((l) => !(spec.drop ?? []).some((d) => d.test(l)));
+    let segment = lines
+      .slice(start, end + 1)
+      .filter((l) => !(spec.drop ?? []).some((d) => d.test(l)));
     if (spec.transform) segment = segment.map(spec.transform);
     return dedent(segment).join('\n');
   });
@@ -73,6 +93,12 @@ export function buildExcerpts(snippets) {
   return clientExcerpts.map((spec) => {
     const code = snippets[spec.id];
     assert(code, `missing tested client snippet: ${spec.id}`);
-    return { id: spec.id, label: spec.label, lang: spec.lang, library: spec.library(code) || '', ...cutExcerpt(code, spec) };
+    return {
+      id: spec.id,
+      label: spec.label,
+      lang: spec.lang,
+      library: spec.library(code) || '',
+      ...cutExcerpt(code, spec),
+    };
   });
 }

@@ -8,8 +8,14 @@ const bundle = new URL('../public/why3-web/', import.meta.url);
 function worker(filename) {
   const replies = [];
   const context = vm.createContext({
-    onmessage: null, console, TextDecoder, TextEncoder, performance,
-    setTimeout, clearTimeout, postMessage: (text) => replies.push(JSON.parse(text)),
+    onmessage: null,
+    console,
+    TextDecoder,
+    TextEncoder,
+    performance,
+    setTimeout,
+    clearTimeout,
+    postMessage: (text) => replies.push(JSON.parse(text)),
   });
   vm.runInContext(fs.readFileSync(new URL(filename, bundle), 'utf8'), context, { timeout: 30_000 });
   return (message) => {
@@ -23,8 +29,12 @@ function worker(filename) {
 const why3 = worker('proof_worker.js');
 assert.equal(why3({ cmd: 'ping' }).kind, 'pong');
 const loaded = why3({
-  cmd: 'load', name: 'barrier_placement_decision',
-  content: fs.readFileSync(new URL('./fixtures/barrier_placement_decision.coma', import.meta.url), 'utf8'),
+  cmd: 'load',
+  name: 'barrier_placement_decision',
+  content: fs.readFileSync(
+    new URL('./fixtures/barrier_placement_decision.coma', import.meta.url),
+    'utf8',
+  ),
 });
 assert.equal(loaded.kind, 'loaded');
 const goals = loaded.theories.flatMap((theory) => theory.goals);

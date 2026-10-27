@@ -24,7 +24,9 @@ function getFiles(dir, ext = '.md') {
 const mdFiles = getFiles(DOCS_CONTENT_DIR, '.md');
 const astroFiles = getFiles(DOCS_PAGES_DIR, '.astro');
 
-console.log(`\n🔍 [verify-code-stubs] Inspecting code blocks across ${mdFiles.length} markdown guides and ${astroFiles.length} docs pages...\n`);
+console.log(
+  `\n🔍 [verify-code-stubs] Inspecting code blocks across ${mdFiles.length} markdown guides and ${astroFiles.length} docs pages...\n`,
+);
 
 let totalCodeBlocks = 0;
 const languageCounts = {};
@@ -64,12 +66,14 @@ for (const file of mdFiles) {
 
     // 2. Check XML / Maven blocks for balanced tags
     if (lang === 'xml') {
-      const openTags = (code.match(/<[a-zA-Z0-9_-]+>/g) || []).map(t => t.replace(/[<>]/g, ''));
-      const closeTags = (code.match(/<\/[a-zA-Z0-9_-]+>/g) || []).map(t => t.replace(/[<>/]/g, ''));
+      const openTags = (code.match(/<[a-zA-Z0-9_-]+>/g) || []).map((t) => t.replace(/[<>]/g, ''));
+      const closeTags = (code.match(/<\/[a-zA-Z0-9_-]+>/g) || []).map((t) =>
+        t.replace(/[<>/]/g, ''),
+      );
       // Basic check that common XML tags are matched
       for (const tag of ['dependency', 'groupId', 'artifactId', 'version']) {
-        const opened = openTags.filter(t => t === tag).length;
-        const closed = closeTags.filter(t => t === tag).length;
+        const opened = openTags.filter((t) => t === tag).length;
+        const closed = closeTags.filter((t) => t === tag).length;
         if (opened !== closed) {
           syntaxErrors.push({
             file: relPath,

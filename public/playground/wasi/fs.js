@@ -15,11 +15,11 @@
 // points. Chunks are keyed by inode number, not by path, so a rename (the
 // log's segment swap, a directory renamed on delete) rewrites no data.
 
-import { ERRNO as E, FILETYPE } from "./abi.js";
-import { PAGE_SIZE } from "./protocol.js";
+import { ERRNO as E, FILETYPE } from './abi.js';
+import { PAGE_SIZE } from './protocol.js';
 
-const DIR = "dir";
-const FILE = "file";
+const DIR = 'dir';
+const FILE = 'file';
 const NAME_MAX = 255;
 const encoder = new TextEncoder();
 
@@ -32,7 +32,7 @@ export class Inode {
     this.mtime = now;
     this.ctime = now;
     this.parent = null;
-    this.name = "";
+    this.name = '';
     this.nameBytes = null;
     this.seq = 0; // position in the parent's listing; readdir cookies are built from it
     this.opens = 0;
@@ -87,13 +87,13 @@ export class MemFs {
 
   /** Builds the tree from a stored image: `{ nextIno, nodes: [{path, type, ino, size, atime, mtime}], chunks: [{ino, index, bytes}] }`. */
   load(image, warn = () => {}) {
-    const dirs = new Map([["", this.root]]);
+    const dirs = new Map([['', this.root]]);
     const byIno = new Map();
     let maxIno = 1;
     const nodes = [...image.nodes].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     for (const node of nodes) {
-      const slash = node.path.lastIndexOf("/");
-      const parent = dirs.get(slash < 0 ? "" : node.path.slice(0, slash));
+      const slash = node.path.lastIndexOf('/');
+      const parent = dirs.get(slash < 0 ? '' : node.path.slice(0, slash));
       if (!parent) {
         warn(`volume image: ${node.path} has no parent directory; skipped`);
         continue;
@@ -128,10 +128,10 @@ export class MemFs {
 
   /** The inode's path relative to the volume root ("" for the root). */
   pathOf(inode) {
-    if (inode === this.root) return "";
+    if (inode === this.root) return '';
     const parts = [];
     for (let node = inode; node !== this.root; node = node.parent) parts.push(node.name);
-    return parts.reverse().join("/");
+    return parts.reverse().join('/');
   }
 
   #childPath(dir, name) {
@@ -147,16 +147,16 @@ export class MemFs {
     if (start.nlink === 0) return E.NOENT;
     if (path.length === 0) return E.NOENT;
     if (path.charCodeAt(0) === 47) return E.NOTCAPABLE; // absolute: wasi-libc hands relative paths only
-    if (path.includes("\0")) return E.INVAL;
-    const parts = path.split("/");
+    if (path.includes('\0')) return E.INVAL;
+    const parts = path.split('/');
     let end = parts.length - 1;
-    while (end >= 0 && parts[end] === "") end--;
+    while (end >= 0 && parts[end] === '') end--;
     const trailingSlash = end < parts.length - 1;
     let dir = start;
     for (let i = 0; i < end; i++) {
       const part = parts[i];
-      if (part === "" || part === ".") continue;
-      if (part === "..") {
+      if (part === '' || part === '.') continue;
+      if (part === '..') {
         if (dir === this.root) return E.NOTCAPABLE;
         dir = dir.parent;
         continue;
@@ -167,10 +167,16 @@ export class MemFs {
       dir = child;
     }
     const name = parts[end];
-    if (name === "." || name === "..") {
-      if (name === ".." && dir === this.root) return E.NOTCAPABLE;
-      const node = name === "." ? dir : dir.parent;
-      return { parent: node === this.root ? null : node.parent, name: null, node, self: true, trailingSlash };
+    if (name === '.' || name === '..') {
+      if (name === '..' && dir === this.root) return E.NOTCAPABLE;
+      const node = name === '.' ? dir : dir.parent;
+      return {
+        parent: node === this.root ? null : node.parent,
+        name: null,
+        node,
+        self: true,
+        trailingSlash,
+      };
     }
     if (encoder.encode(name).length > NAME_MAX) return E.NAMETOOLONG;
     const node = dir.entries.get(name) ?? null;
@@ -180,10 +186,10 @@ export class MemFs {
 
   /** Looks up a volume-relative path ("a/b", "" or "/" for the root); null when missing. */
   lookup(relative) {
-    const trimmed = relative.replace(/^\/+|\/+$/g, "");
-    if (trimmed === "") return this.root;
+    const trimmed = relative.replace(/^\/+|\/+$/g, '');
+    if (trimmed === '') return this.root;
     const r = this.resolve(this.root, trimmed);
-    return typeof r === "number" ? null : r.node;
+    return typeof r === 'number' ? null : r.node;
   }
 
   // ---- namespace operations -----------------------------------------------------------------
@@ -194,7 +200,7 @@ export class MemFs {
    */
   open(start, path, how) {
     const r = this.resolve(start, path);
-    if (typeof r === "number") return r;
+    if (typeof r === 'number') return r;
     let node = r.node;
     if (!node) {
       if (!how.create) return E.NOENT;
@@ -205,7 +211,7 @@ export class MemFs {
       this.#link(r.parent, r.name, node);
       r.parent.mtime = node.mtime;
       this.files++;
-      this.#record(["create", this.pathOf(node), node.ino, String(node.mtime)]);
+      this.#record(['create', this.pathOf(node), node.ino, String(node.mtime)]);
       return node;
     }
     if (how.create && how.excl) return E.EXIST;
@@ -217,20 +223,20 @@ export class MemFs {
 
   mkdir(start, path) {
     const r = this.resolve(start, path);
-    if (typeof r === "number") return r;
+    if (typeof r === 'number') return r;
     if (r.self || r.node) return E.EXIST;
     if (r.parent.nlink === 0) return E.NOENT;
     const node = new Inode(this.nextIno++, DIR, this.now());
     this.#link(r.parent, r.name, node);
     r.parent.mtime = node.mtime;
     this.dirs++;
-    this.#record(["mkdir", this.pathOf(node), node.ino, String(node.mtime)]);
+    this.#record(['mkdir', this.pathOf(node), node.ino, String(node.mtime)]);
     return E.SUCCESS;
   }
 
   rmdir(start, path) {
     const r = this.resolve(start, path);
-    if (typeof r === "number") return r;
+    if (typeof r === 'number') return r;
     if (r.self) return r.node === this.root ? E.BUSY : E.INVAL;
     if (!r.node) return E.NOENT;
     if (!r.node.isDir) return E.NOTDIR;
@@ -240,28 +246,28 @@ export class MemFs {
     r.parent.mtime = this.now();
     r.node.nlink = 0;
     this.dirs--;
-    this.#record(["rmdir", path_]);
+    this.#record(['rmdir', path_]);
     return E.SUCCESS;
   }
 
   unlink(start, path) {
     const r = this.resolve(start, path);
-    if (typeof r === "number") return r;
+    if (typeof r === 'number') return r;
     if (r.self || (r.node && r.node.isDir)) return E.ISDIR;
     if (!r.node) return E.NOENT;
     const path_ = this.pathOf(r.node);
     r.parent.entries.delete(r.name);
     r.parent.mtime = this.now();
     this.#drop(r.node);
-    this.#record(["unlink", path_]);
+    this.#record(['unlink', path_]);
     return E.SUCCESS;
   }
 
   rename(fromStart, fromPath, toStart, toPath) {
     const a = this.resolve(fromStart, fromPath);
-    if (typeof a === "number") return a;
+    if (typeof a === 'number') return a;
     const b = this.resolve(toStart, toPath);
-    if (typeof b === "number") return b;
+    if (typeof b === 'number') return b;
     if (a.self || b.self) return a.node === this.root || b.node === this.root ? E.BUSY : E.INVAL;
     const src = a.node;
     if (!src) return E.NOENT;
@@ -296,7 +302,7 @@ export class MemFs {
     src.ctime = now;
     a.parent.mtime = now;
     b.parent.mtime = now;
-    this.#record(["rename", from, to]);
+    this.#record(['rename', from, to]);
     return E.SUCCESS;
   }
 
@@ -353,7 +359,8 @@ export class MemFs {
   writeAt(inode, pos, src, srcOff, len) {
     if (len === 0) return 0;
     const end = pos + len;
-    if (end > inode.size && inode.nlink > 0 && this.bytes + (end - inode.size) > this.maxBytes) return -E.NOSPC;
+    if (end > inode.size && inode.nlink > 0 && this.bytes + (end - inode.size) > this.maxBytes)
+      return -E.NOSPC;
     let done = 0;
     while (done < len) {
       const at = pos + done;
@@ -405,7 +412,8 @@ export class MemFs {
         last.fill(0, cut);
         this.#dirtyPage(inode, keep - 1);
       }
-      if (this.journalOn && inode.nlink > 0) inode.truncatedTo = Math.min(inode.truncatedTo ?? size, size);
+      if (this.journalOn && inode.nlink > 0)
+        inode.truncatedTo = Math.min(inode.truncatedTo ?? size, size);
     }
     if (inode.nlink > 0) this.bytes += size - old;
     inode.size = size;
@@ -503,7 +511,7 @@ export class MemFs {
         continue;
       }
       if (!inode.isDir) {
-        if (inode.truncatedTo !== null) ops.push(["size", inode.ino, inode.truncatedTo]);
+        if (inode.truncatedTo !== null) ops.push(['size', inode.ino, inode.truncatedTo]);
         const pages = Math.ceil(inode.size / PAGE_SIZE);
         const dirty = inode.dirtyPages ? [...inode.dirtyPages].sort((x, y) => x - y) : [];
         for (const index of dirty) {
@@ -512,12 +520,20 @@ export class MemFs {
           const valid = Math.min(PAGE_SIZE, inode.size - index * PAGE_SIZE);
           const out = new Uint8Array(page ? valid : 0);
           if (page) out.set(page.length > valid ? page.subarray(0, valid) : page);
-          ops.push(["page", inode.ino, index, out]);
+          ops.push(['page', inode.ino, index, out]);
           transfer.push(out.buffer);
           bytes += out.length;
         }
       }
-      ops.push(["attr", this.pathOf(inode), inode.type, inode.ino, inode.isDir ? 0 : inode.size, String(inode.atime), String(inode.mtime)]);
+      ops.push([
+        'attr',
+        this.pathOf(inode),
+        inode.type,
+        inode.ino,
+        inode.isDir ? 0 : inode.size,
+        String(inode.atime),
+        String(inode.mtime),
+      ]);
       bytes += 64;
       this.#clearDirty(inode);
     }

@@ -53,11 +53,21 @@ assert.doesNotThrow(() => parseConfig(normalizeScenario(doc).nodes[0].config));
 // Config mapping: real names, real validator, unknown keys dropped.
 assert.deepEqual(realConfigFromSimulated(undefined), {});
 assert.deepEqual(realConfigFromSimulated(null), {});
-assert.deepEqual(realConfigFromSimulated({ default_replication_factor: 3, min_insync_replicas: 2, replica_lag_time_max_ms: 30000 }), {
-  default_replication_factor: 3,
-  min_insync_replicas: 2,
-  replica_lag_time_max_ms: 30000,
-});
-assert.deepEqual(realConfigFromSimulated({ default_replication_factor: -1, rack: '', voter: 'yes', bogus: 1 }), {});
+assert.deepEqual(
+  realConfigFromSimulated({
+    default_replication_factor: 3,
+    min_insync_replicas: 2,
+    replica_lag_time_max_ms: 30000,
+  }),
+  {
+    default_replication_factor: 3,
+    min_insync_replicas: 2,
+    replica_lag_time_max_ms: 30000,
+  },
+);
+assert.deepEqual(
+  realConfigFromSimulated({ default_replication_factor: -1, rack: '', voter: 'yes', bogus: 1 }),
+  {},
+);
 
 console.log('Checked the simulated-broker migration.');

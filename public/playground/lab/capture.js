@@ -18,8 +18,14 @@
 // Wireshark's Kafka dissector opens it), JSON (every frame, base64), CSV (one
 // row per exchange).
 
-import { nodeIp } from "./external.js";
-import { KAFKA_PORTS, peekRequest, peekCorrelation, decodeFrame, isSspiFrame } from "./kafka-decode.js";
+import { nodeIp } from './external.js';
+import {
+  KAFKA_PORTS,
+  peekRequest,
+  peekCorrelation,
+  decodeFrame,
+  isSspiFrame,
+} from './kafka-decode.js';
 
 export const DEFAULT_BUDGET = 64 * 1024 * 1024;
 
@@ -78,18 +84,42 @@ export class Capture {
       return;
     }
     for (const r of raw) {
-      const bytes = r.kind === "data" ? b64bytes(r.bytes) : null;
-      const f = { seq: ++this.seq, at: r.at, deliverAt: r.deliver_at, src: r.src, dst: r.dst, conn: r.conn, kind: r.kind, size: r.size, label: r.label, bytes, role: null, exchange: null, ingress: Boolean(r.ingress) };
+      const bytes = r.kind === 'data' ? b64bytes(r.bytes) : null;
+      const f = {
+        seq: ++this.seq,
+        at: r.at,
+        deliverAt: r.deliver_at,
+        src: r.src,
+        dst: r.dst,
+        conn: r.conn,
+        kind: r.kind,
+        size: r.size,
+        label: r.label,
+        bytes,
+        role: null,
+        exchange: null,
+        ingress: Boolean(r.ingress),
+      };
       this.frames.push(f);
       this.bytes += bytes ? bytes.length : 0;
       const key = connKey(r);
       f.key = key;
-      if (r.kind === "open") this.byConn.set(key, { client: r.src, server: r.dst, opened: r.at, closed: null, frames: 0, bytes: [0, 0] });
+      if (r.kind === 'open')
+        this.byConn.set(key, {
+          client: r.src,
+          server: r.dst,
+          opened: r.at,
+          closed: null,
+          frames: 0,
+          bytes: [0, 0],
+        });
       const conn = this.byConn.get(key);
       if (conn) {
         conn.frames++;
-        if (r.kind === "close") conn.closed = r.at;
-        if (bytes) conn.bytes[r.src.node === conn.client.node && r.src.port === conn.client.port ? 0 : 1] += r.size;
+        if (r.kind === 'close') conn.closed = r.at;
+        if (bytes)
+          conn.bytes[r.src.node === conn.client.node && r.src.port === conn.client.port ? 0 : 1] +=
+            r.size;
       }
       if (bytes) this.pair(f);
     }
@@ -103,13 +133,27 @@ export class Capture {
     if (KAFKA_PORTS.has(f.dst.port)) {
       const peek = peekRequest(f.bytes);
       if (!peek) return;
-      f.role = "request";
-      const ex = { id: this.exchanges.length ? this.exchanges[this.exchanges.length - 1].id + 1 : 1, conn: f.conn, client: f.src, server: f.dst, apiKey: peek.apiKey, version: peek.version, corr: peek.corr, req: f, resp: null, rtt: null, serverMs: null, errors: null, problems: null };
+      f.role = 'request';
+      const ex = {
+        id: this.exchanges.length ? this.exchanges[this.exchanges.length - 1].id + 1 : 1,
+        conn: f.conn,
+        client: f.src,
+        server: f.dst,
+        apiKey: peek.apiKey,
+        version: peek.version,
+        corr: peek.corr,
+        req: f,
+        resp: null,
+        rtt: null,
+        serverMs: null,
+        errors: null,
+        problems: null,
+      };
       f.exchange = ex;
       this.exchanges.push(ex);
       this.pending.set(`${f.key}:${peek.corr}`, ex);
     } else if (KAFKA_PORTS.has(f.src.port)) {
-      f.role = "response";
+      f.role = 'response';
       const corr = peekCorrelation(f.bytes);
       const key = `${f.key}:${corr}`;
       const ex = this.pending.get(key);
@@ -131,7 +175,7 @@ export class Capture {
     this.evicted++;
     this.bytes -= f.bytes ? f.bytes.length : 0;
     // An exchange goes with its request; a response alone cannot be decoded.
-    if (f.role === "request" && this.exchanges[0]?.req === f) {
+    if (f.role === 'request' && this.exchanges[0]?.req === f) {
       const ex = this.exchanges.shift();
       if (!ex.resp) this.pending.delete(`${ex.req.key}:${ex.corr}`);
     }
@@ -146,7 +190,11 @@ export class Capture {
       const ex = this.scanQueue.shift();
       if (!ex.resp?.bytes) continue;
       try {
-        const d = await decodeFrame(ex.resp.bytes, { size: ex.resp.size, request: false, answers: ex });
+        const d = await decodeFrame(ex.resp.bytes, {
+          size: ex.resp.size,
+          request: false,
+          answers: ex,
+        });
         ex.errors = [...new Set(d.errors.map((e) => e.name))];
         ex.problems = d.problems;
       } catch (err) {
@@ -171,7 +219,21 @@ export class Capture {
     const byApi = new Map();
     for (const ex of exchanges) {
       let s = byApi.get(ex.apiKey);
-      if (!s) byApi.set(ex.apiKey, (s = { apiKey: ex.apiKey, name: apiName(ex.apiKey), count: 0, answered: 0, failed: 0, reqBytes: 0, respBytes: 0, rtts: [], servers: [] }));
+      if (!s)
+        byApi.set(
+          ex.apiKey,
+          (s = {
+            apiKey: ex.apiKey,
+            name: apiName(ex.apiKey),
+            count: 0,
+            answered: 0,
+            failed: 0,
+            reqBytes: 0,
+            respBytes: 0,
+            rtts: [],
+            servers: [],
+          }),
+        );
       s.count++;
       s.reqBytes += ex.req.size;
       if (ex.resp) {
@@ -191,7 +253,11 @@ export class Capture {
       const [a, b] = f.src.node <= f.dst.node ? [f.src.node, f.dst.node] : [f.dst.node, f.src.node];
       const key = `${a}-${b}`;
       let s = byLink.get(key);
-      if (!s) byLink.set(key, (s = { a, b, frames: 0, ab: 0, ba: 0, first: f.at, last: f.at, buckets: new Map() }));
+      if (!s)
+        byLink.set(
+          key,
+          (s = { a, b, frames: 0, ab: 0, ba: 0, first: f.at, last: f.at, buckets: new Map() }),
+        );
       s.frames++;
       if (f.src.node === a) s.ab += f.size;
       else s.ba += f.size;
@@ -199,7 +265,10 @@ export class Capture {
       const bucket = Math.floor(f.at / 1000);
       s.buckets.set(bucket, (s.buckets.get(bucket) || 0) + f.size);
     }
-    return { byApi: [...byApi.values()].sort((x, y) => y.count - x.count), byLink: [...byLink.values()].sort((x, y) => y.ab + y.ba - (x.ab + x.ba)) };
+    return {
+      byApi: [...byApi.values()].sort((x, y) => y.count - x.count),
+      byLink: [...byLink.values()].sort((x, y) => y.ab + y.ba - (x.ab + x.ba)),
+    };
   }
 
   // ---- exports ----
@@ -207,31 +276,72 @@ export class Capture {
   toJson(frames, meta) {
     const enc = (bytes) => {
       if (!bytes) return null;
-      let bin = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000)
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
       return btoa(bin);
     };
     return JSON.stringify({
-      format: "krabka-cluster-lab-capture/1",
+      format: 'krabka-cluster-lab-capture/1',
       ...meta,
-      timeUnit: "lab milliseconds since the scenario started",
+      timeUnit: 'lab milliseconds since the scenario started',
       dropped: this.dropped,
       evicted: this.evicted,
-      frames: frames.map((f) => ({ at: f.at, deliverAt: f.deliverAt, src: f.src, dst: f.dst, conn: f.conn, kind: f.kind, size: f.size, captured: f.bytes ? f.bytes.length : 0, label: f.label, bytes: enc(f.bytes), ...(f.ingress && { ingress: true }) })),
+      frames: frames.map((f) => ({
+        at: f.at,
+        deliverAt: f.deliverAt,
+        src: f.src,
+        dst: f.dst,
+        conn: f.conn,
+        kind: f.kind,
+        size: f.size,
+        captured: f.bytes ? f.bytes.length : 0,
+        label: f.label,
+        bytes: enc(f.bytes),
+        ...(f.ingress && { ingress: true }),
+      })),
     });
   }
 
   toCsv(exchanges, apiName, nodeName) {
-    const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
-    const rows = [["request_sent_ms", "client", "server", "connection", "api", "version", "correlation", "request_bytes", "response_bytes", "rtt_ms", "server_ms", "network_ms", "errors"].join(",")];
+    const q = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      [
+        'request_sent_ms',
+        'client',
+        'server',
+        'connection',
+        'api',
+        'version',
+        'correlation',
+        'request_bytes',
+        'response_bytes',
+        'rtt_ms',
+        'server_ms',
+        'network_ms',
+        'errors',
+      ].join(','),
+    ];
     for (const ex of exchanges) {
-      rows.push([
-        ex.req.at, q(`${nodeName(ex.client.node)}:${ex.client.port}`), q(`${nodeName(ex.server.node)}:${ex.server.port}`), ex.conn,
-        q(apiName(ex.apiKey)), ex.version, ex.corr, ex.req.size, ex.resp?.size ?? "", ex.rtt ?? "", ex.serverMs ?? "", ex.rtt != null && ex.serverMs != null ? ex.rtt - ex.serverMs : "",
-        q((ex.errors || []).join(" ")),
-      ].join(","));
+      rows.push(
+        [
+          ex.req.at,
+          q(`${nodeName(ex.client.node)}:${ex.client.port}`),
+          q(`${nodeName(ex.server.node)}:${ex.server.port}`),
+          ex.conn,
+          q(apiName(ex.apiKey)),
+          ex.version,
+          ex.corr,
+          ex.req.size,
+          ex.resp?.size ?? '',
+          ex.rtt ?? '',
+          ex.serverMs ?? '',
+          ex.rtt != null && ex.serverMs != null ? ex.rtt - ex.serverMs : '',
+          q((ex.errors || []).join(' ')),
+        ].join(','),
+      );
     }
-    return rows.join("\n");
+    return rows.join('\n');
   }
 
   // pcapng with raw IPv4 packets (LINKTYPE_RAW) and a millisecond clock: the
@@ -275,13 +385,24 @@ export class Capture {
     sv.setUint32(0, 0x1a2b3c4d, true);
     sv.setUint16(4, 1, true);
     sv.setBigInt64(8, -1n, true);
-    block(0x0a0d0d0a, concat([shb, option(4, te.encode("krabka Cluster Lab")), option(1, te.encode(comment)), new Uint8Array(4)]));
+    block(
+      0x0a0d0d0a,
+      concat([
+        shb,
+        option(4, te.encode('krabka Cluster Lab')),
+        option(1, te.encode(comment)),
+        new Uint8Array(4),
+      ]),
+    );
     // Interface: raw IP, no snap limit, timestamps in 10^-3 s.
     const idb = new Uint8Array(8);
     new DataView(idb.buffer).setUint16(0, 101, true);
-    block(0x00000001, concat([idb, option(2, te.encode("lab")), option(9, Uint8Array.of(3)), new Uint8Array(4)]));
+    block(
+      0x00000001,
+      concat([idb, option(2, te.encode('lab')), option(9, Uint8Array.of(3)), new Uint8Array(4)]),
+    );
 
-    const ip = (id) => nodeIp(id).split(".").map(Number);
+    const ip = (id) => nodeIp(id).split('.').map(Number);
     // A client end has port 0 in the lab; TCP needs a real one, so it gets an
     // ephemeral port from its connection id.
     const port = (ep, f) => (ep.port === 0 ? 32768 + (f.conn % 28232) : ep.port);
@@ -344,12 +465,15 @@ export class Capture {
     };
     const MSS = 65495;
     for (const f of frames) {
-      if (f.kind === "open") packet(f, 0x02, null, 0, f.at);
-      else if (f.kind === "close") packet(f, 0x11, null, 0, f.at);
+      if (f.kind === 'open') packet(f, 0x02, null, 0, f.at);
+      else if (f.kind === 'close') packet(f, 0x11, null, 0, f.at);
       else {
         for (let off = 0; off < Math.max(1, f.size); off += MSS) {
           const len = Math.min(MSS, f.size - off);
-          const part = f.bytes && off < f.bytes.length ? f.bytes.subarray(off, Math.min(f.bytes.length, off + len)) : null;
+          const part =
+            f.bytes && off < f.bytes.length
+              ? f.bytes.subarray(off, Math.min(f.bytes.length, off + len))
+              : null;
           packet(f, 0x18, part, len, f.at);
         }
       }

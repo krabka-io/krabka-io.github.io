@@ -8,7 +8,7 @@
 // record, and a line that is neither, such as a panic, is kept raw with a
 // guessed level.
 
-export const LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
+export const LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'];
 const RANK = Object.fromEntries(LEVELS.map((l, i) => [l, i]));
 
 export function levelRank(level) {
@@ -17,15 +17,18 @@ export function levelRank(level) {
 
 /** "warn" / "Warning" / "ERR" as one of LEVELS, or null when it is none of them. */
 export function normalizeLevel(text) {
-  const u = String(text ?? "").trim().toUpperCase();
-  if (u === "WARNING") return "WARN";
-  if (u === "ERR" || u === "FATAL" || u === "CRITICAL") return "ERROR";
+  const u = String(text ?? '')
+    .trim()
+    .toUpperCase();
+  if (u === 'WARNING') return 'WARN';
+  if (u === 'ERR' || u === 'FATAL' || u === 'CRITICAL') return 'ERROR';
   return u in RANK ? u : null;
 }
 
 // ---- lines ----------------------------------------------------------------------------------------
 
-const COMPACT = /^\s*(\d+(?:\.\d+)?)s\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(?:([A-Za-z_][\w:.-]*):\s+)?(.*)$/;
+const COMPACT =
+  /^\s*(\d+(?:\.\d+)?)s\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(?:([A-Za-z_][\w:.-]*):\s+)?(.*)$/;
 const TRAILING_FIELDS = /((?:\s+[A-Za-z_][\w.]*=(?:"[^"]*"|\S+))+)\s*$/;
 const FIELD = /([A-Za-z_][\w.]*)=("[^"]*"|\S+)/g;
 const ERROR_WORDS = /\b(panic(?:ked)?|error|fatal|exception|abort(?:ed)?)\b/i;
@@ -37,16 +40,17 @@ function fromJson(raw) {
   } catch {
     return null;
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const { ts, level, target, message, ...fields } = obj;
-  const seconds = typeof ts === "number" ? ts : typeof ts === "string" && ts.trim() ? Number(ts) : NaN;
+  const seconds =
+    typeof ts === 'number' ? ts : typeof ts === 'string' && ts.trim() ? Number(ts) : NaN;
   // A subscriber that did not flatten the event nests its message under `fields`.
   const text = message ?? fields.fields?.message;
   return {
-    format: "json",
-    level: normalizeLevel(level) ?? "INFO",
-    target: typeof target === "string" ? target : "",
-    message: text == null ? "" : typeof text === "string" ? text : JSON.stringify(text),
+    format: 'json',
+    level: normalizeLevel(level) ?? 'INFO',
+    target: typeof target === 'string' ? target : '',
+    message: text == null ? '' : typeof text === 'string' ? text : JSON.stringify(text),
     ts: Number.isFinite(seconds) ? seconds : null,
     fields,
     record: obj,
@@ -60,11 +64,20 @@ function fromCompact(raw) {
   const fields = {};
   const tail = TRAILING_FIELDS.exec(message);
   if (tail) {
-    for (const [, key, value] of tail[1].matchAll(FIELD)) fields[key] = value.replace(/^"(.*)"$/, "$1");
+    for (const [, key, value] of tail[1].matchAll(FIELD))
+      fields[key] = value.replace(/^"(.*)"$/, '$1');
     message = message.slice(0, tail.index);
   }
   const ts = Number(m[1]);
-  return { format: "text", level: m[2], target: m[3] || "", message, ts, fields, record: { ts, level: m[2], target: m[3] || "", message, ...fields } };
+  return {
+    format: 'text',
+    level: m[2],
+    target: m[3] || '',
+    message,
+    ts,
+    fields,
+    record: { ts, level: m[2], target: m[3] || '', message, ...fields },
+  };
 }
 
 /**
@@ -74,26 +87,41 @@ function fromCompact(raw) {
  * since the process started, or null. An empty line is null.
  */
 export function parseLine(text) {
-  const raw = String(text).replace(/\r$/, "");
+  const raw = String(text).replace(/\r$/, '');
   if (!raw.trim()) return null;
   const trimmed = raw.trim();
-  const parsed = (trimmed.startsWith("{") && trimmed.endsWith("}") && fromJson(trimmed)) || fromCompact(raw);
+  const parsed =
+    (trimmed.startsWith('{') && trimmed.endsWith('}') && fromJson(trimmed)) || fromCompact(raw);
   if (parsed) return { raw, ...parsed };
-  return { raw, format: "raw", level: ERROR_WORDS.test(raw) ? "ERROR" : "INFO", target: "", message: raw, ts: null, fields: {}, record: null };
+  return {
+    raw,
+    format: 'raw',
+    level: ERROR_WORDS.test(raw) ? 'ERROR' : 'INFO',
+    target: '',
+    message: raw,
+    ts: null,
+    fields: {},
+    record: null,
+  };
 }
 
 /** The raw lines of `entries`, one per line: what Download and Copy visible hand out. */
 export function toNdjson(entries) {
-  return entries.length ? `${entries.map((e) => e.raw).join("\n")}\n` : "";
+  return entries.length ? `${entries.map((e) => e.raw).join('\n')}\n` : '';
 }
 
 // ---- level directives -----------------------------------------------------------------------------
 
 // What the page sets as `KRABKA_LOG`: a tracing-subscriber `Targets` string.
-const LEVEL_WORDS = ["trace", "debug", "info", "warn", "error", "off"];
+const LEVEL_WORDS = ['trace', 'debug', 'info', 'warn', 'error', 'off'];
 const TARGET = /^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$/;
 
-export const DIRECTIVE_EXAMPLES = ["info", "debug", "warn,krabka_broker=debug", "info,krabka_broker::request=debug"];
+export const DIRECTIVE_EXAMPLES = [
+  'info',
+  'debug',
+  'warn,krabka_broker=debug',
+  'info,krabka_broker::request=debug',
+];
 
 /**
  * Checks a level directive: comma-separated entries, each a bare level
@@ -103,25 +131,44 @@ export const DIRECTIVE_EXAMPLES = ["info", "debug", "warn,krabka_broker=debug", 
  * default.
  */
 export function parseDirective(text) {
-  const source = String(text ?? "").trim();
-  if (!source) return { ok: true, directive: "", entries: [] };
+  const source = String(text ?? '').trim();
+  if (!source) return { ok: true, directive: '', entries: [] };
   const entries = [];
-  for (const part of source.split(",").map((p) => p.trim())) {
-    if (!part) return { ok: false, error: "an entry is empty: check for a stray comma" };
-    const at = part.indexOf("=");
+  for (const part of source.split(',').map((p) => p.trim())) {
+    if (!part) return { ok: false, error: 'an entry is empty: check for a stray comma' };
+    const at = part.indexOf('=');
     const level = (at < 0 ? part : part.slice(at + 1)).trim().toLowerCase();
     if (at < 0) {
-      if (!LEVEL_WORDS.includes(level)) return { ok: false, error: `"${part}" is not a level: write ${part}=debug to set a target's level` };
-      if (entries.some((e) => e.target === null)) return { ok: false, error: "only one bare level can set the default" };
+      if (!LEVEL_WORDS.includes(level))
+        return {
+          ok: false,
+          error: `"${part}" is not a level: write ${part}=debug to set a target's level`,
+        };
+      if (entries.some((e) => e.target === null))
+        return { ok: false, error: 'only one bare level can set the default' };
       entries.push({ target: null, level });
       continue;
     }
     const target = part.slice(0, at).trim();
-    if (!TARGET.test(target)) return { ok: false, error: `"${target}" is not a target such as krabka_broker or krabka_broker::raft` };
-    if (!LEVEL_WORDS.includes(level)) return { ok: false, error: `"${part.slice(at + 1).trim()}" is not a level: use ${LEVEL_WORDS.join(", ")}` };
+    if (!TARGET.test(target))
+      return {
+        ok: false,
+        error: `"${target}" is not a target such as krabka_broker or krabka_broker::raft`,
+      };
+    if (!LEVEL_WORDS.includes(level))
+      return {
+        ok: false,
+        error: `"${part.slice(at + 1).trim()}" is not a level: use ${LEVEL_WORDS.join(', ')}`,
+      };
     entries.push({ target, level });
   }
-  return { ok: true, directive: entries.map((e) => (e.target === null ? e.level : `${e.target}=${e.level}`)).join(","), entries };
+  return {
+    ok: true,
+    directive: entries
+      .map((e) => (e.target === null ? e.level : `${e.target}=${e.level}`))
+      .join(','),
+    entries,
+  };
 }
 
 // ---- filtering ------------------------------------------------------------------------------------
@@ -134,23 +181,30 @@ export function parseDirective(text) {
 export function parseQuery(text) {
   const terms = [];
   const fields = [];
-  for (const token of String(text ?? "").match(/(?:[^\s"]|"[^"]*")+/g) ?? []) {
+  for (const token of String(text ?? '').match(/(?:[^\s"]|"[^"]*")+/g) ?? []) {
     const m = /^([A-Za-z_][\w.-]*):(.+)$/s.exec(token);
     if (!m) {
-      terms.push(token.replace(/"/g, "").toLowerCase());
+      terms.push(token.replace(/"/g, '').toLowerCase());
       continue;
     }
-    let value = m[2].replace(/^"(.*)"$/s, "$1");
+    let value = m[2].replace(/^"(.*)"$/s, '$1');
     const cmp = /^(>=|<=|>|<)(.*)$/s.exec(value);
-    const op = cmp ? { ">": "gt", ">=": "gte", "<": "lt", "<=": "lte" }[cmp[1]] : "eq";
+    const op = cmp ? { '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' }[cmp[1]] : 'eq';
     if (cmp) value = cmp[2];
-    fields.push({ key: m[1], op, value: value.toLowerCase(), num: value.trim() === "" ? NaN : Number(value) });
+    fields.push({
+      key: m[1],
+      op,
+      value: value.toLowerCase(),
+      num: value.trim() === '' ? NaN : Number(value),
+    });
   }
   return { terms, fields };
 }
 
 function haystack(entry) {
-  entry.hay ??= `${entry.message} ${entry.target} ${Object.entries(entry.fields).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(" ")}`.toLowerCase();
+  entry.hay ??= `${entry.message} ${entry.target} ${Object.entries(entry.fields)
+    .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+    .join(' ')}`.toLowerCase();
   return entry.hay;
 }
 
@@ -158,20 +212,20 @@ function haystack(entry) {
 // `level`, `stream` and `message`.
 function lookup(entry, key, nodeName) {
   switch (key) {
-    case "node":
-      return [String(entry.node), nodeName ? nodeName(entry.node) : ""];
-    case "level":
+    case 'node':
+      return [String(entry.node), nodeName ? nodeName(entry.node) : ''];
+    case 'level':
       return entry.level;
-    case "target":
+    case 'target':
       return entry.target;
-    case "message":
+    case 'message':
       return entry.message;
-    case "stream":
+    case 'stream':
       return entry.stream;
     default: {
       let at = entry.fields;
-      for (const step of key.split(".")) {
-        if (at == null || typeof at !== "object" || !Object.hasOwn(at, step)) return undefined;
+      for (const step of key.split('.')) {
+        if (at == null || typeof at !== 'object' || !Object.hasOwn(at, step)) return undefined;
         at = at[step];
       }
       return at;
@@ -183,20 +237,26 @@ function matchField(entry, f, nodeName) {
   const v = lookup(entry, f.key, nodeName);
   if (v === undefined || v === null) return false;
   if (Array.isArray(v)) return v.some((x) => String(x).toLowerCase() === f.value);
-  if (f.op !== "eq") {
-    if (f.key === "level") {
+  if (f.op !== 'eq') {
+    if (f.key === 'level') {
       const want = normalizeLevel(f.value);
       if (!want) return false;
       const d = levelRank(entry.level) - levelRank(want);
-      return f.op === "gt" ? d > 0 : f.op === "gte" ? d >= 0 : f.op === "lt" ? d < 0 : d <= 0;
+      return f.op === 'gt' ? d > 0 : f.op === 'gte' ? d >= 0 : f.op === 'lt' ? d < 0 : d <= 0;
     }
     const n = Number(v);
     if (Number.isNaN(n) || Number.isNaN(f.num)) return false;
-    return f.op === "gt" ? n > f.num : f.op === "gte" ? n >= f.num : f.op === "lt" ? n < f.num : n <= f.num;
+    return f.op === 'gt'
+      ? n > f.num
+      : f.op === 'gte'
+        ? n >= f.num
+        : f.op === 'lt'
+          ? n < f.num
+          : n <= f.num;
   }
-  const text = String(typeof v === "object" ? JSON.stringify(v) : v).toLowerCase();
+  const text = String(typeof v === 'object' ? JSON.stringify(v) : v).toLowerCase();
   // A target or a message is found by a part of it (`target:raft`); every other field is compared whole.
-  return f.key === "target" || f.key === "message" ? text.includes(f.value) : text === f.value;
+  return f.key === 'target' || f.key === 'message' ? text.includes(f.value) : text === f.value;
 }
 
 /** Whether `entry` passes the text query. `nodeName(id)` lets `node:` match a name. */
@@ -213,11 +273,12 @@ export function matchQuery(entry, query, nodeName) {
  * the level and target filters: they explain the gaps between lines.
  */
 export function filterEntries(entries, filter, nodeName) {
-  const min = levelRank(filter.minLevel || "TRACE");
+  const min = levelRank(filter.minLevel || 'TRACE');
   const nodes = filter.nodes?.size ? filter.nodes : null;
   const targets = filter.targets?.size ? filter.targets : null;
-  const prefix = filter.prefix || "";
-  const query = filter.query && (filter.query.terms.length || filter.query.fields.length) ? filter.query : null;
+  const prefix = filter.prefix || '';
+  const query =
+    filter.query && (filter.query.terms.length || filter.query.fields.length) ? filter.query : null;
   return entries.filter((e) => {
     if (nodes && !nodes.has(e.node)) return false;
     if (!e.marker) {
