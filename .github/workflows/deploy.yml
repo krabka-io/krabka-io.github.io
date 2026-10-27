@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  # The merge queue waits for `build` on the commit it builds for main; without
+  # this trigger nothing ran there and every entry timed out after an hour.
+  merge_group:
+    branches: [main]
   schedule:
     - cron: '0 4 * * *'
   repository_dispatch:
@@ -18,8 +22,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages-production' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && format('pages-merge-group-{0}', github.ref) || 'pages-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   build:
