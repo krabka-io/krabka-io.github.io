@@ -693,16 +693,20 @@ rpk:
       // the cgroups, so device use can be read over the OMB measurement window.
       const deviceNames = provenance.host.storage.sampled_devices;
       const deviceSamples = [];
+      const hostSamples = [];
       const deviceFile = await fs.open(path.join(path.dirname(filename), 'devices.jsonl'), 'w');
       // Host memory and reclaim counters, sampled with the cgroups, in
       // host.jsonl: a broker whose page cache fills its cgroup stalls in the
       // kernel's reclaim, and the cgroup counters alone cannot tell that
       // from host-wide memory pressure. Pressure stall information is null on
-      // kernels built without PSI.
+      // kernels built without PSI. Anonymous, shared and unreclaimable slab
+      // memory, the virtio balloon counters and stolen CPU time tell a
+      // consumer outside every cgroup, or the hypervisor itself, from the
+      // brokers when free memory disappears mid-trial.
       const hostFile = await fs.open(path.join(path.dirname(filename), 'host.jsonl'), 'w');
       async function readHost() {
-        const [meminfo, vmstat, memoryPressure, ioPressure] = await Promise.all([
-          fs.readFile('/proc/meminfo', 'utf8'), fs.readFile('/proc/vmstat', 'utf8'),
+        const [meminfo, vmstat, stat, memoryPressure, ioPressure] = await Promise.all([
+          fs.readFile('/proc/meminfo', 'utf8'), fs.readFile('/proc/vmstat', 'utf8'), fs.readFile('/proc/stat', 'utf8'),
           fs.readFile('/proc/pressure/memory', 'utf8').catch(() => ''), fs.readFile('/proc/pressure/io', 'utf8').catch(() => '')]);
         const bytes = key => {
           const match = meminfo.match(new RegExp(`^${key.replace(/[()]/g, '\\$&')}:\\s+(\\d+) kB$`, 'm'));
@@ -716,12 +720,18 @@ rpk:
           const match = text.match(new RegExp(`^${kind} .*total=(\\d+)$`, 'm'));
           return match ? Number(match[1]) : null;
         };
+        // The eighth field of the aggregate cpu line counts ticks the hypervisor
+        // ran another guest while this one was runnable.
+        const steal = stat.match(/^cpu\s+(?:\d+\s+){7}(\d+)/m);
         return { mem_free_bytes: bytes('MemFree'), mem_available_bytes: bytes('MemAvailable'), cached_bytes: bytes('Cached'),
           dirty_bytes: bytes('Dirty'), writeback_bytes: bytes('Writeback'),
           active_file_bytes: bytes('Active(file)'), inactive_file_bytes: bytes('Inactive(file)'),
+          anon_bytes: bytes('AnonPages'), shmem_bytes: bytes('Shmem'), slab_unreclaimable_bytes: bytes('SUnreclaim'),
           pgscan_kswapd: count('pgscan_kswapd'), pgscan_direct: count('pgscan_direct'),
           pgsteal_kswapd: count('pgsteal_kswapd'), pgsteal_direct: count('pgsteal_direct'),
           allocstall: [...vmstat.matchAll(/^allocstall_\w+ (\d+)$/gm)].reduce((sum, match) => sum + Number(match[1]), 0),
+          balloon_inflate: count('balloon_inflate'), balloon_deflate: count('balloon_deflate'),
+          cpu_steal_ticks: steal ? Number(steal[1]) : null,
           memory_stall_us: stall(memoryPressure, 'some'), memory_stall_full_us: stall(memoryPressure, 'full'),
           io_stall_us: stall(ioPressure, 'some') };
       }
@@ -733,11 +743,13 @@ rpk:
         const elapsed = performance.now() - start;
         const current = { elapsed_ms: elapsed, brokers: brokersSampled };
         const device = { elapsed_ms: elapsed, devices: parseDiskstats(diskstats, deviceNames) };
+        const hostSample = { elapsed_ms: elapsed, host };
         samples.push(current);
         deviceSamples.push(device);
+        hostSamples.push(hostSample);
         await sampleFile.write(`${JSON.stringify(current)}\n`);
         await deviceFile.write(`${JSON.stringify(device)}\n`);
-        await hostFile.write(`${JSON.stringify({ elapsed_ms: elapsed, host })}\n`);
+        await hostFile.write(`${JSON.stringify(hostSample)}\n`);
       }
       const closeFiles = () => Promise.all([sampleFile.close(), deviceFile.close(), hostFile.close()]);
       try { await sample(); }
@@ -763,7 +775,7 @@ rpk:
         finally { await closeFiles(); }
       }
       if (sampleError) throw sampleError;
-      return { output, samples, deviceSamples, startedAt };
+      return { output, samples, deviceSamples, hostSamples, startedAt };
     }
 
     // Run each OMB workload on fresh clusters.
@@ -827,7 +839,8 @@ rpk:
               // CPU, messages and device use over the OMB measurement window
               // only; the totals above cover the full capture.
               measurement_window: windowMetrics({ samples: measurement.samples, deviceSamples: measurement.deviceSamples,
-                startedAt: measurement.startedAt, window: ombMeasurementWindow(logs[0], measurement.startedAt), result }) };
+                hostSamples: measurement.hostSamples, startedAt: measurement.startedAt,
+                window: ombMeasurementWindow(logs[0], measurement.startedAt), result }) };
             const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline,
               retriable_commit_failures: retriableCommitFailures(logs.join('\n')),
               ...(directIoResult ? { direct_io: directIoResult } : {}) };

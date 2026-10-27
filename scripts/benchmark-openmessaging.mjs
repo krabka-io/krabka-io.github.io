@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { hostInterfered } from './benchmark-results.mjs';
 
 export const OMB = {
   repository: 'https://github.com/openmessaging/benchmark.git',
@@ -278,7 +279,17 @@ export async function writeOmbReport(directory, provenance, trials) {
     '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|'];
   for (const trial of trials) {
     const result = trial.omb;
-    lines.push(`| ${trial.case.id} | ${trial.rf} | ${trial.vendor} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`);
+    const mark = hostInterfered(trial) ? ' †' : '';
+    lines.push(`| ${trial.case.id} | ${trial.rf} | ${trial.vendor}${mark} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`);
+  }
+  const interfered = trials.filter(hostInterfered);
+  if (interfered.length) {
+    lines.push('', '## Host interference', '',
+      '† The host, not the broker, shaped these latencies during the measurement window: the hypervisor inflated the virtio balloon or the brokers\' allocations fell into direct reclaim. Compare them with care or repeat them.', '');
+    for (const trial of interfered) {
+      const host = trial.metrics.measurement_window.host;
+      lines.push(`- ${trial.case.id}, RF${trial.rf}, ${trial.vendor}, round ${trial.repetition}: balloon ${host.balloon_inflated_pages === null ? 'absent' : `${(host.balloon_inflated_pages * 4096 / 1024 ** 3).toFixed(1)} GiB inflated`}, ${host.allocstall} direct reclaim stalls, ${((host.pgsteal_kswapd + host.pgsteal_direct) * 4096 / 1024 ** 3).toFixed(1)} GiB reclaimed host-wide, available memory down to ${(host.available_min_bytes / 1024 ** 3).toFixed(1)} GiB`);
+    }
   }
   if (omitted.length) {
     lines.push('', '## Not measured', '');
