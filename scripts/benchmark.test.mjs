@@ -382,10 +382,20 @@ test('the O_DIRECT check needs the newest segment of every benchmark partition o
     '/data/test-topic-a-0/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000001000.log 02100002'].join('\n');
-  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
+  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, unwritten: [], missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
   assert.deepEqual(directIoCheck(listing.replaceAll('02140002', '02100002'), 'x64').direct, 0);
-  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
+  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, unwritten: [], missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
   assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
+  // With sizes: a newest segment of zero bytes without O_DIRECT has had no
+  // append and is unwritten, one with bytes and no O_DIRECT is missing, and
+  // an unknown size counts as written.
+  const sized = ['/data/test-topic-b-0/00000000000000000000.log 02100002 0',
+    '/data/test-topic-b-1/00000000000000000000.log 02100002 4096',
+    '/data/test-topic-b-2/00000000000000000000.log 02100002 0',
+    '/data/test-topic-b-2/00000000000000000000.log 02140002 4096',
+    '/data/test-topic-b-3/00000000000000000000.log 02100002 ?'].join('\n');
+  assert.deepEqual(directIoCheck(sized, 'x64'), { partitions: 4, direct: 1, unwritten: ['test-topic-b-0'],
+    missing: ['test-topic-b-1', 'test-topic-b-3'], verified: ['test-topic-b-2'] });
   assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
 });
 
