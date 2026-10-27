@@ -339,7 +339,9 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   production-smoke:
-    if: github.ref == 'refs/heads/main'
+    # success() also sees skipped/failed transitive ancestors. After promotion
+    # (or successful fallback from a failed promote), gate on deployment itself.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}
     needs: deploy
     runs-on: ubuntu-26.04
     timeout-minutes: 10

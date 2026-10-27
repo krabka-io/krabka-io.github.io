@@ -12,6 +12,8 @@ const proofs = "steps.changes.outputs.proofs == 'true'";
 const mainOnly = "github.ref == 'refs/heads/main'";
 const mainPush = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
 const buildCondition = "${{ !cancelled() && needs.promote.outputs.promoted != 'true' }}";
+const smokeCondition =
+  "${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}";
 const deployCondition =
   "${{ always() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.promote.outputs.promoted == 'true')) }}";
 const normalize = (value) => value?.replace(/\s+/g, ' ').trim();
@@ -26,13 +28,14 @@ function runs(
     promoted = '',
     promote = 'success',
     build = 'success',
+    deploy = 'success',
     cancelled = false,
   } = {},
 ) {
   const source = (expression || 'true').replace(/^\$\{\{\s*|\s*\}\}$/g, '');
   if (
     !/\b(always|cancelled|success|failure)\(/.test(source) &&
-    (promote !== 'success' || build !== 'success')
+    [promote, build, deploy].some((result) => result !== 'success')
   )
     return false;
   const values = {
@@ -41,6 +44,7 @@ function runs(
     'needs.promote.outputs.promoted': promoted,
     'needs.promote.result': promote,
     'needs.build.result': build,
+    'needs.deploy.result': deploy,
   };
   let js = source;
   for (const [key, value] of Object.entries(values)) js = js.replaceAll(key, JSON.stringify(value));
@@ -89,6 +93,19 @@ function gateScenarios(doc) {
         false,
         'PR cannot deploy',
       );
+      for (const promote of ['success', 'failure', 'skipped']) {
+        for (const deploy of ['success', 'failure', 'skipped', 'cancelled']) {
+          assert.equal(
+            runs(doc.jobs['production-smoke'].if, { build, promote, deploy }),
+            deploy === 'success',
+            'successful deployment runs smoke despite skipped/failed ancestors',
+          );
+          assert.equal(
+            runs(doc.jobs['production-smoke'].if, { build, promote, deploy, cancelled: true }),
+            false,
+          );
+        }
+      }
     }
   }
 }
@@ -127,7 +144,7 @@ function contract(doc, pkg) {
   blocking(build, 'build', buildCondition);
   assert.equal(normalize(deploy.if), deployCondition);
   blocking(deploy, 'deploy', deploy.if);
-  blocking(smoke, 'production-smoke', mainOnly);
+  blocking(smoke, 'production-smoke', smokeCondition);
   for (const job of [doc, build, deploy, smoke]) {
     assert.equal(
       job.defaults?.run,
@@ -421,6 +438,12 @@ test('deployment preserves blocking build, validation, upload and production smo
 const step = (doc, name, job = 'build') => doc.jobs[job].steps.find((entry) => entry.name === name);
 const validation = 'Check built links, SEO and page budgets';
 const mutations = {
+  'transitive skip suppresses smoke': (doc) => {
+    doc.jobs['production-smoke'].if = mainOnly;
+  },
+  'smoke after failed deployment': (doc) => {
+    doc.jobs['production-smoke'].if = `\${{ !cancelled() && ${mainOnly} }}`;
+  },
   'main-only promote job': (doc) => {
     doc.jobs.promote.if = mainPush;
   },

@@ -78,7 +78,9 @@ promotion or empty outputs. It never skips on PR or merge-group events. Deployme
 requires a successful full build or a skipped build with explicit completed
 promotion; a failed or cancelled build blocks it. Only `refs/heads/main` can upload
 and deploy Pages. The production concurrency
-group remains serialized through deployment and smoke checks. Each PR has its
+group remains serialized through deployment and smoke checks. Smoke explicitly
+requires successful deployment and uses `!cancelled()` to prevent a skipped or
+failed transitive ancestor from suppressing it; its validation commands are unchanged. Each PR has its
 own concurrency group and cancels its superseded runs; it cannot cancel production.
 Snippet execution also cancels only superseded PR runs.
 

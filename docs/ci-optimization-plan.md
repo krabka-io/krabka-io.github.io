@@ -115,7 +115,9 @@ Require a present server digest in candidate metadata. Download/extract into
 clean staging, validate the package, then re-upload the same files as this main
 run's Pages artifact. Set `promoted=true` only after all these steps succeed.
 No resynchronization, rebuild, or content mutation occurs after queue validation.
-Production smoke stays unchanged; deploy dependencies/conditions change below.
+Production smoke commands stay unchanged. Its job condition explicitly requires
+a successful deployment and uses a status function so skipped/failed ancestors
+do not suppress smoke; deploy dependencies/conditions change below.
 
 Schedules, release dispatches, and manual runs retain fresh full synchronization,
 build, and validation. A main push without an eligible queue producer also uses
@@ -149,6 +151,9 @@ deploy:
     ${{ always() && github.ref == 'refs/heads/main' &&
         (needs.build.result == 'success' ||
          (needs.build.result == 'skipped' && needs.promote.outputs.promoted == 'true')) }}
+production-smoke:
+  needs: deploy
+  if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}
 ```
 
 The build status function overrides implicit success gating: failed/skipped
@@ -156,6 +161,10 @@ promote or absent outputs still run build unless cancelled. Build must never
 skip on `pull_request` or `merge_group`. Failed/cancelled builds block deploy;
 a skipped build authorizes deployment only with explicit `promoted=true`.
 Scheduled/manual/release main builds still deploy after full validation.
+GitHub applies implicit success gating to the dependency chain, not just the
+immediate deployment job. The smoke status guard preserves smoke after a
+promoted/skipped build or successful fallback from failed promotion, and still
+rejects failed/skipped deployment or workflow cancellation.
 
 The implementation replaces `assert.equal(build.needs, undefined)` in
 `scripts/deployment-contract.test.mjs` with graph-aware contracts and mutations:
