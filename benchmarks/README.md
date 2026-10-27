@@ -18,6 +18,10 @@ gh workflow run openmessaging.yml -f mode=smoke
 # Run a narrower workload or repeat the comparison three times
 gh workflow run openmessaging.yml -f mode=full \
   -f workloads=1-topic-16-partitions-1kb -f repetitions=3
+# Write krabka's segments with preallocate=true and O_DIRECT (direct-io-uring
+# adds the io_uring seccomp profile). Such a run is an experiment: the
+# publisher does not publish it.
+gh workflow run openmessaging.yml -f mode=full -f krabka_storage=direct
 
 # The same runner works on a prepared Linux host; no npm install is needed
 npm run benchmark -- --suite openmessaging --dry-run
