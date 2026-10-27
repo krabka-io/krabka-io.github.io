@@ -545,7 +545,15 @@ rpk:
       while (!(await fs.readFile(stdout, 'utf8').catch(() => '')).includes('----- Starting benchmark traffic')) {
         await delay(2_000, undefined, { signal });
       }
-      await delay(30_000, undefined, { signal });
+      // Let the producers reach every partition before the first listing:
+      // 30 s into a full workload, a sixth of a shorter one. From here the
+      // check runs to its end whether or not the measurement is still going;
+      // the brokers stay up until it returns, and a descriptor's flags do not
+      // change, so a listing taken after the measurement is the same
+      // evidence. The smoke run 40436211985 lost the 16- and 100-partition
+      // cells to the measurement ending inside this check.
+      const durationMs = workload.config.testDurationMinutes * 60_000;
+      await delay(Math.min(30_000, Math.max(5_000, Math.floor(durationMs / 6))), undefined, { signal });
       const user = JSON.parse(await docker(['image', 'inspect', provenance.images.krabka.reference]))[0].Config.User || '0';
       // One `ls` and shell built-ins: a process per descriptor took about a
       // second for 150 descriptors, longer than a segment lives at a maximum
@@ -572,7 +580,7 @@ rpk:
           checked.attempts = attempt;
         }
         if (brokersChecked.every(b => b.verified.size === b.partitions)) break;
-        await delay(3_000, undefined, { signal });
+        await delay(3_000);
       }
       for (const checked of brokersChecked) {
         checked.direct = checked.verified.size;
@@ -685,7 +693,7 @@ rpk:
             const directAbort = new AbortController();
             const directIo = vendor === 'krabka' && options['krabka-preallocate']
               ? verifyDirectIo(brokers, directory, workload, rf, directAbort.signal).catch(error => ({ verified: false,
-                error: error.name === 'AbortError' ? 'the OMB measurement ended before the check ran' : error.message }))
+                error: error.name === 'AbortError' ? 'the OMB measurement ended before traffic started' : error.message }))
               : null;
             const measurement = await measureResources(brokers, path.join(directory, 'resources.jsonl'),
               () => oneShot(['--network', network, '--user', `${process.getuid()}:${process.getgid()}`,
