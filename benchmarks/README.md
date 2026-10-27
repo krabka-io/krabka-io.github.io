@@ -46,7 +46,11 @@ separate 4 GiB client. Multiple rounds rotate vendor order. Each shard has a
 have their upstream duration plus 30 minutes for startup and sustainable-rate probing,
 or 90 extra minutes for a full backlog fill/drain (five extra minutes in smoke).
 Deadlines remain failures. Smoke is a wiring check, not a performance
-measurement of the original workload.
+measurement of the original workload. Each shard builds OMB, into a Maven
+repository under `.benchmarks/m2-cache/` that every run on the runner shares,
+so Maven Central is asked for a dependency once per runner: run 40427360965
+built a fresh repository per shard and lost every shard after a lane's first to
+`429 Too Many Requests`.
 
 During backlog fill, upstream OMB blocks the consumer's message callback. Filling
 100 GiB at 100,000 messages/s takes about 17½ minutes, exceeding the Kafka client's
