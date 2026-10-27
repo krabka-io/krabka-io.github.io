@@ -51,6 +51,54 @@ test('actual cleanup retains final exit state before removal and tolerates inspe
   } finally { await fs.rm(artifacts, { recursive: true, force: true }); }
 });
 
+test('actual memory check waits for MemAvailable and records the shortfall before failing', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const checkSource = source.slice(source.indexOf('async function awaitAvailableMemory('), source.indexOf('async function cleanup()'));
+  const GIB = 1024 ** 3;
+  const meminfo = available => ['MemTotal:       67416620 kB', `MemAvailable:   ${available / 1024} kB`, 'MemFree:        12582912 kB',
+    'Cached:          2097152 kB', 'AnonPages:      31457280 kB', 'Shmem:             51080 kB', 'Slab:             460752 kB',
+    'SUnreclaim:       174528 kB', 'Dirty:            281820 kB', 'Writeback:             0 kB', 'Unevictable:       27208 kB',
+    'AnonHugePages:         0 kB', ''].join('\n');
+  const artifacts = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-memory-'));
+  try {
+    const check = readings => {
+      const queue = [...readings];
+      const trace = { waits: [], commands: [], logs: [] };
+      const run = runInNewContext(`(${checkSource.trim()})`, {
+        fs: { readFile: async file => { assert.equal(file, '/proc/meminfo'); return meminfo((queue.length > 1 ? queue.shift() : queue[0]) * GIB); },
+          appendFile: fs.appendFile },
+        path, artifacts, GIB, MEMORY_WAIT_MS: 200, MEMORY_POLL_MS: 5, controller: new AbortController(),
+        console: { log: message => trace.logs.push(message) },
+        delay: async ms => { trace.waits.push(ms); await delay(1); },
+        command: async (executable, args) => { trace.commands.push([executable, ...args]); return 'PID RSS ELAPSED COMMAND\n1 100 00:01 init'; },
+        docker: async args => { trace.commands.push(['docker', ...args]); return 'broker-0 Up 2 minutes image'; },
+      });
+      return { run, trace };
+    };
+    const recovered = check([49, 49, 61]);
+    assert.equal(await recovered.run(50 * GIB, 'RF3 cluster startup'), 61 * GIB);
+    assert.deepEqual(recovered.trace.waits, [5, 5]);
+    assert.deepEqual(recovered.trace.commands, []);
+    assert.match(recovered.trace.logs.join('\n'), /waited \d+ s for 50 GiB available RAM; found 61\.0 GiB/);
+    const prompt = check([61]);
+    assert.equal(await prompt.run(34 * GIB, 'the run'), 61 * GIB);
+    assert.deepEqual(prompt.trace.waits, []);
+    assert.deepEqual(prompt.trace.logs, []);
+    const shortfall = check([28]);
+    await assert.rejects(shortfall.run(34 * GIB, 'RF3 cluster startup'),
+      /^Error: RF3 cluster startup needs 34 GiB available RAM; found 28\.0 GiB after \d+ s \(MemFree 12\.0 GiB, Cached 2\.0 GiB, AnonPages 30\.0 GiB, .*\); memory-shortfall\.txt lists/);
+    assert.ok(shortfall.trace.waits.length >= 2);
+    assert.deepEqual(shortfall.trace.commands, [['ps', '-eo', 'pid,rss,etime,comm', '--sort=-rss'],
+      ['docker', 'ps', '-a', '--format', '{{.Names}} {{.Status}} {{.Image}}']]);
+    const recorded = await fs.readFile(path.join(artifacts, 'memory-shortfall.txt'), 'utf8');
+    assert.match(recorded, /RF3 cluster startup: MemFree 12\.0 GiB/);
+    assert.match(recorded, /MemAvailable:   29360128 kB/);
+    assert.match(recorded, /1 100 00:01 init\nbroker-0 Up 2 minutes image\n/);
+    const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
+    assert.ok(workflow.includes('.benchmarks/*/memory-shortfall.txt'));
+  } finally { await fs.rm(artifacts, { recursive: true, force: true }); }
+});
+
 const firstDevice = (await fs.readFile('/proc/diskstats', 'utf8')).trim().split('\n')[0].trim().split(/\s+/)[2];
 const sampledHost = { host: { storage: { sampled_devices: [firstDevice] } } };
 
@@ -218,6 +266,10 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   assert.throws(() => validateOmbResult({ ...capture, publishErrorRate: [0, 0, 0, 0, 0, 1] }, 'krabka', 3, config), /publish errors/);
   assert.throws(() => validateOmbResult({ ...capture, consumeRate: Array(6).fill(0) }, 'krabka', 3, config), /consumed no/);
   assert.throws(() => validateOmbResult({ ...capture, publishRate: [5000] }, 'krabka', 3, config), /truncated/);
+  // One sample fewer than six per minute is a normal upstream run.
+  const short = { publishRate: Array(5).fill(5000), consumeRate: Array(5).fill(5000), publishErrorRate: Array(5).fill(0), backlog: Array(5).fill(0) };
+  validateOmbResult({ ...capture, ...short }, 'krabka', 3, config);
+  assert.throws(() => validateOmbResult({ ...capture, ...short, publishRate: Array(4).fill(5000) }, 'krabka', 3, config), /truncated/);
   assert.throws(() => validateOmbResult({ ...capture, driver: 'kafka-rf3' }, 'krabka', 3, config), /wrong OMB driver/);
   await assert.rejects(writeOmbReport('/unused', { cases: [{}], replication_factors: [1, 3], repetitions: 1 }, []), /incomplete/);
 });

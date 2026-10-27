@@ -14,6 +14,10 @@ import { runLoggedCommand } from './benchmark-command.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const GIB = 1024 ** 3;
+// How long a memory check waits for MemAvailable to come back, and how often
+// it looks.
+const MEMORY_WAIT_MS = 5 * 60_000;
+const MEMORY_POLL_MS = 5_000;
 const DEFAULT_IMAGES = {
   krabka: 'ghcr.io/krabka-io/krabka-broker:v1.0.5',
   kafka: 'apache/kafka:4.3.1',
@@ -224,6 +228,38 @@ async function main() {
     try { return await docker(['start', '-a', id], settings); }
     finally { await removeContainer(id); }
   }
+  // MemAvailable can stay short for a while after the previous trial's
+  // containers are gone. Run 40452124698 lost its two RF3 lanes to that: on
+  // two runners the check failed within a minute of a 20-minute max-rate
+  // shard, and every later shard of the lane failed at once. Wait up to
+  // MEMORY_WAIT_MS for the memory to come back; when it does not, record
+  // where it is before failing, so the retained artifacts say what held it.
+  async function awaitAvailableMemory(needed, purpose) {
+    const read = async () => Number((await fs.readFile('/proc/meminfo', 'utf8')).match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
+    const started = Date.now();
+    let available = await read();
+    let polls = 0;
+    while (available < needed && Date.now() - started < MEMORY_WAIT_MS) {
+      await delay(MEMORY_POLL_MS, undefined, { signal: controller.signal });
+      available = await read();
+      polls++;
+    }
+    const waited = Math.round((Date.now() - started) / 1000);
+    if (polls > 0) console.log(`benchmark: waited ${waited} s for ${needed / GIB} GiB available RAM; found ${(available / GIB).toFixed(1)} GiB`);
+    if (available >= needed) return available;
+    const meminfo = await fs.readFile('/proc/meminfo', 'utf8');
+    const breakdown = ['MemFree', 'Cached', 'AnonPages', 'Shmem', 'Slab', 'SUnreclaim', 'Dirty', 'Writeback', 'Unevictable', 'AnonHugePages']
+      .map(field => `${field} ${(Number(meminfo.match(new RegExp(`^${field}:\\s+(\\d+)`, 'm'))?.[1] ?? 0) * 1024 / GIB).toFixed(1)} GiB`)
+      .join(', ');
+    const processes = await command('ps', ['-eo', 'pid,rss,etime,comm', '--sort=-rss'])
+      .then(listing => listing.split('\n').slice(0, 16).join('\n'), error => error.message);
+    const running = await docker(['ps', '-a', '--format', '{{.Names}} {{.Status}} {{.Image}}'], { timeout: 30_000 })
+      .catch(error => error.message);
+    await fs.appendFile(path.join(artifacts, 'memory-shortfall.txt'),
+      `${new Date().toISOString()} ${purpose}: ${breakdown}\n${meminfo}\n${processes}\n${running}\n\n`);
+    throw new Error(`${purpose} needs ${needed / GIB} GiB available RAM; found ${(available / GIB).toFixed(1)} GiB after ${waited} s `
+      + `(${breakdown}); memory-shortfall.txt lists the processes and containers`);
+  }
   async function cleanup() {
     const errors = [];
     if (resourceCreationStarted) {
@@ -293,10 +329,7 @@ async function main() {
     // Four shards per node: 1024 storage + 1024 networking + 2 preemption
     // contexts per shard, plus startup headroom. Never change a host sysctl.
     assert.ok(aioMax - aioUsed >= 3 * 4 * 2050 + 128, 'insufficient available Linux AIO slots for Redpanda RF3');
-    const meminfo = await fs.readFile('/proc/meminfo', 'utf8');
-    const memoryAvailable = Number(meminfo.match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-    const requiredMemory = 34 * GIB;
-    assert.ok(memoryAvailable >= requiredMemory, `need ${requiredMemory / GIB} GiB available RAM; found ${(memoryAvailable / GIB).toFixed(1)} GiB`);
+    const memoryAvailable = await awaitAvailableMemory(34 * GIB, 'the run');
     const disk = await fs.statfs(ROOT);
     const freeDisk = disk.bavail * disk.bsize;
     // OMB backlog topics retain 120 GiB, three times over at RF3. Allow up to
@@ -432,9 +465,7 @@ async function main() {
       broker_memory_bytes: 10 * GIB, kafka_heap_bytes: GIB, redpanda_memory_bytes: 8 * GIB,
       redpanda_reserve_bytes: GIB,
     }) {
-      const available = Number((await fs.readFile('/proc/meminfo', 'utf8')).match(/^MemAvailable:\s+(\d+)/m)[1]) * 1024;
-      const needed = rf * budget.broker_memory_bytes + 4 * GIB;
-      assert.ok(available >= needed, `RF${rf} needs ${needed / GIB} GiB available RAM before cluster startup`);
+      await awaitAvailableMemory(rf * budget.broker_memory_bytes + 4 * GIB, `RF${rf} cluster startup`);
       resourceCreationStarted = true;
       network = await docker(['network', 'create', '--label', `krabka.benchmark=${runId}`, `krabka-bench-${runId}-${vendor}-rf${rf}-${repetition}`]);
       const names = Array.from({ length: rf }, (_, i) => `broker-${i}`);
