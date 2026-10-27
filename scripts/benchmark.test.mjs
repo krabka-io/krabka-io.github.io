@@ -462,16 +462,60 @@ test('window metrics interpolate CPU and device counters at the window edges', (
     result: { publishRate: [1] } }), /outside the samples/);
 });
 
+test('the direct-mode verification passes verified and unwritten partitions and fails a buffered one', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const verifySource = source.slice(source.indexOf('async function verifyDirectIo('), source.indexOf('\n    async function readBroker('));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-direct-'));
+  try {
+    await fs.writeFile(path.join(directory, 'workload.stdout'), '----- Starting benchmark traffic\n');
+    const listings = {
+      direct: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02140002 8192'],
+      unwritten: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02100002 0'],
+      buffered: ['/data/test-topic-0/00000000000000000000.log 02140002 8192', '/data/test-topic-1/00000000000000000000.log 02100002 8192'],
+    };
+    const workload = { config: { topics: 1, partitionsPerTopic: 2, testDurationMinutes: 1 } };
+    for (const [name, expected] of [['direct', { verified: true, unwritten: [] }], ['unwritten', { verified: true, unwritten: ['test-topic-1'] }],
+      ['buffered', { verified: false, unwritten: [] }]]) {
+      let attempts = 0;
+      const verifyDirectIo = runInNewContext(`(${verifySource.trim()})`, {
+        fs, path, os, JSON, Date, Math, Set, Number, directIoCheck,
+        delay: async () => {},
+        docker: async () => JSON.stringify([{ Config: { User: '65532' } }]),
+        oneShot: async () => { attempts++; return listings[name].join('\n'); },
+        provenance: { images: { krabka: { reference: 'krabka' }, kafka: { reference: 'kafka' } }, cpu_sets: { client: [6, 7] } },
+      });
+      const result = await verifyDirectIo([{ id: 'c0', name: 'broker-0' }], directory, workload, 1, new AbortController().signal);
+      assert.equal(result.verified, expected.verified, name);
+      assert.equal(result.found_partition_replicas, 2);
+      // The arrays come from the function's own realm; spread them before a strict comparison.
+      assert.deepEqual([...result.brokers[0].unwritten], expected.unwritten, name);
+      assert.deepEqual([...result.brokers[0].verified], expected.verified ? ['test-topic-0', ...(name === 'direct' ? ['test-topic-1'] : [])] : ['test-topic-0'], name);
+      assert.equal(result.brokers[0].direct, result.brokers[0].verified.length);
+      assert.equal(attempts, expected.verified ? 1 : 10, name);
+    }
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test('the O_DIRECT check needs the newest segment of every benchmark partition open with O_DIRECT', () => {
   const listing = ['/data/__consumer_offsets-0/00000000000000000000.log 02100002',
     '/data/test-topic-a-0/00000000000000000000.log 02100002',
     '/data/test-topic-a-0/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000000000.log 02140002',
     '/data/test-topic-a-1/00000000000000001000.log 02100002'].join('\n');
-  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
+  assert.deepEqual(directIoCheck(listing, 'x64'), { partitions: 2, direct: 1, unwritten: [], missing: ['test-topic-a-1'], verified: ['test-topic-a-0'] });
   assert.deepEqual(directIoCheck(listing.replaceAll('02140002', '02100002'), 'x64').direct, 0);
-  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
+  assert.deepEqual(directIoCheck(listing.replace(/02100002$/, '02140002'), 'x64'), { partitions: 2, direct: 2, unwritten: [], missing: [], verified: ['test-topic-a-0', 'test-topic-a-1'] });
   assert.equal(directIoCheck('/data/test-topic-a-0/00000000000000000000.log 0200002', 'arm64').direct, 1);
+  // With sizes: a newest segment of zero bytes without O_DIRECT has had no
+  // append and is unwritten, one with bytes and no O_DIRECT is missing, and
+  // an unknown size counts as written.
+  const sized = ['/data/test-topic-b-0/00000000000000000000.log 02100002 0',
+    '/data/test-topic-b-1/00000000000000000000.log 02100002 4096',
+    '/data/test-topic-b-2/00000000000000000000.log 02100002 0',
+    '/data/test-topic-b-2/00000000000000000000.log 02140002 4096',
+    '/data/test-topic-b-3/00000000000000000000.log 02100002 ?'].join('\n');
+  assert.deepEqual(directIoCheck(sized, 'x64'), { partitions: 4, direct: 1, unwritten: ['test-topic-b-0'],
+    missing: ['test-topic-b-1', 'test-topic-b-3'], verified: ['test-topic-b-2'] });
   assert.throws(() => directIoCheck('', 'ppc64'), /O_DIRECT flag unknown/);
 });
 
