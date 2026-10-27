@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DIST_DIR, ROOT, checker, launchOrExit, newLabContext, openLab, serve, waitFor, watchErrors } from './lab-check-lib.mjs';
 
+import { siteCheckSuite } from './site-check-suites.mjs';
+
+const selection = siteCheckSuite(process.argv.slice(2));
 const ROUTES = ['/', '/docs/', '/get-started/', '/docs/quickstart/', '/docs/browser-tools/', '/docs/operations/', '/api/', '/versions/', '/releases/', '/benchmarks/', '/brand/', '/verification/', '/search/'];
 const SEARCH = [
   ['quickstart', '/docs/quickstart'], ['backup', '/docs/broker/operations/backup-restore'],
@@ -10,16 +13,17 @@ const SEARCH = [
   ['compatibility', '/versions'], ['Cluster Lab', '/docs/lab'], ['API Reference', '/api'],
   ['schema registry', '/docs/streams-go/schema-registry'], ['verification', '/verification'], ['configuration', '/docs/broker/config-reference'],
 ];
-const output = path.resolve(process.env.SITE_CHECK_ARTIFACTS ?? path.join(ROOT, 'artifacts/site-check'));
+const outputRoot = process.env.SITE_CHECK_ARTIFACTS ?? path.join(ROOT, 'artifacts/site-check');
+const output = path.resolve(outputRoot, selection.suite === 'all' ? '.' : selection.suite);
 const t = checker();
 const measurements = [];
 const errorBags = [];
 const started = Date.now();
 const built = (route) => path.join(DIST_DIR, route, 'index.html');
-for (const route of [...ROUTES, '/docs/lab/', '/docs/proof-explorer/']) {
+for (const route of [...(selection.site ? ROUTES : []), ...selection.toolRoutes]) {
   if (!fs.existsSync(built(route))) throw new Error(`Missing ${built(route)}; build the site first.`);
 }
-if (!fs.existsSync(path.join(DIST_DIR, 'pagefind/pagefind.js'))) throw new Error('Missing Pagefind index; run npm run build:site.');
+if (selection.site && !fs.existsSync(path.join(DIST_DIR, 'pagefind/pagefind.js'))) throw new Error('Missing Pagefind index; run npm run build:site.');
 fs.mkdirSync(output, { recursive: true });
 const browser = await launchOrExit();
 const { server, port } = await serve(DIST_DIR);
@@ -64,7 +68,7 @@ async function timing(page, route, visit, width, theme, navigate) {
 
 try {
   for (const width of [390, 1440]) for (const theme of ['light', 'dark']) {
-    for (const route of ROUTES) await t.flow(`${route} ${width} ${theme}`, async () => {
+    for (const route of selection.site ? ROUTES : []) await t.flow(`${route} ${width} ${theme}`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, reducedMotion: 'reduce' });
       try {
         const page = await context.newPage();
@@ -112,7 +116,7 @@ try {
       } finally { await context.close(); }
     });
 
-    for (const route of ['/docs/lab/', '/docs/proof-explorer/']) await t.flow(`${route} startup ${width} ${theme}`, async () => {
+    for (const route of selection.toolRoutes) await t.flow(`${route} startup ${width} ${theme}`, async () => {
       const context = await newLabContext(browser, { width, height: 900 });
       await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
       try {
@@ -140,7 +144,7 @@ try {
       } finally { await context.close(); }
     });
   }
-  await t.flow('ten maintained search queries', async () => {
+  if (selection.site) await t.flow('ten maintained search queries', async () => {
     const page = await browser.newPage();
     errorBags.push(watchErrors(page, 'search queries', base));
     await page.goto(`${base}/search/?q=backup`, { waitUntil: 'load' });
@@ -158,7 +162,7 @@ try {
 } finally {
   const errors = errorBags.flat();
   t.check('no page or local console errors', !errors.length, errors.slice(0, 5).join(' | '));
-  fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify({ measuredAt: new Date().toISOString(), runtime: { node: process.version, platform: process.platform, browser: browser.version(), deviceScaleFactor: 1, height: 900, samplesPerVisit: 1 }, profile: 'Loopback static server; no throttling; reduced motion; fresh context then repeat visit. Server sends no-store; browser compilation/storage may be warm. Not field Web Vitals.', measurements, failures: t.failures, errors }, null, 2) + '\n');
+  fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify({ suite: selection.suite, measuredAt: new Date().toISOString(), runtime: { node: process.version, platform: process.platform, browser: browser.version(), deviceScaleFactor: 1, height: 900, samplesPerVisit: 1 }, profile: 'Loopback static server; no throttling; reduced motion; fresh context then repeat visit. Server sends no-store; browser compilation/storage may be warm. Not field Web Vitals.', measurements, failures: t.failures, errors }, null, 2) + '\n');
   await browser.close(); server.close();
 }
 t.finish(`PASS: site checks; screenshots and controlled timings in ${output}`, started);
