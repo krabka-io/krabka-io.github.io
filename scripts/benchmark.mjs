@@ -693,6 +693,7 @@ rpk:
       // the cgroups, so device use can be read over the OMB measurement window.
       const deviceNames = provenance.host.storage.sampled_devices;
       const deviceSamples = [];
+      const hostSamples = [];
       const deviceFile = await fs.open(path.join(path.dirname(filename), 'devices.jsonl'), 'w');
       // Host memory and reclaim counters, sampled with the cgroups, in
       // host.jsonl: a broker whose page cache fills its cgroup stalls in the
@@ -742,11 +743,13 @@ rpk:
         const elapsed = performance.now() - start;
         const current = { elapsed_ms: elapsed, brokers: brokersSampled };
         const device = { elapsed_ms: elapsed, devices: parseDiskstats(diskstats, deviceNames) };
+        const hostSample = { elapsed_ms: elapsed, host };
         samples.push(current);
         deviceSamples.push(device);
+        hostSamples.push(hostSample);
         await sampleFile.write(`${JSON.stringify(current)}\n`);
         await deviceFile.write(`${JSON.stringify(device)}\n`);
-        await hostFile.write(`${JSON.stringify({ elapsed_ms: elapsed, host })}\n`);
+        await hostFile.write(`${JSON.stringify(hostSample)}\n`);
       }
       const closeFiles = () => Promise.all([sampleFile.close(), deviceFile.close(), hostFile.close()]);
       try { await sample(); }
@@ -772,7 +775,7 @@ rpk:
         finally { await closeFiles(); }
       }
       if (sampleError) throw sampleError;
-      return { output, samples, deviceSamples, startedAt };
+      return { output, samples, deviceSamples, hostSamples, startedAt };
     }
 
     // Run each OMB workload on fresh clusters.
@@ -836,7 +839,8 @@ rpk:
               // CPU, messages and device use over the OMB measurement window
               // only; the totals above cover the full capture.
               measurement_window: windowMetrics({ samples: measurement.samples, deviceSamples: measurement.deviceSamples,
-                startedAt: measurement.startedAt, window: ombMeasurementWindow(logs[0], measurement.startedAt), result }) };
+                hostSamples: measurement.hostSamples, startedAt: measurement.startedAt,
+                window: ombMeasurementWindow(logs[0], measurement.startedAt), result }) };
             const trial = { vendor, rf, repetition, case: workload, omb: result, metrics, time_series: timeline,
               retriable_commit_failures: retriableCommitFailures(logs.join('\n')),
               ...(directIoResult ? { direct_io: directIoResult } : {}) };

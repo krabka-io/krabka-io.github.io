@@ -210,7 +210,12 @@ to a process outside the cgroups or to the hypervisor.
 `trial.json` has `metrics.measurement_window`, which covers only the OMB
 measurement: its start and end from the client log, broker CPU seconds,
 published messages (the mean publish rate times the window), messages per CPU
-second, and each device's utilization and bytes read and written. The totals
+second, each device's utilization and bytes read and written, and under `host`
+the pages the hypervisor took through the balloon, the least available memory,
+and the host-wide reclaim during the window. A trial in which the balloon
+inflated or allocations fell into direct reclaim carries a `†` after its broker
+name in `summary.md`, with the amounts under "Host interference": its latency
+came from the host, not from the broker. The totals
 in `metrics` still cover the full capture.
 OMB does **not** check exact delivery counts or duplicate sequences. Missing or
 truncated result series, zero publish/consume traffic, publish errors, OOMs,
