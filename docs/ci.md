@@ -1,5 +1,9 @@
 # Website CI selection
 
+For the proposed SDK, permissions, merge-queue artifact promotion, and later
+cache/job changes, see the [CI optimization plan](ci-optimization-plan.md).
+That plan is not implemented yet; this page describes the current workflow.
+
 The required `build` check runs on every pull request to `main`. There are no
 workflow path filters. The job keeps ordinary validation in one blocking chain;
 a skipped optional step cannot skip the merge gate. Selected suites do not use

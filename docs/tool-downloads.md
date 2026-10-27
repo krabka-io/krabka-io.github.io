@@ -35,17 +35,33 @@ headers pass these checks before extraction starts.
 
 The cache is `playground/.tools/verified/`. Download names include the tool,
 version, platform, and digest. Every use hashes the cached download again and
-extracts a new isolated installation. The installer never trusts an old extracted
-binary or a checksum marker. Legacy `.tools/` installations are not reused. A
-corrupt cached download fails closed; remove the reported file before a retry.
-Build scripts remove their managed installation on exit. Workflow installations
-remain available until the CI job ends. If a build stops before cleanup, remove
-leftover `*-install-*` directories when no builds use them. Keep `*.download`
-files to avoid another network download.
+extracts a fresh installation. The installer never trusts old extracted files
+or checksum markers. Legacy `.tools/` installations are not reused. A corrupt
+cached download fails closed; remove the reported file before a retry.
 
-Each reconstruction gives the SDK a new path. Cargo can rebuild C dependencies
-and their Rust dependents because compiler and sysroot paths change. This favors
-cache integrity over warm-build speed; it does not preserve a stable SDK path.
+Managed SDK installations use a stable absolute path:
+
+```text
+playground/.tools/verified/wasi-sdk-<version>-<host>-<sha>/<archive-root>/
+```
+
+Each build clears only that per-digest installation and reconstructs it from the
+verified archive. The cached `.download` stays outside that directory. Stable
+compiler and sysroot paths remove one source of Cargo invalidation; they do not
+guarantee a cache hit or a particular speedup.
+
+The SDK environment helper opens one per-digest `.lock` beside the installation.
+The Python installer takes a POSIX `flock` on the inherited descriptor. The build
+shell retains ownership through compilation and its exit cleanup. A concurrent
+local build waits before reconstruction. The lock file stays outside the wiped
+directory and is not deleted. Linux and macOS use Python's `fcntl`; no external
+locking utility is required. Explicit caller-managed SDKs do not take this lock.
+
+The broker build removes only its owned per-digest SDK directory on exit, never
+the shared cache root. The playground CI job has a private runner, installs once,
+and leaves the SDK available for its later steps. Other tools keep isolated
+`*-install-*` directories. Remove interrupted installations only when no build
+uses them; retain `.download` archives to avoid another network download.
 
 The cache and checkout should be writable only by the developer or CI job.
 Verification does not protect against another process that changes files between

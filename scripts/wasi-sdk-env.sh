@@ -4,7 +4,11 @@ WASI_SDK_MANAGED_DIR=""
 repo_tools="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${CC_wasm32_wasip1:-}" || -z "${AR_wasm32_wasip1:-}" || -z "${CFLAGS_wasm32_wasip1:-}" ]]; then
   if [[ -z "${WASI_SDK_PATH:-}" ]]; then
-    WASI_SDK_PATH="$(python3 "${repo_tools}/install-tool.py" wasi-sdk)" || return 1
+    sdk_lock="$(python3 "${repo_tools}/install-tool.py" wasi-sdk --lock-path)" || return 1
+    # The shell owns this descriptor. Python takes one POSIX flock on it;
+    # closing the installer does not release the shell's copy of that lock.
+    exec {WASI_SDK_LOCK_FD}>"${sdk_lock}" || return 1
+    WASI_SDK_PATH="$(python3 "${repo_tools}/install-tool.py" wasi-sdk --lock-fd "${WASI_SDK_LOCK_FD}")" || return 1
     WASI_SDK_MANAGED_DIR="$(dirname "${WASI_SDK_PATH}")"
   fi
   export WASI_SDK_PATH
