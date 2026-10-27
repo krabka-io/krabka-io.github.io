@@ -96,6 +96,100 @@ test('actual cleanup retains final exit state before removal and tolerates inspe
   }
 });
 
+test('actual memory check waits for MemAvailable and records the shortfall before failing', async () => {
+  const source = await fs.readFile(new URL('./benchmark.mjs', import.meta.url), 'utf8');
+  const checkSource = source.slice(
+    source.indexOf('async function awaitAvailableMemory('),
+    source.indexOf('async function cleanup()'),
+  );
+  const GIB = 1024 ** 3;
+  const meminfo = (available) =>
+    [
+      'MemTotal:       67416620 kB',
+      `MemAvailable:   ${available / 1024} kB`,
+      'MemFree:        12582912 kB',
+      'Cached:          2097152 kB',
+      'AnonPages:      31457280 kB',
+      'Shmem:             51080 kB',
+      'Slab:             460752 kB',
+      'SUnreclaim:       174528 kB',
+      'Dirty:            281820 kB',
+      'Writeback:             0 kB',
+      'Unevictable:       27208 kB',
+      'AnonHugePages:         0 kB',
+      '',
+    ].join('\n');
+  const artifacts = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-memory-'));
+  try {
+    const check = (readings) => {
+      const queue = [...readings];
+      const trace = { waits: [], commands: [], logs: [] };
+      const run = runInNewContext(`(${checkSource.trim()})`, {
+        fs: {
+          readFile: async (file) => {
+            assert.equal(file, '/proc/meminfo');
+            return meminfo((queue.length > 1 ? queue.shift() : queue[0]) * GIB);
+          },
+          appendFile: fs.appendFile,
+        },
+        path,
+        artifacts,
+        GIB,
+        MEMORY_WAIT_MS: 200,
+        MEMORY_POLL_MS: 5,
+        controller: new AbortController(),
+        console: { log: (message) => trace.logs.push(message) },
+        delay: async (ms) => {
+          trace.waits.push(ms);
+          await delay(1);
+        },
+        command: async (executable, args) => {
+          trace.commands.push([executable, ...args]);
+          return 'PID RSS ELAPSED COMMAND\n1 100 00:01 init';
+        },
+        docker: async (args) => {
+          trace.commands.push(['docker', ...args]);
+          return 'broker-0 Up 2 minutes image';
+        },
+      });
+      return { run, trace };
+    };
+    const recovered = check([49, 49, 61]);
+    assert.equal(await recovered.run(50 * GIB, 'RF3 cluster startup'), 61 * GIB);
+    assert.deepEqual(recovered.trace.waits, [5, 5]);
+    assert.deepEqual(recovered.trace.commands, []);
+    assert.match(
+      recovered.trace.logs.join('\n'),
+      /waited \d+ s for 50 GiB available RAM; found 61\.0 GiB/,
+    );
+    const prompt = check([61]);
+    assert.equal(await prompt.run(34 * GIB, 'the run'), 61 * GIB);
+    assert.deepEqual(prompt.trace.waits, []);
+    assert.deepEqual(prompt.trace.logs, []);
+    const shortfall = check([28]);
+    await assert.rejects(
+      shortfall.run(34 * GIB, 'RF3 cluster startup'),
+      /^Error: RF3 cluster startup needs 34 GiB available RAM; found 28\.0 GiB after \d+ s \(MemFree 12\.0 GiB, Cached 2\.0 GiB, AnonPages 30\.0 GiB, .*\); memory-shortfall\.txt lists/,
+    );
+    assert.ok(shortfall.trace.waits.length >= 2);
+    assert.deepEqual(shortfall.trace.commands, [
+      ['ps', '-eo', 'pid,rss,etime,comm', '--sort=-rss'],
+      ['docker', 'ps', '-a', '--format', '{{.Names}} {{.Status}} {{.Image}}'],
+    ]);
+    const recorded = await fs.readFile(path.join(artifacts, 'memory-shortfall.txt'), 'utf8');
+    assert.match(recorded, /RF3 cluster startup: MemFree 12\.0 GiB/);
+    assert.match(recorded, /MemAvailable:   29360128 kB/);
+    assert.match(recorded, /1 100 00:01 init\nbroker-0 Up 2 minutes image\n/);
+    const workflow = await fs.readFile(
+      new URL('../.github/workflows/openmessaging.yml', import.meta.url),
+      'utf8',
+    );
+    assert.ok(workflow.includes('.benchmarks/*/memory-shortfall.txt'));
+  } finally {
+    await fs.rm(artifacts, { recursive: true, force: true });
+  }
+});
+
 const firstDevice = (await fs.readFile('/proc/diskstats', 'utf8'))
   .trim()
   .split('\n')[0]
@@ -116,11 +210,17 @@ test('actual resource reader retains user and system CPU through the sampler', a
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-cpu-'));
   const cpu = 'usage_usec 900000\nuser_usec 200000\nsystem_usec 700000\n';
   try {
+    // No cpu.pressure: a kernel without PSI leaves those stall totals null.
     for (const [name, data] of Object.entries({
       'cpu.stat': cpu,
       'memory.current': '8192',
-      'memory.stat': 'anon 4096\ninactive_file 1024\n',
-      'memory.events': 'oom_kill 0\n',
+      'memory.stat':
+        'anon 4096\ninactive_file 1024\nactive_file 512\nfile_dirty 256\nfile_writeback 128\npgscan 7\npgsteal 5\n',
+      'memory.events': 'oom_kill 0\nmax 3\nhigh 0\n',
+      'memory.pressure':
+        'some avg10=0.00 avg60=0.00 avg300=0.00 total=1234\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=56\n',
+      'io.pressure':
+        'some avg10=0.00 avg60=0.00 avg300=0.00 total=78\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=9\n',
       'cgroup.procs': `${process.pid}\n`,
     }))
       await fs.writeFile(path.join(directory, name), data);
@@ -141,12 +241,52 @@ test('actual resource reader retains user and system CPU through the sampler', a
     const filename = path.join(directory, 'resources.jsonl');
     const result = await measure([{ id: 'broker', cgroup: directory }], filename, async () => {});
     assert.ok(result.samples.length >= 2);
-    for (const sample of (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse)) {
+    const rows = (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse);
+    for (const sample of rows) {
       const row = sample.brokers[0];
       assert.deepEqual(
         [row.cpu_usage_us, row.cpu_user_us, row.cpu_system_us],
         [900000, 200000, 700000],
       );
+      assert.deepEqual(
+        [
+          row.active_file_bytes,
+          row.file_dirty_bytes,
+          row.file_writeback_bytes,
+          row.pgscan,
+          row.pgsteal,
+          row.memory_max_events,
+          row.memory_high_events,
+        ],
+        [512, 256, 128, 7, 5, 3, 0],
+      );
+      assert.deepEqual(
+        [row.memory_stall_us, row.memory_stall_full_us, row.io_stall_us, row.cpu_stall_us],
+        [1234, 56, 78, null],
+      );
+    }
+    // Host memory and reclaim counters land beside the cgroup samples.
+    const hostRows = (await fs.readFile(path.join(directory, 'host.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map(JSON.parse);
+    assert.deepEqual(
+      hostRows.map((r) => r.elapsed_ms),
+      rows.map((r) => r.elapsed_ms),
+    );
+    for (const { host } of hostRows) {
+      assert.ok(
+        host.mem_available_bytes > 0 && host.mem_free_bytes > 0 && host.cached_bytes >= 0,
+        'host memory unavailable',
+      );
+      assert.ok(
+        Number.isInteger(host.pgsteal_kswapd) &&
+          Number.isInteger(host.pgsteal_direct) &&
+          Number.isInteger(host.allocstall),
+        'host reclaim counters unavailable',
+      );
+      for (const field of ['memory_stall_us', 'memory_stall_full_us', 'io_stall_us'])
+        assert.ok(host[field] === null || host[field] >= 0, field);
     }
     for (const counter of ['user_usec', 'system_usec']) {
       await fs.writeFile(
@@ -461,6 +601,24 @@ test('OpenMessaging rejects failed or truncated upstream captures and incomplete
   );
   assert.throws(
     () => validateOmbResult({ ...capture, publishRate: [5000] }, 'krabka', 3, config),
+    /truncated/,
+  );
+  // One sample fewer than six per minute is a normal upstream run.
+  const short = {
+    publishRate: Array(5).fill(5000),
+    consumeRate: Array(5).fill(5000),
+    publishErrorRate: Array(5).fill(0),
+    backlog: Array(5).fill(0),
+  };
+  validateOmbResult({ ...capture, ...short }, 'krabka', 3, config);
+  assert.throws(
+    () =>
+      validateOmbResult(
+        { ...capture, ...short, publishRate: Array(4).fill(5000) },
+        'krabka',
+        3,
+        config,
+      ),
     /truncated/,
   );
   assert.throws(
