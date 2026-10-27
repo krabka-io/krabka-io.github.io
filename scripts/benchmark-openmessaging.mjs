@@ -167,12 +167,14 @@ export async function prepareOmb(directory, command, oneShot,
   const image = JSON.parse(await command('docker', ['image', 'inspect', OMB.build_image]))[0];
   const m2 = path.join(cacheRoot, `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`);
   await fs.mkdir(m2, { recursive: true });
-  // `MAVEN_CONFIG=/m2` makes this the build's Maven settings. Maven Central
-  // rate-limits the Google Cloud runners' egress (429 Too Many Requests for
-  // the plugin POMs in runs 40427360965 and 40439747507); Google's mirror of
-  // Maven Central serves the same artifacts to them without a limit, and the
-  // jars are hashed into the provenance below, so a mirror that served
-  // different bytes would fail the shard merge.
+  // The build's Maven settings, passed with `-s`: the image's `MAVEN_CONFIG`
+  // only places the image's reference files, and Maven looks for user
+  // settings under a home the build's uid does not have (`?/.m2`). Maven
+  // Central rate-limits the Google Cloud runners' egress (429 Too Many
+  // Requests for the plugin POMs in runs 40427360965 and 40439747507);
+  // Google's mirror of Maven Central serves the same artifacts to them
+  // without a limit, and the jars are hashed into the provenance below, so a
+  // mirror that served different bytes would fail the shard merge.
   await fs.writeFile(path.join(m2, 'settings.xml'), `<settings>
   <mirrors>
     <mirror>
@@ -187,7 +189,7 @@ export async function prepareOmb(directory, command, oneShot,
   // this many times, this long apart, before it fails the build.
   await oneShot(['--user', `${process.getuid()}:${process.getgid()}`, '--cpus', '4', '--memory', '4g', '--memory-swap', '4g',
     '--env', 'MAVEN_CONFIG=/m2', '--volume', `${source}:/src`, '--volume', `${m2}:/m2`, '--workdir', '/src',
-    OMB.build_image, 'mvn', '-B', '-ntp', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
+    OMB.build_image, 'mvn', '-B', '-ntp', '-s', '/m2/settings.xml', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
     '-Daether.connector.http.retryHandler.count=8', '-Daether.connector.http.retryHandler.requestInterval=5000',
     '-Dcheckstyle.skip', '-Dspotless.check.skip=true', '-Dlicense.skip=true', '-Djacoco.skip', '-Dspotbugs.skip=true',
     '-pl', 'benchmark-framework', '-am', 'install'], 'omb-build',
