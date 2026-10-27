@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { OMB_WORKLOADS, checkOmbOmissions } from './benchmark-openmessaging.mjs';
+import { OMB, OMB_WORKLOADS, checkOmbOmissions, prepareOmb } from './benchmark-openmessaging.mjs';
 import { lanes, merge, plan, split } from './benchmark-openmessaging-shards.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
@@ -258,4 +258,44 @@ test('a run of one broker passes the omission check when it omits nothing', () =
   assert.deepEqual(checkOmbOmissions(provenance, ['krabka']), []);
   assert.throws(() => checkOmbOmissions({ ...provenance,
     omitted: [{ vendor: 'kafka', rf: 3, workload: 'simple-workload', reason: 'x' }] }, ['krabka', 'kafka']), /at least two/);
+});
+
+// Two runs on one host build OMB into one Maven repository, keyed by the
+// pinned commit and the build image, and tell Maven to wait out a rate limit.
+test('runs on one host share the OMB Maven repository and retry rate limits', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-m2-'));
+  try {
+    const cache = path.join(root, 'm2-cache');
+    const command = async (executable, args) => {
+      if (executable === 'git' && args.includes('rev-parse')) return `${OMB.commit}\n`;
+      if (executable === 'docker' && args[0] === 'image') return JSON.stringify([{ Id: 'sha256:eeff00112233445566' }]);
+      return '';
+    };
+    const repositories = [];
+    const oneShot = async args => {
+      const volume = suffix => args.find(arg => arg.endsWith(suffix)).slice(0, -suffix.length);
+      const source = volume(':/src');
+      const m2 = volume(':/m2');
+      repositories.push(m2);
+      assert.ok(args.includes('-Daether.connector.http.retryHandler.count=8'));
+      await fs.mkdir(path.join(source, 'benchmark-framework/target'), { recursive: true });
+      await fs.writeFile(path.join(source, 'benchmark-framework/target/classpath.txt'),
+        '/m2/dep.jar:/src/driver-kafka/target/driver-kafka.jar\n');
+      await fs.mkdir(path.join(source, 'driver-kafka/target'), { recursive: true });
+      await fs.writeFile(path.join(source, 'driver-kafka/target/driver-kafka.jar'), 'driver');
+      await fs.writeFile(path.join(m2, 'dep.jar'), 'dependency');
+      return '';
+    };
+    const runtimes = [];
+    for (const run of ['a', 'b']) {
+      const directory = path.join(root, run);
+      await fs.mkdir(directory);
+      runtimes.push(await prepareOmb(directory, command, oneShot, cache));
+    }
+    assert.equal(runtimes[0].m2, runtimes[1].m2);
+    assert.equal(runtimes[0].m2, path.join(cache, `${OMB.commit.slice(0, 12)}-eeff00112233`));
+    assert.deepEqual(repositories, [runtimes[0].m2, runtimes[1].m2]);
+    assert.deepEqual(runtimes[0].provenance.jars, runtimes[1].provenance.jars);
+    assert.ok(runtimes[0].classpath.startsWith('/src/benchmark-framework/target/classes:/m2/dep.jar'));
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

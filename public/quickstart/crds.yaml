@@ -21,7 +21,7 @@ spec:
           spec:
             properties:
               databaseUrl:
-                description: '`Secret` key containing the `PostgreSQL` connection URL.'
+                description: "`Secret` key containing the `PostgreSQL` connection URL."
                 properties:
                   key:
                     description: Key containing the `PostgreSQL` connection URL.
@@ -42,7 +42,7 @@ spec:
                 description: Gracefully stop the worker while retaining its durable checkpoint.
                 type: boolean
               publication:
-                description: '`PostgreSQL` publication read by the connector.'
+                description: "`PostgreSQL` publication read by the connector."
                 minLength: 1
                 type: string
               resources:
@@ -50,12 +50,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -73,13 +68,13 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               runtime:
@@ -93,7 +88,7 @@ spec:
                     nullable: true
                     type: integer
                   maxBatch:
-                    description: 'Maximum records read in one source poll. Worker default: 500.'
+                    description: "Maximum records read in one source poll. Worker default: 500."
                     format: uint
                     minimum: 1.0
                     nullable: true
@@ -114,7 +109,7 @@ spec:
                 minLength: 1
                 type: string
               slot:
-                description: '`PostgreSQL` logical replication slot.'
+                description: "`PostgreSQL` logical replication slot."
                 minLength: 1
                 type: string
               tables:
@@ -158,7 +153,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -195,7 +190,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -219,16 +213,9 @@ spec:
           spec:
             properties:
               allowedTargets:
-                description: |-
-                  Explicit SSRF allowlist for outbound HTTP targets. The controller
-                  derives the entries from the `targetUrl` of each subscription. Use
-                  this field to add more allowed hosts.
+                description: "Explicit SSRF allowlist for outbound HTTP targets. The controller\nderives the entries from the `targetUrl` of each subscription. Use\nthis field to add more allowed hosts."
                 items:
-                  description: |-
-                    One entry in the SSRF allowlist of the gateway.
-
-                    The gateway permits an outbound HTTP request only when `scheme` and
-                    `host` match.
+                  description: "One entry in the SSRF allowlist of the gateway.\n\nThe gateway permits an outbound HTTP request only when `scheme` and\n`host` match."
                   properties:
                     host:
                       description: Hostname of the allowed target, with an optional port.
@@ -242,27 +229,19 @@ spec:
                   type: object
                 type: array
               authz:
-                description: |-
-                  Authorization configuration. When absent, the gateway uses simple
-                  ACL-based authorization, which is mode `simple`.
+                description: "Authorization configuration. When absent, the gateway uses simple\nACL-based authorization, which is mode `simple`."
                 nullable: true
                 properties:
                   aclRefresh:
-                    description: |-
-                      How often the gateway refreshes its ACL cache from the broker,
-                      as a unit-carrying duration. Default `60s`.
+                    description: "How often the gateway refreshes its ACL cache from the broker,\nas a unit-carrying duration. Default `60s`."
                     nullable: true
                     type: string
                   bearer:
-                    description: |-
-                      Bearer-token authentication configuration. When absent,
-                      bearer auth is disabled.
+                    description: "Bearer-token authentication configuration. When absent,\nbearer auth is disabled."
                     nullable: true
                     properties:
                       allowableClockSkew:
-                        description: |-
-                          Allowable clock skew for bearer-token timestamps, as a
-                          unit-carrying duration such as `30s` or `500ms`.
+                        description: "Allowable clock skew for bearer-token timestamps, as a\nunit-carrying duration such as `30s` or `500ms`."
                         nullable: true
                         type: string
                       mode:
@@ -275,30 +254,21 @@ spec:
                         type: string
                     type: object
                   mode:
-                    description: |-
-                      Authorization mode. One of `off` or `simple`. Default `simple`,
-                      which is ACL-based and reads the `KafkaUser` ACLs from the broker.
+                    description: "Authorization mode. One of `off` or `simple`. Default `simple`,\nwhich is ACL-based and reads the `KafkaUser` ACLs from the broker."
                     nullable: true
                     type: string
                   superUsers:
-                    description: |-
-                      Principal strings, for example `User:admin`, that bypass all ACL
-                      checks.
+                    description: "Principal strings, for example `User:admin`, that bypass all ACL\nchecks."
                     items:
                       type: string
                     type: array
                 type: object
               dedup:
-                description: |-
-                  Configuration for the deduplication topic below the idempotent
-                  produce, which gives exactly-once delivery. When absent, the
-                  controller defaults apply.
+                description: "Configuration for the deduplication topic below the idempotent\nproduce, which gives exactly-once delivery. When absent, the\ncontroller defaults apply."
                 nullable: true
                 properties:
                   ownershipGroup:
-                    description: |-
-                      Consumer group used to divide dedup ownership between replicas.
-                      Defaults to a value derived from the gateway name.
+                    description: "Consumer group used to divide dedup ownership between replicas.\nDefaults to a value derived from the gateway name."
                     nullable: true
                     type: string
                   partitions:
@@ -309,22 +279,15 @@ spec:
                     nullable: true
                     type: integer
                   topic:
-                    description: |-
-                      Kafka topic used to store dedup state. Defaults to
-                      `<gateway-name>-dedup` when absent.
+                    description: "Kafka topic used to store dedup state. Defaults to\n`<gateway-name>-dedup` when absent."
                     nullable: true
                     type: string
                   txnIdPrefix:
-                    description: |-
-                      Prefix for transactional producer IDs. Defaults to the gateway
-                      name. The full `transactional.id` is `<prefix>-<partition>`.
+                    description: "Prefix for transactional producer IDs. Defaults to the gateway\nname. The full `transactional.id` is `<prefix>-<partition>`."
                     nullable: true
                     type: string
                   window:
-                    description: |-
-                      Dedup window, as a unit-carrying duration such as `24h` or `30m`.
-                      The gateway drops records with the same idempotency key inside this
-                      window. Default `24h`.
+                    description: "Dedup window, as a unit-carrying duration such as `24h` or `30m`.\nThe gateway drops records with the same idempotency key inside this\nwindow. Default `24h`."
                     nullable: true
                     type: string
                 type: object
@@ -354,9 +317,7 @@ spec:
                     type: integer
                 type: object
               image:
-                description: |-
-                  Container image override. When absent, the operator uses its
-                  `--default-gateway-image` flag.
+                description: "Container image override. When absent, the operator uses its\n`--default-gateway-image` flag."
                 nullable: true
                 type: string
               membershipTopic:
@@ -364,26 +325,16 @@ spec:
                 nullable: true
                 type: string
               outboundSubscriptions:
-                description: |-
-                  Outbound webhook subscriptions. Each entry reads from
-                  `sourceTopics` and HTTP-POSTs records to `targetUrl`.
+                description: "Outbound webhook subscriptions. Each entry reads from\n`sourceTopics` and HTTP-POSTs records to `targetUrl`."
                 items:
-                  description: |-
-                    One outbound webhook subscription.
-
-                    The gateway reads from `sourceTopics` and sends each record to
-                    `targetUrl` with an HTTP POST.
+                  description: "One outbound webhook subscription.\n\nThe gateway reads from `sourceTopics` and sends each record to\n`targetUrl` with an HTTP POST."
                   properties:
                     baseBackoff:
-                      description: |-
-                        Initial backoff for exponential retry, as a unit-carrying duration.
-                        Default `500ms`.
+                      description: "Initial backoff for exponential retry, as a unit-carrying duration.\nDefault `500ms`."
                       nullable: true
                       type: string
                     deadLetterTopic:
-                      description: |-
-                        Kafka topic for the records that used all their delivery attempts.
-                        When absent, the gateway logs a failed record and discards it.
+                      description: "Kafka topic for the records that used all their delivery attempts.\nWhen absent, the gateway logs a failed record and discards it."
                       nullable: true
                       type: string
                     decodeToJson:
@@ -391,9 +342,7 @@ spec:
                       nullable: true
                       type: boolean
                     filter:
-                      description: |-
-                        CEL expression evaluated against the record to decide whether to
-                        deliver it. An absent or empty filter delivers all records.
+                      description: "CEL expression evaluated against the record to decide whether to\ndeliver it. An absent or empty filter delivers all records."
                       nullable: true
                       type: string
                     groupId:
@@ -406,9 +355,7 @@ spec:
                       description: Static HTTP headers appended to every delivery request.
                       type: object
                     maxAttempts:
-                      description: |-
-                        Maximum number of delivery attempts before moving the record to
-                        the dead-letter topic. Default 5.
+                      description: "Maximum number of delivery attempts before moving the record to\nthe dead-letter topic. Default 5."
                       format: uint32
                       minimum: 1.0
                       nullable: true
@@ -418,18 +365,14 @@ spec:
                       nullable: true
                       type: string
                     name:
-                      description: |-
-                        Unique name for this subscription. It is the suffix of the
-                        consumer group id.
+                      description: "Unique name for this subscription. It is the suffix of the\nconsumer group id."
                       type: string
                     requestTimeout:
                       description: HTTP request timeout, as a unit-carrying duration. Default `10s`.
                       nullable: true
                       type: string
                     signingSecretRef:
-                      description: |-
-                        Secret key reference for the HMAC signing secret of the outbound
-                        request. The controller resolves it at render time.
+                      description: "Secret key reference for the HMAC signing secret of the outbound\nrequest. The controller resolves it at render time."
                       nullable: true
                       properties:
                         key:
@@ -466,12 +409,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -489,13 +427,13 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               schemaRegistry:
@@ -513,15 +451,11 @@ spec:
                     type: string
                 type: object
               telemetry:
-                description: |-
-                  OpenTelemetry / observability configuration. When absent,
-                  the gateway exports no telemetry.
+                description: "OpenTelemetry / observability configuration. When absent,\nthe gateway exports no telemetry."
                 nullable: true
                 properties:
                   otlpEndpoint:
-                    description: |-
-                      OTLP exporter endpoint URL, for example
-                      `http://otel-collector.observability.svc:4317`.
+                    description: "OTLP exporter endpoint URL, for example\n`http://otel-collector.observability.svc:4317`."
                     nullable: true
                     type: string
                   otlpProtocol:
@@ -529,9 +463,7 @@ spec:
                     nullable: true
                     type: string
                   sampleRatio:
-                    description: |-
-                      Fraction of traces to sample, in the range `[0.0, 1.0]`. Default
-                      1.0, which samples all traces.
+                    description: "Fraction of traces to sample, in the range `[0.0, 1.0]`. Default\n1.0, which samples all traces."
                     format: double
                     maximum: 1.0
                     minimum: 0.0
@@ -539,15 +471,11 @@ spec:
                     type: number
                 type: object
               tls:
-                description: |-
-                  TLS serving configuration. When absent, the TLS defaults apply:
-                  `clientAuth: required` and `validityDays: 365`.
+                description: "TLS serving configuration. When absent, the TLS defaults apply:\n`clientAuth: required` and `validityDays: 365`."
                 nullable: true
                 properties:
                   clientAuth:
-                    description: |-
-                      How the gateway authenticates inbound clients.
-                      One of `disabled`, `optional`, `required`. Default `required`.
+                    description: "How the gateway authenticates inbound clients.\nOne of `disabled`, `optional`, `required`. Default `required`."
                     nullable: true
                     type: string
                   reloadInterval:
@@ -612,35 +540,22 @@ spec:
                     type: string
                 type: object
               webhooks:
-                description: |-
-                  Inbound HTTP-webhook endpoints. Each entry creates one
-                  authenticated ingress route that produces records to
-                  `targetTopic`.
+                description: "Inbound HTTP-webhook endpoints. Each entry creates one\nauthenticated ingress route that produces records to\n`targetTopic`."
                 items:
-                  description: |-
-                    One inbound HTTP-webhook endpoint.
-
-                    The gateway does one produce call against `targetTopic` for every
-                    verified POST to `/<name>`.
+                  description: "One inbound HTTP-webhook endpoint.\n\nThe gateway does one produce call against `targetTopic` for every\nverified POST to `/<name>`."
                   properties:
                     forwardHeaders:
-                      description: |-
-                        Request headers to preserve as Kafka record headers. Authentication
-                        credentials and webhook signatures cannot be forwarded.
+                      description: "Request headers to preserve as Kafka record headers. Authentication\ncredentials and webhook signatures cannot be forwarded."
                       items:
                         type: string
                       nullable: true
                       type: array
                     idempotencySource:
-                      description: |-
-                        How to derive the idempotency key for deduplication, for example
-                        `header:X-Idempotency-Key` or `body_hash`.
+                      description: "How to derive the idempotency key for deduplication, for example\n`header:X-Idempotency-Key` or `body_hash`."
                       nullable: true
                       type: string
                     keySource:
-                      description: |-
-                        How to derive the Kafka record key from the request, for example
-                        `header:X-Record-Key` or `body_path:.id`.
+                      description: "How to derive the Kafka record key from the request, for example\n`header:X-Record-Key` or `body_path:.id`."
                       nullable: true
                       type: string
                     maxBody:
@@ -651,13 +566,11 @@ spec:
                       description: Unique name for this webhook route. It is the URL path segment.
                       type: string
                     principal:
-                      description: |-
-                        Kafka principal for ACL checks on produce to `targetTopic`.
-                        Defaults to the gateway service account principal when absent.
+                      description: "Kafka principal for ACL checks on produce to `targetTopic`.\nDefaults to the gateway service account principal when absent."
                       nullable: true
                       type: string
                     schemaFormat:
-                      description: 'Structured payload format: `avro`, `json`, or `protobuf`.'
+                      description: "Structured payload format: `avro`, `json`, or `protobuf`."
                       nullable: true
                       type: string
                     schemaSubject:
@@ -665,11 +578,7 @@ spec:
                       nullable: true
                       type: string
                     secretRef:
-                      description: |-
-                        Kubernetes Secret key reference for the HMAC signing secret or the
-                        Standard Webhooks signing token required by `signatureMode`. The
-                        controller resolves it at render time and puts the raw secret value
-                        into the config Secret. The CRD never stores that value.
+                      description: "Kubernetes Secret key reference for the HMAC signing secret or the\nStandard Webhooks signing token required by `signatureMode`. The\ncontroller resolves it at render time and puts the raw secret value\ninto the config Secret. The CRD never stores that value."
                       nullable: true
                       properties:
                         key:
@@ -687,36 +596,26 @@ spec:
                       nullable: true
                       type: string
                     signatureHeader:
-                      description: |-
-                        HTTP header that carries the HMAC signature, for example
-                        `X-Hub-Signature-256`.
+                      description: "HTTP header that carries the HMAC signature, for example\n`X-Hub-Signature-256`."
                       nullable: true
                       type: string
                     signatureMode:
-                      description: |-
-                        Signature protocol. Set `standard_webhooks` to verify the signed
-                        message ID, timestamp, and body; omit for body-only HMAC verification.
+                      description: "Signature protocol. Set `standard_webhooks` to verify the signed\nmessage ID, timestamp, and body; omit for body-only HMAC verification."
                       nullable: true
                       type: string
                     signaturePrefix:
-                      description: |-
-                        Prefix to remove from the signature header value before the
-                        gateway verifies it, for example `sha256=`.
+                      description: "Prefix to remove from the signature header value before the\ngateway verifies it, for example `sha256=`."
                       nullable: true
                       type: string
                     targetTopic:
                       description: Kafka topic that the gateway produces the records to.
                       type: string
                     timestampHeader:
-                      description: |-
-                        HTTP header that carries the request timestamp. The gateway uses
-                        it with `timestampTolerance` to reject replayed requests.
+                      description: "HTTP header that carries the request timestamp. The gateway uses\nit with `timestampTolerance` to reject replayed requests."
                       nullable: true
                       type: string
                     timestampTolerance:
-                      description: |-
-                        Maximum age of a request timestamp before it is rejected as a replay,
-                        as a unit-carrying duration. Default `300s`.
+                      description: "Maximum age of a request timestamp before it is rejected as a replay,\nas a unit-carrying duration. Default `300s`."
                       nullable: true
                       type: string
                   required:
@@ -731,9 +630,7 @@ spec:
             properties:
               conditions:
                 default: []
-                description: |-
-                  Standard Kubernetes-style condition list. It reports `Ready`,
-                  `KafkaVersionValid`, `CertReady`, and `Degraded`.
+                description: "Standard Kubernetes-style condition list. It reports `Ready`,\n`KafkaVersionValid`, `CertReady`, and `Degraded`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -746,7 +643,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -760,7 +657,7 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: '`metadata.generation` of the last successfully-reconciled spec.'
+                description: "`metadata.generation` of the last successfully-reconciled spec."
                 format: int64
                 nullable: true
                 type: integer
@@ -778,7 +675,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -800,12 +696,7 @@ spec:
         description: Auto-generated derived type for KafkaNodePoolSpec via `CustomResource`
         properties:
           spec:
-            description: |-
-              A pool of nodes, which are pods, that share the role, the image, and
-              the resources.
-
-              There is one `StatefulSet` for each pool. Clients address the pods
-              through the shared headless `Service` that the parent `Kafka` owns.
+            description: "A pool of nodes, which are pods, that share the role, the image, and\nthe resources.\n\nThere is one `StatefulSet` for each pool. Clients address the pods\nthrough the shared headless `Service` that the parent `Kafka` owns."
             properties:
               clientDispatchQueueCapacity:
                 description: Kafka client request-dispatch queue capacity.
@@ -818,9 +709,7 @@ spec:
                 nullable: true
                 type: string
               image:
-                description: |-
-                  Container image. The operator uses `--default-broker-image` when
-                  this field is absent.
+                description: "Container image. The operator uses `--default-broker-image` when\nthis field is absent."
                 nullable: true
                 type: string
               nodeIdStart:
@@ -840,12 +729,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -863,19 +747,17 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               roles:
-                description: |-
-                  Roles that each node in this pool has. The list must contain
-                  `Controller`, `Broker`, or both, without duplicates.
+                description: "Roles that each node in this pool has. The list must contain\n`Controller`, `Broker`, or both, without duplicates."
                 items:
                   enum:
                   - Controller
@@ -885,9 +767,7 @@ spec:
                 minItems: 1
                 type: array
               storage:
-                description: |-
-                  Storage configuration. `None`, which means that the field is
-                  absent, gives an emptyDir. That is the default. See [`Storage`].
+                description: "Storage configuration. `None`, which means that the field is\nabsent, gives an emptyDir. That is the default. See [`Storage`]."
                 nullable: true
                 properties:
                   class:
@@ -1491,7 +1371,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -1523,7 +1403,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1547,11 +1426,7 @@ spec:
           spec:
             properties:
               authorizationSecretRef:
-                description: |-
-                  Bearer credential for `removeBrokers`, read from a Secret in this
-                  resource's namespace. When omitted, the operator derives
-                  `<cluster>-rebalancer-auth` / `token` from the `krabka.io/cluster`
-                  label. The token is never written to status.
+                description: "Bearer credential for `removeBrokers`, read from a Secret in this\nresource's namespace. When omitted, the operator derives\n`<cluster>-rebalancer-auth` / `token` from the `krabka.io/cluster`\nlabel. The token is never written to status."
                 nullable: true
                 properties:
                   key:
@@ -1571,39 +1446,25 @@ spec:
                   type: integer
                 type: array
               endpoint:
-                description: |-
-                  Connect-RPC base URL of the `krabka-rebalancer` service, for
-                  example `http://my-cluster-rebalancer.kafka.svc:9300`. When this
-                  field is absent, the operator derives
-                  `http://<cluster>-rebalancer.<namespace>.svc.cluster.local:9300`
-                  from the `krabka.io/cluster` label.
+                description: "Connect-RPC base URL of the `krabka-rebalancer` service, for\nexample `http://my-cluster-rebalancer.kafka.svc:9300`. When this\nfield is absent, the operator derives\n`http://<cluster>-rebalancer.<namespace>.svc.cluster.local:9300`\nfrom the `krabka.io/cluster` label."
                 nullable: true
                 type: string
               goals:
-                description: |-
-                  Optimization goals to apply, by name, for example `RackAware` and
-                  `ReplicaDistribution`. When this field is absent or empty, the
-                  rebalancer uses its full default goal registry in priority
-                  order.
+                description: "Optimization goals to apply, by name, for example `RackAware` and\n`ReplicaDistribution`. When this field is absent or empty, the\nrebalancer uses its full default goal registry in priority\norder."
                 items:
                   type: string
                 nullable: true
                 type: array
               mode:
                 default: full
-                description: |-
-                  Proposal scope. The operator always sends this explicitly to the
-                  rebalancer, including the default `full` mode.
+                description: "Proposal scope. The operator always sends this explicitly to the\nrebalancer, including the default `full` mode."
                 enum:
                 - full
                 - removeBrokers
                 - addBrokers
                 type: string
               throttleBytesPerSec:
-                description: |-
-                  Replication throttle in bytes per second while the proposal
-                  executes. This is KIP-73. When this field is absent, the rebalancer
-                  uses its own `--default-throttle-bytes-per-sec`.
+                description: "Replication throttle in bytes per second while the proposal\nexecutes. This is KIP-73. When this field is absent, the rebalancer\nuses its own `--default-throttle-bytes-per-sec`."
                 format: int64
                 minimum: 1.0
                 nullable: true
@@ -1614,11 +1475,7 @@ spec:
             properties:
               conditions:
                 default: []
-                description: |-
-                  Kubernetes-style condition list. The `type` of the active
-                  condition holds the rebalance state. It is one of
-                  `PendingProposal`, `ProposalReady`, `Rebalancing`, `Ready`,
-                  `NotReady`, and `Stopped`.
+                description: "Kubernetes-style condition list. The `type` of the active\ncondition holds the rebalance state. It is one of\n`PendingProposal`, `ProposalReady`, `Rebalancing`, `Ready`,\n`NotReady`, and `Stopped`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -1631,7 +1488,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -1645,10 +1502,7 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: |-
-                  `metadata.generation` of the last spec that gave the current
-                  proposal. The operator advances it when it computes a new
-                  proposal.
+                description: "`metadata.generation` of the last spec that gave the current\nproposal. The operator advances it when it computes a new\nproposal."
                 format: int64
                 nullable: true
                 type: integer
@@ -1693,10 +1547,7 @@ spec:
                     type: integer
                 type: object
               sessionId:
-                description: |-
-                  Proposal id that the rebalancer assigned. The operator stores it,
-                  so that the `approve`, `stop`, and poll operations reach the same
-                  proposal in every reconcile.
+                description: "Proposal id that the rebalancer assigned. The operator stores it,\nso that the `approve`, `stop`, and poll operations reach the same\nproposal in every reconcile."
                 nullable: true
                 type: string
             type: object
@@ -1708,7 +1559,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -1730,21 +1580,10 @@ spec:
         description: Auto-generated derived type for KafkaSpec via `CustomResource`
         properties:
           spec:
-            description: |-
-              Krabka cluster spec. The spec carries only the version label. Sibling
-              `KafkaNodePool`s labeled `krabka.io/cluster=<this name>` describe the
-              broker pods.
+            description: "Krabka cluster spec. The spec carries only the version label. Sibling\n`KafkaNodePool`s labeled `krabka.io/cluster=<this name>` describe the\nbroker pods."
             properties:
               authorization:
-                description: |-
-                  Cluster-level authorizer selection. When `None`, the broker uses the
-                  default `AllowAll` authorizer and makes no ACL checks. When `Some`, the
-                  operator renders the `[authorization]` TOML section, so the broker
-                  builds the matching `Arc<dyn Authorizer>`. That is
-                  `SimpleAclAuthorizer` for `type: simple`, and `OpaAuthorizer` for
-                  `type: opa`. With `simple` or `opa` selected, the operator's
-                  inter-broker principal MUST appear in `super_users`. There is no
-                  implicit `ANONYMOUS` allow, and operators must opt in explicitly.
+                description: "Cluster-level authorizer selection. When `None`, the broker uses the\ndefault `AllowAll` authorizer and makes no ACL checks. When `Some`, the\noperator renders the `[authorization]` TOML section, so the broker\nbuilds the matching `Arc<dyn Authorizer>`. That is\n`SimpleAclAuthorizer` for `type: simple`, and `OpaAuthorizer` for\n`type: opa`. With `simple` or `opa` selected, the operator's\ninter-broker principal MUST appear in `super_users`. There is no\nimplicit `ANONYMOUS` allow, and operators must opt in explicitly."
                 nullable: true
                 properties:
                   allowOnError:
@@ -2266,25 +2105,16 @@ spec:
                     type: integer
                 type: object
               clientsCa:
-                description: |-
-                  Per-cluster CA that signs `KafkaUser` TLS certs. When absent, the
-                  operator uses a fully-defaulted `CertificateAuthority`.
+                description: "Per-cluster CA that signs `KafkaUser` TLS certs. When absent, the\noperator uses a fully-defaulted `CertificateAuthority`."
                 nullable: true
                 properties:
                   generateCertificateAuthority:
                     default: true
-                    description: |-
-                      When `true`, which is the default, the operator generates and
-                      renews this CA. When `false`, the cluster admin must create the CA
-                      `Secret` pair first, and the operator refuses to overwrite them.
-                      The admin renews a BYO CA. The `CronJob` skips a BYO CA and emits
-                      an Event when the CA comes near its expiry.
+                    description: "When `true`, which is the default, the operator generates and\nrenews this CA. When `false`, the cluster admin must create the CA\n`Secret` pair first, and the operator refuses to overwrite them.\nThe admin renews a BYO CA. The `CronJob` skips a BYO CA and emits\nan Event when the CA comes near its expiry."
                     type: boolean
                   renewalDays:
                     default: 30
-                    description: |-
-                      Window in days before `notAfter` in which the renewal `CronJob`
-                      reissues the leaf certs. Default 30.
+                    description: "Window in days before `notAfter` in which the renewal `CronJob`\nreissues the leaf certs. Default 30."
                     format: uint32
                     minimum: 0.0
                     type: integer
@@ -2296,26 +2126,16 @@ spec:
                     type: integer
                 type: object
               clusterCa:
-                description: |-
-                  Per-cluster CA for inter-broker mTLS and broker certs. When absent,
-                  the operator uses a fully-defaulted `CertificateAuthority`, which it
-                  generates itself with 365/30 days.
+                description: "Per-cluster CA for inter-broker mTLS and broker certs. When absent,\nthe operator uses a fully-defaulted `CertificateAuthority`, which it\ngenerates itself with 365/30 days."
                 nullable: true
                 properties:
                   generateCertificateAuthority:
                     default: true
-                    description: |-
-                      When `true`, which is the default, the operator generates and
-                      renews this CA. When `false`, the cluster admin must create the CA
-                      `Secret` pair first, and the operator refuses to overwrite them.
-                      The admin renews a BYO CA. The `CronJob` skips a BYO CA and emits
-                      an Event when the CA comes near its expiry.
+                    description: "When `true`, which is the default, the operator generates and\nrenews this CA. When `false`, the cluster admin must create the CA\n`Secret` pair first, and the operator refuses to overwrite them.\nThe admin renews a BYO CA. The `CronJob` skips a BYO CA and emits\nan Event when the CA comes near its expiry."
                     type: boolean
                   renewalDays:
                     default: 30
-                    description: |-
-                      Window in days before `notAfter` in which the renewal `CronJob`
-                      reissues the leaf certs. Default 30.
+                    description: "Window in days before `notAfter` in which the renewal `CronJob`\nreissues the leaf certs. Default 30."
                     format: uint32
                     minimum: 0.0
                     type: integer
@@ -2329,29 +2149,15 @@ spec:
               config:
                 additionalProperties:
                   type: string
-                description: |-
-                  Opaque broker properties, in `server.properties`-style key and value
-                  pairs. The operator passes them through to the broker's
-                  `[server_properties]` TOML table, and the broker treats them as inert
-                  today. Changes propagate through the config hash.
+                description: "Opaque broker properties, in `server.properties`-style key and value\npairs. The operator passes them through to the broker's\n`[server_properties]` TOML table, and the broker treats them as inert\ntoday. Changes propagate through the config hash."
                 nullable: true
                 type: object
               delegationToken:
-                description: |-
-                  Delegation-token master HMAC key source. When `None`, the broker
-                  rejects all KIP-48 delegation-token RPCs with err 61
-                  `DELEGATION_TOKEN_AUTH_DISABLED`. When `Some`, the operator injects
-                  `KRABKA_DELEGATION_TOKEN_SECRET_KEY` into each broker pod through a
-                  `valueFrom.secretKeyRef`. The key is then part of the rendered
-                  `StatefulSet`, so the SSA reconcile does not race with out-of-band
-                  `kubectl set env` patches.
+                description: "Delegation-token master HMAC key source. When `None`, the broker\nrejects all KIP-48 delegation-token RPCs with err 61\n`DELEGATION_TOKEN_AUTH_DISABLED`. When `Some`, the operator injects\n`KRABKA_DELEGATION_TOKEN_SECRET_KEY` into each broker pod through a\n`valueFrom.secretKeyRef`. The key is then part of the rendered\n`StatefulSet`, so the SSA reconcile does not race with out-of-band\n`kubectl set env` patches."
                 nullable: true
                 properties:
                   secretKeyRef:
-                    description: |-
-                      Reference to a Kubernetes `Secret` in the same namespace as the
-                      `Kafka` CR. Its `data.<key>` value is the broker's master HMAC key for
-                      KIP-48 delegation tokens.
+                    description: "Reference to a Kubernetes `Secret` in the same namespace as the\n`Kafka` CR. Its `data.<key>` value is the broker's master HMAC key for\nKIP-48 delegation tokens."
                     properties:
                       key:
                         description: Key within the Secret's `data`. Defaults to `secret-key`.
@@ -2367,17 +2173,11 @@ spec:
                 - secretKeyRef
                 type: object
               interBrokerKerberos:
-                description: |-
-                  Inter-broker Kerberos initiate config. It is required when
-                  `interBrokerListenerName` resolves to a `type: gssapi` listener. It
-                  supplies the shared client principal and the KDC. The keytab comes from
-                  that listener's `keytabSecretRef`.
+                description: "Inter-broker Kerberos initiate config. It is required when\n`interBrokerListenerName` resolves to a `type: gssapi` listener. It\nsupplies the shared client principal and the KDC. The keytab comes from\nthat listener's `keytabSecretRef`."
                 nullable: true
                 properties:
                   clientPrincipal:
-                    description: |-
-                      Principal that every broker authenticates as when it dials peers, for
-                      example `kafka@EXAMPLE.COM`. It must exist in the shared keytab.
+                    description: "Principal that every broker authenticates as when it dials peers, for\nexample `kafka@EXAMPLE.COM`. It must exist in the shared keytab."
                     type: string
                   kdcUrl:
                     description: KDC endpoint, for example `tcp://kdc:88`.
@@ -2391,22 +2191,14 @@ spec:
                 - kdcUrl
                 type: object
               interBrokerListenerName:
-                description: |-
-                  Name of the listener for inter-broker traffic. When `None`, the
-                  operator picks the first `internal` listener. When `listeners` is
-                  empty, the operator picks the synthesized default `"PLAIN"`.
+                description: "Name of the listener for inter-broker traffic. When `None`, the\noperator picks the first `internal` listener. When `listeners` is\nempty, the operator picks the synthesized default `\"PLAIN\"`."
                 nullable: true
                 type: string
               kafkaVersion:
-                description: |-
-                  Krabka version label. The operator propagates it to all pool pods
-                  through the `app.kubernetes.io/version` label.
+                description: "Krabka version label. The operator propagates it to all pool pods\nthrough the `app.kubernetes.io/version` label."
                 type: string
               krb5ConfSecretRef:
-                description: |-
-                  Optional process-wide `krb5.conf`. The operator mounts it into the
-                  broker pods and points `KRB5_CONFIG` at it. It serves both the accept
-                  path and the initiate path.
+                description: "Optional process-wide `krb5.conf`. The operator mounts it into the\nbroker pods and points `KRB5_CONFIG` at it. It serves both the accept\npath and the initiate path."
                 nullable: true
                 properties:
                   key:
@@ -2420,17 +2212,11 @@ spec:
                 - secretName
                 type: object
               listeners:
-                description: |-
-                  Named listeners. An empty or absent list synthesizes one internal
-                  `PLAIN` listener on port 9092.
+                description: "Named listeners. An empty or absent list synthesizes one internal\n`PLAIN` listener on port 9092."
                 items:
                   properties:
                     authentication:
-                      description: |-
-                        Per-listener authentication mechanism. Absent means anonymous, and no
-                        client identity is required. When the field is `type: tls`, the
-                        listener must also have `tls: true`. The reconcile enforces this
-                        rule.
+                      description: "Per-listener authentication mechanism. Absent means anonymous, and no\nclient identity is required. When the field is `type: tls`, the\nlistener must also have `tls: true`. The reconcile enforces this\nrule."
                       nullable: true
                       properties:
                         accessTokenIsJwt:
@@ -2576,7 +2362,7 @@ spec:
                               description: Annotations to add to the bootstrap Service.
                               type: object
                             host:
-                              description: '`ingress` / `route` only: bootstrap hostname.'
+                              description: "`ingress` / `route` only: bootstrap hostname."
                               nullable: true
                               type: string
                             labels:
@@ -2585,11 +2371,11 @@ spec:
                               description: Labels to add to the bootstrap Service.
                               type: object
                             loadBalancerIP:
-                              description: '`loadbalancer` only: pin the bootstrap LB IP.'
+                              description: "`loadbalancer` only: pin the bootstrap LB IP."
                               nullable: true
                               type: string
                             nodePort:
-                              description: '`nodeport` only: pin the bootstrap `NodePort`.'
+                              description: "`nodeport` only: pin the bootstrap `NodePort`."
                               format: int32
                               nullable: true
                               type: integer
@@ -2611,15 +2397,15 @@ spec:
                                 format: int32
                                 type: integer
                               host:
-                                description: '`ingress` / `route` only: per-broker hostname.'
+                                description: "`ingress` / `route` only: per-broker hostname."
                                 nullable: true
                                 type: string
                               loadBalancerIP:
-                                description: '`loadbalancer` only: pin this broker''s `Service.spec.loadBalancerIP`.'
+                                description: "`loadbalancer` only: pin this broker's `Service.spec.loadBalancerIP`."
                                 nullable: true
                                 type: string
                               nodePort:
-                                description: '`nodeport` only: pin this broker''s `Service.spec.ports[0].nodePort`.'
+                                description: "`nodeport` only: pin this broker's `Service.spec.ports[0].nodePort`."
                                 format: int32
                                 nullable: true
                                 type: integer
@@ -2628,38 +2414,17 @@ spec:
                             type: object
                           type: array
                         class:
-                          description: |-
-                            `ingress` only: the `spec.ingressClassName` that the operator sets on
-                            every generated `Ingress`. This is the Strimzi-shaped
-                            `configuration.class`. It is inert for other listener types.
+                          description: "`ingress` only: the `spec.ingressClassName` that the operator sets on\nevery generated `Ingress`. This is the Strimzi-shaped\n`configuration.class`. It is inert for other listener types."
                           nullable: true
                           type: string
                       type: object
                     name:
-                      description: |-
-                        Unique within the cluster. Alphanumeric characters and `-`, ≤25
-                        chars. It is the Kafka listener name, and it appears in
-                        `bootstrap.servers`-style URLs.
+                      description: "Unique within the cluster. Alphanumeric characters and `-`, ≤25\nchars. It is the Kafka listener name, and it appears in\n`bootstrap.servers`-style URLs."
                       type: string
                     networkPolicyPeers:
-                      description: |-
-                        Per-listener peer allow-list. It is tri-state:
-                        - `None` gives no per-listener restriction, that is, allow-all on this
-                          port.
-                        - `Some(vec![])` gives deny-all on this listener port. The operator
-                          emits no per-listener rule, and the default-deny applies.
-                        - `Some(non_empty)` lets only the listed peers reach this port.
-
-                        The operator reads this field only when `Kafka.spec.networkPolicy` is
-                        set. In any other case the field is inert. The operator auto-allow rule
-                        still fires on this port for deny-all listeners, so that the operator
-                        can manage the cluster.
+                      description: "Per-listener peer allow-list. It is tri-state:\n- `None` gives no per-listener restriction, that is, allow-all on this\n  port.\n- `Some(vec![])` gives deny-all on this listener port. The operator\n  emits no per-listener rule, and the default-deny applies.\n- `Some(non_empty)` lets only the listed peers reach this port.\n\nThe operator reads this field only when `Kafka.spec.networkPolicy` is\nset. In any other case the field is inert. The operator auto-allow rule\nstill fires on this port for deny-all listeners, so that the operator\ncan manage the cluster."
                       items:
-                        description: |-
-                          Subset of `networking.k8s.io/v1.NetworkPolicyPeer`.
-
-                          This struct omits `ipBlock` on purpose. Someone can add it later if
-                          external CIDR allow-lists become a real need.
+                        description: "Subset of `networking.k8s.io/v1.NetworkPolicyPeer`.\n\nThis struct omits `ipBlock` on purpose. Someone can add it later if\nexternal CIDR allow-lists become a real need."
                         properties:
                           namespaceSelector:
                             description: A label selector is a label query over a set of resources. The result of matchLabels and matchExpressions are ANDed. An empty label selector matches all objects. A null label selector matches no objects.
@@ -2732,17 +2497,10 @@ spec:
                       type: integer
                     tls:
                       default: false
-                      description: |-
-                        Transport-level TLS. When `true`, the listener uses the per-broker
-                        keystore that the cluster CA signed, and clients must use TLS to
-                        connect. This field is independent of `authentication`. A `tls: true`
-                        listener with no `authentication` is anonymous over TLS.
+                      description: "Transport-level TLS. When `true`, the listener uses the per-broker\nkeystore that the cluster CA signed, and clients must use TLS to\nconnect. This field is independent of `authentication`. A `tls: true`\nlistener with no `authentication` is anonymous over TLS."
                       type: boolean
                     type:
-                      description: |-
-                        Listener type. `internal` is in-cluster. `nodeport` and
-                        `loadbalancer` create external Services. The schema accepts `ingress`
-                        and `route`, but the reconcile rejects them.
+                      description: "Listener type. `internal` is in-cluster. `nodeport` and\n`loadbalancer` create external Services. The schema accepts `ingress`\nand `route`, but the reconcile rejects them."
                       enum:
                       - internal
                       - nodeport
@@ -2757,25 +2515,13 @@ spec:
                   type: object
                 type: array
               logging:
-                description: |-
-                  Broker log configuration. When `None`, the brokers use their built-in
-                  default `RUST_LOG` filter. When `Some`, the operator composes an inline
-                  `tracing` env-filter string, or reads an external one. The operator
-                  then renders it into the broker `ConfigMap` under the `rust.log` key,
-                  wires it into the `RUST_LOG` env of each broker pod, and rolls the
-                  cluster on a change through the config hash.
+                description: "Broker log configuration. When `None`, the brokers use their built-in\ndefault `RUST_LOG` filter. When `Some`, the operator composes an inline\n`tracing` env-filter string, or reads an external one. The operator\nthen renders it into the broker `ConfigMap` under the `rust.log` key,\nwires it into the `RUST_LOG` env of each broker pod, and rolls the\ncluster on a change through the config hash."
                 nullable: true
                 properties:
                   loggers:
                     additionalProperties:
                       type: string
-                    description: |-
-                      Inline loggers, from tracing target to level. The key `root` is
-                      case-insensitive and sets the global default level as a bare
-                      env-filter directive. Any other key is a tracing target, that is, a
-                      Rust module path such as `krabka_broker`. The levels are
-                      `trace|debug|info|warn|error|off`, and they are case-insensitive.
-                      `fatal` is accepted as an alias for `error`.
+                    description: "Inline loggers, from tracing target to level. The key `root` is\ncase-insensitive and sets the global default level as a bare\nenv-filter directive. Any other key is a tracing target, that is, a\nRust module path such as `krabka_broker`. The levels are\n`trace|debug|info|warn|error|off`, and they are case-insensitive.\n`fatal` is accepted as an alias for `error`."
                     type: object
                   type:
                     default: inline
@@ -2784,10 +2530,7 @@ spec:
                     - external
                     type: string
                   valueFrom:
-                    description: |-
-                      External logging source. This field is required when
-                      `type: external`. The operator uses the value of the referenced
-                      `ConfigMap` key verbatim as the broker's `RUST_LOG` filter.
+                    description: "External logging source. This field is required when\n`type: external`. The operator uses the value of the referenced\n`ConfigMap` key verbatim as the broker's `RUST_LOG` filter."
                     nullable: true
                     properties:
                       configMapKeyRef:
@@ -2805,24 +2548,11 @@ spec:
                     type: object
                 type: object
               metadataVersion:
-                description: |-
-                  `KRaft` metadata version, the runtime analog of
-                  `inter.broker.protocol.version`. When unset, it tracks the
-                  `major.minor` of `kafkaVersion`. When set, it pins the metadata version
-                  for a two-step upgrade or an online downgrade. The operator validates
-                  it against `kafkaVersion`; changes on an existing cluster are finalized
-                  through `UpdateFeatures`, with safe-downgrade semantics for a lower
-                  target. Rejections surface `KafkaVersionValid=False` and leave
-                  `status.metadataVersion` unchanged.
+                description: "`KRaft` metadata version, the runtime analog of\n`inter.broker.protocol.version`. When unset, it tracks the\n`major.minor` of `kafkaVersion`. When set, it pins the metadata version\nfor a two-step upgrade or an online downgrade. The operator validates\nit against `kafkaVersion`; changes on an existing cluster are finalized\nthrough `UpdateFeatures`, with safe-downgrade semantics for a lower\ntarget. Rejections surface `KafkaVersionValid=False` and leave\n`status.metadataVersion` unchanged."
                 nullable: true
                 type: string
               metricsConfig:
-                description: |-
-                  Prometheus scrape configuration. When `None`, the brokers do not bind
-                  `/metrics`, and the operator renders no `PodMonitor` and no
-                  `ServiceMonitor`. When `Some`, the broker `StatefulSet` gains a
-                  `metrics` container port on TCP 9404, and the operator SSA-applies the
-                  resources that `pod_monitor` and `service_monitor` request.
+                description: "Prometheus scrape configuration. When `None`, the brokers do not bind\n`/metrics`, and the operator renders no `PodMonitor` and no\n`ServiceMonitor`. When `Some`, the broker `StatefulSet` gains a\n`metrics` container port on TCP 9404, and the operator SSA-applies the\nresources that `pod_monitor` and `service_monitor` request."
                 nullable: true
                 properties:
                   podMonitor:
@@ -2860,52 +2590,25 @@ spec:
                     type: string
                 type: object
               networkPolicy:
-                description: |-
-                  Opt-in `NetworkPolicy` generation. When `None`, the operator generates
-                  no `NetworkPolicy`. When `Some`, even `{}`, the operator renders a
-                  cluster-level `NetworkPolicy` that gates ingress to the broker and
-                  controller pods.
+                description: "Opt-in `NetworkPolicy` generation. When `None`, the operator generates\nno `NetworkPolicy`. When `Some`, even `{}`, the operator renders a\ncluster-level `NetworkPolicy` that gates ingress to the broker and\ncontroller pods."
                 nullable: true
                 type: object
               tieredStorage:
-                description: |-
-                  KIP-405: cluster-wide tiered storage. When `Some`, every broker pod
-                  boots with the local-tier RSM enabled, with an `emptyDir` mounted at
-                  `/var/lib/krabka/remote`, which is the broker's
-                  `remote_log_storage_dir`, and with `[remote_storage]` rendered in the
-                  broker TOML. The per-topic enablement does not change. It stays
-                  `KafkaTopic.spec.config["remote.storage.enable"] = "true"`.
-
-                  With the `emptyDir` default and `InmemoryRemoteLogMetadataManager` as
-                  the only RLMM, tier data does not survive pod restarts. PVC support
-                  pairs with the production RLMM.
+                description: "KIP-405: cluster-wide tiered storage. When `Some`, every broker pod\nboots with the local-tier RSM enabled, with an `emptyDir` mounted at\n`/var/lib/krabka/remote`, which is the broker's\n`remote_log_storage_dir`, and with `[remote_storage]` rendered in the\nbroker TOML. The per-topic enablement does not change. It stays\n`KafkaTopic.spec.config[\"remote.storage.enable\"] = \"true\"`.\n\nWith the `emptyDir` default and `InmemoryRemoteLogMetadataManager` as\nthe only RLMM, tier data does not survive pod restarts. PVC support\npairs with the production RLMM."
                 nullable: true
                 properties:
                   gcs:
-                    description: |-
-                      GCS-backend tuning. It is required when `kind == Gcs`, and it must be
-                      absent in any other case. The struct has the same shape as
-                      `krabka_remote_storage::GcsConfig`. The operator renders the
-                      non-credential fields verbatim into the broker TOML's
-                      `[remote_storage.gcs]` block. S3 uses env-var credentials, but GCS does
-                      not. The operator mounts an explicit service-account JSON key as a FILE
-                      on the broker pod and gives it to the broker as `service_account_path`
-                      in the TOML. Unset credentials select keyless Workload Identity or
-                      ADC.
+                    description: "GCS-backend tuning. It is required when `kind == Gcs`, and it must be\nabsent in any other case. The struct has the same shape as\n`krabka_remote_storage::GcsConfig`. The operator renders the\nnon-credential fields verbatim into the broker TOML's\n`[remote_storage.gcs]` block. S3 uses env-var credentials, but GCS does\nnot. The operator mounts an explicit service-account JSON key as a FILE\non the broker pod and gives it to the broker as `service_account_path`\nin the TOML. Unset credentials select keyless Workload Identity or\nADC."
                     nullable: true
                     properties:
                       allowHttp:
-                        description: |-
-                          Allow plaintext HTTP. It is off by default. Turn it on for GCS
-                          emulators that run without TLS. Real GCS never needs it.
+                        description: "Allow plaintext HTTP. It is off by default. Turn it on for GCS\nemulators that run without TLS. Real GCS never needs it."
                         type: boolean
                       bucket:
                         description: GCS bucket name. Required.
                         type: string
                       credentials:
-                        description: |-
-                          Optional explicit service-account credentials. When None, the broker
-                          uses Workload Identity or ADC, which is the keyless GKE path.
+                        description: "Optional explicit service-account credentials. When None, the broker\nuses Workload Identity or ADC, which is the keyless GKE path."
                         nullable: true
                         properties:
                           serviceAccountKey:
@@ -2925,66 +2628,38 @@ spec:
                         - serviceAccountKey
                         type: object
                       endpoint:
-                        description: |-
-                          Optional custom GCS API base URL, for example for emulators and
-                          fakes. When `None`, the broker uses the standard Google Cloud Storage
-                          endpoint.
+                        description: "Optional custom GCS API base URL, for example for emulators and\nfakes. When `None`, the broker uses the standard Google Cloud Storage\nendpoint."
                         nullable: true
                         type: string
                       multipartChunkSize:
-                        description: |-
-                          Override the per-part size for multipart uploads in bytes. When unset,
-                          the broker uses
-                          `krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is
-                          16 MiB.
+                        description: "Override the per-part size for multipart uploads in bytes. When unset,\nthe broker uses\n`krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is\n16 MiB."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       multipartThreshold:
-                        description: |-
-                          Override the single-PUT and multipart cutoff in bytes. When unset, the
-                          broker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which
-                          is 100 MiB. Lower it in tests to exercise the multipart path on small
-                          fixtures.
+                        description: "Override the single-PUT and multipart cutoff in bytes. When unset, the\nbroker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which\nis 100 MiB. Lower it in tests to exercise the multipart path on small\nfixtures."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       prefix:
-                        description: |-
-                          Optional key prefix inside the bucket. It lets more than one Krabka
-                          cluster share a bucket without a collision.
+                        description: "Optional key prefix inside the bucket. It lets more than one Krabka\ncluster share a bucket without a collision."
                         nullable: true
                         type: string
                     required:
                     - bucket
                     type: object
                   metadataManager:
-                    description: |-
-                      KIP-405: pick the `RemoteLogMetadataManager` that the broker pods run.
-                      When the field is absent, or when it is `type: Topic`, the broker
-                      activates the durable
-                      `krabka_remote_storage_topic::TopicBasedRemoteLogMetadataManager`
-                      against the internal `__remote_log_metadata` topic. Tier-segment
-                      metadata then survives pod restarts and is consistent across the
-                      brokers in the cluster. Only an explicit `type: InMemory` selects the
-                      in-memory fixture, which is for test and dev only.
+                    description: "KIP-405: pick the `RemoteLogMetadataManager` that the broker pods run.\nWhen the field is absent, or when it is `type: Topic`, the broker\nactivates the durable\n`krabka_remote_storage_topic::TopicBasedRemoteLogMetadataManager`\nagainst the internal `__remote_log_metadata` topic. Tier-segment\nmetadata then survives pod restarts and is consistent across the\nbrokers in the cluster. Only an explicit `type: InMemory` selects the\nin-memory fixture, which is for test and dev only."
                     nullable: true
                     properties:
                       topic:
-                        description: |-
-                          Topic-backed tuning. It is optional when `kind == Topic`, and the
-                          broker fills the defaults for the bootstrap and topic parameters. It
-                          must be absent in any other case.
+                        description: "Topic-backed tuning. It is optional when `kind == Topic`, and the\nbroker fills the defaults for the bootstrap and topic parameters. It\nmust be absent in any other case."
                         nullable: true
                         properties:
                           bootstrap:
-                            description: |-
-                              `host:port` that the broker pod dials to reach its own listener, so
-                              that it can publish and consume `__remote_log_metadata`. This is
-                              usually the pod's loopback inter-broker listener, for example
-                              `127.0.0.1:9094`.
+                            description: "`host:port` that the broker pod dials to reach its own listener, so\nthat it can publish and consume `__remote_log_metadata`. This is\nusually the pod's loopback inter-broker listener, for example\n`127.0.0.1:9094`."
                             type: string
                           eventQueueCapacity:
                             description: Capacity of the shared metadata-event delivery queue.
@@ -3005,18 +2680,12 @@ spec:
                             nullable: true
                             type: string
                           numPartitions:
-                            description: |-
-                              Partition count for `__remote_log_metadata` on the first creation.
-                              Defaults to 50, which is the Kafka
-                              `remote.log.metadata.topic.num.partitions`.
+                            description: "Partition count for `__remote_log_metadata` on the first creation.\nDefaults to 50, which is the Kafka\n`remote.log.metadata.topic.num.partitions`."
                             format: int32
                             nullable: true
                             type: integer
                           replication:
-                            description: |-
-                              Replication factor for `__remote_log_metadata` on the first creation.
-                              Defaults to 3, which is the Kafka
-                              `remote.log.metadata.topic.replication.factor`.
+                            description: "Replication factor for `__remote_log_metadata` on the first creation.\nDefaults to 3, which is the Kafka\n`remote.log.metadata.topic.replication.factor`."
                             format: int32
                             nullable: true
                             type: integer
@@ -3041,14 +2710,7 @@ spec:
                     - type
                     type: object
                   persistence:
-                    description: |-
-                      KIP-405: durable storage for the local-tier directory. It is valid
-                      only with `type=Local`. When it is absent, which is the default, the
-                      operator renders an `emptyDir` for `tier-storage`. When `Some`, the
-                      operator renders a `volumeClaimTemplate` of the configured size and
-                      class, so tier data survives pod restarts. Together with the
-                      topic-backed RLMM, this closes the "tier data is lost on pod restart"
-                      caveat.
+                    description: "KIP-405: durable storage for the local-tier directory. It is valid\nonly with `type=Local`. When it is absent, which is the default, the\noperator renders an `emptyDir` for `tier-storage`. When `Some`, the\noperator renders a `volumeClaimTemplate` of the configured size and\nclass, so tier data survives pod restarts. Together with the\ntopic-backed RLMM, this closes the \"tier data is lost on pod restart\"\ncaveat."
                     nullable: true
                     properties:
                       class:
@@ -3057,48 +2719,26 @@ spec:
                         type: string
                       deleteClaim:
                         default: false
-                        description: |-
-                          `true` gives
-                          `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. It must
-                          match the parent `KafkaNodePool.spec.storage.deleteClaim` when both
-                          PVCs are present, because K8s `StatefulSets` have one set-wide
-                          retention policy and no per-template override. The operator validates
-                          this at reconcile time, and a mismatch surfaces as
-                          `TieredStorageInvalid`.
+                        description: "`true` gives\n`persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. It must\nmatch the parent `KafkaNodePool.spec.storage.deleteClaim` when both\nPVCs are present, because K8s `StatefulSets` have one set-wide\nretention policy and no per-template override. The operator validates\nthis at reconcile time, and a mismatch surfaces as\n`TieredStorageInvalid`."
                         type: boolean
                       size:
-                        description: |-
-                          K8s `Quantity`, for example `"50Gi"` or `"500Mi"`. It must be
-                          non-empty. The Kubernetes API server validates the resource-quantity
-                          form at SSA time.
+                        description: "K8s `Quantity`, for example `\"50Gi\"` or `\"500Mi\"`. It must be\nnon-empty. The Kubernetes API server validates the resource-quantity\nform at SSA time."
                         type: string
                     required:
                     - size
                     type: object
                   s3:
-                    description: |-
-                      S3-backend tuning. It is required when `kind == S3`, and it must be
-                      absent in any other case. The struct has the same shape as
-                      `krabka_remote_storage::S3Config`. The operator renders the
-                      non-credential fields verbatim into the broker TOML's
-                      `[remote_storage.s3]` block. The credentials come from Kubernetes
-                      Secrets, and the operator injects them as the broker-pod env vars
-                      `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+                    description: "S3-backend tuning. It is required when `kind == S3`, and it must be\nabsent in any other case. The struct has the same shape as\n`krabka_remote_storage::S3Config`. The operator renders the\nnon-credential fields verbatim into the broker TOML's\n`[remote_storage.s3]` block. The credentials come from Kubernetes\nSecrets, and the operator injects them as the broker-pod env vars\n`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`."
                     nullable: true
                     properties:
                       allowHttp:
-                        description: |-
-                          Allow plaintext HTTP. It is off by default. Turn it on for a `MinIO`
-                          that runs without TLS. AWS S3 never needs it.
+                        description: "Allow plaintext HTTP. It is off by default. Turn it on for a `MinIO`\nthat runs without TLS. AWS S3 never needs it."
                         type: boolean
                       bucket:
                         description: S3 bucket name. Required.
                         type: string
                       credentials:
-                        description: |-
-                          Optional explicit credentials. When `None`, the broker falls back to
-                          the AWS credential chain, such as IRSA on EKS or an instance profile on
-                          EC2.
+                        description: "Optional explicit credentials. When `None`, the broker falls back to\nthe AWS credential chain, such as IRSA on EKS or an instance profile on\nEC2."
                         nullable: true
                         properties:
                           accessKeyId:
@@ -3132,44 +2772,27 @@ spec:
                         - secretAccessKey
                         type: object
                       endpoint:
-                        description: |-
-                          Optional custom endpoint URL, for example `http://minio:9000` for
-                          `MinIO`, or `https://<account>.r2.cloudflarestorage.com` for Cloudflare
-                          R2. When `None`, the broker uses the AWS S3 endpoint for the configured
-                          region.
+                        description: "Optional custom endpoint URL, for example `http://minio:9000` for\n`MinIO`, or `https://<account>.r2.cloudflarestorage.com` for Cloudflare\nR2. When `None`, the broker uses the AWS S3 endpoint for the configured\nregion."
                         nullable: true
                         type: string
                       multipartChunkSize:
-                        description: |-
-                          Override the per-part size for multipart uploads in bytes. When unset,
-                          the broker uses
-                          `krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is
-                          16 MiB.
+                        description: "Override the per-part size for multipart uploads in bytes. When unset,\nthe broker uses\n`krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is\n16 MiB."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       multipartThreshold:
-                        description: |-
-                          Override the single-PUT and multipart cutoff in bytes. When unset, the
-                          broker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which
-                          is 100 MiB. Lower it in tests to exercise the multipart path on small
-                          fixtures.
+                        description: "Override the single-PUT and multipart cutoff in bytes. When unset, the\nbroker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which\nis 100 MiB. Lower it in tests to exercise the multipart path on small\nfixtures."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       prefix:
-                        description: |-
-                          Optional key prefix inside the bucket. It lets more than one Krabka
-                          cluster share a bucket without a collision.
+                        description: "Optional key prefix inside the bucket. It lets more than one Krabka\ncluster share a bucket without a collision."
                         nullable: true
                         type: string
                       region:
-                        description: |-
-                          AWS region. It is required even for the non-AWS endpoints `MinIO` and
-                          R2, because the `AmazonS3Builder` of `object_store` rejects an empty
-                          region.
+                        description: "AWS region. It is required even for the non-AWS endpoints `MinIO` and\nR2, because the `AmazonS3Builder` of `object_store` rejects an empty\nregion."
                         type: string
                     required:
                     - bucket
@@ -3186,13 +2809,7 @@ spec:
                 - type
                 type: object
               tracing:
-                description: |-
-                  Distributed-tracing wiring for the broker pods. When `Some`, the
-                  operator renders the matching `KRABKA_OTLP_*` env vars onto every
-                  broker pod. The broker's telemetry pipeline reads them with
-                  `TelemetryConfig::from_env` and installs the OTLP tracer at startup.
-                  When `None`, the operator emits no OTLP env vars, and the broker leaves
-                  tracing off. That is the default.
+                description: "Distributed-tracing wiring for the broker pods. When `Some`, the\noperator renders the matching `KRABKA_OTLP_*` env vars onto every\nbroker pod. The broker's telemetry pipeline reads them with\n`TelemetryConfig::from_env` and installs the OTLP tracer at startup.\nWhen `None`, the operator emits no OTLP env vars, and the broker leaves\ntracing off. That is the default."
                 nullable: true
                 properties:
                   otlp:
@@ -3200,41 +2817,26 @@ spec:
                     nullable: true
                     properties:
                       endpoint:
-                        description: |-
-                          Required. OTLP collector endpoint in the form `scheme://host:port`.
-                          The operator renders it as `KRABKA_OTLP_ENDPOINT`. A set field also
-                          sets `KRABKA_OTLP_ENABLED=true`.
+                        description: "Required. OTLP collector endpoint in the form `scheme://host:port`.\nThe operator renders it as `KRABKA_OTLP_ENDPOINT`. A set field also\nsets `KRABKA_OTLP_ENABLED=true`."
                         type: string
                       protocol:
-                        description: |-
-                          OTLP wire protocol selector. It has the same shape as the broker's
-                          internal `OtlpProtocol` enum and the `OTEL_EXPORTER_OTLP_PROTOCOL` spec
-                          values.
+                        description: "OTLP wire protocol selector. It has the same shape as the broker's\ninternal `OtlpProtocol` enum and the `OTEL_EXPORTER_OTLP_PROTOCOL` spec\nvalues."
                         enum:
                         - grpc
                         - http_protobuf
                         nullable: true
                         type: string
                       sampleRatio:
-                        description: |-
-                          Optional sampling ratio in `[0.0, 1.0]`. The operator renders it as
-                          `KRABKA_OTLP_SAMPLE_RATIO`. An unset field leaves the binary's own
-                          default of `1.0`, which samples every trace.
+                        description: "Optional sampling ratio in `[0.0, 1.0]`. The operator renders it as\n`KRABKA_OTLP_SAMPLE_RATIO`. An unset field leaves the binary's own\ndefault of `1.0`, which samples every trace."
                         format: double
                         nullable: true
                         type: number
                       serviceName:
-                        description: |-
-                          Optional `service.name` resource attribute. The operator renders it as
-                          `OTEL_SERVICE_NAME`. An unset field leaves the binary's own name, which
-                          is `"krabka-broker"` for `Kafka` and `"krabka-gres"` for `Gres`.
+                        description: "Optional `service.name` resource attribute. The operator renders it as\n`OTEL_SERVICE_NAME`. An unset field leaves the binary's own name, which\nis `\"krabka-broker\"` for `Kafka` and `\"krabka-gres\"` for `Gres`."
                         nullable: true
                         type: string
                       timeout:
-                        description: |-
-                          Optional export timeout. The operator renders it as
-                          `KRABKA_OTLP_TIMEOUT`. An unset field leaves the binary's own default
-                          of `10s`.
+                        description: "Optional export timeout. The operator renders it as\n`KRABKA_OTLP_TIMEOUT`. An unset field leaves the binary's own default\nof `10s`."
                         nullable: true
                         type: string
                     required:
@@ -3255,42 +2857,29 @@ spec:
             nullable: true
             properties:
               clientsCa:
-                description: |-
-                  Status surface for one CA.
-
-                  The reconciler fills it in from the parsed CA cert and the CRD spec.
+                description: "Status surface for one CA.\n\nThe reconciler fills it in from the parsed CA cert and the CRD spec."
                 nullable: true
                 properties:
                   certGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing cert. It increments on
-                      a same-key renewal and on a key promotion.
+                    description: "Monotonic generation of the active signing cert. It increments on\na same-key renewal and on a key promotion."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   generated:
-                    description: |-
-                      `true` when the operator generated this CA, that is, when
-                      `generateCertificateAuthority == true`. `false` for a BYO CA.
+                    description: "`true` when the operator generated this CA, that is, when\n`generateCertificateAuthority == true`. `false` for a BYO CA."
                     type: boolean
                   keyGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing key. It increments only
-                      on a key replacement.
+                    description: "Monotonic generation of the active signing key. It increments only\non a key replacement."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   notAfter:
-                    description: |-
-                      RFC3339 `notAfter` of the current CA cert, which is the signing
-                      cert.
+                    description: "RFC3339 `notAfter` of the current CA cert, which is the signing\ncert."
                     type: string
                   rotationPhase:
-                    description: |-
-                      Staged key-replacement phase. One of `idle`, `key-replace-trust`,
-                      and `key-replace-promote`.
+                    description: "Staged key-replacement phase. One of `idle`, `key-replace-trust`,\nand `key-replace-promote`."
                     nullable: true
                     type: string
                   trustAnchors:
@@ -3304,42 +2893,29 @@ spec:
                 - notAfter
                 type: object
               clusterCa:
-                description: |-
-                  Status surface for one CA.
-
-                  The reconciler fills it in from the parsed CA cert and the CRD spec.
+                description: "Status surface for one CA.\n\nThe reconciler fills it in from the parsed CA cert and the CRD spec."
                 nullable: true
                 properties:
                   certGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing cert. It increments on
-                      a same-key renewal and on a key promotion.
+                    description: "Monotonic generation of the active signing cert. It increments on\na same-key renewal and on a key promotion."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   generated:
-                    description: |-
-                      `true` when the operator generated this CA, that is, when
-                      `generateCertificateAuthority == true`. `false` for a BYO CA.
+                    description: "`true` when the operator generated this CA, that is, when\n`generateCertificateAuthority == true`. `false` for a BYO CA."
                     type: boolean
                   keyGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing key. It increments only
-                      on a key replacement.
+                    description: "Monotonic generation of the active signing key. It increments only\non a key replacement."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   notAfter:
-                    description: |-
-                      RFC3339 `notAfter` of the current CA cert, which is the signing
-                      cert.
+                    description: "RFC3339 `notAfter` of the current CA cert, which is the signing\ncert."
                     type: string
                   rotationPhase:
-                    description: |-
-                      Staged key-replacement phase. One of `idle`, `key-replace-trust`,
-                      and `key-replace-promote`.
+                    description: "Staged key-replacement phase. One of `idle`, `key-replace-trust`,\nand `key-replace-promote`."
                     nullable: true
                     type: string
                   trustAnchors:
@@ -3354,9 +2930,7 @@ spec:
                 type: object
               conditions:
                 default: []
-                description: |-
-                  Standard Kubernetes-style condition list. It shows `Ready`,
-                  `ListenersValid`, and `ListenersReady`.
+                description: "Standard Kubernetes-style condition list. It shows `Ready`,\n`ListenersValid`, and `ListenersReady`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -3369,7 +2943,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -3387,9 +2961,7 @@ spec:
                 nullable: true
                 type: string
               listeners:
-                description: |-
-                  Per-listener resolved addresses. The operator fills them in once
-                  `ListenersReady=True`.
+                description: "Per-listener resolved addresses. The operator fills them in once\n`ListenersReady=True`."
                 items:
                   properties:
                     addresses:
@@ -3407,7 +2979,7 @@ spec:
                         type: object
                       type: array
                     bootstrapServers:
-                      description: '`host:port` that clients put in `bootstrap.servers`.'
+                      description: "`host:port` that clients put in `bootstrap.servers`."
                       type: string
                     name:
                       type: string
@@ -3426,9 +2998,7 @@ spec:
                   type: object
                 type: array
               metadataVersion:
-                description: |-
-                  The operator-finalized metadata version. On an existing cluster it
-                  advances only after `UpdateFeatures` accepts the requested level.
+                description: "The operator-finalized metadata version. On an existing cluster it\nadvances only after `UpdateFeatures` accepts the requested level."
                 nullable: true
                 type: string
               readyReplicas:
@@ -3442,9 +3012,7 @@ spec:
                 nullable: true
                 type: integer
               targetMetadataVersion:
-                description: |-
-                  The metadata feature level requested by the current spec. This may be
-                  newer than `metadataVersion` while broker pools are rolling.
+                description: "The metadata feature level requested by the current spec. This may be\nnewer than `metadataVersion` while broker pools are rolling."
                 nullable: true
                 type: string
             type: object
@@ -3456,7 +3024,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3482,42 +3049,27 @@ spec:
               config:
                 additionalProperties:
                   type: string
-                description: |-
-                  Opaque topic-level config, such as `retention.ms` and
-                  `cleanup.policy`. The operator reconciles it with an
-                  `IncrementalAlterConfigs` SET and DELETE diff against the cluster's
-                  current dynamic-topic overrides.
+                description: "Opaque topic-level config, such as `retention.ms` and\n`cleanup.policy`. The operator reconciles it with an\n`IncrementalAlterConfigs` SET and DELETE diff against the cluster's\ncurrent dynamic-topic overrides."
                 nullable: true
                 type: object
               partitions:
-                description: |-
-                  Number of partitions. The operator applies increases through
-                  `CreatePartitions`. The operator rejects decreases with
-                  `ImmutableFieldChanged`.
+                description: "Number of partitions. The operator applies increases through\n`CreatePartitions`. The operator rejects decreases with\n`ImmutableFieldChanged`."
                 format: int32
                 maximum: 1000000.0
                 minimum: 1.0
                 type: integer
               preserveTopic:
                 default: false
-                description: |-
-                  When `true`, a CRD delete still removes the finalizer but skips the
-                  `DeleteTopics` call, so the Kafka topic survives. Default: `false`.
+                description: "When `true`, a CRD delete still removes the finalizer but skips the\n`DeleteTopics` call, so the Kafka topic survives. Default: `false`."
                 type: boolean
               replicas:
-                description: |-
-                  Replication factor. The operator applies changes through Kafka
-                  partition reassignment and reports `Reassigning` until it completes.
+                description: "Replication factor. The operator applies changes through Kafka\npartition reassignment and reports `Reassigning` until it completes."
                 format: int32
                 maximum: 1000.0
                 minimum: 1.0
                 type: integer
               topicName:
-                description: |-
-                  Optional override for the Kafka topic name. Defaults to
-                  `metadata.name`. The operator validates it at reconcile time against
-                  Kafka's rules: length ≤ 249, characters `[A-Za-z0-9._-]`, and not `.`
-                  or `..`.
+                description: "Optional override for the Kafka topic name. Defaults to\n`metadata.name`. The operator validates it at reconcile time against\nKafka's rules: length ≤ 249, characters `[A-Za-z0-9._-]`, and not `.`\nor `..`."
                 nullable: true
                 type: string
             required:
@@ -3542,7 +3094,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -3556,22 +3108,16 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: |-
-                  `metadata.generation` of the last successfully-reconciled spec. That
-                  is the last time the operator wrote `Ready=True reason=Ready`.
+                description: "`metadata.generation` of the last successfully-reconciled spec. That\nis the last time the operator wrote `Ready=True reason=Ready`."
                 format: int64
                 nullable: true
                 type: integer
               topicId:
-                description: |-
-                  Cluster-assigned topic UUID. The operator fills it in once the topic
-                  exists.
+                description: "Cluster-assigned topic UUID. The operator fills it in once the topic\nexists."
                 nullable: true
                 type: string
               topicName:
-                description: |-
-                  Effective topic name. The operator supplies a default if
-                  `spec.topicName` is unset.
+                description: "Effective topic name. The operator supplies a default if\n`spec.topicName` is unset."
                 nullable: true
                 type: string
             type: object
@@ -3583,7 +3129,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3607,20 +3152,7 @@ spec:
           spec:
             properties:
               authentication:
-                description: |-
-                  Tagged enum on `type`, in the same shape as Strimzi.
-
-                  The wire shape is flat and Strimzi-compatible. `type` is the discriminator,
-                  and the per-variant config fields are siblings of `type`. The custom
-                  `schema_with` writes a structural schema by hand, because the
-                  `StructuralSchemaRewriter` of kube-rs 3.x panics when `oneOf` branches
-                  share a `type` property with different `enum` values. That is the default
-                  schemars output for tagged-union enums. This is the same workaround as
-                  `Storage` in `kafka_node_pool.rs`.
-
-                  The operator enforces the cross-variant constraints at reconcile time, and
-                  the apiserver does not. One such constraint is that `iterations` is valid
-                  only when `type=scram-sha-512`.
+                description: "Tagged enum on `type`, in the same shape as Strimzi.\n\nThe wire shape is flat and Strimzi-compatible. `type` is the discriminator,\nand the per-variant config fields are siblings of `type`. The custom\n`schema_with` writes a structural schema by hand, because the\n`StructuralSchemaRewriter` of kube-rs 3.x panics when `oneOf` branches\nshare a `type` property with different `enum` values. That is the default\nschemars output for tagged-union enums. This is the same workaround as\n`Storage` in `kafka_node_pool.rs`.\n\nThe operator enforces the cross-variant constraints at reconcile time, and\nthe apiserver does not. One such constraint is that `iterations` is valid\nonly when `type=scram-sha-512`."
                 properties:
                   iterations:
                     maximum: 1000000.0
@@ -3659,10 +3191,7 @@ spec:
                 - type
                 type: object
               authorization:
-                description: |-
-                  Authorization is optional. A user with no ACLs can still
-                  authenticate. When this field is absent, the operator skips ACL
-                  reconciliation.
+                description: "Authorization is optional. A user with no ACLs can still\nauthenticate. When this field is absent, the operator skips ACL\nreconciliation."
                 nullable: true
                 oneOf:
                 - required:
@@ -3671,24 +3200,15 @@ spec:
                   acls:
                     default: []
                     items:
-                      description: |-
-                        One rule from `spec.authorization.acls`. The operator expands it into one
-                        `(resource, operation, host, type)` tuple per `operations` entry at
-                        reconcile time.
+                      description: "One rule from `spec.authorization.acls`. The operator expands it into one\n`(resource, operation, host, type)` tuple per `operations` entry at\nreconcile time."
                       properties:
                         host:
-                          description: |-
-                            Source-address pattern. `"*"` is the wildcard. Defaults to `"*"` when
-                            omitted.
+                          description: "Source-address pattern. `\"*\"` is the wildcard. Defaults to `\"*\"` when\nomitted."
                           type: string
                         operations:
-                          description: |-
-                            Non-empty list. The reconciler refuses an empty `operations` with
-                            `Ready=False reason=InvalidSpec`.
+                          description: "Non-empty list. The reconciler refuses an empty `operations` with\n`Ready=False reason=InvalidSpec`."
                           items:
-                            description: |-
-                              All 11 Kafka ACL operations. Matches the discriminants in
-                              `org.apache.kafka.common.acl.AclOperation`.
+                            description: "All 11 Kafka ACL operations. Matches the discriminants in\n`org.apache.kafka.common.acl.AclOperation`."
                             enum:
                             - All
                             - Read
@@ -3709,9 +3229,7 @@ spec:
                               type: string
                             patternType:
                               default: literal
-                              description: |-
-                                `literal` for an exact match, or `prefixed` for resources whose name
-                                starts with `name`. Defaults to `literal`.
+                              description: "`literal` for an exact match, or `prefixed` for resources whose name\nstarts with `name`. Defaults to `literal`."
                               enum:
                               - literal
                               - prefixed
@@ -3729,7 +3247,7 @@ spec:
                           type: object
                         type:
                           default: allow
-                          description: '`allow` or `deny`; defaults to `allow`.'
+                          description: "`allow` or `deny`; defaults to `allow`."
                           enum:
                           - allow
                           - deny
@@ -3745,13 +3263,7 @@ spec:
                     type: string
                 type: object
               quotas:
-                description: |-
-                  Optional per-user client quotas (KIP-13/124/257). This field maps
-                  onto Kafka's `(user)` quota entity through `AlterClientQuotas`, which
-                  is `api_key` 49. When the field is absent, the operator does not touch
-                  the broker's quota state. When the field is present, the operator
-                  drives the broker's quota keys for `User:<name>` toward the spec. It
-                  sets the configured fields and tombstones the omitted ones.
+                description: "Optional per-user client quotas (KIP-13/124/257). This field maps\nonto Kafka's `(user)` quota entity through `AlterClientQuotas`, which\nis `api_key` 49. When the field is absent, the operator does not touch\nthe broker's quota state. When the field is present, the operator\ndrives the broker's quota keys for `User:<name>` toward the spec. It\nsets the configured fields and tombstones the omitted ones."
                 nullable: true
                 properties:
                   consumerByteRate:
@@ -3761,9 +3273,7 @@ spec:
                     nullable: true
                     type: integer
                   controllerMutationRate:
-                    description: |-
-                      KIP-599 controller-mutation rate in creates and deletes per second.
-                      Backed by `controller_mutation_rate`.
+                    description: "KIP-599 controller-mutation rate in creates and deletes per second.\nBacked by `controller_mutation_rate`."
                     format: double
                     nullable: true
                     type: number
@@ -3774,9 +3284,7 @@ spec:
                     nullable: true
                     type: integer
                   requestPercentage:
-                    description: |-
-                      Maximum percentage of a request-handler thread's time that the user
-                      can consume, in the range `0..=100`. Backed by `request_percentage`.
+                    description: "Maximum percentage of a request-handler thread's time that the user\ncan consume, in the range `0..=100`. Backed by `request_percentage`."
                     format: int32
                     maximum: 100.0
                     minimum: 0.0
@@ -3804,7 +3312,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -3818,50 +3326,31 @@ spec:
                   type: object
                 type: array
               delegationTokenExpiryTimestampMs:
-                description: |-
-                  Current `expiry_timestamp_ms` of the operator-managed delegation
-                  token. Each successful renew extends it. The operator compares it
-                  against `now` to decide when to renew, as
-                  `spec.authentication.renewBeforeExpiry` specifies.
+                description: "Current `expiry_timestamp_ms` of the operator-managed delegation\ntoken. Each successful renew extends it. The operator compares it\nagainst `now` to decide when to renew, as\n`spec.authentication.renewBeforeExpiry` specifies."
                 format: int64
                 nullable: true
                 type: integer
               delegationTokenId:
-                description: |-
-                  Persisted `token_id`, a UUID, of the operator-managed delegation
-                  token for this user. The operator uses it across reconciles to find the
-                  same token with `DescribeDelegationToken`. It is present once the
-                  operator has issued a token with `CreateDelegationToken`.
+                description: "Persisted `token_id`, a UUID, of the operator-managed delegation\ntoken for this user. The operator uses it across reconciles to find the\nsame token with `DescribeDelegationToken`. It is present once the\noperator has issued a token with `CreateDelegationToken`."
                 nullable: true
                 type: string
               delegationTokenMaxTimestampMs:
-                description: |-
-                  Token's absolute upper bound, which is `max_timestamp_ms`. A renew can
-                  never push `expiry_timestamp_ms` past this bound. The operator stops
-                  the renews and surfaces `TokenExpiring` once no more extension is
-                  possible.
+                description: "Token's absolute upper bound, which is `max_timestamp_ms`. A renew can\nnever push `expiry_timestamp_ms` past this bound. The operator stops\nthe renews and surfaces `TokenExpiring` once no more extension is\npossible."
                 format: int64
                 nullable: true
                 type: integer
               external:
                 default: false
-                description: |-
-                  `true` once the operator has reconciled a credential-less user with
-                  `type: tls-external`. It appears in `kubectl describe ku`, so that
-                  operators can see that the operator does not own this user's
-                  credentials.
+                description: "`true` once the operator has reconciled a credential-less user with\n`type: tls-external`. It appears in `kubectl describe ku`, so that\noperators can see that the operator does not own this user's\ncredentials."
                 type: boolean
               observedGeneration:
-                description: '`metadata.generation` of the last successfully-reconciled spec.'
+                description: "`metadata.generation` of the last successfully-reconciled spec."
                 format: int64
                 nullable: true
                 type: integer
               quotasInSync:
                 default: false
-                description: |-
-                  True once the operator has reflected the spec's `quotas`, if any, in
-                  the broker's `(user)` client-quota state. False when `spec.quotas` is
-                  `None`, because the operator then does not touch broker quotas.
+                description: "True once the operator has reflected the spec's `quotas`, if any, in\nthe broker's `(user)` client-quota state. False when `spec.quotas` is\n`None`, because the operator then does not touch broker quotas."
                 type: boolean
               scramSha256:
                 default: false
@@ -3877,22 +3366,14 @@ spec:
                 type: string
               tls:
                 default: false
-                description: |-
-                  `true` once a TLS user has a current cert Secret. It has the same
-                  shape as `scram_sha512`.
+                description: "`true` once a TLS user has a current cert Secret. It has the same\nshape as `scram_sha512`."
                 type: boolean
               tlsCertNotAfter:
-                description: |-
-                  RFC3339 timestamp of the user cert's `notAfter`. Present when
-                  `tls == true`.
+                description: "RFC3339 timestamp of the user cert's `notAfter`. Present when\n`tls == true`."
                 nullable: true
                 type: string
               tlsPrincipal:
-                description: |-
-                  The principal string that the operator pinned in ACLs. It is
-                  `User:CN=alice` for TLS users, and `User:alice` for SCRAM and
-                  `tls-external` users. It is always filled in when the user is
-                  provisioned. It is load-bearing for the debug of ACL-match problems.
+                description: "The principal string that the operator pinned in ACLs. It is\n`User:CN=alice` for TLS users, and `User:alice` for SCRAM and\n`tls-external` users. It is always filled in when the user is\nprovisioned. It is load-bearing for the debug of ACL-match problems."
                 nullable: true
                 type: string
               username:
@@ -3908,7 +3389,6 @@ spec:
     storage: true
     subresources:
       status: {}
-
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -3943,10 +3423,7 @@ spec:
                         nullable: true
                         type: string
                       usersSecretName:
-                        description: |-
-                          Secret with one key that holds `user:cred` entries, one on each
-                          line. The cred is plaintext or a `$2…` bcrypt hash. The operator
-                          mounts the key as a file and gives it in `--basic-auth-file`.
+                        description: "Secret with one key that holds `user:cred` entries, one on each\nline. The cred is plaintext or a `$2…` bcrypt hash. The operator\nmounts the key as a file and gives it in `--basic-auth-file`."
                         type: string
                     required:
                     - usersSecretName
@@ -3963,9 +3440,7 @@ spec:
                         nullable: true
                         type: string
                       jwksPrincipalClaim:
-                        description: |-
-                          JWT claim to use as the principal when the mode is `Jwks`. It
-                          overrides `principalClaim` on the JWKS paths.
+                        description: "JWT claim to use as the principal when the mode is `Jwks`. It\noverrides `principalClaim` on the JWKS paths."
                         nullable: true
                         type: string
                       jwksRefresh:
@@ -3973,9 +3448,7 @@ spec:
                         nullable: true
                         type: string
                       jwksTlsSecretName:
-                        description: |-
-                          Name of the Secret whose `ca.crt` key the operator mounts and
-                          gives in `--bearer-jwks-ca`.
+                        description: "Name of the Secret whose `ca.crt` key the operator mounts and\ngives in `--bearer-jwks-ca`."
                         nullable: true
                         type: string
                       jwksValidIssuer:
@@ -3995,7 +3468,7 @@ spec:
                     - mode
                     type: object
                   realm:
-                    description: '`WWW-Authenticate: basic realm="<realm>"`.'
+                    description: "`WWW-Authenticate: basic realm=\"<realm>\"`."
                     nullable: true
                     type: string
                   requireAuth:
@@ -4020,12 +3493,7 @@ spec:
                     type: array
                 type: object
               bootstrapServers:
-                description: |-
-                  Bootstrap override for an external Kafka that the operator does
-                  not manage. When unset, the operator derives the bootstrap from the
-                  internal listener of the Kafka with the `krabka.io/cluster` label.
-                  Settings in `kafka_client` secure both external and managed bootstrap
-                  connections.
+                description: "Bootstrap override for an external Kafka that the operator does\nnot manage. When unset, the operator derives the bootstrap from the\ninternal listener of the Kafka with the `krabka.io/cluster` label.\nSettings in `kafka_client` secure both external and managed bootstrap\nconnections."
                 nullable: true
                 type: string
               clientId:
@@ -4062,37 +3530,24 @@ spec:
                     nullable: true
                     type: integer
                   startupFailureThreshold:
-                    description: |-
-                      Failed startup probes before the kubelet restarts the container.
-                      Default 60.
-
-                      Set it so that `startupPeriodSeconds` times this value covers the
-                      longest replay of the schemas topic. The defaults allow 5 minutes.
+                    description: "Failed startup probes before the kubelet restarts the container.\nDefault 60.\n\nSet it so that `startupPeriodSeconds` times this value covers the\nlongest replay of the schemas topic. The defaults allow 5 minutes."
                     format: int32
                     minimum: 1.0
                     nullable: true
                     type: integer
                   startupPeriodSeconds:
-                    description: |-
-                      Seconds between two startup probes. Default 5.
-
-                      The registry binds its REST port only after it replays the schemas
-                      topic. The startup probe holds the liveness probe back until then.
+                    description: "Seconds between two startup probes. Default 5.\n\nThe registry binds its REST port only after it replays the schemas\ntopic. The startup probe holds the liveness probe back until then."
                     format: int32
                     minimum: 1.0
                     nullable: true
                     type: integer
                 type: object
               image:
-                description: |-
-                  Container image. Defaults to the operator's
-                  `--default-schema-registry-image`.
+                description: "Container image. Defaults to the operator's\n`--default-schema-registry-image`."
                 nullable: true
                 type: string
               kafkaClient:
-                description: |-
-                  Client security from the SR to the broker, with SASL and TLS. It
-                  maps to the `--kafka-*` flags.
+                description: "Client security from the SR to the broker, with SASL and TLS. It\nmaps to the `--kafka-*` flags."
                 nullable: true
                 properties:
                   sasl:
@@ -4128,9 +3583,7 @@ spec:
                     type: object
                 type: object
               replicas:
-                description: |-
-                  Number of stateless replicas. All of them join the election
-                  group. Default 1.
+                description: "Number of stateless replicas. All of them join the election\ngroup. Default 1."
                 format: int32
                 maximum: 1000.0
                 minimum: 1.0
@@ -4140,12 +3593,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -4163,13 +3611,13 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               runtime:
@@ -4243,15 +3691,11 @@ spec:
                     nullable: true
                     type: string
                   clientCaSecretName:
-                    description: |-
-                      Secret with `ca.crt` that verifies the client certs. It is
-                      necessary when `clientAuth` is not Disabled.
+                    description: "Secret with `ca.crt` that verifies the client certs. It is\nnecessary when `clientAuth` is not Disabled."
                     nullable: true
                     type: string
                   issuerRef:
-                    description: |-
-                      cert-manager issuer reference. Do not set it together with
-                      `secretName`.
+                    description: "cert-manager issuer reference. Do not set it together with\n`secretName`."
                     nullable: true
                     properties:
                       group:
@@ -4259,9 +3703,7 @@ spec:
                         nullable: true
                         type: string
                       kind:
-                        description: |-
-                          The default is `Issuer`. Set `ClusterIssuer` for an issuer with
-                          cluster scope.
+                        description: "The default is `Issuer`. Set `ClusterIssuer` for an issuer with\ncluster scope."
                         nullable: true
                         type: string
                       name:
@@ -4270,9 +3712,7 @@ spec:
                     - name
                     type: object
                   secretName:
-                    description: |-
-                      Secret of type kubernetes.io/tls with `tls.crt` and `tls.key`. Do
-                      not set it together with `issuerRef`.
+                    description: "Secret of type kubernetes.io/tls with `tls.crt` and `tls.key`. Do\nnot set it together with `issuerRef`."
                     nullable: true
                     type: string
                 type: object
@@ -4284,9 +3724,7 @@ spec:
             properties:
               conditions:
                 default: []
-                description: |-
-                  Kubernetes-style conditions: `KafkaReady`, `Available`, and
-                  `Ready`.
+                description: "Kubernetes-style conditions: `KafkaReady`, `Available`, and\n`Ready`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -4299,7 +3737,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -4313,7 +3751,7 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: '`metadata.generation` of the last successfully-reconciled spec.'
+                description: "`metadata.generation` of the last successfully-reconciled spec."
                 format: int64
                 nullable: true
                 type: integer

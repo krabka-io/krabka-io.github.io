@@ -137,11 +137,19 @@ consumerConfig: |
 ${maxPollIntervalMs === undefined ? '' : `  max.poll.interval.ms=${maxPollIntervalMs}\n`}`;
 }
 
-export async function prepareOmb(directory, command, oneShot) {
+// Builds OMB from its pinned commit into `directory/openmessaging`, with the
+// Maven repository under `cacheRoot` shared by every run on this host that
+// builds the same commit with the same build image. A fresh repository per
+// run asked Maven Central for every dependency again, and the lanes of run
+// 40427360965, each building a shard every few minutes, got 429 Too Many
+// Requests and lost every shard after their first. The repository's jars are
+// hashed into the provenance either way, so shards still compare their
+// builds byte for byte. Runs on one host build one at a time, so the shared
+// repository sees no concurrent writers.
+export async function prepareOmb(directory, command, oneShot,
+  cacheRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.benchmarks', 'm2-cache')) {
   const source = path.join(directory, 'openmessaging');
-  const m2 = path.join(directory, 'm2');
   await fs.mkdir(source);
-  await fs.mkdir(m2);
   await command('git', ['-c', 'init.templateDir=', 'init', source]);
   await command('git', ['-C', source, 'remote', 'add', 'origin', OMB.repository]);
   await command('git', ['-C', source, 'fetch', '--depth=1', 'origin', OMB.commit]);
@@ -156,9 +164,14 @@ export async function prepareOmb(directory, command, oneShot) {
   }
   await command('docker', ['pull', '--platform', 'linux/amd64', OMB.build_image], { timeout: 600_000 });
   const image = JSON.parse(await command('docker', ['image', 'inspect', OMB.build_image]))[0];
+  const m2 = path.join(cacheRoot, `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`);
+  await fs.mkdir(m2, { recursive: true });
+  // Maven's resolver retries a 429 or 503 (its `serviceUnavailable` default)
+  // this many times, this long apart, before it fails the build.
   await oneShot(['--user', `${process.getuid()}:${process.getgid()}`, '--cpus', '4', '--memory', '4g', '--memory-swap', '4g',
     '--env', 'MAVEN_CONFIG=/m2', '--volume', `${source}:/src`, '--volume', `${m2}:/m2`, '--workdir', '/src',
     OMB.build_image, 'mvn', '-B', '-ntp', '-Dmaven.repo.local=/m2', '-Dmaven.test.skip=true',
+    '-Daether.connector.http.retryHandler.count=8', '-Daether.connector.http.retryHandler.requestInterval=5000',
     '-Dcheckstyle.skip', '-Dspotless.check.skip=true', '-Dlicense.skip=true', '-Djacoco.skip', '-Dspotbugs.skip=true',
     '-pl', 'benchmark-framework', '-am', 'install'], 'omb-build',
   { timeout: 1_800_000, output: path.join(directory, 'omb-build') });
