@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, mkdirSync, mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { join, delimiter } from 'node:path';
@@ -9,18 +17,34 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const pins = JSON.parse(read('scripts/tool-pins.json'));
 
 test('Cargo.lock wasm-bindgen version has all supported pinned platforms', () => {
-  const version = read('playground/Cargo.lock').match(/name = "wasm-bindgen"\nversion = "([^"]+)"/)[1];
-  assert.equal(pins['wasm-bindgen'].version, version, 'Update scripts/tool-pins.json; see docs/tool-downloads.md');
-  assert.deepEqual(Object.keys(pins['wasm-bindgen'].platforms).sort(), ['darwin-arm64', 'darwin-x86_64', 'linux-arm64', 'linux-x86_64', 'windows-x86_64']);
-  for (const tool of Object.values(pins)) for (const pin of Object.values(tool.platforms)) {
-    assert.match(pin.sha256, /^[a-f0-9]{64}$/);
-    assert.match(pin.url, /^https:\/\/github.com\//);
-    assert.match(tool.provenance, /^https:\/\/api.github.com\/repos\//);
-  }
+  const version = read('playground/Cargo.lock').match(
+    /name = "wasm-bindgen"\nversion = "([^"]+)"/,
+  )[1];
+  assert.equal(
+    pins['wasm-bindgen'].version,
+    version,
+    'Update scripts/tool-pins.json; see docs/tool-downloads.md',
+  );
+  assert.deepEqual(Object.keys(pins['wasm-bindgen'].platforms).sort(), [
+    'darwin-arm64',
+    'darwin-x86_64',
+    'linux-arm64',
+    'linux-x86_64',
+    'windows-x86_64',
+  ]);
+  for (const tool of Object.values(pins))
+    for (const pin of Object.values(tool.platforms)) {
+      assert.match(pin.sha256, /^[a-f0-9]{64}$/);
+      assert.match(pin.url, /^https:\/\/github.com\//);
+      assert.match(tool.provenance, /^https:\/\/api.github.com\/repos\//);
+    }
 });
 
 test('installer fails closed and reconstructs installs from verified bytes', () => {
-  const result = spawnSync('python3', ['scripts/tool-downloads-test.py'], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  const result = spawnSync('python3', ['scripts/tool-downloads-test.py'], {
+    encoding: 'utf8',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+  });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
@@ -45,26 +69,40 @@ test('native download entrypoints delegate to the verified installer', () => {
   };
   const observed = {};
   function walk(dir) {
-    for (const item of readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true })) {
+    for (const item of readdirSync(new URL(`../${dir}`, import.meta.url), {
+      withFileTypes: true,
+    })) {
       const path = `${dir}/${item.name}`;
-      if (item.isDirectory()) { if (!['.tools', 'target', '__pycache__'].includes(item.name)) walk(path); }
-      else if (/\.(sh|ya?ml|py|mjs)$/.test(path) && !path.endsWith('.test.mjs') && path !== 'scripts/tool-downloads-test.py') {
+      if (item.isDirectory()) {
+        if (!['.tools', 'target', '__pycache__'].includes(item.name)) walk(path);
+      } else if (
+        /\.(sh|ya?ml|py|mjs)$/.test(path) &&
+        !path.endsWith('.test.mjs') &&
+        path !== 'scripts/tool-downloads-test.py'
+      ) {
         const source = read(path);
-        const calls = source.match(/\b(?:curl|wget)[ \t]+(?=[-$"'])|\b(?:fetch|urlopen)\s*\(|\bhttps?\.(?:get|request)\s*\(/g) ?? [];
+        const calls =
+          source.match(
+            /\b(?:curl|wget)[ \t]+(?=[-$"'])|\b(?:fetch|urlopen)\s*\(|\bhttps?\.(?:get|request)\s*\(/g,
+          ) ?? [];
         if (calls.length) observed[path] = calls.length;
         if (path.startsWith('why3-web/build-') && calls.length) {
           assert.match(source, /sha256sum -c -/);
           const fetches = source.split('\n').filter((line) => /^fetch /.test(line));
           assert.equal(fetches.length, path.includes('cvc4') ? 6 : 4);
-          for (const line of fetches) assert.match(line, /^fetch "\$\{\w+_URL\}" "\$\{\w+_SHA256\}" /);
+          for (const line of fetches)
+            assert.match(line, /^fetch "\$\{\w+_URL\}" "\$\{\w+_SHA256\}" /);
         }
       }
     }
   }
   for (const dir of ['scripts', 'playground', '.github', 'why3-web']) walk(dir);
-  assert.deepEqual(observed, inventory, 'Review new download clients and update the inventory only after verification');
+  assert.deepEqual(
+    observed,
+    inventory,
+    'Review new download clients and update the inventory only after verification',
+  );
 });
-
 
 test('build caller stops on installer failure without executing PATH or printed tools', () => {
   const parent = fileURLToPath(new URL('../playground/.tools/', import.meta.url));
@@ -73,24 +111,50 @@ test('build caller stops on installer failure without executing PATH or printed 
   try {
     for (const dir of ['playground', 'scripts', 'bin']) mkdirSync(join(fixture, dir));
     writeFileSync(join(fixture, 'playground/build.sh'), read('playground/build.sh'));
-    writeFileSync(join(fixture, 'playground/Cargo.lock'), '[[package]]\nname = "wasm-bindgen"\nversion = "0.2.129"\n');
-    const executable = (name, source) => writeFileSync(join(fixture, 'bin', name), source, { mode: 0o755 });
-    executable('cargo', '#!/usr/bin/env bash\nif [[ "$1" == build ]]; then touch "$BUILD_SENTINEL"; fi\n');
+    writeFileSync(
+      join(fixture, 'playground/Cargo.lock'),
+      '[[package]]\nname = "wasm-bindgen"\nversion = "0.2.129"\n',
+    );
+    const executable = (name, source) =>
+      writeFileSync(join(fixture, 'bin', name), source, { mode: 0o755 });
+    executable(
+      'cargo',
+      '#!/usr/bin/env bash\nif [[ "$1" == build ]]; then touch "$BUILD_SENTINEL"; fi\n',
+    );
     executable('rustup', '#!/usr/bin/env bash\nexit 0\n');
-    executable('wasm-bindgen', '#!/usr/bin/env bash\ntouch "$TOOL_SENTINEL"\necho "wasm-bindgen 0.2.129"\n');
+    executable(
+      'wasm-bindgen',
+      '#!/usr/bin/env bash\ntouch "$TOOL_SENTINEL"\necho "wasm-bindgen 0.2.129"\n',
+    );
     // A failed installer may print a path before it reports its failure.
     // The caller must respect its exit status, not execute that printed path.
     executable('python3', '#!/usr/bin/env bash\necho "$PRINTED_TOOL"\nexit 42\n');
     const toolSentinel = join(fixture, 'tool-executed');
     const buildSentinel = join(fixture, 'cargo-built');
-    const env = { ...process.env, PATH: join(fixture, 'bin') + delimiter + process.env.PATH,
-      PRINTED_TOOL: join(fixture, 'bin/wasm-bindgen'), TOOL_SENTINEL: toolSentinel,
-      BUILD_SENTINEL: buildSentinel, GITHUB_ACTIONS: 'true' };
+    const env = {
+      ...process.env,
+      PATH: join(fixture, 'bin') + delimiter + process.env.PATH,
+      PRINTED_TOOL: join(fixture, 'bin/wasm-bindgen'),
+      TOOL_SENTINEL: toolSentinel,
+      BUILD_SENTINEL: buildSentinel,
+      GITHUB_ACTIONS: 'true',
+    };
     delete env.WASM_BINDGEN;
-    const result = spawnSync('bash', [join(fixture, 'playground/build.sh')], { env, encoding: 'utf8' });
+    const result = spawnSync('bash', [join(fixture, 'playground/build.sh')], {
+      env,
+      encoding: 'utf8',
+    });
     assert.equal(result.status, 42, result.stdout + result.stderr);
-    assert.equal(existsSync(toolSentinel), false, 'neither implicit PATH nor printed executable may run');
-    assert.equal(existsSync(buildSentinel), false, 'cargo build must not run after failed verification');
+    assert.equal(
+      existsSync(toolSentinel),
+      false,
+      'neither implicit PATH nor printed executable may run',
+    );
+    assert.equal(
+      existsSync(buildSentinel),
+      false,
+      'cargo build must not run after failed verification',
+    );
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

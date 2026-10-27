@@ -30,7 +30,8 @@ export const STEP_TIMEOUT = 30_000;
 export const NETWORK_PROBE = {
   id: 'network-probe',
   name: 'Network probe',
-  description: 'Two echo nodes and a pinger. The pinger opens a connection and pings every 100 ms; watch the round trip on the canvas and the RTT in the inspector.',
+  description:
+    'Two echo nodes and a pinger. The pinger opens a connection and pings every 100 ms; watch the round trip on the canvas and the RTT in the inspector.',
   scenario: {
     version: 1,
     seed: 7,
@@ -39,7 +40,14 @@ export const NETWORK_PROBE = {
     nodes: [
       { id: 1, kind: 'echo', name: 'echo-a', x: 140, y: 120, config: {} },
       { id: 2, kind: 'echo', name: 'echo-b', x: 140, y: 300, config: {} },
-      { id: 3, kind: 'pinger', name: 'pinger', x: 460, y: 210, config: { target: 1, period_ms: 100 } },
+      {
+        id: 3,
+        kind: 'pinger',
+        name: 'pinger',
+        x: 460,
+        y: 210,
+        config: { target: 1, period_ms: 100 },
+      },
     ],
     topics: [],
   },
@@ -77,13 +85,23 @@ export function installedChromium() {
   const builds = [
     [
       'chromium',
-      ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-win64/chrome.exe', 'chrome-win/chrome.exe'],
+      [
+        'chrome-linux/chrome',
+        'chrome-linux64/chrome',
+        'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+        'chrome-win64/chrome.exe',
+        'chrome-win/chrome.exe',
+      ],
     ],
   ];
   if (HEADLESS) {
     builds.unshift([
       'chromium_headless_shell',
-      ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell', 'chrome-headless-shell-win64/chrome-headless-shell.exe'],
+      [
+        'chrome-headless-shell-linux64/chrome-headless-shell',
+        'chrome-linux/headless_shell',
+        'chrome-headless-shell-win64/chrome-headless-shell.exe',
+      ],
     ]);
   }
   const entries = fs.readdirSync(base);
@@ -109,7 +127,8 @@ export async function launchChromium(pw) {
     return await pw.chromium.launch({ headless: HEADLESS });
   } catch (err) {
     const executablePath = installedChromium();
-    if (!executablePath && process.platform === 'win32') return pw.chromium.launch({ headless: HEADLESS, channel: 'msedge' });
+    if (!executablePath && process.platform === 'win32')
+      return pw.chromium.launch({ headless: HEADLESS, channel: 'msedge' });
     if (!executablePath) throw err;
     return pw.chromium.launch({ headless: HEADLESS, executablePath });
   }
@@ -126,7 +145,9 @@ export async function launchOrExit() {
     return await launchChromium(pw);
   } catch (err) {
     console.error(`Playwright could not launch Chromium: ${err.message.split('\n')[0]}`);
-    console.error('Install it with `npx playwright install chromium`, or point PLAYWRIGHT_BROWSERS_PATH at an installed one.');
+    console.error(
+      'Install it with `npx playwright install chromium`, or point PLAYWRIGHT_BROWSERS_PATH at an installed one.',
+    );
     process.exit(2);
   }
 }
@@ -174,16 +195,22 @@ export function serve(dir, handler) {
       res.writeHead(403).end();
       return;
     }
-    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
+    if (fs.existsSync(file) && fs.statSync(file).isDirectory())
+      file = path.join(file, 'index.html');
     else if (!fs.existsSync(file) && fs.existsSync(`${file}.html`)) file = `${file}.html`;
     if (!fs.existsSync(file)) {
       res.writeHead(404).end('not found');
       return;
     }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
+    res.writeHead(200, {
+      'content-type': MIME[path.extname(file)] || 'application/octet-stream',
+      'cache-control': 'no-store',
+    });
     fs.createReadStream(file).pipe(res);
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
+  return new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })),
+  );
 }
 
 // ---- the WASI test guest ---------------------------------------------------------------------------------
@@ -191,7 +218,8 @@ export function serve(dir, handler) {
 function run(cmd, cmdArgs, options = {}) {
   const result = spawnSync(cmd, cmdArgs, { stdio: 'inherit', ...options });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${cmd} ${cmdArgs.join(' ')} exited with ${result.status}`);
+  if (result.status !== 0)
+    throw new Error(`${cmd} ${cmdArgs.join(' ')} exited with ${result.status}`);
 }
 
 // `[command, ...leading args]`: binaryen's npm wasm-opt is a Node script, run
@@ -214,13 +242,30 @@ function wasmOpt() {
 // the module.
 export function buildGuest() {
   const crate = path.join(ROOT, 'playground', 'wasi-guest');
-  const targetDir = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(crate, 'target');
-  run('cargo', ['build', '--release', '--target', 'wasm32-wasip1'], { cwd: crate, env: { ...process.env, CARGO_TARGET_DIR: targetDir } });
+  const targetDir = process.env.CARGO_TARGET_DIR
+    ? path.resolve(process.env.CARGO_TARGET_DIR)
+    : path.join(crate, 'target');
+  run('cargo', ['build', '--release', '--target', 'wasm32-wasip1'], {
+    cwd: crate,
+    env: { ...process.env, CARGO_TARGET_DIR: targetDir },
+  });
   const raw = path.join(targetDir, 'wasm32-wasip1', 'release', 'krabka-wasi-guest.wasm');
   const opt = wasmOpt();
   if (!opt) return raw;
   const optimised = path.join(targetDir, 'wasm32-wasip1', 'release', 'krabka-wasi-guest.lab.wasm');
-  run(opt[0], [...opt.slice(1), '-Oz', '--enable-bulk-memory', '--enable-sign-ext', '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-reference-types', '--enable-multivalue', raw, '-o', optimised]);
+  run(opt[0], [
+    ...opt.slice(1),
+    '-Oz',
+    '--enable-bulk-memory',
+    '--enable-sign-ext',
+    '--enable-mutable-globals',
+    '--enable-nontrapping-float-to-int',
+    '--enable-reference-types',
+    '--enable-multivalue',
+    raw,
+    '-o',
+    optimised,
+  ]);
   return optimised;
 }
 
@@ -253,7 +298,9 @@ export function checker({ detail = false } = {}) {
     // The summary, and the exit code when a check failed.
     finish(okLine, since) {
       const secs = since == null ? '' : ` in ${((Date.now() - since) / 1000).toFixed(1)} s`;
-      console.log(`\n${state.passed} checks passed${state.failures.length ? `, ${state.failures.length} failed` : ''}${secs}`);
+      console.log(
+        `\n${state.passed} checks passed${state.failures.length ? `, ${state.failures.length} failed` : ''}${secs}`,
+      );
       if (state.failures.length) {
         for (const f of state.failures) console.error(`  • ${f}`);
         process.exit(1);
@@ -309,7 +356,9 @@ export async function openScenario(page, scenario, timeout = STEP_TIMEOUT) {
   // The reload may cut the evaluation short; the wait below covers it.
   await page.evaluate((doc) => window.krabkaLab.openScenario(doc), scenario).catch(() => {});
   const want = JSON.stringify(scenario.name);
-  const isolated = scenario.nodes.some((n) => n.kind === 'krabka-broker') ? 'self.crossOriginIsolated && ' : '';
+  const isolated = scenario.nodes.some((n) => n.kind === 'krabka-broker')
+    ? 'self.crossOriginIsolated && '
+    : '';
   await waitFor(
     page,
     `${isolated}document.querySelector('#krabka-lab[data-ready="true"]') !== null && Boolean(window.krabkaLab.world.id) && window.krabkaLab.world.scenario().name === ${want}`,
@@ -319,13 +368,20 @@ export async function openScenario(page, scenario, timeout = STEP_TIMEOUT) {
 }
 
 export async function setSpeed(page, speed) {
-  await page.locator('#krabka-lab select[aria-label="Simulation speed"]').selectOption(String(speed));
+  await page
+    .locator('#krabka-lab select[aria-label="Simulation speed"]')
+    .selectOption(String(speed));
 }
 
 // The node's snapshot entry as JSON text, or null.
-export const nodeState = (id) => `(() => { const s = window.krabkaLab.world.snapshot(); const n = s && s.nodes.find((x) => x.id === ${id}); return n ? JSON.stringify({ alive: n.alive, hosted: n.hosted, isolated: n.isolated, state: n.state }) : null; })()`;
+export const nodeState = (id) =>
+  `(() => { const s = window.krabkaLab.world.snapshot(); const n = s && s.nodes.find((x) => x.id === ${id}); return n ? JSON.stringify({ alive: n.alive, hosted: n.hosted, isolated: n.isolated, state: n.state }) : null; })()`;
 
-export const nodeStateOf = (page, id) => page.evaluate((id) => window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id)?.state ?? null, id);
+export const nodeStateOf = (page, id) =>
+  page.evaluate(
+    (id) => window.krabkaLab.world.snapshot()?.nodes.find((x) => x.id === id)?.state ?? null,
+    id,
+  );
 
 // Wait until `fn`, the source of a function of the snapshot's nodes by id,
 // returns something truthy, and return it. It runs in the page, so it can
@@ -343,7 +399,11 @@ export async function fit(page) {
 // Select a node on the canvas and wait for the inspector to show it.
 export async function inspect(page, id, name) {
   await page.locator(`#krabka-lab .lab-node[data-node-id="${id}"]`).click();
-  await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector .lab-insp-name')?.textContent === ${JSON.stringify(name)}`, `the inspector on ${name}`);
+  await waitFor(
+    page,
+    `document.querySelector('#krabka-lab .lab-inspector .lab-insp-name')?.textContent === ${JSON.stringify(name)}`,
+    `the inspector on ${name}`,
+  );
 }
 
 // Run a command from the inspector's command bar, after filling its inputs,
@@ -352,21 +412,40 @@ export async function command(page, cmd, params = {}) {
   const row = page.locator(`#krabka-lab .lab-insp-commands .lab-cmd[data-command="${cmd}"]`);
   for (const [key, value] of Object.entries(params)) {
     const input = row.locator(`[data-param="${key}"]`);
-    if ((await input.evaluate((e) => e.tagName)) === 'SELECT') await input.selectOption(String(value));
+    if ((await input.evaluate((e) => e.tagName)) === 'SELECT')
+      await input.selectOption(String(value));
     else await input.fill(String(value));
   }
   await page.evaluate(() => {
-    const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]');
+    const r = document.querySelector(
+      '#krabka-lab .lab-insp-commands [data-field="command-result"]',
+    );
     if (r) r.dataset.command = '';
   });
   await row.locator(`button[data-command="${cmd}"]`).click();
-  const text = await waitFor(page, `(() => { const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]'); return r && r.dataset.command === ${JSON.stringify(cmd)} ? JSON.stringify({ ok: r.dataset.ok === 'true', text: r.textContent }) : null; })()`, `the answer to ${cmd}`);
+  const text = await waitFor(
+    page,
+    `(() => { const r = document.querySelector('#krabka-lab .lab-insp-commands [data-field="command-result"]'); return r && r.dataset.command === ${JSON.stringify(cmd)} ? JSON.stringify({ ok: r.dataset.ok === 'true', text: r.textContent }) : null; })()`,
+    `the answer to ${cmd}`,
+  );
   return JSON.parse(text);
 }
 
 // The text of one cell of an inspector table.
 export const cell = (page, row, col) =>
-  page.evaluate(([row, col]) => document.querySelector(`#krabka-lab .lab-inspector tr[data-row="${row}"] td[data-col="${col}"]`)?.textContent ?? null, [row, col]);
+  page.evaluate(
+    ([row, col]) =>
+      document.querySelector(
+        `#krabka-lab .lab-inspector tr[data-row="${row}"] td[data-col="${col}"]`,
+      )?.textContent ?? null,
+    [row, col],
+  );
 
 // The text of one key/value row of the inspector.
-export const field = (page, name) => page.evaluate((name) => document.querySelector(`#krabka-lab .lab-inspector dd[data-field="${name}"]`)?.textContent ?? null, name);
+export const field = (page, name) =>
+  page.evaluate(
+    (name) =>
+      document.querySelector(`#krabka-lab .lab-inspector dd[data-field="${name}"]`)?.textContent ??
+      null,
+    name,
+  );

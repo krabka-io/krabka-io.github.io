@@ -20,10 +20,10 @@
 // - `reason`: why isolation is unavailable, in words, when it is;
 // - `reloading`: true when the page is about to reload (the promise resolves first).
 
-const SW_URL = new URL("./coi-sw.js", import.meta.url);
-const SCOPE = new URL("./", import.meta.url);
-const STATE_KEY = "krabka-coi"; // sessionStorage: the helper's own reloads
-const MODE_KEY = "krabka-coi-coep"; // localStorage: the COEP value this browser needs
+const SW_URL = new URL('./coi-sw.js', import.meta.url);
+const SCOPE = new URL('./', import.meta.url);
+const STATE_KEY = 'krabka-coi'; // sessionStorage: the helper's own reloads
+const MODE_KEY = 'krabka-coi-coep'; // localStorage: the COEP value this browser needs
 
 function storage(kind) {
   try {
@@ -35,7 +35,7 @@ function storage(kind) {
 
 /** Reads and clears the reload state left by a previous call on this tab. */
 function takeState() {
-  const store = storage("sessionStorage");
+  const store = storage('sessionStorage');
   try {
     const text = store?.getItem(STATE_KEY);
     store?.removeItem(STATE_KEY);
@@ -47,7 +47,7 @@ function takeState() {
 
 function saveState(state) {
   try {
-    storage("sessionStorage")?.setItem(STATE_KEY, JSON.stringify(state));
+    storage('sessionStorage')?.setItem(STATE_KEY, JSON.stringify(state));
   } catch {
     // Without sessionStorage the helper cannot tell its own reload apart; it still reloads at most once per call.
   }
@@ -55,7 +55,7 @@ function saveState(state) {
 
 function rememberMode(coep) {
   try {
-    storage("localStorage")?.setItem(MODE_KEY, coep);
+    storage('localStorage')?.setItem(MODE_KEY, coep);
   } catch {
     // Not remembered; the helper probes again next time.
   }
@@ -63,9 +63,11 @@ function rememberMode(coep) {
 
 function recallMode() {
   try {
-    return storage("localStorage")?.getItem(MODE_KEY) === "require-corp" ? "require-corp" : "credentialless";
+    return storage('localStorage')?.getItem(MODE_KEY) === 'require-corp'
+      ? 'require-corp'
+      : 'credentialless';
   } catch {
-    return "credentialless";
+    return 'credentialless';
   }
 }
 
@@ -74,23 +76,37 @@ function isOurs(worker, workerUrl = SW_URL) {
 }
 
 function coepOf(worker) {
-  return new URL(worker.scriptURL).searchParams.get("coep") === "require-corp" ? "require-corp" : "credentialless";
+  return new URL(worker.scriptURL).searchParams.get('coep') === 'require-corp'
+    ? 'require-corp'
+    : 'credentialless';
 }
 
-const unavailable = (reason) => ({ isolated: false, via: null, coep: null, reason, reloading: false });
+const unavailable = (reason) => ({
+  isolated: false,
+  via: null,
+  coep: null,
+  reason,
+  reloading: false,
+});
 
 function activated(registration, timeoutMs) {
   const pending = registration.installing || registration.waiting;
-  if (!pending) return registration.active ? Promise.resolve() : Promise.reject(new Error("no service worker to activate"));
+  if (!pending)
+    return registration.active
+      ? Promise.resolve()
+      : Promise.reject(new Error('no service worker to activate'));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`it did not activate within ${timeoutMs} ms`)), timeoutMs);
-    pending.addEventListener("statechange", () => {
-      if (pending.state === "activated") {
+    const timer = setTimeout(
+      () => reject(new Error(`it did not activate within ${timeoutMs} ms`)),
+      timeoutMs,
+    );
+    pending.addEventListener('statechange', () => {
+      if (pending.state === 'activated') {
         clearTimeout(timer);
         resolve();
-      } else if (pending.state === "redundant") {
+      } else if (pending.state === 'redundant') {
         clearTimeout(timer);
-        reject(new Error("it became redundant while installing"));
+        reject(new Error('it became redundant while installing'));
       }
     });
   });
@@ -98,17 +114,18 @@ function activated(registration, timeoutMs) {
 
 async function register(coep, timeoutMs, workerUrl, scope) {
   const url = new URL(workerUrl);
-  url.searchParams.set("coep", coep);
+  url.searchParams.set('coep', coep);
   const registration = await navigator.serviceWorker.register(url.href, { scope: scope.pathname });
-  if (!registration) throw new Error("the browser declined the registration");
+  if (!registration) throw new Error('the browser declined the registration');
   await activated(registration, timeoutMs);
 }
 
 function reloadWith(state, reload) {
   saveState(state);
-  if (!reload) return { ...unavailable("reload the page to apply cross-origin isolation"), reloading: false };
+  if (!reload)
+    return { ...unavailable('reload the page to apply cross-origin isolation'), reloading: false };
   location.reload();
-  return { ...unavailable("reloading to apply cross-origin isolation"), reloading: true };
+  return { ...unavailable('reloading to apply cross-origin isolation'), reloading: true };
 }
 
 /**
@@ -118,57 +135,81 @@ function reloadWith(state, reload) {
  * @param {number} [options.timeoutMs] How long the service worker may take to activate.
  * @param {URL} [options.workerUrl] Worker URL; its directory is the isolated page scope.
  */
-export async function ensureCrossOriginIsolation({ reload = true, timeoutMs = 10_000, workerUrl = SW_URL } = {}) {
+export async function ensureCrossOriginIsolation({
+  reload = true,
+  timeoutMs = 10_000,
+  workerUrl = SW_URL,
+} = {}) {
   workerUrl = new URL(workerUrl);
-  const scope = new URL("./", workerUrl);
+  const scope = new URL('./', workerUrl);
   const state = takeState();
-  const container = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+  const container = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined;
   const controller = container?.controller ?? null;
   if (globalThis.crossOriginIsolated) {
     if (isOurs(controller, workerUrl)) {
       rememberMode(coepOf(controller));
-      return { isolated: true, via: "service-worker", coep: coepOf(controller), reason: null, reloading: false };
+      return {
+        isolated: true,
+        via: 'service-worker',
+        coep: coepOf(controller),
+        reason: null,
+        reloading: false,
+      };
     }
-    return { isolated: true, via: "headers", coep: null, reason: null, reloading: false };
+    return { isolated: true, via: 'headers', coep: null, reason: null, reloading: false };
   }
-  if (!globalThis.isSecureContext) return unavailable("the page is not a secure context (https or localhost), so it cannot use a service worker");
-  if (!container) return unavailable("service workers are unavailable in this browser (private browsing can disable them)");
+  if (!globalThis.isSecureContext)
+    return unavailable(
+      'the page is not a secure context (https or localhost), so it cannot use a service worker',
+    );
+  if (!container)
+    return unavailable(
+      'service workers are unavailable in this browser (private browsing can disable them)',
+    );
   if (!location.pathname.startsWith(scope.pathname)) {
-    if (`${location.pathname}/` === scope.pathname && reload && state?.step !== "slash") {
-      saveState({ step: "slash" });
+    if (`${location.pathname}/` === scope.pathname && reload && state?.step !== 'slash') {
+      saveState({ step: 'slash' });
       location.replace(`${scope.pathname}${location.search}${location.hash}`);
       return { ...unavailable("moving to the page's canonical URL"), reloading: true };
     }
-    return unavailable(`this page (${location.pathname}) is outside the service worker's scope ${scope.pathname}`);
+    return unavailable(
+      `this page (${location.pathname}) is outside the service worker's scope ${scope.pathname}`,
+    );
   }
   if (isOurs(controller, workerUrl)) {
     // The service worker served this page, and the browser still did not isolate it.
     const coep = coepOf(controller);
-    if (coep === "credentialless" && state?.step !== "degraded") {
-      rememberMode("require-corp");
+    if (coep === 'credentialless' && state?.step !== 'degraded') {
+      rememberMode('require-corp');
       try {
-        await register("require-corp", timeoutMs, workerUrl, scope);
+        await register('require-corp', timeoutMs, workerUrl, scope);
       } catch (err) {
-        return unavailable(`the service worker could not switch to COEP require-corp: ${err.message}`);
+        return unavailable(
+          `the service worker could not switch to COEP require-corp: ${err.message}`,
+        );
       }
-      return reloadWith({ step: "degraded" }, reload);
+      return reloadWith({ step: 'degraded' }, reload);
     }
-    return unavailable(`the browser did not isolate the page even with COEP ${coep} from the service worker`);
+    return unavailable(
+      `the browser did not isolate the page even with COEP ${coep} from the service worker`,
+    );
   }
-  if (state?.step === "reloaded" || state?.step === "degraded") {
-    return unavailable("the service worker did not take control of the page after a reload (a hard reload bypasses service workers: reload normally)");
+  if (state?.step === 'reloaded' || state?.step === 'degraded') {
+    return unavailable(
+      'the service worker did not take control of the page after a reload (a hard reload bypasses service workers: reload normally)',
+    );
   }
   try {
     await register(recallMode(), timeoutMs, workerUrl, scope);
   } catch (err) {
     return unavailable(`the service worker could not be registered: ${err.message}`);
   }
-  return reloadWith({ step: "reloaded" }, reload);
+  return reloadWith({ step: 'reloaded' }, reload);
 }
 
 /** Removes the lab's service worker (the page loses isolation on its next load). */
 export async function removeCrossOriginIsolation() {
-  if (typeof navigator === "undefined" || !navigator.serviceWorker) return false;
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return false;
   const registration = await navigator.serviceWorker.getRegistration(SCOPE.pathname);
   return registration && isOurs(registration.active) ? registration.unregister() : false;
 }

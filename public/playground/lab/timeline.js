@@ -5,8 +5,8 @@
 // are coloured by `detail.level`; a registry election carries a label and the
 // colour of its node kind; clicking a row selects its node.
 
-import { el, button, select, fmtMs, shortJson } from "./dom.js";
-import { KINDS } from "./kinds.js";
+import { el, button, select, fmtMs, shortJson } from './dom.js';
+import { KINDS } from './kinds.js';
 
 const MAX_ROWS = 500;
 const MAX_KEPT = 4000;
@@ -14,7 +14,7 @@ const MAX_KEPT = 4000;
 // Event kinds shown with a label and a colour; every other kind shows its
 // name as it is.
 const KIND_STYLES = {
-  election: { label: "registry election", color: KINDS["schema-registry"].color },
+  election: { label: 'registry election', color: KINDS['schema-registry'].color },
 };
 
 // The text a kind shows in the list and in the filter.
@@ -27,51 +27,58 @@ export class Timeline {
     this.hooks = hooks; // onSelect(id), nodeName(id)
     this.events = [];
     this.follow = true;
-    this.nodeFilter = "";
-    this.kindFilter = "";
-    this.textFilter = "";
+    this.nodeFilter = '';
+    this.kindFilter = '';
+    this.textFilter = '';
     this.kinds = new Set();
     this.nodeOptions = [];
     this.renderQueued = false;
 
-    this.root = el("details", "lab-timeline");
-    this.root.setAttribute("aria-label", "Event timeline");
-    this.summary = el("summary", "lab-panel-title lab-timeline-summary", "Timeline · 0 events");
+    this.root = el('details', 'lab-timeline');
+    this.root.setAttribute('aria-label', 'Event timeline');
+    this.summary = el('summary', 'lab-panel-title lab-timeline-summary', 'Timeline · 0 events');
     this.root.appendChild(this.summary);
-    const body = el("div", "lab-timeline-body");
-    const bar = el("div", "lab-timeline-bar");
-    this.nodeSel = select([{ value: "", label: "all nodes" }], "", (v) => {
+    const body = el('div', 'lab-timeline-body');
+    const bar = el('div', 'lab-timeline-bar');
+    this.nodeSel = select([{ value: '', label: 'all nodes' }], '', (v) => {
       this.nodeFilter = v;
       this.rerender();
     });
-    this.nodeSel.setAttribute("aria-label", "Filter by node");
-    this.kindSel = select([{ value: "", label: "all kinds" }], "", (v) => {
+    this.nodeSel.setAttribute('aria-label', 'Filter by node');
+    this.kindSel = select([{ value: '', label: 'all kinds' }], '', (v) => {
       this.kindFilter = v;
       this.rerender();
     });
-    this.kindSel.setAttribute("aria-label", "Filter by kind");
-    this.text = el("input", "lab-input lab-input-sm");
-    this.text.type = "search";
-    this.text.placeholder = "filter text";
-    this.text.setAttribute("aria-label", "Filter events by text");
-    this.text.addEventListener("input", () => {
+    this.kindSel.setAttribute('aria-label', 'Filter by kind');
+    this.text = el('input', 'lab-input lab-input-sm');
+    this.text.type = 'search';
+    this.text.placeholder = 'filter text';
+    this.text.setAttribute('aria-label', 'Filter events by text');
+    this.text.addEventListener('input', () => {
       this.textFilter = this.text.value.trim().toLowerCase();
       this.rerender();
     });
-    const followLabel = el("label", "lab-field-inline lab-follow");
-    this.followBox = el("input");
-    this.followBox.type = "checkbox";
+    const followLabel = el('label', 'lab-field-inline lab-follow');
+    this.followBox = el('input');
+    this.followBox.type = 'checkbox';
     this.followBox.checked = true;
-    this.followBox.addEventListener("change", () => {
+    this.followBox.addEventListener('change', () => {
       this.follow = this.followBox.checked;
       if (this.follow) this.scrollToEnd();
     });
-    followLabel.append(this.followBox, el("span", null, "follow"));
-    this.count = el("span", "lab-timeline-count", "0 events");
-    this.empty = el("p", "lab-dock-empty", "No events yet.");
-    bar.append(this.nodeSel, this.kindSel, this.text, followLabel, this.count, button("Clear", "lab-btn-sm", () => this.clear()));
-    this.list = el("ol", "lab-timeline-list");
-    this.list.addEventListener("scroll", () => {
+    followLabel.append(this.followBox, el('span', null, 'follow'));
+    this.count = el('span', 'lab-timeline-count', '0 events');
+    this.empty = el('p', 'lab-dock-empty', 'No events yet.');
+    bar.append(
+      this.nodeSel,
+      this.kindSel,
+      this.text,
+      followLabel,
+      this.count,
+      button('Clear', 'lab-btn-sm', () => this.clear()),
+    );
+    this.list = el('ol', 'lab-timeline-list');
+    this.list.addEventListener('scroll', () => {
       // Scrolling up pauses auto-follow; scrolling back to the end resumes it.
       const atEnd = this.list.scrollTop + this.list.clientHeight >= this.list.scrollHeight - 4;
       if (this.follow !== atEnd) {
@@ -92,22 +99,26 @@ export class Timeline {
 
   // The node names for the filter and the rows: `[{ id, name }]`.
   setNodes(nodes) {
-    const key = nodes.map((n) => `${n.id}:${n.name}`).join("|");
+    const key = nodes.map((n) => `${n.id}:${n.name}`).join('|');
     if (key === this.nodeKey) return;
     this.nodeKey = key;
     this.nodeOptions = nodes;
     const current = this.nodeSel.value;
-    this.nodeSel.innerHTML = "";
-    for (const o of [{ value: "", label: "all nodes" }, { value: "world", label: "world" }, ...nodes.map((n) => ({ value: String(n.id), label: n.name }))]) {
-      const opt = document.createElement("option");
+    this.nodeSel.innerHTML = '';
+    for (const o of [
+      { value: '', label: 'all nodes' },
+      { value: 'world', label: 'world' },
+      ...nodes.map((n) => ({ value: String(n.id), label: n.name })),
+    ]) {
+      const opt = document.createElement('option');
       opt.value = o.value;
       opt.textContent = o.label;
       this.nodeSel.appendChild(opt);
     }
     this.nodeSel.value = current;
     if (this.nodeSel.value !== current) {
-      this.nodeSel.value = "";
-      this.nodeFilter = "";
+      this.nodeSel.value = '';
+      this.nodeFilter = '';
     }
   }
 
@@ -137,7 +148,7 @@ export class Timeline {
   clear() {
     this.events = [];
     this.trimmed = false;
-    this.list.innerHTML = "";
+    this.list.innerHTML = '';
     this.refreshCount();
   }
 
@@ -146,17 +157,22 @@ export class Timeline {
     const total = this.events.length;
     const shown = this.list.children.length;
     const filtered = Boolean(this.nodeFilter || this.kindFilter || this.textFilter);
-    this.count.textContent = filtered ? `${shown} of ${total} events` : `${this.trimmed ? "latest " : ""}${total} events`;
+    this.count.textContent = filtered
+      ? `${shown} of ${total} events`
+      : `${this.trimmed ? 'latest ' : ''}${total} events`;
     this.summary.firstChild.textContent = `Timeline · ${total} events`;
-    this.empty.textContent = total ? "No events match the filter." : "No events yet.";
+    this.empty.textContent = total ? 'No events match the filter.' : 'No events yet.';
     this.empty.hidden = shown > 0;
   }
 
   refreshKinds() {
     const current = this.kindSel.value;
-    this.kindSel.innerHTML = "";
-    for (const o of [{ value: "", label: "all kinds" }, ...[...this.kinds].sort().map((k) => ({ value: k, label: kindLabel(k) }))]) {
-      const opt = document.createElement("option");
+    this.kindSel.innerHTML = '';
+    for (const o of [
+      { value: '', label: 'all kinds' },
+      ...[...this.kinds].sort().map((k) => ({ value: k, label: kindLabel(k) })),
+    ]) {
+      const opt = document.createElement('option');
       opt.value = o.value;
       opt.textContent = o.label;
       this.kindSel.appendChild(opt);
@@ -165,18 +181,20 @@ export class Timeline {
   }
 
   matches(e) {
-    if (this.nodeFilter === "world" && e.node != null) return false;
-    if (this.nodeFilter && this.nodeFilter !== "world" && String(e.node) !== this.nodeFilter) return false;
+    if (this.nodeFilter === 'world' && e.node != null) return false;
+    if (this.nodeFilter && this.nodeFilter !== 'world' && String(e.node) !== this.nodeFilter)
+      return false;
     if (this.kindFilter && e.kind !== this.kindFilter) return false;
     if (this.textFilter) {
-      const hay = `${e.kind} ${kindLabel(e.kind)} ${this.nodeName(e.node)} ${shortJson(e.detail, 400)}`.toLowerCase();
+      const hay =
+        `${e.kind} ${kindLabel(e.kind)} ${this.nodeName(e.node)} ${shortJson(e.detail, 400)}`.toLowerCase();
       if (!hay.includes(this.textFilter)) return false;
     }
     return true;
   }
 
   rerender() {
-    this.list.innerHTML = "";
+    this.list.innerHTML = '';
     const shown = this.events.filter((e) => this.matches(e)).slice(-MAX_ROWS);
     for (const e of shown) this.list.appendChild(this.row(e));
     this.refreshCount();
@@ -184,23 +202,24 @@ export class Timeline {
   }
 
   nodeName(id) {
-    if (id == null) return "world";
+    if (id == null) return 'world';
     return this.hooks.nodeName(id);
   }
 
   row(e) {
-    const level = e.detail && typeof e.detail === "object" && e.detail.level ? String(e.detail.level) : "info";
-    const li = el("li", `lab-ev lab-ev-${level}`);
+    const level =
+      e.detail && typeof e.detail === 'object' && e.detail.level ? String(e.detail.level) : 'info';
+    const li = el('li', `lab-ev lab-ev-${level}`);
     li.dataset.index = String(e.index);
     if (e.node != null) li.dataset.node = String(e.node);
-    const time = el("span", "lab-ev-time", fmtMs(e.at));
-    const node = el("button", "lab-ev-node");
-    node.type = "button";
+    const time = el('span', 'lab-ev-time', fmtMs(e.at));
+    const node = el('button', 'lab-ev-node');
+    node.type = 'button';
     node.textContent = this.nodeName(e.node);
-    if (e.node != null) node.addEventListener("click", () => this.hooks.onSelect(e.node));
+    if (e.node != null) node.addEventListener('click', () => this.hooks.onSelect(e.node));
     else node.disabled = true;
     const style = KIND_STYLES[e.kind];
-    const kind = el("span", "lab-ev-kind", style ? style.label : e.kind);
+    const kind = el('span', 'lab-ev-kind', style ? style.label : e.kind);
     kind.dataset.kind = e.kind;
     if (style) {
       kind.style.color = style.color;
@@ -209,9 +228,15 @@ export class Timeline {
     li.append(time, node, kind);
     const preview = shortJson(e.detail, 120);
     if (preview) {
-      const detail = el("details", "lab-ev-detail");
-      detail.appendChild(el("summary", null, preview));
-      detail.appendChild(el("pre", null, typeof e.detail === "object" ? JSON.stringify(e.detail, null, 2) : String(e.detail)));
+      const detail = el('details', 'lab-ev-detail');
+      detail.appendChild(el('summary', null, preview));
+      detail.appendChild(
+        el(
+          'pre',
+          null,
+          typeof e.detail === 'object' ? JSON.stringify(e.detail, null, 2) : String(e.detail),
+        ),
+      );
       li.appendChild(detail);
     }
     return li;

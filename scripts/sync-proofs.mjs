@@ -41,25 +41,61 @@ function brokerCheckout() {
   const dir = path.join(tmp, 'broker');
   try {
     console.log(`  → Sparse-cloning ${REPO} (verif/, .creusot-version, why3find.json)...`);
-    execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--sparse', `https://github.com/${REPO}.git`, dir], { stdio: 'pipe', timeout: 120000 });
-    execFileSync('git', ['-C', dir, 'sparse-checkout', 'set', '--no-cone', '/verif', '/.creusot-version', '/why3find.json'], { stdio: 'pipe', timeout: 120000 });
+    execFileSync(
+      'git',
+      [
+        'clone',
+        '--depth',
+        '1',
+        '--filter=blob:none',
+        '--sparse',
+        `https://github.com/${REPO}.git`,
+        dir,
+      ],
+      { stdio: 'pipe', timeout: 120000 },
+    );
+    execFileSync(
+      'git',
+      [
+        '-C',
+        dir,
+        'sparse-checkout',
+        'set',
+        '--no-cone',
+        '/verif',
+        '/.creusot-version',
+        '/why3find.json',
+      ],
+      { stdio: 'pipe', timeout: 120000 },
+    );
     return { dir, temporary: tmp };
   } catch (err) {
     fs.rmSync(tmp, { recursive: true, force: true });
-    throw new Error(`Could not fetch ${REPO}; previous proof outputs were preserved: ${err.message}`, { cause: err });
+    throw new Error(
+      `Could not fetch ${REPO}; previous proof outputs were preserved: ${err.message}`,
+      { cause: err },
+    );
   }
 }
 
 function gitCommit(dir) {
-  const commit = execFileSync('git', ['-C', dir, 'rev-parse', '--verify', 'HEAD^{commit}'], { stdio: 'pipe', encoding: 'utf8' }).trim();
-  if (!/^[a-f\d]{40,64}$/i.test(commit)) throw new Error('Proof source checkout has no valid commit');
+  const commit = execFileSync('git', ['-C', dir, 'rev-parse', '--verify', 'HEAD^{commit}'], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  }).trim();
+  if (!/^[a-f\d]{40,64}$/i.test(commit))
+    throw new Error('Proof source checkout has no valid commit');
   return commit;
 }
 
 // ---- proof.json -----------------------------------------------------------------
 
 /** Walk a why3find certificate tree, returning leaf and tactic statistics. */
-function treeStats(node, depth = 0, acc = { leaves: 0, time: 0, maxTime: 0, depth: 0, provers: {}, tactics: {}, stuck: 0 }) {
+function treeStats(
+  node,
+  depth = 0,
+  acc = { leaves: 0, time: 0, maxTime: 0, depth: 0, provers: {}, tactics: {}, stuck: 0 },
+) {
   if (!node || typeof node !== 'object') return acc;
   if (typeof node.prover === 'string') {
     acc.leaves += 1;
@@ -91,7 +127,13 @@ function parseSpans(coma) {
   const spans = new Map();
   const re = /^let%span\s+(\S+)\s*=\s*"([^"]+)"\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/gm;
   for (const m of coma.matchAll(re)) {
-    spans.set(m[1], { file: relativeSource(m[2]), line: Number(m[3]), col: Number(m[4]), end_line: Number(m[5]), end_col: Number(m[6]) });
+    spans.set(m[1], {
+      file: relativeSource(m[2]),
+      line: Number(m[3]),
+      col: Number(m[4]),
+      end_line: Number(m[5]),
+      end_col: Number(m[6]),
+    });
   }
   return spans;
 }
@@ -110,7 +152,15 @@ function relativeSource(file) {
 /** The function's own span: `(* #"/workspace/.../consensus.rs" 15 0 15 55 *)` on line 1. */
 function parseHeaderSpan(coma) {
   const m = /^\(\*\s*#"([^"]+)"\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\*\)/.exec(coma);
-  return m ? { file: relativeSource(m[1]), line: Number(m[2]), col: Number(m[3]), end_line: Number(m[4]), end_col: Number(m[5]) } : null;
+  return m
+    ? {
+        file: relativeSource(m[1]),
+        line: Number(m[2]),
+        col: Number(m[3]),
+        end_line: Number(m[4]),
+        end_col: Number(m[5]),
+      }
+    : null;
 }
 
 /**
@@ -177,11 +227,18 @@ function kindOf(name, kernelNames) {
 
 // ---- main ----------------------------------------------------------------------
 
-export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, catalogFile = CATALOG } = {}) {
+export function syncProofs(
+  checkout,
+  { dataOut = DATA_OUT, comaOut = COMA_OUT, catalogFile = CATALOG } = {},
+) {
   const commit = gitCommit(checkout);
   const verifDir = path.join(checkout, VERIF_SUBDIR);
-  const creusotVersion = fs.existsSync(path.join(checkout, '.creusot-version')) ? fs.readFileSync(path.join(checkout, '.creusot-version'), 'utf8').trim() : null;
-  const why3find = fs.existsSync(path.join(checkout, 'why3find.json')) ? JSON.parse(fs.readFileSync(path.join(checkout, 'why3find.json'), 'utf8')) : null;
+  const creusotVersion = fs.existsSync(path.join(checkout, '.creusot-version'))
+    ? fs.readFileSync(path.join(checkout, '.creusot-version'), 'utf8').trim()
+    : null;
+  const why3find = fs.existsSync(path.join(checkout, 'why3find.json'))
+    ? JSON.parse(fs.readFileSync(path.join(checkout, 'why3find.json'), 'utf8'))
+    : null;
 
   // Ledger rows citing each proof session, from the synced catalog when present.
   const ledgerByProof = new Map();
@@ -192,7 +249,12 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
       for (const k of row.kernels) kernelNames.add(k.label);
       for (const proof of row.proofs) {
         const m = /verif\/krabka_verified_rlib\/(.+)\/proof\.json/.exec(proof.url);
-        if (m) ledgerByProof.set(m[1], { row: row.id, label: proof.label, kernels: row.kernels.map((k) => k.label) });
+        if (m)
+          ledgerByProof.set(m[1], {
+            row: row.id,
+            label: proof.label,
+            kernels: row.kernels.map((k) => k.label),
+          });
       }
     }
   }
@@ -206,7 +268,6 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
   fs.mkdirSync(stagedComa);
   let published = false;
   try {
-
     // A session is a directory holding `proof.json`, with the Coma file beside the
     // directory: `<module>/<name>/proof.json` and `<module>/<name>.coma`. A module
     // split across files nests one level deeper, `<module>/<file>/<name>/proof.json`,
@@ -237,7 +298,15 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
         const coma = fs.existsSync(comaFile) ? fs.readFileSync(comaFile, 'utf8') : null;
 
         const goals = [];
-        const stats = { leaves: 0, time: 0, maxTime: 0, depth: 0, provers: {}, tactics: {}, stuck: 0 };
+        const stats = {
+          leaves: 0,
+          time: 0,
+          maxTime: 0,
+          depth: 0,
+          provers: {},
+          tactics: {},
+          stuck: 0,
+        };
         for (const [theory, byGoal] of Object.entries(proof.proofs ?? {})) {
           for (const [goal, tree] of Object.entries(byGoal)) {
             goals.push({ theory, name: goal, tree });
@@ -276,15 +345,29 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
       }
     }
 
-    const totals = { sessions: sessions.length, leaves: 0, time: 0, provers: {}, tactics: {}, kinds: {}, obligations: 0, modules: new Set(sessions.map((s) => s.module)).size };
-    if (!sessions.length) throw new Error('The broker checkout contains no proof sessions; previous outputs were preserved');
+    const totals = {
+      sessions: sessions.length,
+      leaves: 0,
+      time: 0,
+      provers: {},
+      tactics: {},
+      kinds: {},
+      obligations: 0,
+      modules: new Set(sessions.map((s) => s.module)).size,
+    };
+    if (!sessions.length)
+      throw new Error(
+        'The broker checkout contains no proof sessions; previous outputs were preserved',
+      );
     for (const s of sessions) {
       totals.leaves += s.stats.leaves;
       totals.time += s.stats.time;
       totals.obligations += s.obligations.length;
       totals.kinds[s.kind] = (totals.kinds[s.kind] ?? 0) + 1;
-      for (const [p, n] of Object.entries(s.stats.provers)) totals.provers[p] = (totals.provers[p] ?? 0) + n;
-      for (const [t, n] of Object.entries(s.stats.tactics)) totals.tactics[t] = (totals.tactics[t] ?? 0) + n;
+      for (const [p, n] of Object.entries(s.stats.provers))
+        totals.provers[p] = (totals.provers[p] ?? 0) + n;
+      for (const [t, n] of Object.entries(s.stats.tactics))
+        totals.tactics[t] = (totals.tactics[t] ?? 0) + n;
     }
     totals.time = round(totals.time);
 
@@ -293,7 +376,15 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
         repo: REPO,
         commit,
         creusot: creusotVersion,
-        why3find: why3find ? { provers: why3find.provers, tactics: why3find.tactics, time: why3find.time, fast: why3find.fast, depth: why3find.depth } : null,
+        why3find: why3find
+          ? {
+              provers: why3find.provers,
+              tactics: why3find.tactics,
+              time: why3find.time,
+              fast: why3find.fast,
+              depth: why3find.depth,
+            }
+          : null,
         synced_at: new Date().toISOString(),
       },
       totals,
@@ -320,13 +411,16 @@ export function syncProofs(checkout, { dataOut = DATA_OUT, comaOut = COMA_OUT, c
       if (fs.existsSync(previousData)) fs.renameSync(previousData, dataOut);
       throw error;
     }
-    console.log(`  ✓ ${sessions.length} sessions, ${totals.leaves} prover goals, ${totals.obligations} labelled obligations → ${path.relative(ROOT, dataOut)} (${(fs.statSync(dataOut).size / 1024).toFixed(0)} KB)`);
+    console.log(
+      `  ✓ ${sessions.length} sessions, ${totals.leaves} prover goals, ${totals.obligations} labelled obligations → ${path.relative(ROOT, dataOut)} (${(fs.statSync(dataOut).size / 1024).toFixed(0)} KB)`,
+    );
     console.log(`  ✓ Coma sources → ${path.relative(ROOT, comaOut)}`);
     published = true;
     return data;
   } finally {
     // Retain the backup if a filesystem failure also prevented rollback.
-    if (published || (!fs.existsSync(previousComa) && !fs.existsSync(previousData))) fs.rmSync(staged, { recursive: true, force: true });
+    if (published || (!fs.existsSync(previousComa) && !fs.existsSync(previousData)))
+      fs.rmSync(staged, { recursive: true, force: true });
   }
 }
 

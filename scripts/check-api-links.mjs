@@ -9,8 +9,11 @@
 import fs from 'node:fs';
 
 const SITE = 'https://krabka.io';
-const entries = JSON.parse(fs.readFileSync(new URL('../src/data/api-reference.json', import.meta.url), 'utf8'));
-if (!Array.isArray(entries) || !entries.length) throw new Error('The API reference directory is empty');
+const entries = JSON.parse(
+  fs.readFileSync(new URL('../src/data/api-reference.json', import.meta.url), 'utf8'),
+);
+if (!Array.isArray(entries) || !entries.length)
+  throw new Error('The API reference directory is empty');
 
 let failures = 0;
 for (const entry of entries) {
@@ -37,5 +40,9 @@ for (const entry of entries) {
   }
 }
 
-console.log(failures === 0 ? '\n✅ Every API reference resolves.' : `\n${failures} of ${entries.length} API references do not resolve.`);
+console.log(
+  failures === 0
+    ? '\n✅ Every API reference resolves.'
+    : `\n${failures} of ${entries.length} API references do not resolve.`,
+);
 process.exit(failures === 0 ? 0 : 1);

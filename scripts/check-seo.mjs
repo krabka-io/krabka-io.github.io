@@ -18,7 +18,8 @@ function getAllHtmlFiles(dir) {
         fullPath.endsWith('\\charts') ||
         fullPath.includes('/charts/') ||
         fullPath.includes('\\charts\\')
-      ) continue;
+      )
+        continue;
       results = results.concat(getAllHtmlFiles(fullPath));
     } else if (entry.isFile() && entry.name.endsWith('.html')) {
       results.push(fullPath);
@@ -32,7 +33,9 @@ if (!htmlFiles.length) {
   console.error(`No built HTML pages in ${DIST_DIR}. Build the site before checking SEO.`);
   process.exit(1);
 }
-console.log(`\n🔍 [seo-check] Running SEO audit across ${htmlFiles.length} site pages in dist/...\n`);
+console.log(
+  `\n🔍 [seo-check] Running SEO audit across ${htmlFiles.length} site pages in dist/...\n`,
+);
 
 let passedCount = 0;
 const issues = [];
@@ -74,8 +77,9 @@ for (const file of htmlFiles) {
   }
 
   // 2. Meta Description
-  const descMatch = content.match(/<meta\s+name=["']description["']\s+content=(["'])([\s\S]*?)\1/i) ||
-                    content.match(/<meta\s+content=(["'])([\s\S]*?)\1\s+name=["']description["']/i);
+  const descMatch =
+    content.match(/<meta\s+name=["']description["']\s+content=(["'])([\s\S]*?)\1/i) ||
+    content.match(/<meta\s+content=(["'])([\s\S]*?)\1\s+name=["']description["']/i);
   if (!descMatch || !descMatch[2].trim()) {
     if (!is404) fileIssues.push('Missing or empty <meta name="description">');
   } else {
@@ -83,13 +87,16 @@ for (const file of htmlFiles) {
     if (desc.length < 30) {
       fileIssues.push(`Short meta description (${desc.length} chars): "${desc}"`);
     } else if (desc.length > 200) {
-      fileIssues.push(`Long meta description (${desc.length} chars, recommended <160): "${desc.slice(0, 50)}..."`);
+      fileIssues.push(
+        `Long meta description (${desc.length} chars, recommended <160): "${desc.slice(0, 50)}..."`,
+      );
     }
   }
 
   // 3. Canonical Link
-  const canonicalMatch = content.match(/<link\s+rel=["']canonical["']\s+href=(["'])([\s\S]*?)\1/i) ||
-                        content.match(/<link\s+href=(["'])([\s\S]*?)\1\s+rel=["']canonical["']/i);
+  const canonicalMatch =
+    content.match(/<link\s+rel=["']canonical["']\s+href=(["'])([\s\S]*?)\1/i) ||
+    content.match(/<link\s+href=(["'])([\s\S]*?)\1\s+rel=["']canonical["']/i);
   if (!canonicalMatch && !is404) {
     fileIssues.push('Missing <link rel="canonical">');
   }
@@ -131,7 +138,9 @@ for (const file of htmlFiles) {
   }
 
   // 8. Structured Data JSON-LD
-  const jsonLdMatches = [...content.matchAll(/<script\s+type=["']application\/ld\+json["']>([\s\S]*?)<\/script>/gi)];
+  const jsonLdMatches = [
+    ...content.matchAll(/<script\s+type=["']application\/ld\+json["']>([\s\S]*?)<\/script>/gi),
+  ];
   for (const match of jsonLdMatches) {
     try {
       JSON.parse(match[1]);

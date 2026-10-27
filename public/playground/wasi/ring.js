@@ -15,7 +15,7 @@ import {
   RING_HEADER_BYTES,
   RING_TAIL,
   RING_WANT_SPACE,
-} from "./protocol.js";
+} from './protocol.js';
 
 /** A new ring buffer with `capacity` data bytes. */
 export function createRing(capacity) {

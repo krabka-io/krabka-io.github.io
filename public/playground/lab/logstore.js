@@ -5,11 +5,11 @@
 // date as lines come and go. `LogLevels` keeps the level the reader chose for
 // each scenario's brokers (`KRABKA_LOG` of their process).
 
-import { parseLine, levelRank } from "./logparse.js";
+import { parseLine, levelRank } from './logparse.js';
 
 export const PER_NODE = 5000;
 export const TOTAL = 20_000;
-const LEVELS_KEY = "krabka-lab.loglevels";
+const LEVELS_KEY = 'krabka-lab.loglevels';
 // Dead lines (trimmed from a node's history) stay in `all` until this many pile up or someone reads it.
 const COMPACT_AT = 2000;
 
@@ -59,10 +59,23 @@ export class LogStore {
    * A process lifecycle row (`kind`: started, restarted, killed, exited, ...).
    * It is a JSON line of its own, so it survives Download.
    */
-  mark(node, kind, message, { level = "INFO", now, detail = {} } = {}) {
+  mark(node, kind, message, { level = 'INFO', now, detail = {} } = {}) {
     const fields = { node, kind, ...detail };
-    const record = { ts: now / 1000, level, target: "lab::process", message, ...fields };
-    return this.push({ node, stream: "lab", marker: kind, at: now, raw: JSON.stringify(record), format: "json", level, target: "lab::process", message, ts: record.ts, fields, record });
+    const record = { ts: now / 1000, level, target: 'lab::process', message, ...fields };
+    return this.push({
+      node,
+      stream: 'lab',
+      marker: kind,
+      at: now,
+      raw: JSON.stringify(record),
+      format: 'json',
+      level,
+      target: 'lab::process',
+      message,
+      ts: record.ts,
+      fields,
+      record,
+    });
   }
 
   push(entry) {
@@ -127,7 +140,7 @@ export class LogStore {
   }
 
   /** The lines of one level or above that a node wrote since `seq`. */
-  since(seq, minLevel = "WARN") {
+  since(seq, minLevel = 'WARN') {
     const min = levelRank(minLevel);
     const out = [];
     for (let i = this.all.length - 1; i >= 0 && this.all[i].seq > seq; i--) {
@@ -161,8 +174,8 @@ export class LogLevels {
   read() {
     if (this.unsaved) return this.cache;
     try {
-      const all = JSON.parse(this.storage?.getItem(LEVELS_KEY) ?? "{}");
-      return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+      const all = JSON.parse(this.storage?.getItem(LEVELS_KEY) ?? '{}');
+      return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
     } catch {
       return this.cache;
     }
@@ -170,20 +183,21 @@ export class LogLevels {
 
   get(scenarioId) {
     const s = this.read()[scenarioId];
-    const nodes = s && typeof s.nodes === "object" && s.nodes && !Array.isArray(s.nodes) ? s.nodes : {};
-    return { default: typeof s?.default === "string" ? s.default : "", nodes: { ...nodes } };
+    const nodes =
+      s && typeof s.nodes === 'object' && s.nodes && !Array.isArray(s.nodes) ? s.nodes : {};
+    return { default: typeof s?.default === 'string' ? s.default : '', nodes: { ...nodes } };
   }
 
   /** The directive node `nodeId` of the scenario starts with. */
   directive(scenarioId, nodeId) {
     const s = this.get(scenarioId);
-    return typeof s.nodes[nodeId] === "string" ? s.nodes[nodeId] : s.default;
+    return typeof s.nodes[nodeId] === 'string' ? s.nodes[nodeId] : s.default;
   }
 
   /** `scope` "all" sets every broker (and forgets single-broker choices); a node id sets that broker. */
   set(scenarioId, scope, directive) {
     const s = this.get(scenarioId);
-    if (scope === "all") {
+    if (scope === 'all') {
       s.default = directive;
       s.nodes = {};
     } else {

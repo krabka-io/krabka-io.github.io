@@ -36,7 +36,8 @@ export default defineConfig({
     '/api/broker/latest': 'https://krabka.io/krabka-broker/',
     '/api/streams-java/latest': 'https://krabka.io/krabka-streams-java/api/',
     '/api/streams-go/latest': 'https://krabka.io/krabka-streams-go/',
-    '/whitepapers/gres-scaling': 'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
+    '/whitepapers/gres-scaling':
+      'https://github.com/krabka-io/gres/blob/main/docs/gres-scaling-whitepaper.md',
   },
   integrations: [
     // Exclude noindex pages and the authored /docs/api redirect to /api.
@@ -44,8 +45,8 @@ export default defineConfig({
     sitemap({
       filter: (page) => !/\/(404|search|docs\/api)\/?$/.test(new URL(page).pathname),
       chunks: {
-        docs: (item) => /^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined,
-        website: (item) => !/^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined,
+        docs: (item) => (/^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined),
+        website: (item) => (!/^\/docs(?:\/|$)/.test(new URL(item.url).pathname) ? item : undefined),
       },
     }),
     sitemapLastmod(),

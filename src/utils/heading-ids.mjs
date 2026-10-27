@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { slugify } from './slugify.mjs';
 
 const decode = (s) =>
-  s.replace(/&(amp|lt|gt|quot|#39|#x27);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'" })[e]);
+  s.replace(
+    /&(amp|lt|gt|quot|#39|#x27);/g,
+    (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'" })[e],
+  );
 
 export function addHeadingIds(html) {
   const used = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));

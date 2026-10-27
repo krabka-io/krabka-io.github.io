@@ -7,20 +7,20 @@
 // everywhere: without `DecompressionStream` the bytes go through the
 // JavaScript decoder in `inflate.js`.
 
-import { inflateRaw } from "./inflate.js";
+import { inflateRaw } from './inflate.js';
 
 function toBase64Url(bytes) {
-  let binary = "";
+  let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function fromBase64Url(text) {
-  const padded = text.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
   const binary = atob(padded + pad);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -35,9 +35,9 @@ async function pipe(bytes, stream) {
 
 export async function encodeShare(value) {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
-  if (typeof CompressionStream === "function") {
+  if (typeof CompressionStream === 'function') {
     try {
-      const packed = await pipe(bytes, new CompressionStream("deflate-raw"));
+      const packed = await pipe(bytes, new CompressionStream('deflate-raw'));
       return `d${toBase64Url(packed)}`;
     } catch {
       // The plain encoding below always works.
@@ -48,16 +48,21 @@ export async function encodeShare(value) {
 
 // What a person sees for a code that does not decode: a truncated or edited
 // link, not the browser's own error.
-const BAD_CODE = "that code is damaged or cut short; copy it again in full";
+const BAD_CODE = 'that code is damaged or cut short; copy it again in full';
 
 export async function decodeShare(code) {
-  const text = String(code || "").trim();
-  if (!text) throw new Error("empty code");
+  const text = String(code || '').trim();
+  if (!text) throw new Error('empty code');
   const tag = text[0];
-  if (tag !== "d" && tag !== "p") throw new Error(BAD_CODE);
+  if (tag !== 'd' && tag !== 'p') throw new Error(BAD_CODE);
   try {
     const bytes = fromBase64Url(text.slice(1));
-    const json = tag === "d" ? (typeof DecompressionStream === "function" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : inflateRaw(bytes)) : bytes;
+    const json =
+      tag === 'd'
+        ? typeof DecompressionStream === 'function'
+          ? await pipe(bytes, new DecompressionStream('deflate-raw'))
+          : inflateRaw(bytes)
+        : bytes;
     return JSON.parse(new TextDecoder().decode(json));
   } catch {
     throw new Error(BAD_CODE);

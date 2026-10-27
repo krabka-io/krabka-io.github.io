@@ -12,13 +12,25 @@
 // worker): COOP/COEP response headers, or the lab's service worker
 // (`/docs/lab/coi.js`).
 
-import { ERRNO } from "./abi.js";
-import { WasiClock } from "./clock.js";
-import { DEFAULTS, DISK, DISK_MODES, FAULT_BYTES, FAULT_DISK_MODE, FAULT_DISK_MS, FAULT_PAUSED, FAULT_SEQ, FAULT_SKEW, OUT, REC } from "./protocol.js";
-import { createRing, RingWriter } from "./ring.js";
-import { lockVolume, VolumeWriter, loadImage, readVolumeFile } from "./volumes.js";
+import { ERRNO } from './abi.js';
+import { WasiClock } from './clock.js';
+import {
+  DEFAULTS,
+  DISK,
+  DISK_MODES,
+  FAULT_BYTES,
+  FAULT_DISK_MODE,
+  FAULT_DISK_MS,
+  FAULT_PAUSED,
+  FAULT_SEQ,
+  FAULT_SKEW,
+  OUT,
+  REC,
+} from './protocol.js';
+import { createRing, RingWriter } from './ring.js';
+import { lockVolume, VolumeWriter, loadImage, readVolumeFile } from './volumes.js';
 
-export { WasiClock } from "./clock.js";
+export { WasiClock } from './clock.js';
 export {
   DB_NAME,
   exportVolume,
@@ -30,13 +42,13 @@ export {
   readVolumeFileRange,
   storageAvailable,
   usage,
-} from "./volumes.js";
+} from './volumes.js';
 
-const WORKER_URL = new URL("./worker.js", import.meta.url).href;
+const WORKER_URL = new URL('./worker.js', import.meta.url).href;
 const encoder = new TextEncoder();
 const EMPTY = new Uint8Array(0);
 const LOG_TAIL = 200;
-const IDLE_REQUEST = encoder.encode(JSON.stringify({ op: "idle" }));
+const IDLE_REQUEST = encoder.encode(JSON.stringify({ op: 'idle' }));
 
 function u32(value) {
   const out = new Uint8Array(4);
@@ -45,21 +57,22 @@ function u32(value) {
 }
 
 function toBytes(data) {
-  if (typeof data === "string") return encoder.encode(data);
+  if (typeof data === 'string') return encoder.encode(data);
   if (data instanceof Uint8Array) return data.slice();
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+  if (ArrayBuffer.isView(data))
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
   if (data instanceof ArrayBuffer) return new Uint8Array(data.slice(0));
-  throw new TypeError("send() takes a Uint8Array, an ArrayBuffer, a view or a string");
+  throw new TypeError('send() takes a Uint8Array, an ArrayBuffer, a view or a string');
 }
 
 /** Why a process cannot run in this context, or null when it can. */
 export function isolationProblem() {
-  if (typeof Worker === "undefined") return "Web Workers are unavailable in this context.";
-  if (typeof SharedArrayBuffer === "undefined" || !globalThis.crossOriginIsolated) {
+  if (typeof Worker === 'undefined') return 'Web Workers are unavailable in this context.';
+  if (typeof SharedArrayBuffer === 'undefined' || !globalThis.crossOriginIsolated) {
     return (
-      "the page is not cross-origin isolated, so SharedArrayBuffer and Atomics.wait are unavailable. " +
-      "Serve it with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: credentialless " +
-      "(or require-corp), or call ensureCrossOriginIsolation() from /docs/lab/coi.js first."
+      'the page is not cross-origin isolated, so SharedArrayBuffer and Atomics.wait are unavailable. ' +
+      'Serve it with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: credentialless ' +
+      '(or require-corp), or call ensureCrossOriginIsolation() from /docs/lab/coi.js first.'
     );
   }
   return null;
@@ -160,7 +173,7 @@ export class Connection extends Emitter {
 
   /** Whether "data" events flow: a handler is attached and the connection is not paused. */
   get flowing() {
-    return !this.paused && this.listenerCount("data") > 0;
+    return !this.paused && this.listenerCount('data') > 0;
   }
 
   /** Queues bytes for the guest. Returns false when the buffer is past the high-water mark: wait for "drain". */
@@ -170,11 +183,12 @@ export class Connection extends Emitter {
 
   /** Like send(), but resolves once the buffer is below the high-water mark; rejects on a closed connection. */
   write(data) {
-    if (this.state === "closed" || this.state === "closing" || this.ended) return Promise.reject(new Error(`connection ${this.id} is closed`));
+    if (this.state === 'closed' || this.state === 'closing' || this.ended)
+      return Promise.reject(new Error(`connection ${this.id} is closed`));
     if (this.send(data)) return Promise.resolve();
     return new Promise((resolve) => {
-      const offDrain = this.on("drain", done);
-      const offClose = this.on("close", done);
+      const offDrain = this.on('drain', done);
+      const offClose = this.on('close', done);
       function done() {
         offDrain();
         offClose();
@@ -204,7 +218,7 @@ export class Connection extends Emitter {
   }
 
   listening(type) {
-    if (type === "data" && this.inbox.length > 0) queueMicrotask(() => this.process.deliver(this));
+    if (type === 'data' && this.inbox.length > 0) queueMicrotask(() => this.process.deliver(this));
   }
 }
 
@@ -216,12 +230,12 @@ export class Connection extends Emitter {
 export function pipe(a, b) {
   const forward = (from, to) => {
     const offs = [
-      from.on("data", (bytes) => {
+      from.on('data', (bytes) => {
         if (!to.send(bytes)) from.pause();
       }),
-      to.on("drain", () => from.resume()),
-      from.on("end", () => to.end()),
-      from.on("close", (info) => to.close({ reset: Boolean(info && info.reset) })),
+      to.on('drain', () => from.resume()),
+      from.on('end', () => to.end()),
+      from.on('close', (info) => to.close({ reset: Boolean(info && info.reset) })),
     ];
     return () => offs.forEach((off) => off());
   };
@@ -240,7 +254,7 @@ const moduleCache = new Map();
  */
 export async function compileModule(source) {
   if (source instanceof WebAssembly.Module) return source;
-  if (typeof source === "string" || source instanceof URL) {
+  if (typeof source === 'string' || source instanceof URL) {
     const url = new URL(String(source), globalThis.location?.href).href;
     if (!moduleCache.has(url)) {
       const compiling = (async () => {
@@ -268,9 +282,11 @@ function createWorker(name) {
   // A blob-URL worker inherits the page's policy container, so it is
   // cross-origin isolated whether the isolation came from response headers or
   // from a service worker whose scope does not cover this directory.
-  const bootstrap = new Blob([`import ${JSON.stringify(WORKER_URL)};\n`], { type: "text/javascript" });
+  const bootstrap = new Blob([`import ${JSON.stringify(WORKER_URL)};\n`], {
+    type: 'text/javascript',
+  });
   const url = URL.createObjectURL(bootstrap);
-  const worker = new Worker(url, { type: "module", name });
+  const worker = new Worker(url, { type: 'module', name });
   return { worker, url };
 }
 
@@ -297,15 +313,18 @@ export class WasiProcess extends Emitter {
     this.name = o.name ?? `guest-${++processCount}`;
     this.module = module;
     this.args = o.args ?? [this.name];
-    this.env = Array.isArray(o.env) ? [...o.env] : Object.entries(o.env ?? {}).map(([k, v]) => `${k}=${v}`);
+    this.env = Array.isArray(o.env)
+      ? [...o.env]
+      : Object.entries(o.env ?? {}).map(([k, v]) => `${k}=${v}`);
     this.listeners = [...(o.listeners ?? [])];
-    if (new Set(this.listeners).size !== this.listeners.length) throw new Error(`duplicate listener ports: ${this.listeners}`);
+    if (new Set(this.listeners).size !== this.listeners.length)
+      throw new Error(`duplicate listener ports: ${this.listeners}`);
     this.volume = o.volume ?? null;
     this.mountPath = o.mountPath;
     this.clock = o.clock instanceof WasiClock ? o.clock : new WasiClock(o.clock ?? {});
     this.ondial = o.ondial ?? null;
     this.options = o;
-    this.state = "idle"; // "starting" | "running" | "exited" | "killed" | "trapped" | "failed"
+    this.state = 'idle'; // "starting" | "running" | "exited" | "killed" | "trapped" | "failed"
     this.incarnation = 0;
     this.layout = null;
     this.exitInfo = null;
@@ -327,7 +346,15 @@ export class WasiProcess extends Emitter {
     this.releaseVolume = null;
     this.store = this.volume === null ? null : new VolumeWriter(this.volume);
     this.logs = { stdout: [], stderr: [] };
-    this.hostStats = { bytesToGuest: 0, bytesFromGuest: 0, connections: 0, dials: 0, dialsAccepted: 0, journalBatches: 0, journalBytes: 0 };
+    this.hostStats = {
+      bytesToGuest: 0,
+      bytesFromGuest: 0,
+      connections: 0,
+      dials: 0,
+      dialsAccepted: 0,
+      journalBatches: 0,
+      journalBytes: 0,
+    };
     this.exited = null; // a promise per incarnation, resolved with the exit info
     // Faults the host injects (pause, clock skew, disk mode): one buffer for
     // every incarnation, so skew and disk mode outlive a restart; a pause does not.
@@ -339,14 +366,16 @@ export class WasiProcess extends Emitter {
   // ---- lifecycle ------------------------------------------------------------------------------
 
   async start() {
-    if (this.state === "starting" || this.state === "running") throw new Error(`${this.name} is already ${this.state}`);
+    if (this.state === 'starting' || this.state === 'running')
+      throw new Error(`${this.name} is already ${this.state}`);
     const problem = isolationProblem();
     if (problem) throw new Error(`cannot start ${this.name}: ${problem}`);
-    if (this.volume !== null && !this.releaseVolume) this.releaseVolume = await lockVolume(this.volume);
+    if (this.volume !== null && !this.releaseVolume)
+      this.releaseVolume = await lockVolume(this.volume);
     const t0 = performance.now();
     this.helloAt = null;
     Atomics.store(this.faultI32, FAULT_PAUSED, 0);
-    this.state = "starting";
+    this.state = 'starting';
     const incarnation = ++this.incarnation;
     let resolveExit;
     this.exited = new Promise((resolve) => (resolveExit = resolve));
@@ -364,13 +393,17 @@ export class WasiProcess extends Emitter {
       worker.onmessage = (event) => this.#message(incarnation, event.data, url);
       worker.onerror = (event) => {
         event.preventDefault();
-        this.#workerError(incarnation, new Error(`the WASI worker failed: ${event.message || "it did not load"}`));
+        this.#workerError(
+          incarnation,
+          new Error(`the WASI worker failed: ${event.message || 'it did not load'}`),
+        );
       };
-      worker.onmessageerror = () => this.emit("error", new Error("a message from the worker could not be deserialized"));
+      worker.onmessageerror = () =>
+        this.emit('error', new Error('a message from the worker could not be deserialized'));
       const transfer = image ? [...new Set(image.chunks.map((c) => c.bytes.buffer))] : [];
       worker.postMessage(
         {
-          t: "start",
+          t: 'start',
           module: this.module,
           ring,
           clock: this.clock.buffer,
@@ -410,10 +443,11 @@ export class WasiProcess extends Emitter {
       this.imports = info.imports;
       this.instantiateMs = info.instantiateMs;
       this.startedAt = performance.now();
-      this.state = "running";
+      this.state = 'running';
       this.#pump();
     } catch (err) {
-      if (this.incarnation === incarnation && this.state === "starting") this.#teardown({ reason: "failed", code: null, error: { message: err.message } }, "failed");
+      if (this.incarnation === incarnation && this.state === 'starting')
+        this.#teardown({ reason: 'failed', code: null, error: { message: err.message } }, 'failed');
       if (this.releaseVolume) {
         await this.store?.idle();
         this.releaseVolume();
@@ -426,7 +460,7 @@ export class WasiProcess extends Emitter {
 
   /** Stops the guest at once, like pulling the plug: journal batches not yet posted by the worker are lost. */
   async kill() {
-    if (this.worker) this.#teardown({ reason: "kill", code: null }, "killed");
+    if (this.worker) this.#teardown({ reason: 'kill', code: null }, 'killed');
     await this.#settleVolume();
   }
 
@@ -436,14 +470,17 @@ export class WasiProcess extends Emitter {
    * restarts from what IndexedDB holds right now, like a crash.
    */
   async restart({ flush = true, flushTimeoutMs = 5000 } = {}) {
-    if (this.state === "starting") throw new Error(`${this.name} is starting`);
-    if (this.state === "running" && flush) {
-      await Promise.race([this.flush().catch(() => {}), new Promise((resolve) => setTimeout(resolve, flushTimeoutMs))]);
+    if (this.state === 'starting') throw new Error(`${this.name} is starting`);
+    if (this.state === 'running' && flush) {
+      await Promise.race([
+        this.flush().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, flushTimeoutMs)),
+      ]);
     }
-    if (this.worker) this.#teardown({ reason: "restart", code: null }, "killed");
+    if (this.worker) this.#teardown({ reason: 'restart', code: null }, 'killed');
     await this.store?.idle();
     await this.start();
-    this.emit("restart", { incarnation: this.incarnation });
+    this.emit('restart', { incarnation: this.incarnation });
     return this;
   }
 
@@ -461,9 +498,14 @@ export class WasiProcess extends Emitter {
     this.writer = null;
     this.unsubscribeClock?.();
     this.unsubscribeClock = null;
-    this.startWaiter?.reject(new Error(`${this.name} ${info.reason === "failed" ? "failed to start" : `stopped (${info.reason})`}`));
+    this.startWaiter?.reject(
+      new Error(
+        `${this.name} ${info.reason === 'failed' ? 'failed to start' : `stopped (${info.reason})`}`,
+      ),
+    );
     this.startWaiter = null;
-    for (const [, request] of this.requests) request.reject(new Error(`${this.name} stopped (${info.reason})`));
+    for (const [, request] of this.requests)
+      request.reject(new Error(`${this.name} stopped (${info.reason})`));
     this.requests.clear();
     const conns = [...this.conns.values()];
     this.conns.clear();
@@ -471,21 +513,32 @@ export class WasiProcess extends Emitter {
     this.ctrl = [];
     this.barriers = [];
     this.acks.clear();
-    for (const conn of conns) this.#remoteClose(conn, { reason: info.reason === "exit" || info.reason === "return" ? "exit" : info.reason, reset: true });
+    for (const conn of conns)
+      this.#remoteClose(conn, {
+        reason: info.reason === 'exit' || info.reason === 'return' ? 'exit' : info.reason,
+        reset: true,
+      });
     this.state = state;
     this.exitInfo = info;
-    this.emit("exit", info);
+    this.emit('exit', info);
     this.resolveExit?.(info);
   }
 
   #workerError(incarnation, err) {
     if (incarnation !== this.incarnation) return;
-    if (this.state === "starting") {
+    if (this.state === 'starting') {
       this.startWaiter?.reject(err);
       return;
     }
-    this.emit("error", err);
-    this.#teardown({ reason: "trap", code: null, error: { name: err.name, message: err.message, stack: err.stack } }, "trapped");
+    this.emit('error', err);
+    this.#teardown(
+      {
+        reason: 'trap',
+        code: null,
+        error: { name: err.name, message: err.message, stack: err.stack },
+      },
+      'trapped',
+    );
     this.#settleVolume();
   }
 
@@ -494,35 +547,38 @@ export class WasiProcess extends Emitter {
   #message(incarnation, message, url) {
     if (incarnation !== this.incarnation || !this.worker) return;
     switch (message.t) {
-      case "hello":
+      case 'hello':
         this.helloAt = performance.now();
         URL.revokeObjectURL(url);
         break;
-      case "running":
+      case 'running':
         this.startWaiter?.resolve(message);
         this.startWaiter = null;
         break;
-      case "failed":
-        this.startWaiter?.reject(new Error(`${this.name} failed to start: ${message.error.message}`));
+      case 'failed':
+        this.startWaiter?.reject(
+          new Error(`${this.name} failed to start: ${message.error.message}`),
+        );
         this.startWaiter = null;
         break;
-      case "batch":
+      case 'batch':
         this.#batch(message.items);
         break;
-      case "reply": {
+      case 'reply': {
         const request = this.requests.get(message.id);
         this.requests.delete(message.id);
         if (!request) break;
         if (!message.ok) request.reject(new Error(message.value));
-        else if (request.op === "idle") request.resolve({ value: message.value, fresh: this.#covers(request, message.value) });
+        else if (request.op === 'idle')
+          request.resolve({ value: message.value, fresh: this.#covers(request, message.value) });
         else request.resolve(message.value);
         break;
       }
-      case "exit":
+      case 'exit':
         this.#exit(message);
         break;
       default:
-        this.emit("warn", `unknown worker message ${JSON.stringify(message.t)}`);
+        this.emit('warn', `unknown worker message ${JSON.stringify(message.t)}`);
     }
   }
 
@@ -534,7 +590,7 @@ export class WasiProcess extends Emitter {
           if (!conn) break;
           conn.bytesReceived += item[2].length;
           this.hostStats.bytesFromGuest += item[2].length;
-          conn.inbox.push({ type: "data", bytes: item[2] });
+          conn.inbox.push({ type: 'data', bytes: item[2] });
           this.inboxDirty.add(conn);
           break;
         }
@@ -542,22 +598,31 @@ export class WasiProcess extends Emitter {
           const conn = this.conns.get(item[1]);
           if (!conn) break;
           conn.acceptedAt = performance.now();
-          if (conn.state === "pending") conn.state = "open";
-          conn.emit("accept", conn);
-          this.emit("accept", conn);
+          if (conn.state === 'pending') conn.state = 'open';
+          conn.emit('accept', conn);
+          this.emit('accept', conn);
           break;
         }
         case OUT.END: {
           const conn = this.conns.get(item[1]);
           if (conn) {
-            conn.inbox.push({ type: "end" });
+            conn.inbox.push({ type: 'end' });
             this.inboxDirty.add(conn);
           }
           break;
         }
         case OUT.CLOSE: {
           const conn = this.conns.get(item[1]);
-          if (conn) this.#remoteClose(conn, { reason: item[2] === "closed" ? "guest" : item[2] === "backlog" ? "refused: backlog full" : "refused: no listener", reset: false });
+          if (conn)
+            this.#remoteClose(conn, {
+              reason:
+                item[2] === 'closed'
+                  ? 'guest'
+                  : item[2] === 'backlog'
+                    ? 'refused: backlog full'
+                    : 'refused: no listener',
+              reset: false,
+            });
           break;
         }
         case OUT.DIAL:
@@ -572,18 +637,18 @@ export class WasiProcess extends Emitter {
           break;
         }
         case OUT.LOG:
-          this.#line(item[1] === 1 ? "stdout" : "stderr", item[2]);
+          this.#line(item[1] === 1 ? 'stdout' : 'stderr', item[2]);
           break;
         case OUT.JOURNAL:
           this.#journal(item[1], item[2], item[3]);
           break;
         case OUT.WARN:
-          if (!this.emit("warn", item[1])) console.warn(`wasi ${this.name}: ${item[1]}`);
+          if (!this.emit('warn', item[1])) console.warn(`wasi ${this.name}: ${item[1]}`);
           break;
         case OUT.SPACE:
           break;
         default:
-          this.emit("warn", `unknown outbox item ${item[0]}`);
+          this.emit('warn', `unknown outbox item ${item[0]}`);
       }
     }
     for (const conn of this.inboxDirty) this.deliver(conn);
@@ -595,19 +660,19 @@ export class WasiProcess extends Emitter {
   deliver(conn) {
     while (conn.inbox.length > 0) {
       const item = conn.inbox[0];
-      if (item.type === "data") {
+      if (item.type === 'data') {
         if (!conn.flowing) return;
         conn.inbox.shift();
-        conn.emit("data", item.bytes);
+        conn.emit('data', item.bytes);
         this.acks.set(conn.id, (this.acks.get(conn.id) ?? 0) + item.bytes.length);
-      } else if (item.type === "end") {
+      } else if (item.type === 'end') {
         conn.inbox.shift();
         conn.remoteEnded = true;
-        conn.emit("end");
+        conn.emit('end');
       } else {
         conn.inbox.shift();
-        conn.state = "closed";
-        conn.emit("close", item.info);
+        conn.state = 'closed';
+        conn.emit('close', item.info);
       }
     }
     if (this.acks.size > 0) this.#schedulePump();
@@ -622,12 +687,12 @@ export class WasiProcess extends Emitter {
     conn.queue = [];
     conn.queueHead = 0;
     conn.buffered = 0;
-    if (conn.state !== "closed") conn.state = "closing";
-    conn.inbox.push({ type: "close", info });
+    if (conn.state !== 'closed') conn.state = 'closing';
+    conn.inbox.push({ type: 'close', info });
     this.deliver(conn);
     if (conn.needDrain) {
       conn.needDrain = false;
-      conn.emit("drain");
+      conn.emit('drain');
     }
   }
 
@@ -653,17 +718,25 @@ export class WasiProcess extends Emitter {
     this.store.enqueue(ops, nextIno).then(
       () => {
         ack();
-        this.emit("persisted", { ops: ops.length, bytes, ms: performance.now() - started });
+        this.emit('persisted', { ops: ops.length, bytes, ms: performance.now() - started });
       },
       (err) => {
         ack();
-        this.emit("error", new Error(`persisting ${this.volume} failed: ${err.message}`, { cause: err }));
+        this.emit(
+          'error',
+          new Error(`persisting ${this.volume} failed: ${err.message}`, { cause: err }),
+        );
       },
     );
   }
 
   #dial(id, host, port) {
-    const conn = new Connection(this, id, { direction: "outbound", port, host, state: "connecting" });
+    const conn = new Connection(this, id, {
+      direction: 'outbound',
+      port,
+      host,
+      state: 'connecting',
+    });
     this.conns.set(id, conn);
     this.hostStats.dials++;
     let settled = false;
@@ -671,23 +744,23 @@ export class WasiProcess extends Emitter {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      const live = this.conns.get(id) === conn && conn.state === "connecting";
+      const live = this.conns.get(id) === conn && conn.state === 'connecting';
       if (live && accepted) {
-        conn.state = "open";
+        conn.state = 'open';
         this.hostStats.dialsAccepted++;
         this.hostStats.connections++;
         this.#enqueueFirst(conn, REC.DIAL_OK, EMPTY);
-        conn.emit("open", conn);
+        conn.emit('open', conn);
       } else if (live) {
         const payload = new Uint8Array(2 + encoder.encode(reason).length);
         new DataView(payload.buffer).setUint16(0, errno, true);
         payload.set(encoder.encode(reason), 2);
         this.#enqueueFirst(conn, REC.DIAL_FAIL, payload);
-        conn.state = "closed";
+        conn.state = 'closed';
         this.conns.delete(id);
         conn.closeInfo = { reason: `refused: ${reason}`, reset: false };
       }
-      this.emit("dial", { host, port, accepted: live && accepted, conn });
+      this.emit('dial', { host, port, accepted: live && accepted, conn });
     };
     const dial = {
       host,
@@ -696,22 +769,29 @@ export class WasiProcess extends Emitter {
         decide(true);
         return conn;
       },
-      refuse: (code = "ECONNREFUSED") => decide(false, ERRNO[String(code).replace(/^E/, "")] ?? ERRNO.CONNREFUSED, String(code)),
+      refuse: (code = 'ECONNREFUSED') =>
+        decide(false, ERRNO[String(code).replace(/^E/, '')] ?? ERRNO.CONNREFUSED, String(code)),
     };
-    const timer = setTimeout(() => decide(false, ERRNO.TIMEDOUT, "ETIMEDOUT"), this.options.dialTimeoutMs);
+    const timer = setTimeout(
+      () => decide(false, ERRNO.TIMEDOUT, 'ETIMEDOUT'),
+      this.options.dialTimeoutMs,
+    );
     let answer;
     try {
       answer = this.ondial ? this.ondial(host, port, dial) : null;
     } catch (err) {
-      this.emit("error", err);
-      decide(false, ERRNO.CONNREFUSED, "ECONNREFUSED");
+      this.emit('error', err);
+      decide(false, ERRNO.CONNREFUSED, 'ECONNREFUSED');
       return;
     }
     Promise.resolve(answer).then(
-      (value) => (value === conn || value === true ? decide(true) : decide(false, ERRNO.CONNREFUSED, "ECONNREFUSED")),
+      (value) =>
+        value === conn || value === true
+          ? decide(true)
+          : decide(false, ERRNO.CONNREFUSED, 'ECONNREFUSED'),
       (err) => {
-        this.emit("error", err);
-        decide(false, ERRNO.CONNREFUSED, "ECONNREFUSED");
+        this.emit('error', err);
+        decide(false, ERRNO.CONNREFUSED, 'ECONNREFUSED');
       },
     );
   }
@@ -720,11 +800,11 @@ export class WasiProcess extends Emitter {
     this.lastStats = message.stats;
     const info = { reason: message.reason, code: message.code };
     if (message.error) info.error = message.error;
-    if (message.reason === "trap") {
-      this.emit("trap", { ...message.error, stderr: [...this.logs.stderr] });
-      this.#teardown(info, "trapped");
+    if (message.reason === 'trap') {
+      this.emit('trap', { ...message.error, stderr: [...this.logs.stderr] });
+      this.#teardown(info, 'trapped');
     } else {
-      this.#teardown(info, "exited");
+      this.#teardown(info, 'exited');
     }
     this.#settleVolume();
   }
@@ -763,7 +843,7 @@ export class WasiProcess extends Emitter {
   #pump() {
     this.pumpQueued = false;
     const writer = this.writer;
-    if (!writer || (this.state !== "running" && this.state !== "starting")) return;
+    if (!writer || (this.state !== 'running' && this.state !== 'starting')) return;
     for (const [id, bytes] of this.acks) this.ctrl.push([REC.ACK, id, u32(bytes)]);
     this.acks.clear();
     let wrote = false;
@@ -831,7 +911,7 @@ export class WasiProcess extends Emitter {
         }
         if (conn.needDrain && conn.buffered < this.options.highWaterMark) {
           conn.needDrain = false;
-          conn.emit("drain");
+          conn.emit('drain');
         }
       }
       if (!progress) break;
@@ -863,12 +943,16 @@ export class WasiProcess extends Emitter {
   /** Opens a connection to the guest's listener on `port`. The guest sees it on its next accept. */
   connect(port) {
     const index = this.listeners.indexOf(port);
-    if (index < 0) throw new Error(`${this.name} has no listener on port ${port} (it has ${this.listeners.join(", ") || "none"})`);
-    if (this.state !== "running" && this.state !== "starting") throw new Error(`${this.name} is ${this.state}`);
+    if (index < 0)
+      throw new Error(
+        `${this.name} has no listener on port ${port} (it has ${this.listeners.join(', ') || 'none'})`,
+      );
+    if (this.state !== 'running' && this.state !== 'starting')
+      throw new Error(`${this.name} is ${this.state}`);
     let id = this.nextConnId;
     while (this.conns.has(id)) id = id >= 0x7fff_ffff ? 1 : id + 1;
     this.nextConnId = id >= 0x7fff_ffff ? 1 : id + 1;
-    const conn = new Connection(this, id, { direction: "inbound", port, state: "pending" });
+    const conn = new Connection(this, id, { direction: 'inbound', port, state: 'pending' });
     this.conns.set(id, conn);
     this.hostStats.connections++;
     this.#enqueue(conn, REC.CONNECT, u32(index));
@@ -877,8 +961,8 @@ export class WasiProcess extends Emitter {
 
   /** Queues bytes for the guest on `conn`; false means "past the high-water mark, wait for drain". */
   send(conn, data) {
-    if (conn.process !== this) throw new Error("that connection belongs to another process");
-    if (conn.state === "closed" || conn.state === "closing" || conn.ended) return false;
+    if (conn.process !== this) throw new Error('that connection belongs to another process');
+    if (conn.state === 'closed' || conn.state === 'closing' || conn.ended) return false;
     const bytes = toBytes(data);
     if (bytes.length > 0) {
       conn.queue.push({ kind: REC.DATA, bytes, offset: 0 });
@@ -894,20 +978,21 @@ export class WasiProcess extends Emitter {
 
   /** Half-closes `conn` (see Connection.end). */
   end(conn) {
-    if (conn.state === "closed" || conn.ended) return;
+    if (conn.state === 'closed' || conn.ended) return;
     conn.ended = true;
     this.#enqueue(conn, REC.END, EMPTY);
   }
 
   /** Closes `conn` (see Connection.close); `{ reset: true }` resets it instead. */
   close(conn, { reset = false } = {}) {
-    if (conn.state === "closed") return;
-    if (this.conns.get(conn.id) === conn && this.writer) this.#enqueue(conn, REC.CLOSE, Uint8Array.of(reset ? 1 : 0));
+    if (conn.state === 'closed') return;
+    if (this.conns.get(conn.id) === conn && this.writer)
+      this.#enqueue(conn, REC.CLOSE, Uint8Array.of(reset ? 1 : 0));
     this.conns.delete(conn.id);
     conn.inbox = [];
-    conn.state = "closed";
-    conn.closeInfo ??= { reason: "host", reset };
-    conn.emit("close", conn.closeInfo);
+    conn.state = 'closed';
+    conn.closeInfo ??= { reason: 'host', reset };
+    conn.emit('close', conn.closeInfo);
   }
 
   // ---- injected faults ----------------------------------------------------------------------
@@ -955,23 +1040,31 @@ export class WasiProcess extends Emitter {
    */
   setDisk(mode, ms = 0) {
     const code = DISK_MODES.indexOf(mode);
-    if (code < 0) throw new TypeError(`disk mode must be one of ${DISK_MODES.join(", ")}, not ${mode}`);
-    Atomics.store(this.faultI32, FAULT_DISK_MS, code === DISK.SLOW ? Math.max(0, Math.round(Number(ms) || 0)) : 0);
+    if (code < 0)
+      throw new TypeError(`disk mode must be one of ${DISK_MODES.join(', ')}, not ${mode}`);
+    Atomics.store(
+      this.faultI32,
+      FAULT_DISK_MS,
+      code === DISK.SLOW ? Math.max(0, Math.round(Number(ms) || 0)) : 0,
+    );
     this.#setFault(FAULT_DISK_MODE, code);
   }
 
   get disk() {
-    return { mode: DISK_MODES[Atomics.load(this.faultI32, FAULT_DISK_MODE)], ms: Atomics.load(this.faultI32, FAULT_DISK_MS) };
+    return {
+      mode: DISK_MODES[Atomics.load(this.faultI32, FAULT_DISK_MODE)],
+      ms: Atomics.load(this.faultI32, FAULT_DISK_MS),
+    };
   }
 
   // ---- requests and observability -----------------------------------------------------------
 
   #request(op, args = {}) {
-    if (this.state !== "running") return Promise.reject(new Error(`${this.name} is ${this.state}`));
+    if (this.state !== 'running') return Promise.reject(new Error(`${this.name} is ${this.state}`));
     const id = this.nextRequest++;
     return new Promise((resolve, reject) => {
       this.requests.set(id, { resolve, reject, op, seq: -1, inputSeq: -1 });
-      if (op === "idle") this.barriers.push(id);
+      if (op === 'idle') this.barriers.push(id);
       else this.ctrl.push([REC.REQUEST, id, encoder.encode(JSON.stringify({ op, ...args }))]);
       this.#schedulePump();
     });
@@ -1001,7 +1094,11 @@ export class WasiProcess extends Emitter {
   #covers(request, answer) {
     if (request.inputSeq !== this.inputSeq || this.#inputPending()) return false;
     if (!answer.writeBlocked) return true;
-    return request.seq === this.ringSeq && this.acks.size === 0 && !this.ctrl.some(([kind]) => kind === REC.ACK);
+    return (
+      request.seq === this.ringSeq &&
+      this.acks.size === 0 &&
+      !this.ctrl.some(([kind]) => kind === REC.ACK)
+    );
   }
 
   /**
@@ -1017,10 +1114,10 @@ export class WasiProcess extends Emitter {
    */
   async quiesce() {
     for (;;) {
-      if (this.state !== "running") return null;
+      if (this.state !== 'running') return null;
       let answer;
       try {
-        answer = await this.#request("idle");
+        answer = await this.#request('idle');
       } catch {
         return null;
       }
@@ -1036,39 +1133,43 @@ export class WasiProcess extends Emitter {
    * journal); after an exit it is the final snapshot.
    */
   async stats() {
-    const guest = this.state === "running" ? await this.#request("stats") : this.lastStats;
+    const guest = this.state === 'running' ? await this.#request('stats') : this.lastStats;
     return {
       name: this.name,
       state: this.state,
       incarnation: this.incarnation,
       guest,
-      host: { ...this.hostStats, connectionsOpen: this.conns.size, store: this.store ? { ...this.store.stats } : null },
+      host: {
+        ...this.hostStats,
+        connectionsOpen: this.conns.size,
+        store: this.store ? { ...this.store.stats } : null,
+      },
     };
   }
 
   /** Asks the guest to post its journal now, then waits until IndexedDB has committed it. */
   async flush() {
-    if (this.state === "running") await this.#request("flush");
+    if (this.state === 'running') await this.#request('flush');
     await this.store?.idle();
   }
 
   /** A file's bytes: live from the running guest, else as stored. Null when missing. */
   async readFile(path) {
-    if (this.state === "running") return this.#request("readFile", { path });
+    if (this.state === 'running') return this.#request('readFile', { path });
     if (this.volume === null) return null;
     await this.store?.idle();
-    const mount = this.mountPath.replace(/\/+$/, "");
+    const mount = this.mountPath.replace(/\/+$/, '');
     const relative = path.startsWith(`${mount}/`) ? path.slice(mount.length + 1) : path;
     return readVolumeFile(this.volume, relative);
   }
 
   /** A live directory listing `[{ name, type, size }]` from the running guest, or null. */
   listFiles(path) {
-    return this.#request("list", { path });
+    return this.#request('list', { path });
   }
 
   /** The last lines of "stdout" or "stderr". */
-  tail(stream = "stderr") {
+  tail(stream = 'stderr') {
     return [...this.logs[stream]];
   }
 }
@@ -1088,7 +1189,7 @@ export class WasiProcess extends Emitter {
  * @returns {Promise<WasiProcess>} once the module is instantiated and `_start` is about to run.
  */
 export async function spawn(options) {
-  if (!options || options.module === undefined) throw new TypeError("spawn() needs { module }");
+  if (!options || options.module === undefined) throw new TypeError('spawn() needs { module }');
   const problem = isolationProblem();
   if (problem) throw new Error(`cannot spawn: ${problem}`);
   const module = await compileModule(options.module);

@@ -19,8 +19,8 @@
 //   acknowledged (`REC.ACK`); beyond that it returns EAGAIN, and the socket
 //   becomes writable again when an acknowledgement frees room.
 
-import { ERRNO as E, FDFLAGS, FILETYPE, RIGHTS_CHARDEV, RIGHTS_SOCKET } from "./abi.js";
-import { DIAL_ID_BASE, OUT } from "./protocol.js";
+import { ERRNO as E, FDFLAGS, FILETYPE, RIGHTS_CHARDEV, RIGHTS_SOCKET } from './abi.js';
+import { DIAL_ID_BASE, OUT } from './protocol.js';
 
 const encoder = new TextEncoder();
 const MAX_DIAL_LINE = 1024;
@@ -30,13 +30,13 @@ export function parseAddress(text) {
   const t = text.trim();
   let host;
   let portText;
-  if (t.startsWith("[")) {
-    const close = t.indexOf("]");
-    if (close < 0 || t[close + 1] !== ":") return null;
+  if (t.startsWith('[')) {
+    const close = t.indexOf(']');
+    if (close < 0 || t[close + 1] !== ':') return null;
     host = t.slice(1, close);
     portText = t.slice(close + 2);
   } else {
-    const colon = t.lastIndexOf(":");
+    const colon = t.lastIndexOf(':');
     if (colon <= 0) return null;
     host = t.slice(0, colon);
     portText = t.slice(colon + 1);
@@ -49,7 +49,7 @@ export function parseAddress(text) {
 
 export class Listener {
   constructor(net, index, port) {
-    this.kind = "listener";
+    this.kind = 'listener';
     this.filetype = FILETYPE.SOCKET_STREAM;
     this.net = net;
     this.index = index;
@@ -96,14 +96,14 @@ export class Listener {
 
   close() {
     this.open = false;
-    for (const sock of this.pending) this.net.forget(sock, "no-listener");
+    for (const sock of this.pending) this.net.forget(sock, 'no-listener');
     this.pending = [];
   }
 }
 
 export class Socket {
   constructor(net, id, state) {
-    this.kind = "socket";
+    this.kind = 'socket';
     this.filetype = FILETYPE.SOCKET_STREAM;
     this.net = net;
     this.id = id;
@@ -146,19 +146,19 @@ export class Socket {
   }
 
   get ended() {
-    return this.readShut || this.peerEnd || this.peerReset || this.state === "failed";
+    return this.readShut || this.peerEnd || this.peerReset || this.state === 'failed';
   }
 
   pollRead() {
-    const hangup = this.peerEnd || this.peerReset || this.state === "failed";
+    const hangup = this.peerEnd || this.peerReset || this.state === 'failed';
     if (!this.readArmed || (this.rxBytes === 0 && !hangup && !this.readShut)) return null;
     this.readArmed = false;
     return { nbytes: this.rxBytes, hangup };
   }
 
   pollWrite() {
-    if (this.state === "connecting") return null;
-    const hangup = this.state === "failed" || this.peerClosed || this.peerReset;
+    if (this.state === 'connecting') return null;
+    const hangup = this.state === 'failed' || this.peerClosed || this.peerReset;
     const room = this.txRoom;
     if (!this.writeArmed || (!hangup && (this.writeShut || room <= 0))) return null;
     this.writeArmed = false;
@@ -167,12 +167,12 @@ export class Socket {
 
   /** Copies up to `len` received bytes into `dst[at..]`; returns the count or a negated errno. */
   read(dst, at, len, peek = false) {
-    if (this.state === "connecting") {
+    if (this.state === 'connecting') {
       this.readArmed = true;
       this.net.stats.readAgain++;
       return -E.AGAIN;
     }
-    if (this.state === "failed") {
+    if (this.state === 'failed') {
       if (this.failReported) return 0;
       this.failReported = true;
       return -this.failErrno;
@@ -219,13 +219,13 @@ export class Socket {
 
   /** Queues `len` bytes of guest output from `src[at..]`; returns the count or a negated errno. */
   write(src, at, len) {
-    if (this.state === "connecting") {
+    if (this.state === 'connecting') {
       this.writeArmed = true;
       this.net.stats.writeAgain++;
       return -E.AGAIN;
     }
-    if (this.state === "failed") return -this.failErrno;
-    if (this.writeShut || this.state === "closed") return -E.PIPE;
+    if (this.state === 'failed') return -this.failErrno;
+    if (this.writeShut || this.state === 'closed') return -E.PIPE;
     if (this.peerReset) return -E.CONNRESET;
     if (this.peerClosed) return -E.PIPE;
     const room = this.txRoom;
@@ -253,7 +253,7 @@ export class Socket {
   }
 
   shutdown(how) {
-    if (this.state === "connecting" || this.state === "failed") return E.NOTCONN;
+    if (this.state === 'connecting' || this.state === 'failed') return E.NOTCONN;
     if (how & 2 && !this.writeShut) {
       this.writeShut = true;
       this.net.flushSocket(this);
@@ -272,24 +272,24 @@ export class Socket {
   }
 
   close() {
-    if (this.state === "closed") return;
+    if (this.state === 'closed') return;
     this.net.flushSocket(this);
-    this.state = "closed";
-    this.net.forget(this, "closed");
+    this.state = 'closed';
+    this.net.forget(this, 'closed');
   }
 }
 
 /** The dialer: the guest writes `host:port\n` and reads back `<fd>\n` or `ERR <reason>\n`. */
 export class Dialer {
   constructor(net, allocFd) {
-    this.kind = "dialer";
+    this.kind = 'dialer';
     this.filetype = FILETYPE.CHARACTER_DEVICE;
     this.flags = 0;
     this.rightsBase = RIGHTS_CHARDEV;
     this.rightsInheriting = 0n;
     this.net = net;
     this.allocFd = allocFd;
-    this.line = "";
+    this.line = '';
     this.replies = [];
     this.fd = -1;
   }
@@ -306,14 +306,14 @@ export class Dialer {
         continue;
       }
       const line = this.line;
-      this.line = "";
+      this.line = '';
       this.replies.push(encoder.encode(`${this.#dial(line)}\n`));
     }
     return len;
   }
 
   #dial(line) {
-    if (line.length >= MAX_DIAL_LINE) return "ERR address too long";
+    if (line.length >= MAX_DIAL_LINE) return 'ERR address too long';
     const address = parseAddress(line);
     if (!address) return `ERR bad address ${JSON.stringify(line)}`;
     const sock = this.net.dial(address.host, address.port);
@@ -345,7 +345,7 @@ export class Dialer {
 /** stdin: always at its end. */
 export class StdinFd {
   constructor() {
-    this.kind = "stdin";
+    this.kind = 'stdin';
     this.filetype = FILETYPE.CHARACTER_DEVICE;
     this.flags = 0;
     this.rightsBase = RIGHTS_CHARDEV;
@@ -378,7 +378,7 @@ export class StdinFd {
 /** stdout or stderr: UTF-8 split into lines, each handed to `emit(line)`. */
 export class LogFd {
   constructor(fd, emit, maxLine) {
-    this.kind = "log";
+    this.kind = 'log';
     this.fd = fd;
     this.filetype = FILETYPE.CHARACTER_DEVICE;
     this.flags = FDFLAGS.APPEND;
@@ -386,8 +386,8 @@ export class LogFd {
     this.rightsInheriting = 0n;
     this.emit = emit;
     this.maxLine = maxLine;
-    this.decoder = new TextDecoder("utf-8");
-    this.partial = "";
+    this.decoder = new TextDecoder('utf-8');
+    this.partial = '';
   }
 
   get mayBlock() {
@@ -401,10 +401,10 @@ export class LogFd {
   write(src, at, len) {
     this.partial += this.decoder.decode(src.subarray(at, at + len), { stream: true });
     let newline;
-    while ((newline = this.partial.indexOf("\n")) >= 0) {
+    while ((newline = this.partial.indexOf('\n')) >= 0) {
       const line = this.partial.slice(0, newline);
       this.partial = this.partial.slice(newline + 1);
-      this.emit(line.endsWith("\r") ? line.slice(0, -1) : line);
+      this.emit(line.endsWith('\r') ? line.slice(0, -1) : line);
     }
     while (this.partial.length > this.maxLine) {
       this.emit(this.partial.slice(0, this.maxLine));
@@ -417,7 +417,7 @@ export class LogFd {
   flushPartial() {
     this.partial += this.decoder.decode();
     if (this.partial.length > 0) this.emit(this.partial);
-    this.partial = "";
+    this.partial = '';
   }
 
   pollRead() {
@@ -482,10 +482,10 @@ export class VirtualNet {
     const listener = this.listeners[index];
     if (!listener || !listener.open || listener.pending.length >= this.backlog) {
       this.stats.refusedConnects++;
-      this.outbox.push([OUT.CLOSE, id, listener && listener.open ? "backlog" : "no-listener"]);
+      this.outbox.push([OUT.CLOSE, id, listener && listener.open ? 'backlog' : 'no-listener']);
       return;
     }
-    const sock = new Socket(this, id, "open");
+    const sock = new Socket(this, id, 'open');
     this.#track(sock);
     listener.pending.push(sock);
   }
@@ -517,13 +517,13 @@ export class VirtualNet {
 
   onDialOk(id) {
     const sock = this.sockets.get(id);
-    if (sock && sock.state === "connecting") sock.state = "open";
+    if (sock && sock.state === 'connecting') sock.state = 'open';
   }
 
   onDialFail(id, errno) {
     const sock = this.sockets.get(id);
-    if (!sock || sock.state !== "connecting") return;
-    sock.state = "failed";
+    if (!sock || sock.state !== 'connecting') return;
+    sock.state = 'failed';
     sock.failErrno = errno || E.CONNREFUSED;
     this.stats.dialsRefused++;
   }
@@ -535,7 +535,7 @@ export class VirtualNet {
 
   /** A new outbound socket in state "connecting"; the host decides its fate. */
   dial(host, port) {
-    const sock = new Socket(this, this.nextDialId, "connecting");
+    const sock = new Socket(this, this.nextDialId, 'connecting');
     this.nextDialId = this.nextDialId >= 0xffff_fff0 ? DIAL_ID_BASE : this.nextDialId + 1;
     this.#track(sock);
     this.stats.dials++;
@@ -581,7 +581,14 @@ export class VirtualNet {
    */
   writeBlocked() {
     for (const sock of this.sockets.values()) {
-      if (sock.state === "open" && sock.writeArmed && sock.txRoom <= 0 && !sock.writeShut && !sock.peerClosed) return true;
+      if (
+        sock.state === 'open' &&
+        sock.writeArmed &&
+        sock.txRoom <= 0 &&
+        !sock.writeShut &&
+        !sock.peerClosed
+      )
+        return true;
     }
     return false;
   }

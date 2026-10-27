@@ -21,21 +21,21 @@
 // A process holds a Web Lock on its volume while it runs, so two tabs cannot
 // write the same volume; `forget` and `importVolume` refuse a volume in use.
 
-import { PAGE_SIZE } from "./protocol.js";
-import { decodeTar, encodeTar } from "./tar.js";
+import { PAGE_SIZE } from './protocol.js';
+import { decodeTar, encodeTar } from './tar.js';
 
-export const DB_NAME = "krabka-wasi";
+export const DB_NAME = 'krabka-wasi';
 export const DB_VERSION = 1;
-const NODES = "nodes";
-const CHUNKS = "chunks";
-const VOLUMES = "volumes";
-const LOCK_PREFIX = "krabka-wasi:volume:";
+const NODES = 'nodes';
+const CHUNKS = 'chunks';
+const VOLUMES = 'volumes';
+const LOCK_PREFIX = 'krabka-wasi:volume:';
 
 let opening = null;
 
 export function storageAvailable() {
   try {
-    return typeof indexedDB !== "undefined" && indexedDB !== null;
+    return typeof indexedDB !== 'undefined' && indexedDB !== null;
   } catch {
     return false;
   }
@@ -43,12 +43,14 @@ export function storageAvailable() {
 
 /** Opens (and on first use creates) the database. */
 export function openDb() {
-  if (!storageAvailable()) return Promise.reject(new Error("IndexedDB is unavailable in this browser context"));
+  if (!storageAvailable())
+    return Promise.reject(new Error('IndexedDB is unavailable in this browser context'));
   opening ??= new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      for (const name of [NODES, CHUNKS, VOLUMES]) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      for (const name of [NODES, CHUNKS, VOLUMES])
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -62,7 +64,8 @@ export function openDb() {
       opening = null;
       reject(request.error ?? new Error(`cannot open IndexedDB ${DB_NAME}`));
     };
-    request.onblocked = () => reject(new Error(`IndexedDB ${DB_NAME} is blocked by another tab holding an older version`));
+    request.onblocked = () =>
+      reject(new Error(`IndexedDB ${DB_NAME} is blocked by another tab holding an older version`));
   });
   return opening;
 }
@@ -70,26 +73,29 @@ export function openDb() {
 function result(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
   });
 }
 
 function completion(tx) {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
   });
 }
 
 function checkVolume(volume) {
-  if (typeof volume !== "string" || volume.length === 0) throw new TypeError(`a volume id is a non-empty string, not ${JSON.stringify(volume)}`);
+  if (typeof volume !== 'string' || volume.length === 0)
+    throw new TypeError(`a volume id is a non-empty string, not ${JSON.stringify(volume)}`);
 }
 
 const volumeRange = (volume) => IDBKeyRange.bound([volume], [volume, []]);
-const inodeRange = (volume, ino, from = 0) => IDBKeyRange.bound([volume, ino, from], [volume, ino, []]);
+const inodeRange = (volume, ino, from = 0) =>
+  IDBKeyRange.bound([volume, ino, from], [volume, ino, []]);
 /** Every path strictly below directory `path` ("/" sorts right before "0"). */
-const belowRange = (volume, path) => IDBKeyRange.bound([volume, `${path}/`], [volume, `${path}0`], false, true);
+const belowRange = (volume, path) =>
+  IDBKeyRange.bound([volume, `${path}/`], [volume, `${path}0`], false, true);
 
 // ---- locks ----------------------------------------------------------------------------------
 
@@ -102,7 +108,7 @@ const heldInPage = new Set();
 export function lockVolume(volume) {
   checkVolume(volume);
   const name = LOCK_PREFIX + volume;
-  if (typeof navigator === "undefined" || !navigator.locks) {
+  if (typeof navigator === 'undefined' || !navigator.locks) {
     if (heldInPage.has(name)) return Promise.reject(new Error(`volume ${volume} is in use`));
     heldInPage.add(name);
     return Promise.resolve(() => heldInPage.delete(name));
@@ -111,7 +117,9 @@ export function lockVolume(volume) {
     navigator.locks
       .request(name, { ifAvailable: true }, (lock) => {
         if (!lock) {
-          reject(new Error(`volume ${volume} is in use by a running process (in this tab or another)`));
+          reject(
+            new Error(`volume ${volume} is in use by a running process (in this tab or another)`),
+          );
           return undefined;
         }
         return new Promise((release) => resolve(() => release()));
@@ -138,7 +146,7 @@ async function withVolumeFree(volume, fn) {
 export async function loadImage(volume) {
   checkVolume(volume);
   const db = await openDb();
-  const tx = db.transaction([NODES, CHUNKS, VOLUMES], "readonly");
+  const tx = db.transaction([NODES, CHUNKS, VOLUMES], 'readonly');
   const nodes = tx.objectStore(NODES);
   const chunks = tx.objectStore(CHUNKS);
   const range = volumeRange(volume);
@@ -170,38 +178,53 @@ function assemble(size, pieces) {
 /** A stored file's bytes (as last committed), or null when the path is missing or a directory. */
 export async function readVolumeFile(volume, path) {
   checkVolume(volume);
-  const key = path.replace(/^\/+|\/+$/g, "");
+  const key = path.replace(/^\/+|\/+$/g, '');
   const db = await openDb();
-  const tx = db.transaction([NODES, CHUNKS], "readonly");
+  const tx = db.transaction([NODES, CHUNKS], 'readonly');
   const node = await result(tx.objectStore(NODES).get([volume, key]));
-  if (!node || node.type !== "file") return null;
+  if (!node || node.type !== 'file') return null;
   const range = inodeRange(volume, node.ino);
   const chunks = tx.objectStore(CHUNKS);
-  const [keys, values] = await Promise.all([result(chunks.getAllKeys(range)), result(chunks.getAll(range))]);
-  return assemble(node.size, keys.map((k, i) => ({ index: k[2], bytes: values[i] })));
+  const [keys, values] = await Promise.all([
+    result(chunks.getAllKeys(range)),
+    result(chunks.getAll(range)),
+  ]);
+  return assemble(
+    node.size,
+    keys.map((k, i) => ({ index: k[2], bytes: values[i] })),
+  );
 }
 
 /** File metadata from one broker volume, without loading any file contents. */
 export async function listVolumeFiles(volume) {
   checkVolume(volume);
   const db = await openDb();
-  const store = db.transaction(NODES, "readonly").objectStore(NODES);
+  const store = db.transaction(NODES, 'readonly').objectStore(NODES);
   const range = volumeRange(volume);
-  const [keys, values] = await Promise.all([result(store.getAllKeys(range)), result(store.getAll(range))]);
-  return keys.map((key, i) => ({ path: key[1], ...values[i] })).filter((n) => n.type === "file");
+  const [keys, values] = await Promise.all([
+    result(store.getAllKeys(range)),
+    result(store.getAll(range)),
+  ]);
+  return keys.map((key, i) => ({ path: key[1], ...values[i] })).filter((n) => n.type === 'file');
 }
 
 /** A bounded view of a stored file. Missing sparse chunks read as zero bytes. */
 export async function readVolumeFileRange(volume, path, offset, length) {
   checkVolume(volume);
-  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 4096) {
-    throw new RangeError("file range must use a non-negative offset and 1–4096 bytes");
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    !Number.isSafeInteger(length) ||
+    length < 1 ||
+    length > 4096
+  ) {
+    throw new RangeError('file range must use a non-negative offset and 1–4096 bytes');
   }
-  const key = path.replace(/^\/+|\/+$/g, "");
+  const key = path.replace(/^\/+|\/+$/g, '');
   const db = await openDb();
-  const tx = db.transaction([NODES, CHUNKS], "readonly");
+  const tx = db.transaction([NODES, CHUNKS], 'readonly');
   const node = await result(tx.objectStore(NODES).get([volume, key]));
-  if (!node || node.type !== "file") return null;
+  if (!node || node.type !== 'file') return null;
   const count = Math.min(length, Math.max(0, node.size - offset));
   const bytes = new Uint8Array(count);
   if (!count) return { size: node.size, offset, bytes };
@@ -209,7 +232,10 @@ export async function readVolumeFileRange(volume, path, offset, length) {
   const last = Math.floor((offset + count - 1) / PAGE_SIZE);
   const range = IDBKeyRange.bound([volume, node.ino, first], [volume, node.ino, last]);
   const chunks = tx.objectStore(CHUNKS);
-  const [keys, values] = await Promise.all([result(chunks.getAllKeys(range)), result(chunks.getAll(range))]);
+  const [keys, values] = await Promise.all([
+    result(chunks.getAllKeys(range)),
+    result(chunks.getAll(range)),
+  ]);
   keys.forEach((k, i) => {
     const pageStart = k[2] * PAGE_SIZE;
     const from = Math.max(offset, pageStart);
@@ -222,7 +248,7 @@ export async function readVolumeFileRange(volume, path, offset, length) {
 /** The volumes this origin stores: `[{ id, nextIno, created, updated }]`. */
 export async function listVolumes() {
   const db = await openDb();
-  const store = db.transaction(VOLUMES, "readonly").objectStore(VOLUMES);
+  const store = db.transaction(VOLUMES, 'readonly').objectStore(VOLUMES);
   const [keys, values] = await Promise.all([result(store.getAllKeys()), result(store.getAll())]);
   return keys.map((id, i) => ({ id, ...values[i] }));
 }
@@ -234,7 +260,7 @@ export async function listVolumes() {
 export async function usage(volume) {
   checkVolume(volume);
   const db = await openDb();
-  const tx = db.transaction([NODES, CHUNKS], "readonly");
+  const tx = db.transaction([NODES, CHUNKS], 'readonly');
   const nodes = await result(tx.objectStore(NODES).getAll(volumeRange(volume)));
   let storedBytes = 0;
   let chunks = 0;
@@ -252,7 +278,7 @@ export async function usage(volume) {
     };
     request.onerror = () => reject(request.error);
   });
-  const files = nodes.filter((n) => n.type === "file");
+  const files = nodes.filter((n) => n.type === 'file');
   return {
     files: files.length,
     dirs: nodes.length - files.length,
@@ -269,12 +295,15 @@ async function rename(nodes, chunks, volume, from, to) {
   if (!source) return;
   const target = await result(nodes.get([volume, to]));
   if (target) {
-    if (target.type === "file") chunks.delete(inodeRange(volume, target.ino));
+    if (target.type === 'file') chunks.delete(inodeRange(volume, target.ino));
     nodes.delete([volume, to]);
   }
-  if (source.type === "dir") {
+  if (source.type === 'dir') {
     const below = belowRange(volume, from);
-    const [keys, values] = await Promise.all([result(nodes.getAllKeys(below)), result(nodes.getAll(below))]);
+    const [keys, values] = await Promise.all([
+      result(nodes.getAllKeys(below)),
+      result(nodes.getAll(below)),
+    ]);
     nodes.delete(below);
     keys.forEach((key, i) => nodes.put(values[i], [volume, to + key[1].slice(from.length)]));
   }
@@ -284,7 +313,7 @@ async function rename(nodes, chunks, volume, from, to) {
 
 /** Applies journal ops (see fs.js) to one volume in one transaction. */
 async function apply(db, volume, ops, nextIno) {
-  const tx = db.transaction([NODES, CHUNKS, VOLUMES], "readwrite");
+  const tx = db.transaction([NODES, CHUNKS, VOLUMES], 'readwrite');
   const done = completion(tx);
   const nodes = tx.objectStore(NODES);
   const chunks = tx.objectStore(CHUNKS);
@@ -293,40 +322,56 @@ async function apply(db, volume, ops, nextIno) {
     const meta = await result(volumes.get(volume));
     for (const op of ops) {
       switch (op[0]) {
-        case "mkdir":
-          nodes.put({ type: "dir", ino: op[2], size: 0, atime: op[3], mtime: op[3] }, [volume, op[1]]);
+        case 'mkdir':
+          nodes.put({ type: 'dir', ino: op[2], size: 0, atime: op[3], mtime: op[3] }, [
+            volume,
+            op[1],
+          ]);
           break;
-        case "create":
-          nodes.put({ type: "file", ino: op[2], size: 0, atime: op[3], mtime: op[3] }, [volume, op[1]]);
+        case 'create':
+          nodes.put({ type: 'file', ino: op[2], size: 0, atime: op[3], mtime: op[3] }, [
+            volume,
+            op[1],
+          ]);
           break;
-        case "unlink": {
+        case 'unlink': {
           const node = await result(nodes.get([volume, op[1]]));
-          if (node && node.type === "file") chunks.delete(inodeRange(volume, node.ino));
+          if (node && node.type === 'file') chunks.delete(inodeRange(volume, node.ino));
           nodes.delete([volume, op[1]]);
           break;
         }
-        case "rmdir":
+        case 'rmdir':
           nodes.delete([volume, op[1]]);
           break;
-        case "rename":
+        case 'rename':
           await rename(nodes, chunks, volume, op[1], op[2]);
           break;
-        case "size":
+        case 'size':
           chunks.delete(inodeRange(volume, op[1], Math.ceil(op[2] / PAGE_SIZE)));
           break;
-        case "page":
+        case 'page':
           if (op[3].length === 0) chunks.delete([volume, op[1], op[2]]);
           else chunks.put(op[3], [volume, op[1], op[2]]);
           break;
-        case "attr":
-          nodes.put({ type: op[2], ino: op[3], size: op[4], atime: op[5], mtime: op[6] }, [volume, op[1]]);
+        case 'attr':
+          nodes.put({ type: op[2], ino: op[3], size: op[4], atime: op[5], mtime: op[6] }, [
+            volume,
+            op[1],
+          ]);
           break;
         default:
           throw new Error(`unknown journal op ${JSON.stringify(op[0])}`);
       }
     }
     const now = Date.now();
-    volumes.put({ nextIno: Math.max(nextIno, meta?.nextIno ?? 2), created: meta?.created ?? now, updated: now }, volume);
+    volumes.put(
+      {
+        nextIno: Math.max(nextIno, meta?.nextIno ?? 2),
+        created: meta?.created ?? now,
+        updated: now,
+      },
+      volume,
+    );
   } catch (err) {
     try {
       tx.abort();
@@ -395,7 +440,7 @@ export async function forget(volume) {
   checkVolume(volume);
   await withVolumeFree(volume, async () => {
     const db = await openDb();
-    const tx = db.transaction([NODES, CHUNKS, VOLUMES], "readwrite");
+    const tx = db.transaction([NODES, CHUNKS, VOLUMES], 'readwrite');
     const done = completion(tx);
     tx.objectStore(NODES).delete(volumeRange(volume));
     tx.objectStore(CHUNKS).delete(volumeRange(volume));
@@ -421,7 +466,7 @@ export async function exportVolume(volume) {
       path: node.path,
       type: node.type,
       mtimeMs: Number(BigInt(node.mtime ?? 0) / 1_000_000n),
-      bytes: node.type === "file" ? assemble(node.size, byIno.get(node.ino) ?? []) : undefined,
+      bytes: node.type === 'file' ? assemble(node.size, byIno.get(node.ino) ?? []) : undefined,
     })),
   );
 }
@@ -434,11 +479,14 @@ export async function exportVolume(volume) {
  */
 export async function importVolume(volume, archive) {
   checkVolume(volume);
-  const bytes = archive instanceof Uint8Array ? archive : new Uint8Array(await new Response(archive).arrayBuffer());
+  const bytes =
+    archive instanceof Uint8Array
+      ? archive
+      : new Uint8Array(await new Response(archive).arrayBuffer());
   const { entries, skipped } = decodeTar(bytes);
   return withVolumeFree(volume, async () => {
     const db = await openDb();
-    const tx = db.transaction([NODES, CHUNKS, VOLUMES], "readwrite");
+    const tx = db.transaction([NODES, CHUNKS, VOLUMES], 'readwrite');
     const done = completion(tx);
     const nodes = tx.objectStore(NODES);
     const chunks = tx.objectStore(CHUNKS);
@@ -454,28 +502,31 @@ export async function importVolume(volume, archive) {
       return ino++;
     };
     const ensureParents = (path) => {
-      const parts = path.split("/");
+      const parts = path.split('/');
       for (let i = 1; i < parts.length; i++) {
-        const dir = parts.slice(0, i).join("/");
+        const dir = parts.slice(0, i).join('/');
         if (!dirs.has(dir)) {
           dirs.add(dir);
-          put(dir, "dir", 0, Date.now());
+          put(dir, 'dir', 0, Date.now());
         }
       }
     };
     for (const entry of entries) {
       ensureParents(entry.path);
-      if (entry.type === "dir") {
+      if (entry.type === 'dir') {
         if (dirs.has(entry.path)) continue;
         dirs.add(entry.path);
-        put(entry.path, "dir", 0, entry.mtimeMs);
+        put(entry.path, 'dir', 0, entry.mtimeMs);
         continue;
       }
-      const fileIno = put(entry.path, "file", entry.bytes.length, entry.mtimeMs);
+      const fileIno = put(entry.path, 'file', entry.bytes.length, entry.mtimeMs);
       files++;
       total += entry.bytes.length;
       for (let index = 0; index * PAGE_SIZE < entry.bytes.length; index++) {
-        const page = entry.bytes.subarray(index * PAGE_SIZE, Math.min(entry.bytes.length, (index + 1) * PAGE_SIZE));
+        const page = entry.bytes.subarray(
+          index * PAGE_SIZE,
+          Math.min(entry.bytes.length, (index + 1) * PAGE_SIZE),
+        );
         if (page.every((b) => b === 0)) continue;
         chunks.put(page.slice(), [volume, fileIno, index]);
       }

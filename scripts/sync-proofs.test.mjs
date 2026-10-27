@@ -11,7 +11,11 @@ test('proof outputs survive malformed or empty input and valid sessions carry co
   const dir = fs.mkdtempSync(path.join(root, '.proof-sync-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const verif = path.join(dir, 'verif/krabka_verified_rlib/module');
-  const options = { dataOut: path.join(dir, 'data/sessions.json'), comaOut: path.join(dir, 'public/coma'), catalogFile: path.join(dir, 'no-catalog.md') };
+  const options = {
+    dataOut: path.join(dir, 'data/sessions.json'),
+    comaOut: path.join(dir, 'public/coma'),
+    catalogFile: path.join(dir, 'no-catalog.md'),
+  };
   fs.mkdirSync(path.join(verif, 'kernel'), { recursive: true });
   fs.mkdirSync(options.comaOut, { recursive: true });
   fs.mkdirSync(path.dirname(options.dataOut), { recursive: true });
@@ -20,16 +24,25 @@ test('proof outputs survive malformed or empty input and valid sessions carry co
   fs.writeFileSync(path.join(verif, 'kernel/proof.json'), '{broken');
   assert.throws(() => syncProofs(dir, options), SyntaxError);
   assert.equal(fs.readFileSync(options.dataOut, 'utf8'), 'previous data');
-  assert.equal(fs.readFileSync(path.join(options.comaOut, 'previous.coma'), 'utf8'), 'previous coma');
+  assert.equal(
+    fs.readFileSync(path.join(options.comaOut, 'previous.coma'), 'utf8'),
+    'previous coma',
+  );
   fs.rmSync(path.join(verif, 'kernel'), { recursive: true });
   assert.throws(() => syncProofs(dir, options), /no proof sessions/);
   assert.equal(fs.readFileSync(options.dataOut, 'utf8'), 'previous data');
   fs.mkdirSync(path.join(verif, 'kernel'));
-  fs.writeFileSync(path.join(verif, 'kernel/proof.json'), JSON.stringify({ proofs: { Theory: { Goal: { prover: 'Z3', time: 0.01 } } } }));
+  fs.writeFileSync(
+    path.join(verif, 'kernel/proof.json'),
+    JSON.stringify({ proofs: { Theory: { Goal: { prover: 'Z3', time: 0.01 } } } }),
+  );
   fs.writeFileSync(path.join(verif, 'kernel.coma'), 'let x = 1');
   const data = syncProofs(dir, options);
   assert.match(data.source.commit, /^[a-f\d]{40,64}$/i);
   assert.equal(data.totals.sessions, 1);
-  assert.equal(fs.readFileSync(path.join(options.comaOut, 'module/kernel.coma'), 'utf8'), 'let x = 1');
+  assert.equal(
+    fs.readFileSync(path.join(options.comaOut, 'module/kernel.coma'), 'utf8'),
+    'let x = 1',
+  );
   assert.equal(fs.existsSync(path.join(options.comaOut, 'previous.coma')), false);
 });

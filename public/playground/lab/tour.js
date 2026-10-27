@@ -7,13 +7,13 @@
 // kill it, restart it), so the tour ends with a cluster that was broken and
 // healed. It opens by itself once per browser and any time from the toolbar.
 
-import { el, button } from "./dom.js";
+import { el, button } from './dom.js';
 
-const STORAGE_KEY = "krabka-lab.tour";
+const STORAGE_KEY = 'krabka-lab.tour';
 
 function seen() {
   try {
-    return localStorage.getItem(STORAGE_KEY) === "done";
+    return localStorage.getItem(STORAGE_KEY) === 'done';
   } catch {
     return false;
   }
@@ -21,7 +21,7 @@ function seen() {
 
 function remember() {
   try {
-    localStorage.setItem(STORAGE_KEY, "done");
+    localStorage.setItem(STORAGE_KEY, 'done');
   } catch {
     // Without storage the tour simply opens again next time.
   }
@@ -34,15 +34,15 @@ export class Tour {
     this.hooks = hooks;
     this.index = -1;
     this.highlighted = null;
-    this.root = el("section", "lab-tour");
+    this.root = el('section', 'lab-tour');
     // A dialog that leaves the page usable: focus moves into it on each step
     // the reader asks for, so a screen reader announces the title and text.
-    this.root.setAttribute("role", "dialog");
-    this.root.setAttribute("aria-labelledby", "lab-tour-title");
-    this.root.setAttribute("aria-describedby", "lab-tour-text");
+    this.root.setAttribute('role', 'dialog');
+    this.root.setAttribute('aria-labelledby', 'lab-tour-title');
+    this.root.setAttribute('aria-describedby', 'lab-tour-text');
     this.root.hidden = true;
     container.appendChild(this.root);
-    this.lab = container.closest("#krabka-lab");
+    this.lab = container.closest('#krabka-lab');
     this.opener = null;
   }
 
@@ -99,7 +99,7 @@ export class Tour {
   }
 
   clearHighlight() {
-    if (this.highlighted) this.highlighted.classList.remove("lab-tour-target");
+    if (this.highlighted) this.highlighted.classList.remove('lab-tour-target');
     this.highlighted = null;
   }
 
@@ -113,30 +113,33 @@ export class Tour {
     this.clearHighlight();
     const target = step.target && this.lab ? this.lab.querySelector(step.target) : null;
     if (target) {
-      target.classList.add("lab-tour-target");
+      target.classList.add('lab-tour-target');
       this.highlighted = target;
     }
     this.root.hidden = false;
     this.root.replaceChildren();
     const last = this.index === steps.length - 1;
-    const head = el("div", "lab-tour-head");
-    head.append(el("span", "lab-tour-step", `Step ${this.index + 1} of ${steps.length}`), button("Skip tour", "lab-btn-sm lab-tour-skip", () => this.close()));
-    const title = el("h3", "lab-tour-title", step.title);
-    const text = el("p", "lab-tour-text", step.text);
-    title.id = "lab-tour-title";
-    text.id = "lab-tour-text";
+    const head = el('div', 'lab-tour-head');
+    head.append(
+      el('span', 'lab-tour-step', `Step ${this.index + 1} of ${steps.length}`),
+      button('Skip tour', 'lab-btn-sm lab-tour-skip', () => this.close()),
+    );
+    const title = el('h3', 'lab-tour-title', step.title);
+    const text = el('p', 'lab-tour-text', step.text);
+    title.id = 'lab-tour-title';
+    text.id = 'lab-tour-text';
     this.root.append(head, title, text);
     if (step.action) {
       this.root.appendChild(
-        button(step.action.label, "lab-btn-sm lab-tour-action", () => {
+        button(step.action.label, 'lab-btn-sm lab-tour-action', () => {
           step.action.run();
         }),
       );
     }
-    const nav = el("div", "lab-tour-nav");
-    const back = button("Back", "lab-btn-sm", () => this.go(-1));
+    const nav = el('div', 'lab-tour-nav');
+    const back = button('Back', 'lab-btn-sm', () => this.go(-1));
     back.disabled = this.index === 0;
-    const next = button(last ? "Done" : "Next", "lab-btn-sm lab-primary", () => this.go(1));
+    const next = button(last ? 'Done' : 'Next', 'lab-btn-sm lab-primary', () => this.go(1));
     nav.append(back, next);
     this.root.appendChild(nav);
     // Stacked, the part of the page a step points at can be screens away, or
@@ -145,8 +148,12 @@ export class Tour {
     const box = this.highlighted?.getBoundingClientRect();
     const card = this.root.getBoundingClientRect();
     const shown = Math.min(window.innerHeight, card.top);
-    const covered = box ? Math.max(0, Math.min(box.right, card.right) - Math.max(box.left, card.left)) * Math.max(0, Math.min(box.bottom, card.bottom) - Math.max(box.top, card.top)) : 0;
-    if (box && (box.bottom < 64 || box.top > shown - 48 || covered > 0.4 * box.width * box.height)) this.highlighted.scrollIntoView({ block: "start", behavior: "smooth" });
+    const covered = box
+      ? Math.max(0, Math.min(box.right, card.right) - Math.max(box.left, card.left)) *
+        Math.max(0, Math.min(box.bottom, card.bottom) - Math.max(box.top, card.top))
+      : 0;
+    if (box && (box.bottom < 64 || box.top > shown - 48 || covered > 0.4 * box.width * box.height))
+      this.highlighted.scrollIntoView({ block: 'start', behavior: 'smooth' });
     // The buttons were rebuilt, so the one the reader pressed is gone; the
     // next step's own button takes the focus.
     if (focus) next.focus({ preventScroll: true });

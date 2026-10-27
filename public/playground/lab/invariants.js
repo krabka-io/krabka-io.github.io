@@ -39,11 +39,11 @@
 //                      aborted transaction
 
 export const CHECKS = {
-  acked_lost: "No acknowledged record lost",
-  offset_regression: "Consumer offsets only move forward",
-  split_leader: "One leader per partition and leader epoch",
-  split_quorum: "One KRaft quorum leader per epoch",
-  aborted_read: "read_committed never sees aborted records",
+  acked_lost: 'No acknowledged record lost',
+  offset_regression: 'Consumer offsets only move forward',
+  split_leader: 'One leader per partition and leader epoch',
+  split_quorum: 'One KRaft quorum leader per epoch',
+  aborted_read: 'read_committed never sees aborted records',
 };
 
 // How long a high watermark may stand at or below an acked offset before the
@@ -53,7 +53,7 @@ export const STALL_MS = 60_000;
 // How long a reset_offsets excuses a regression after it completed.
 const RESET_GRACE_MS = 30_000;
 
-const isAll = (acks) => acks === -1 || acks === "-1" || acks === "all";
+const isAll = (acks) => acks === -1 || acks === '-1' || acks === 'all';
 
 export class InvariantChecker {
   constructor() {
@@ -91,7 +91,8 @@ export class InvariantChecker {
       fresh.push(out);
     };
     for (const e of events || []) {
-      if (e.kind === "admin_done" && e.detail?.cmd === "reset_offsets") this.resets.push({ group: e.detail.group ?? null, at: e.at ?? now });
+      if (e.kind === 'admin_done' && e.detail?.cmd === 'reset_offsets')
+        this.resets.push({ group: e.detail.group ?? null, at: e.at ?? now });
     }
     const config = (id) => scenario?.nodes?.find((n) => n.id === id)?.config || {};
 
@@ -99,9 +100,10 @@ export class InvariantChecker {
     // polls that completed after it.
     for (const n of snapshot.nodes) {
       const s = n.state;
-      if (n.kind !== "producer" || !s || !isAll(s.acks ?? config(n.id).acks) || !s.acked_upto) continue;
+      if (n.kind !== 'producer' || !s || !isAll(s.acks ?? config(n.id).acks) || !s.acked_upto)
+        continue;
       for (const [tp, off] of Object.entries(s.acked_upto)) {
-        if (typeof off !== "number") continue;
+        if (typeof off !== 'number') continue;
         let list = this.acked.get(tp);
         if (!list) this.acked.set(tp, (list = []));
         const last = list[list.length - 1];
@@ -118,22 +120,38 @@ export class InvariantChecker {
 
     for (const n of snapshot.nodes) {
       const s = n.state;
-      if (n.kind !== "consumer" || !s) continue;
+      if (n.kind !== 'consumer' || !s) continue;
       const group = s.group ?? config(n.id).group ?? null;
       for (const r of s.offset_regressions || []) {
         const key = `${n.id}:${r.tp}:${r.from}:${r.to}:${r.at}`;
         if (this.regressions.has(key)) continue;
         this.regressions.add(key);
         const at = r.at ?? now;
-        const excused = this.resets.some((x) => (x.group == null || x.group === group) && x.at <= at && at - x.at <= RESET_GRACE_MS);
-        if (!excused) add({ at, check: "offset_regression", node: n.id, text: `position of ${r.tp} went back from ${r.from} to ${r.to} without a reset_offsets`, data: r });
+        const excused = this.resets.some(
+          (x) =>
+            (x.group == null || x.group === group) && x.at <= at && at - x.at <= RESET_GRACE_MS,
+        );
+        if (!excused)
+          add({
+            at,
+            check: 'offset_regression',
+            node: n.id,
+            text: `position of ${r.tp} went back from ${r.from} to ${r.to} without a reset_offsets`,
+            data: r,
+          });
       }
       const iso = s.isolation_level ?? config(n.id).isolation_level;
       const seen = s.aborted_seen ?? 0;
       const before = this.aborted.get(n.id) ?? 0;
       this.aborted.set(n.id, seen);
-      if (iso === "read_committed" && seen > before) {
-        add({ at: now, check: "aborted_read", node: n.id, text: `received ${seen - before} record${seen - before === 1 ? "" : "s"} of aborted transactions under read_committed (${seen} in all)`, data: { aborted_seen: seen } });
+      if (iso === 'read_committed' && seen > before) {
+        add({
+          at: now,
+          check: 'aborted_read',
+          node: n.id,
+          text: `received ${seen - before} record${seen - before === 1 ? '' : 's'} of aborted transactions under read_committed (${seen} in all)`,
+          data: { aborted_seen: seen },
+        });
       }
     }
     return fresh;
@@ -146,7 +164,13 @@ export class InvariantChecker {
       const prev = this.quorum.get(q.epoch);
       if (prev == null) this.quorum.set(q.epoch, q.leader);
       else if (prev !== q.leader && this.once(`q${q.epoch}`)) {
-        add({ at, check: "split_quorum", node: null, text: `KRaft epoch ${q.epoch} had two leaders: ${prev} and ${q.leader}`, data: { epoch: q.epoch, leaders: [prev, q.leader] } });
+        add({
+          at,
+          check: 'split_quorum',
+          node: null,
+          text: `KRaft epoch ${q.epoch} had two leaders: ${prev} and ${q.leader}`,
+          data: { epoch: q.epoch, leaders: [prev, q.leader] },
+        });
       }
     }
     const present = new Set();
@@ -160,7 +184,13 @@ export class InvariantChecker {
           const prev = this.leaders.get(key);
           if (prev == null) this.leaders.set(key, p.leader);
           else if (prev !== p.leader && this.once(`l${key}`)) {
-            add({ at, check: "split_leader", node: null, text: `${tp} had two leaders in epoch ${p.leader_epoch}: ${prev} and ${p.leader}`, data: { tp, epoch: p.leader_epoch, leaders: [prev, p.leader] } });
+            add({
+              at,
+              check: 'split_leader',
+              node: null,
+              text: `${tp} had two leaders in epoch ${p.leader_epoch}: ${prev} and ${p.leader}`,
+              data: { tp, epoch: p.leader_epoch, leaders: [prev, p.leader] },
+            });
           }
         }
         if (p.hwm != null) this.checkAcked(tp, p.hwm, at, add, p);
@@ -168,7 +198,9 @@ export class InvariantChecker {
     }
     // A partition that held acked records and is gone from a clean poll (a
     // wiped single replica, a deleted topic) lost them all.
-    if (!c.errors?.length) for (const tp of this.acked.keys()) if (this.seen.has(tp) && !present.has(tp)) this.checkAcked(tp, null, at, add, {});
+    if (!c.errors?.length)
+      for (const tp of this.acked.keys())
+        if (this.seen.has(tp) && !present.has(tp)) this.checkAcked(tp, null, at, add, {});
   }
 
   // `hwm` null: the partition is gone.
@@ -186,9 +218,22 @@ export class InvariantChecker {
     const first = this.lowHwm.get(tp);
     if (first == null) {
       this.lowHwm.set(tp, at);
-    } else if (first !== at && (hwm == null || at - first >= STALL_MS) && this.once(`a${tp}@${ack.acked}`)) {
-      const now = hwm == null ? "the partition is gone from the cluster" : `the high watermark has stood at ${hwm} or below for ${Math.round((at - first) / 1000)} s`;
-      add({ at, check: "acked_lost", node: ack.node, text: `${tp}: offset ${ack.acked} was acknowledged under acks=all, ${now}`, data: { tp, acked: ack.acked, hwm, leader: p.leader, leader_epoch: p.leader_epoch } });
+    } else if (
+      first !== at &&
+      (hwm == null || at - first >= STALL_MS) &&
+      this.once(`a${tp}@${ack.acked}`)
+    ) {
+      const now =
+        hwm == null
+          ? 'the partition is gone from the cluster'
+          : `the high watermark has stood at ${hwm} or below for ${Math.round((at - first) / 1000)} s`;
+      add({
+        at,
+        check: 'acked_lost',
+        node: ack.node,
+        text: `${tp}: offset ${ack.acked} was acknowledged under acks=all, ${now}`,
+        data: { tp, acked: ack.acked, hwm, leader: p.leader, leader_epoch: p.leader_epoch },
+      });
     }
   }
 

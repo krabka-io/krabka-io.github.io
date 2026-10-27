@@ -11,14 +11,21 @@ export function splitSitemap(xml, { maxBytes = MAX_BYTES, maxEntries = MAX_ENTRI
   const header = xml.slice(0, start);
   const footer = xml.slice(end);
   const entries = xml.slice(start, end).match(/<url(?:\s[^>]*)?>[\s\S]*?<\/url>/g) ?? [];
-  if (xml.slice(start, end).replace(/<url(?:\s[^>]*)?>[\s\S]*?<\/url>/g, '').trim()) throw new Error('Unexpected content in sitemap; refusing lossy sharding');
+  if (
+    xml
+      .slice(start, end)
+      .replace(/<url(?:\s[^>]*)?>[\s\S]*?<\/url>/g, '')
+      .trim()
+  )
+    throw new Error('Unexpected content in sitemap; refusing lossy sharding');
   const overhead = Buffer.byteLength(header + footer);
   const chunks = [];
   let current = [];
   let bytes = overhead;
   for (const entry of entries) {
     const size = Buffer.byteLength(entry);
-    if (overhead + size > maxBytes) throw new Error('A single sitemap entry exceeds the byte limit');
+    if (overhead + size > maxBytes)
+      throw new Error('A single sitemap entry exceeds the byte limit');
     if (current.length && (bytes + size > maxBytes || current.length >= maxEntries)) {
       chunks.push(header + current.join('') + footer);
       current = [];
@@ -31,7 +38,13 @@ export function splitSitemap(xml, { maxBytes = MAX_BYTES, maxEntries = MAX_ENTRI
   return chunks;
 }
 
-const escape = (value) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+const escape = (value) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
 
 export function enforceSitemapLimits(base, limits = {}) {
   const indexFile = path.join(base, 'sitemap-index.xml');
@@ -55,5 +68,8 @@ export function enforceSitemapLimits(base, limits = {}) {
 }
 
 export default function sitemapLimits() {
-  return { name: 'sitemap-protocol-limits', hooks: { 'astro:build:done': ({ dir }) => enforceSitemapLimits(fileURLToPath(dir)) } };
+  return {
+    name: 'sitemap-protocol-limits',
+    hooks: { 'astro:build:done': ({ dir }) => enforceSitemapLimits(fileURLToPath(dir)) },
+  };
 }

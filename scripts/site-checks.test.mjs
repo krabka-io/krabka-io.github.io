@@ -13,12 +13,20 @@ const scripts = path.dirname(fileURLToPath(import.meta.url));
 test('analytics load on the configured site, never on local checks or previews', () => {
   const layout = fs.readFileSync(path.join(scripts, '../src/layouts/BaseLayout.astro'), 'utf8');
   const loader = [...layout.matchAll(/<script is:inline\b[^>]*>([\s\S]*?)<\/script>/g)]
-    .map((match) => match[1]).find((code) => code.includes('https://static.cloudflareinsights.com/beacon.min.js'));
+    .map((match) => match[1])
+    .find((code) => code.includes('https://static.cloudflareinsights.com/beacon.min.js'));
   assert.ok(loader, 'analytics loader exists');
   for (const hostname of ['krabka.io', 'localhost', '127.0.0.1', '[::1]', 'krabka-io.github.io']) {
     const added = [];
-    runInNewContext(loader, { beaconToken: 'test-token', siteHostname: 'krabka.io', location: { hostname },
-      document: { createElement: () => ({ dataset: {} }), head: { appendChild: (script) => added.push(script) } } });
+    runInNewContext(loader, {
+      beaconToken: 'test-token',
+      siteHostname: 'krabka.io',
+      location: { hostname },
+      document: {
+        createElement: () => ({ dataset: {} }),
+        head: { appendChild: (script) => added.push(script) },
+      },
+    });
     assert.equal(added.length, hostname === 'krabka.io' ? 1 : 0, hostname);
     if (added.length) {
       assert.equal(added[0].src, 'https://static.cloudflareinsights.com/beacon.min.js');
@@ -40,7 +48,9 @@ function write(dir, file, content) {
   fs.writeFileSync(path.join(dir, file), content);
 }
 function check(script, dir, status) {
-  const result = spawnSync(process.execPath, [path.join(scripts, script), dir], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [path.join(scripts, script), dir], {
+    encoding: 'utf8',
+  });
   assert.equal(result.status, status, result.stdout + result.stderr);
   return result.stdout + result.stderr;
 }
@@ -55,10 +65,22 @@ test('link and SEO checks reject missing and empty builds', (t) => {
 
 test('links cover the authored API page, encoded fragments and safe URL resolution', (t) => {
   const dir = fixture(t);
-  write(dir, 'index.html', '<h1 id="home">Home</h1><a href="/api/?q=1&amp;x=2#caf%C3%A9">API</a><a href="#home">Home</a><a href="//example.com/remote">Remote</a><script>const example = \'<a href="/not-a-link">\';</script>');
-  write(dir, 'api/index.html', '<h1 id="café">API</h1><a href="../#home">Home</a><a href="https://krabka.io/krabka-broker/">Separate API deployment</a><a href="https://krabka.io/krabka-o11y/">Observability site</a><a href="https://krabka.io/krabka-o11y/docs/observing_krabka_clusters/">Observability guide</a>');
+  write(
+    dir,
+    'index.html',
+    '<h1 id="home">Home</h1><a href="/api/?q=1&amp;x=2#caf%C3%A9">API</a><a href="#home">Home</a><a href="//example.com/remote">Remote</a><script>const example = \'<a href="/not-a-link">\';</script>',
+  );
+  write(
+    dir,
+    'api/index.html',
+    '<h1 id="café">API</h1><a href="../#home">Home</a><a href="https://krabka.io/krabka-broker/">Separate API deployment</a><a href="https://krabka.io/krabka-o11y/">Observability site</a><a href="https://krabka.io/krabka-o11y/docs/observing_krabka_clusters/">Observability guide</a>',
+  );
   check('check-links.mjs', dir, 0);
-  write(dir, 'api/index.html', '<a href="/#missing">Broken fragment</a><a href="/missing">Broken file</a><a href="/%2e%2e%2foutside">Escape</a><a href="javascript:alert(1)">Unsafe</a><a href="#bad%escape">Malformed</a><a href="/krabka-o11y-other/">Unknown project</a>');
+  write(
+    dir,
+    'api/index.html',
+    '<a href="/#missing">Broken fragment</a><a href="/missing">Broken file</a><a href="/%2e%2e%2foutside">Escape</a><a href="javascript:alert(1)">Unsafe</a><a href="#bad%escape">Malformed</a><a href="/krabka-o11y-other/">Unknown project</a>',
+  );
   const output = check('check-links.mjs', dir, 1);
   assert.match(output, /api[\\/]index\.html/);
   assert.match(output, /Missing fragment/);
@@ -70,23 +92,48 @@ test('links cover the authored API page, encoded fragments and safe URL resoluti
 test('demo fragments validate scenarios, kernels and proof-session IDs', async (t) => {
   const dir = fixture(t);
   const scenario = await encodeShare({ version: 1, nodes: [{ id: 1, kind: 'producer' }] });
-  write(dir, 'index.html', `<a href="/docs/lab/#s=${scenario}">Lab</a><a href="/docs/verification-playground#kernel=known">Kernel</a><a href="/docs/proof-explorer#session=module%2Fknown">Proof</a>`);
+  write(
+    dir,
+    'index.html',
+    `<a href="/docs/lab/#s=${scenario}">Lab</a><a href="/docs/verification-playground#kernel=known">Kernel</a><a href="/docs/proof-explorer#session=module%2Fknown">Proof</a>`,
+  );
   write(dir, 'docs/lab/index.html', '<h1>Lab</h1>');
-  write(dir, 'docs/verification-playground/index.html', '<script id="krabka-kernel-specs" type="application/json">[{"id":"known"}]</script>');
-  write(dir, 'docs/proof-explorer/index.html', '<script id="proof-sessions" type="application/json">{"sessions":[{"id":"module/known"}]}</script>');
+  write(
+    dir,
+    'docs/verification-playground/index.html',
+    '<script id="krabka-kernel-specs" type="application/json">[{"id":"known"}]</script>',
+  );
+  write(
+    dir,
+    'docs/proof-explorer/index.html',
+    '<script id="proof-sessions" type="application/json">{"sessions":[{"id":"module/known"}]}</script>',
+  );
   check('check-links.mjs', dir, 0);
-  write(dir, 'index.html', '<a href="/docs/lab/#s=damaged">Lab</a><a href="/docs/verification-playground#kernel=missing">Kernel</a><a href="/docs/proof-explorer#session=missing">Proof</a>');
+  write(
+    dir,
+    'index.html',
+    '<a href="/docs/lab/#s=damaged">Lab</a><a href="/docs/verification-playground#kernel=missing">Kernel</a><a href="/docs/proof-explorer#session=missing">Proof</a>',
+  );
   check('check-links.mjs', dir, 1);
 });
 
 test('SEO issues in the API directory and missing crawler files fail', (t) => {
   const dir = fixture(t);
-  const page = (title, route = '/') => `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io${route}"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
+  const page = (title, route = '/') =>
+    `<title>${title} | krabka Documentation</title><meta name="description" content="A useful technical guide for configuring and running the broker."><link rel="canonical" href="https://krabka.io${route}"><meta property="og:title"><meta property="og:description"><meta property="og:url"><meta property="og:type"><meta name="twitter:card"><h1>${title}</h1>`;
   write(dir, 'index.html', page('Home') + '<a href="/api/">API</a>');
   write(dir, 'api/index.html', page('API', '/api/'));
   write(dir, 'robots.txt', 'User-agent: *\nSitemap: https://krabka.io/sitemap-index.xml');
-  write(dir, 'sitemap-index.xml', '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://krabka.io/sitemap-website-0.xml</loc></sitemap></sitemapindex>');
-  write(dir, 'sitemap-website-0.xml', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://krabka.io/</loc></url><url><loc>https://krabka.io/api/</loc></url></urlset>');
+  write(
+    dir,
+    'sitemap-index.xml',
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://krabka.io/sitemap-website-0.xml</loc></sitemap></sitemapindex>',
+  );
+  write(
+    dir,
+    'sitemap-website-0.xml',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://krabka.io/</loc></url><url><loc>https://krabka.io/api/</loc></url></urlset>',
+  );
   check('check-seo.mjs', dir, 0);
   write(dir, 'api/index.html', '<h1>API</h1>');
   assert.match(check('check-seo.mjs', dir, 1), /api[\\/]index\.html/);
@@ -100,28 +147,65 @@ test('production smoke detects missing pages and HTML returned for essential ass
   let redirected = false;
   let sitemapMode = '';
   const server = http.createServer((req, res) => {
-    if (redirected && req.url === '/docs/') { res.writeHead(302, { location: '/' }); res.end(); return; }
-    if (broken && req.url === '/api/') { res.writeHead(404); res.end(); return; }
+    if (redirected && req.url === '/docs/') {
+      res.writeHead(302, { location: '/' });
+      res.end();
+      return;
+    }
+    if (broken && req.url === '/api/') {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
     const origin = `http://${req.headers.host}`;
-    if (req.url === '/sitemap-website-0.xml' && sitemapMode === 'missing-child') { res.writeHead(404); res.end(); return; }
+    if (req.url === '/sitemap-website-0.xml' && sitemapMode === 'missing-child') {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
     if (req.url === '/sitemap-index.xml') {
       res.setHeader('Content-Type', 'application/xml');
-      if (sitemapMode === 'empty-index') { res.end('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
-      res.end(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`);
+      if (sitemapMode === 'empty-index') {
+        res.end('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>');
+        return;
+      }
+      res.end(
+        `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`,
+      );
       return;
     }
     if (req.url === '/sitemap-website-0.xml') {
       res.setHeader('Content-Type', 'application/xml');
-      if (sitemapMode === 'empty-child') { res.end('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>'); return; }
-      res.end(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url></urlset>`);
+      if (sitemapMode === 'empty-child') {
+        res.end('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>');
+        return;
+      }
+      res.end(
+        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url></urlset>`,
+      );
       return;
     }
-    if (req.url === '/robots.txt') { res.setHeader('Content-Type', 'text/plain'); res.end(`User-agent: *\nSitemap: ${origin}/sitemap-index.xml\n`); return; }
+    if (req.url === '/robots.txt') {
+      res.setHeader('Content-Type', 'text/plain');
+      res.end(`User-agent: *\nSitemap: ${origin}/sitemap-index.xml\n`);
+      return;
+    }
     const page = req.url.endsWith('/');
-    const type = req.url.endsWith('.js') ? 'text/javascript' : req.url.endsWith('.css') ? 'text/css'
-      : req.url.endsWith('.wasm') ? 'application/wasm' : req.url.endsWith('.json') ? 'application/json'
-      : req.url.endsWith('.xml') ? 'application/xml' : 'text/plain';
-    res.setHeader('Content-Type', page || (broken && req.url.endsWith('.wasm')) ? 'text/html' : type);
+    const type = req.url.endsWith('.js')
+      ? 'text/javascript'
+      : req.url.endsWith('.css')
+        ? 'text/css'
+        : req.url.endsWith('.wasm')
+          ? 'application/wasm'
+          : req.url.endsWith('.json')
+            ? 'application/json'
+            : req.url.endsWith('.xml')
+              ? 'application/xml'
+              : 'text/plain';
+    res.setHeader(
+      'Content-Type',
+      page || (broken && req.url.endsWith('.wasm')) ? 'text/html' : type,
+    );
     res.end(page ? '<title>krabka documentation</title><h1>Documentation</h1>' : 'asset');
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -151,22 +235,39 @@ test('published validation follows robots and rejects partial, stale, invalid or
   const server = http.createServer((req, res) => {
     if (req.url === '/robots.txt') {
       res.setHeader('Content-Type', 'text/plain');
-      res.end(`User-agent: *\n${mode === 'blocked' ? 'Disallow: /api/' : 'Allow: /'}\n${mode === 'unadvertised' ? '' : `Sitemap: ${origin}/sitemap-index.xml`}`);
+      res.end(
+        `User-agent: *\n${mode === 'blocked' ? 'Disallow: /api/' : 'Allow: /'}\n${mode === 'unadvertised' ? '' : `Sitemap: ${origin}/sitemap-index.xml`}`,
+      );
     } else if (req.url === '/sitemap-index.xml') {
       res.setHeader('Content-Type', 'application/xml');
-      res.end(`<sitemapindex xmlns="${ns}"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`);
+      res.end(
+        `<sitemapindex xmlns="${ns}"><sitemap><loc>${origin}/sitemap-website-0.xml</loc></sitemap></sitemapindex>`,
+      );
     } else {
       res.setHeader('Content-Type', 'application/xml');
       if (mode === 'header-blocked') res.setHeader('X-Robots-Tag', 'noindex');
-      res.end(`<urlset xmlns="${ns}"><url><loc>${origin}/</loc>${mode === 'invalid-xsd' ? '<unknown/>' : ''}</url>${mode === 'partial' ? '' : `<url><loc>${origin}/${mode === 'stale' ? 'old' : 'api'}/</loc></url>`}</urlset>`);
+      res.end(
+        `<urlset xmlns="${ns}"><url><loc>${origin}/</loc>${mode === 'invalid-xsd' ? '<unknown/>' : ''}</url>${mode === 'partial' ? '' : `<url><loc>${origin}/${mode === 'stale' ? 'old' : 'api'}/</loc></url>`}</urlset>`,
+      );
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   origin = `http://127.0.0.1:${server.address().port}`;
   const inventory = { site: origin, urls: [origin + '/', origin + '/api/'] };
-  assert.deepEqual(await checkPublishedSitemap(origin, inventory), { pages: 2, sitemaps: 1, compared: true });
-  for (const [value, pattern] of [['partial', /differs from release artifact/], ['stale', /differs from release artifact/], ['invalid-xsd', /XSD validation failed/], ['blocked', /robots.txt blocks/], ['unadvertised', /must advertise/], ['header-blocked', /X-Robots-Tag/]]) {
+  assert.deepEqual(await checkPublishedSitemap(origin, inventory), {
+    pages: 2,
+    sitemaps: 1,
+    compared: true,
+  });
+  for (const [value, pattern] of [
+    ['partial', /differs from release artifact/],
+    ['stale', /differs from release artifact/],
+    ['invalid-xsd', /XSD validation failed/],
+    ['blocked', /robots.txt blocks/],
+    ['unadvertised', /must advertise/],
+    ['header-blocked', /X-Robots-Tag/],
+  ]) {
     mode = value;
     await assert.rejects(checkPublishedSitemap(origin, inventory), pattern);
   }

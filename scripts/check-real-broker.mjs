@@ -85,12 +85,23 @@ async function newLabContext(browser, viewport) {
 const FAULT_SPEED = 5;
 const TOPIC = 'orders';
 const PARTITIONS = 3;
-const KAFKACTL = path.join(ROOT, 'kafkactl-lab', process.platform === 'win32' ? 'kafkactl.exe' : 'kafkactl');
+const KAFKACTL = path.join(
+  ROOT,
+  'kafkactl-lab',
+  process.platform === 'win32' ? 'kafkactl.exe' : 'kafkactl',
+);
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/opt/pw-browsers';
 
 // ---- the scenarios ------------------------------------------------------------------------------
 
-const realBroker = (id, x) => ({ id, kind: 'krabka-broker', name: `real-${id}`, x, y: 90, config: {} });
+const realBroker = (id, x) => ({
+  id,
+  kind: 'krabka-broker',
+  name: `real-${id}`,
+  x,
+  y: 90,
+  config: {},
+});
 
 const ONE_BROKER = {
   version: 1,
@@ -120,7 +131,13 @@ const THREE_BROKERS = {
       name: 'orders-producer',
       x: 120,
       y: 330,
-      config: { bootstrap: [1, 2, 3], topic: TOPIC, rate_per_sec: 10, acks: -1, key: { pattern: 'customer-{seq % 10}' } },
+      config: {
+        bootstrap: [1, 2, 3],
+        topic: TOPIC,
+        rate_per_sec: 10,
+        acks: -1,
+        key: { pattern: 'customer-{seq % 10}' },
+      },
     },
     {
       id: 5,
@@ -128,7 +145,12 @@ const THREE_BROKERS = {
       name: 'billing',
       x: 600,
       y: 330,
-      config: { bootstrap: [1, 2, 3], group: 'billing', topics: [TOPIC], auto_offset_reset: 'earliest' },
+      config: {
+        bootstrap: [1, 2, 3],
+        group: 'billing',
+        topics: [TOPIC],
+        auto_offset_reset: 'earliest',
+      },
     },
   ],
   topics: [],
@@ -139,7 +161,8 @@ const THREE_BROKERS = {
 function buildModule() {
   const result = spawnSync('bash', [BUILD_SCRIPT], { cwd: ROOT, stdio: 'inherit' });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${path.relative(ROOT, BUILD_SCRIPT)} exited with ${result.status}`);
+  if (result.status !== 0)
+    throw new Error(`${path.relative(ROOT, BUILD_SCRIPT)} exited with ${result.status}`);
 }
 
 // ---- Playwright and Chromium, as check-lab finds them ------------------------------------------
@@ -166,12 +189,28 @@ async function loadPlaywright() {
 function installedChromium() {
   const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (!base || !fs.existsSync(base)) return undefined;
-  const builds = [['chromium', ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-win/chrome.exe']]];
-  if (HEADLESS) builds.unshift(['chromium_headless_shell', ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell']]);
+  const builds = [
+    [
+      'chromium',
+      [
+        'chrome-linux/chrome',
+        'chrome-linux64/chrome',
+        'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+        'chrome-win/chrome.exe',
+      ],
+    ],
+  ];
+  if (HEADLESS)
+    builds.unshift([
+      'chromium_headless_shell',
+      ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell'],
+    ]);
   const entries = fs.readdirSync(base);
   for (const [name, executables] of builds) {
     const pattern = new RegExp(`^${name}-(\\d+)$`);
-    const dirs = entries.filter((d) => pattern.test(d)).sort((a, b) => Number(b.match(pattern)[1]) - Number(a.match(pattern)[1]));
+    const dirs = entries
+      .filter((d) => pattern.test(d))
+      .sort((a, b) => Number(b.match(pattern)[1]) - Number(a.match(pattern)[1]));
     for (const dir of dirs) {
       for (const executable of executables) {
         const candidate = path.join(base, dir, executable);
@@ -219,13 +258,17 @@ function serve(dir, moduleFile) {
       res.writeHead(403).end();
       return;
     }
-    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
+    if (fs.existsSync(file) && fs.statSync(file).isDirectory())
+      file = path.join(file, 'index.html');
     else if (!fs.existsSync(file) && fs.existsSync(`${file}.html`)) file = `${file}.html`;
     if (!fs.existsSync(file)) {
       res.writeHead(404).end('not found');
       return;
     }
-    const headers = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' };
+    const headers = {
+      'content-type': MIME[path.extname(file)] || 'application/octet-stream',
+      'cache-control': 'no-store',
+    };
     if (req.method === 'HEAD') {
       res.writeHead(200, { ...headers, 'content-length': fs.statSync(file).size }).end();
       return;
@@ -233,7 +276,9 @@ function serve(dir, moduleFile) {
     res.writeHead(200, headers);
     fs.createReadStream(file).pipe(res);
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })));
+  return new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })),
+  );
 }
 
 // ---- checks -------------------------------------------------------------------------------------
@@ -288,7 +333,11 @@ function watchErrors(page, name, base) {
 // JSON with every object's keys sorted, for comparing whole values.
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`;
+  if (value && typeof value === 'object')
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`)
+      .join(',')}}`;
   return JSON.stringify(value);
 }
 
@@ -296,7 +345,11 @@ function canonical(value) {
 // `external.js`, the contract's rule), computed independently here.
 function expectedClusterId(scenarioId) {
   for (let salt = 0; ; salt++) {
-    const bytes = crypto.createHash('sha256').update(`krabka-lab/cluster-id/${scenarioId}${salt ? `/${salt}` : ''}`).digest().subarray(0, 16);
+    const bytes = crypto
+      .createHash('sha256')
+      .update(`krabka-lab/cluster-id/${scenarioId}${salt ? `/${salt}` : ''}`)
+      .digest()
+      .subarray(0, 16);
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     const id = bytes.toString('base64url');
@@ -305,7 +358,8 @@ function expectedClusterId(scenarioId) {
 }
 
 // A node's snapshot entry once `pred(entry)` holds, as JSON text.
-const nodeWhere = (id, pred) => `(() => { const s = window.krabkaLab.world.snapshot(); const n = s && s.nodes.find((x) => x.id === ${id}); return n && (${pred})(n) ? JSON.stringify(n) : null; })()`;
+const nodeWhere = (id, pred) =>
+  `(() => { const s = window.krabkaLab.world.snapshot(); const n = s && s.nodes.find((x) => x.id === ${id}); return n && (${pred})(n) ? JSON.stringify(n) : null; })()`;
 // A real broker whose process runs.
 const isRunning = `(n) => n.state && n.state.process && n.state.process.state === 'running'`;
 // A node's snapshot entry once `pred(entry)` holds. A timeout says what the
@@ -316,7 +370,15 @@ async function node(page, id, pred = '() => true', label = `node ${id}`, timeout
   } catch (err) {
     const last = await page.evaluate(nodeWhere(id, '() => true')).catch(() => null);
     const state = last ? JSON.parse(last).state : null;
-    const brief = state ? JSON.stringify({ ...state, client: undefined, stdout: undefined, runtime: undefined, stderr: state.stderr?.slice(-5) }) : 'no state';
+    const brief = state
+      ? JSON.stringify({
+          ...state,
+          client: undefined,
+          stdout: undefined,
+          runtime: undefined,
+          stderr: state.stderr?.slice(-5),
+        })
+      : 'no state';
     throw new Error(`${err.message}; node ${id} was ${brief.slice(0, 1500)}`);
   }
 }
@@ -343,15 +405,25 @@ const ready = `self.crossOriginIsolated && document.querySelector('#krabka-lab[d
 // The producer's view of the cluster: its client's metadata, as the real
 // brokers served it.
 async function metadata(page, pred = '() => true', label = 'the producer to have metadata') {
-  const n = await node(page, 4, `(n) => { const m = n.state && n.state.client && n.state.client.metadata; return Boolean(m) && (${pred})(m); }`, label);
+  const n = await node(
+    page,
+    4,
+    `(n) => { const m = n.state && n.state.client && n.state.client.metadata; return Boolean(m) && (${pred})(m); }`,
+    label,
+  );
   return n.state.client.metadata;
 }
 
-const partitionsOf = (m) => ((m.topics && m.topics[TOPIC] && m.topics[TOPIC].partitions) || []).slice().sort((a, b) => a.partition - b.partition);
+const partitionsOf = (m) =>
+  ((m.topics && m.topics[TOPIC] && m.topics[TOPIC].partitions) || [])
+    .slice()
+    .sort((a, b) => a.partition - b.partition);
 
 // The consumer's partitions: `[{ partition, position, committed, hwm, lag }]`.
 function assignmentOf(state, topic = TOPIC) {
-  return (state.assignment || []).filter((a) => a.topic === topic).sort((a, b) => a.partition - b.partition);
+  return (state.assignment || [])
+    .filter((a) => a.topic === topic)
+    .sort((a, b) => a.partition - b.partition);
 }
 
 // ---- the flows ----------------------------------------------------------------------------------
@@ -367,16 +439,41 @@ async function oneBroker(context, base, errors) {
   await waitFor(page, ready, 'the isolated reload', STEP_TIMEOUT);
   const scenarioId = await page.evaluate(() => window.krabkaLab.world.id);
   const running = await node(page, 1, isRunning, 'the process to run', BOOT_TIMEOUT);
-  check(`the process reaches running (${elapsed(since)} after the scenario opened, the module's download and compile included)`, running.alive === true, JSON.stringify(running.state.process));
+  check(
+    `the process reaches running (${elapsed(since)} after the scenario opened, the module's download and compile included)`,
+    running.alive === true,
+    JSON.stringify(running.state.process),
+  );
   check(
     'it runs with the contract environment',
-    canonical(running.state.env) === canonical({ KRABKA_NODE_ID: '1', KRABKA_HOST: '10.0.0.1', KRABKA_VOTERS: '1@10.0.0.1:9093', KRABKA_CLUSTER_ID: expectedClusterId(scenarioId), KRABKA_CONFIG: JSON.stringify(fitInternalTopics({}, 1)) }),
+    canonical(running.state.env) ===
+      canonical({
+        KRABKA_NODE_ID: '1',
+        KRABKA_HOST: '10.0.0.1',
+        KRABKA_VOTERS: '1@10.0.0.1:9093',
+        KRABKA_CLUSTER_ID: expectedClusterId(scenarioId),
+        KRABKA_CONFIG: JSON.stringify(fitInternalTopics({}, 1)),
+      }),
     JSON.stringify(running.state.env),
   );
   const boot = await stderrLine(page, 1, 'starting the broker on /data/log', 'the broker to start');
-  check('it formats its volume and boots a fresh cluster', boot.bootstrap_mode === 'Bootstrap' && boot.voter === true, JSON.stringify(boot));
-  const serving = await stderrLine(page, 1, 'krabka-broker serving on', 'the broker to serve', BOOT_TIMEOUT);
-  check(`it advertises its local bridge address (${elapsed(since)})`, serving.message.endsWith('krabka-broker serving on 127.0.0.1:9092'), JSON.stringify(serving));
+  check(
+    'it formats its volume and boots a fresh cluster',
+    boot.bootstrap_mode === 'Bootstrap' && boot.voter === true,
+    JSON.stringify(boot),
+  );
+  const serving = await stderrLine(
+    page,
+    1,
+    'krabka-broker serving on',
+    'the broker to serve',
+    BOOT_TIMEOUT,
+  );
+  check(
+    `it advertises its local bridge address (${elapsed(since)})`,
+    serving.message.endsWith('krabka-broker serving on 127.0.0.1:9092'),
+    JSON.stringify(serving),
+  );
   await page.close();
 }
 
@@ -391,77 +488,174 @@ async function createTopic(page) {
         name: 'topic-admin',
         x: 0,
         y: 0,
-        config: { bootstrap: [1, 2, 3], topics: [{ name: topic, partitions: 3, replication_factor: 3 }] },
+        config: {
+          bootstrap: [1, 2, 3],
+          topics: [{ name: topic, partitions: 3, replication_factor: 3 }],
+        },
       }),
     TOPIC,
   );
-  const admin = await node(page, adminId, `(n) => n.state && Array.isArray(n.state.topics) && n.state.topics.some((t) => t.status === 'created' || t.status === 'exists' || t.status === 'failed')`, 'the admin node to create the topic');
+  const admin = await node(
+    page,
+    adminId,
+    `(n) => n.state && Array.isArray(n.state.topics) && n.state.topics.some((t) => t.status === 'created' || t.status === 'exists' || t.status === 'failed')`,
+    'the admin node to create the topic',
+  );
   return admin.state.topics[0];
 }
 
 async function checkKafkactl(page, base) {
   if (!fs.existsSync(KAFKACTL)) throw new Error(`build ${KAFKACTL} before the kafkactl check`);
   await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'pause' }));
-  const config = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-kafkactl-')), 'config.yml');
-  const command = (args, input = '', timeout = 15_000, until = '') => new Promise((resolve) => {
-    const child = spawn(KAFKACTL, ['--config', config, ...args]);
-    let output = '';
-    child.stdout.on('data', (data) => { output += data; if (until && output.includes(until)) child.kill(); });
-    child.stderr.on('data', (data) => { output += data; });
-    if (input) child.stdin.write(input);
-    child.stdin.end();
-    const timer = setTimeout(() => child.kill(), timeout);
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
-  });
+  const config = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'krabka-kafkactl-')),
+    'config.yml',
+  );
+  const command = (args, input = '', timeout = 15_000, until = '') =>
+    new Promise((resolve) => {
+      const child = spawn(KAFKACTL, ['--config', config, ...args]);
+      let output = '';
+      child.stdout.on('data', (data) => {
+        output += data;
+        if (until && output.includes(until)) child.kill();
+      });
+      child.stderr.on('data', (data) => {
+        output += data;
+      });
+      if (input) child.stdin.write(input);
+      child.stdin.end();
+      const timer = setTimeout(() => child.kill(), timeout);
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ code, output });
+      });
+    });
   const bridge = spawn(KAFKACTL, ['lab', 'bridge', '--origin', base]);
   try {
     const token = await new Promise((resolve, reject) => {
       let output = '';
-      const timer = setTimeout(() => reject(new Error(`bridge token timed out: ${output}`)), 10_000);
+      const timer = setTimeout(
+        () => reject(new Error(`bridge token timed out: ${output}`)),
+        10_000,
+      );
       bridge.stdout.on('data', (data) => {
         output += data;
         const found = output.match(/\b[0-9a-f]{48}\b/);
-        if (found) { clearTimeout(timer); resolve(found[0]); }
+        if (found) {
+          clearTimeout(timer);
+          resolve(found[0]);
+        }
       });
-      bridge.on('exit', (code) => { clearTimeout(timer); reject(new Error(`bridge exited ${code}: ${output}`)); });
+      bridge.on('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`bridge exited ${code}: ${output}`));
+      });
     });
     await page.locator('#krabka-lab .lab-dtab[data-tab="connect"]').click();
     await page.locator('#krabka-lab .lab-bridge summary').click();
     await page.locator('#krabka-lab .lab-bridge input[type="password"]').fill(token);
     await page.locator('#krabka-lab .lab-bridge button', { hasText: 'Connect' }).click();
-    await waitFor(page, `window.krabkaLab.bridge.state === 'connected'`, 'the browser to pair with kafkactl');
-    const clientId = await page.evaluate(() => window.krabkaLab.world.scenario().nodes.find((n) => n.kind === 'local-client').id);
-    check('the distributed kafkactl binary pairs with the browser', await page.evaluate(() => window.krabkaLab.bridge.state) === 'connected');
+    await waitFor(
+      page,
+      `window.krabkaLab.bridge.state === 'connected'`,
+      'the browser to pair with kafkactl',
+    );
+    const clientId = await page.evaluate(
+      () => window.krabkaLab.world.scenario().nodes.find((n) => n.kind === 'local-client').id,
+    );
+    check(
+      'the distributed kafkactl binary pairs with the browser',
+      (await page.evaluate(() => window.krabkaLab.bridge.state)) === 'connected',
+    );
     const setup = await command(['config', 'add', 'krabka-lab', '--broker', '127.0.0.1:9092']);
     check('kafkactl adds the krabka-lab context', setup.code === 0, setup.output);
     const brokers = await command(['--context', 'krabka-lab', 'get', 'brokers']);
-    check('kafkactl queries all three real brokers', brokers.code === 0 && [1, 2, 3].every((id) => brokers.output.includes(`127.0.0.1:${9091 + id}`)), brokers.output);
+    check(
+      'kafkactl queries all three real brokers',
+      brokers.code === 0 &&
+        [1, 2, 3].every((id) => brokers.output.includes(`127.0.0.1:${9091 + id}`)),
+      brokers.output,
+    );
     const topics = await command(['--context', 'krabka-lab', 'get', 'topics']);
-    check('kafkactl queries the orders topic', topics.code === 0 && topics.output.includes('orders'), topics.output);
+    check(
+      'kafkactl queries the orders topic',
+      topics.code === 0 && topics.output.includes('orders'),
+      topics.output,
+    );
     const configText = fs.readFileSync(config, 'utf8');
-    if (!configText.includes('127.0.0.1:9092')) throw new Error('the kafkactl context has no expected bootstrap broker');
+    if (!configText.includes('127.0.0.1:9092'))
+      throw new Error('the kafkactl context has no expected bootstrap broker');
     fs.writeFileSync(config, configText.replace('127.0.0.1:9092', '127.0.0.1:9093'));
     const alternateTopics = await command(['--context', 'krabka-lab', 'get', 'topics']);
-    check('kafkactl uses the context broker for topics', alternateTopics.code === 0 && alternateTopics.output.includes('orders'), alternateTopics.output);
+    check(
+      'kafkactl uses the context broker for topics',
+      alternateTopics.code === 0 && alternateTopics.output.includes('orders'),
+      alternateTopics.output,
+    );
     fs.writeFileSync(config, configText);
-    const produced = await command(['--context', 'krabka-lab', 'produce', 'orders'], 'bridge-check-record\n');
+    const produced = await command(
+      ['--context', 'krabka-lab', 'produce', 'orders'],
+      'bridge-check-record\n',
+    );
     check('kafkactl produces to orders', produced.code === 0, produced.output);
-    const consumed = await command(['--context', 'krabka-lab', 'consume', 'orders', '--offset=oldest', '--output=raw'], '', 15_000, 'bridge-check-record');
-    check('kafkactl consumes its record', consumed.output.includes('bridge-check-record'), consumed.output.slice(-300));
+    const consumed = await command(
+      ['--context', 'krabka-lab', 'consume', 'orders', '--offset=oldest', '--output=raw'],
+      '',
+      15_000,
+      'bridge-check-record',
+    );
+    check(
+      'kafkactl consumes its record',
+      consumed.output.includes('bridge-check-record'),
+      consumed.output.slice(-300),
+    );
     for (const partition of [0, 1, 2]) {
-      const read = await command(['--context', 'krabka-lab', 'consume', 'orders', `--partition=${partition}`, '--offset=oldest', '--output=raw'], '', 8_000, '"id":');
-      check(`kafkactl fetches partition ${partition}`, read.output.includes('"id":'), read.output.slice(-300));
+      const read = await command(
+        [
+          '--context',
+          'krabka-lab',
+          'consume',
+          'orders',
+          `--partition=${partition}`,
+          '--offset=oldest',
+          '--output=raw',
+        ],
+        '',
+        8_000,
+        '"id":',
+      );
+      check(
+        `kafkactl fetches partition ${partition}`,
+        read.output.includes('"id":'),
+        read.output.slice(-300),
+      );
     }
-    await page.evaluate((id) => window.krabkaLab.fault({ kind: 'partition', a: id, b: 1 }), clientId);
+    await page.evaluate(
+      (id) => window.krabkaLab.fault({ kind: 'partition', a: id, b: 1 }),
+      clientId,
+    );
     const cut = await command(['--context', 'krabka-lab', 'get', 'brokers'], '', 3_000);
     check('the lab link cut blocks a new kafkactl request', cut.code !== 0, cut.output.slice(-500));
     await page.evaluate((id) => window.krabkaLab.fault({ kind: 'heal', a: id, b: 1 }), clientId);
     const healed = await command(['--context', 'krabka-lab', 'get', 'brokers']);
-    check('kafkactl works again after the link heals', healed.code === 0 && healed.output.includes('127.0.0.1:9094'), healed.output);
+    check(
+      'kafkactl works again after the link heals',
+      healed.code === 0 && healed.output.includes('127.0.0.1:9094'),
+      healed.output,
+    );
     await page.evaluate((id) => window.krabkaLab.world.removeNode(id), clientId);
-    await waitFor(page, `window.krabkaLab.bridge.state === 'error'`, 'the bridge to deconfigure after client removal', 10_000);
+    await waitFor(
+      page,
+      `window.krabkaLab.bridge.state === 'error'`,
+      'the bridge to deconfigure after client removal',
+      10_000,
+    );
     const removed = await command(['--context', 'krabka-lab', 'get', 'brokers'], '', 3_000);
-    check('removing the local client closes the bridge listeners', removed.code !== 0, removed.output.slice(-500));
+    check(
+      'removing the local client closes the bridge listeners',
+      removed.code !== 0,
+      removed.output.slice(-500),
+    );
   } finally {
     bridge.kill();
     await page.evaluate(() => window.krabkaLab.control(4, { cmd: 'resume' }));
@@ -482,24 +676,70 @@ async function threeBrokers(context, base, errors) {
 
   // The quorum.
   for (const id of [1, 2, 3]) await node(page, id, isRunning, `broker ${id} to run`, BOOT_TIMEOUT);
-  const envs = await page.evaluate(() => [1, 2, 3].map((id) => window.krabkaLab.world.snapshot().nodes.find((n) => n.id === id).state.env.KRABKA_VOTERS));
-  check('three voters, each with the same static quorum', envs.every((v) => v === '1@10.0.0.1:9093,2@10.0.0.2:9093,3@10.0.0.3:9093'), JSON.stringify(envs));
+  const envs = await page.evaluate(() =>
+    [1, 2, 3].map(
+      (id) =>
+        window.krabkaLab.world.snapshot().nodes.find((n) => n.id === id).state.env.KRABKA_VOTERS,
+    ),
+  );
+  check(
+    'three voters, each with the same static quorum',
+    envs.every((v) => v === '1@10.0.0.1:9093,2@10.0.0.2:9093,3@10.0.0.3:9093'),
+    JSON.stringify(envs),
+  );
   const servingLines = [];
-  for (const id of [1, 2, 3]) servingLines.push(await stderrLine(page, id, 'krabka-broker serving on', `broker ${id} to serve`, BOOT_TIMEOUT));
-  check(`the three brokers form a quorum and serve (${elapsed(since)})`, servingLines.every((l, i) => l.message.endsWith(`serving on 127.0.0.1:${9092 + i}`)), servingLines.map((l) => JSON.stringify(l)).join(' | '));
+  for (const id of [1, 2, 3])
+    servingLines.push(
+      await stderrLine(page, id, 'krabka-broker serving on', `broker ${id} to serve`, BOOT_TIMEOUT),
+    );
+  check(
+    `the three brokers form a quorum and serve (${elapsed(since)})`,
+    servingLines.every((l, i) => l.message.endsWith(`serving on 127.0.0.1:${9092 + i}`)),
+    servingLines.map((l) => JSON.stringify(l)).join(' | '),
+  );
   const topic = await createTopic(page);
-  check(`the lab's admin node creates "${TOPIC}" with three replicas on the real brokers (${elapsed(since)})`, topic.status === 'created', JSON.stringify(topic));
+  check(
+    `the lab's admin node creates "${TOPIC}" with three replicas on the real brokers (${elapsed(since)})`,
+    topic.status === 'created',
+    JSON.stringify(topic),
+  );
   if (args.has('--kafkactl') || args.has('--kafkactl-only')) {
-    await node(page, 4, '(n) => n.state && n.state.acked >= 30', 'the producer to ack 30 records before the kafkactl check');
-    await metadata(page, `(m) => m.topics?.${TOPIC}?.partitions?.length === 3 && m.topics.${TOPIC}.partitions.every((p) => p.isr.length === 3)`, 'all three topic replicas to be in sync');
+    await node(
+      page,
+      4,
+      '(n) => n.state && n.state.acked >= 30',
+      'the producer to ack 30 records before the kafkactl check',
+    );
+    await metadata(
+      page,
+      `(m) => m.topics?.${TOPIC}?.partitions?.length === 3 && m.topics.${TOPIC}.partitions.every((p) => p.isr.length === 3)`,
+      'all three topic replicas to be in sync',
+    );
     await checkKafkactl(page, base);
   }
-  if (args.has('--kafkactl-only')) { await page.close(); return; }
+  if (args.has('--kafkactl-only')) {
+    await page.close();
+    return;
+  }
 
   // The lab's clients produce and consume through the real brokers.
-  const produced = await node(page, 4, '(n) => n.state && n.state.acked >= 30', 'the producer to have 30 records acknowledged');
-  check(`the producer's records are acknowledged with acks=all (${elapsed(since)})`, produced.state.failed === 0, `acked ${produced.state.acked}, failed ${produced.state.failed}, producer id ${produced.state.producer_id}`);
-  const consumed = await node(page, 5, `(n) => n.state && n.state.state === 'stable' && n.state.processed >= 30`, 'the consumer to process 30 records');
+  const produced = await node(
+    page,
+    4,
+    '(n) => n.state && n.state.acked >= 30',
+    'the producer to have 30 records acknowledged',
+  );
+  check(
+    `the producer's records are acknowledged with acks=all (${elapsed(since)})`,
+    produced.state.failed === 0,
+    `acked ${produced.state.acked}, failed ${produced.state.failed}, producer id ${produced.state.producer_id}`,
+  );
+  const consumed = await node(
+    page,
+    5,
+    `(n) => n.state && n.state.state === 'stable' && n.state.processed >= 30`,
+    'the consumer to process 30 records',
+  );
   const parts = assignmentOf(consumed.state);
   check(
     `the consumer joins its group and consumes them back (${elapsed(since)})`,
@@ -516,63 +756,133 @@ async function threeBrokers(context, base, errors) {
         name: 'audit',
         x: 840,
         y: 330,
-        config: { bootstrap: [1, 2, 3], group: 'audit', topics: [topic], auto_offset_reset: 'earliest', protocol: 'consumer' },
+        config: {
+          bootstrap: [1, 2, 3],
+          group: 'audit',
+          topics: [topic],
+          auto_offset_reset: 'earliest',
+          protocol: 'consumer',
+        },
       }),
     TOPIC,
   );
-  const audit = await node(page, auditId, `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).length === ${PARTITIONS} && n.state.processed >= 30`, 'the KIP-848 member to consume');
+  const audit = await node(
+    page,
+    auditId,
+    `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).length === ${PARTITIONS} && n.state.processed >= 30`,
+    'the KIP-848 member to consume',
+  );
   check(
     `a KIP-848 member gets every partition from the broker's assignor and consumes them too (${elapsed(since)})`,
     audit.state.protocol === 'consumer' && audit.state.epoch >= 1,
-    `epoch ${audit.state.epoch}, processed ${audit.state.processed}, partitions ${assignmentOf(audit.state).map((a) => a.partition).join(',')}`,
+    `epoch ${audit.state.epoch}, processed ${audit.state.processed}, partitions ${assignmentOf(
+      audit.state,
+    )
+      .map((a) => a.partition)
+      .join(',')}`,
   );
 
   // The real brokers' metadata, as the lab's clients got it, in the inspector.
-  const meta = await metadata(page, `(m) => (m.brokers || []).length === 3 && ${JSON.stringify(TOPIC)} in (m.topics || {}) && m.topics[${JSON.stringify(TOPIC)}].partitions.every((p) => p.isr.length === 3)`, 'metadata with three brokers and a full ISR');
-  const brokers = meta.brokers.map((b) => ({ id: b.id, host: b.host, port: b.port, node: b.node })).sort((a, b) => a.id - b.id);
+  const meta = await metadata(
+    page,
+    `(m) => (m.brokers || []).length === 3 && ${JSON.stringify(TOPIC)} in (m.topics || {}) && m.topics[${JSON.stringify(TOPIC)}].partitions.every((p) => p.isr.length === 3)`,
+    'metadata with three brokers and a full ISR',
+  );
+  const brokers = meta.brokers
+    .map((b) => ({ id: b.id, host: b.host, port: b.port, node: b.node }))
+    .sort((a, b) => a.id - b.id);
   check(
     'the metadata names the three real brokers at their bridge addresses',
-    canonical(brokers) === canonical([1, 2, 3].map((id) => ({ id, host: '127.0.0.1', port: 9091 + id, node: id }))),
+    canonical(brokers) ===
+      canonical([1, 2, 3].map((id) => ({ id, host: '127.0.0.1', port: 9091 + id, node: id }))),
     JSON.stringify(brokers),
   );
-  check('and the scenario\'s cluster id and a controller among them', meta.cluster_id === clusterId && [1, 2, 3].includes(meta.controller), `cluster ${meta.cluster_id}, controller ${meta.controller}`);
-  const leaders = partitionsOf(meta).map((p) => ({ partition: p.partition, leader: p.leader, replicas: [...p.replicas].sort(), isr: [...p.isr].sort() }));
+  check(
+    "and the scenario's cluster id and a controller among them",
+    meta.cluster_id === clusterId && [1, 2, 3].includes(meta.controller),
+    `cluster ${meta.cluster_id}, controller ${meta.controller}`,
+  );
+  const leaders = partitionsOf(meta).map((p) => ({
+    partition: p.partition,
+    leader: p.leader,
+    replicas: [...p.replicas].sort(),
+    isr: [...p.isr].sort(),
+  }));
   check(
     `"${TOPIC}" has three partitions, each led by one of them with all three in sync`,
-    leaders.length === PARTITIONS && leaders.every((p) => [1, 2, 3].includes(p.leader) && canonical(p.replicas) === '[1,2,3]' && canonical(p.isr) === '[1,2,3]'),
+    leaders.length === PARTITIONS &&
+      leaders.every(
+        (p) =>
+          [1, 2, 3].includes(p.leader) &&
+          canonical(p.replicas) === '[1,2,3]' &&
+          canonical(p.isr) === '[1,2,3]',
+      ),
     JSON.stringify(leaders),
   );
   await page.locator('#krabka-lab .lab-node[data-node-id="4"]').click();
   await page.locator('#krabka-lab .lab-inspector #lab-tab-raw').click();
-  const raw = await waitFor(page, `(() => { const t = document.querySelector('#krabka-lab .lab-inspector .lab-tabpanel[data-tab="raw"] pre')?.textContent; return t && t.includes('"metadata"') ? t : null; })()`, 'the inspector to show the raw snapshot');
+  const raw = await waitFor(
+    page,
+    `(() => { const t = document.querySelector('#krabka-lab .lab-inspector .lab-tabpanel[data-tab="raw"] pre')?.textContent; return t && t.includes('"metadata"') ? t : null; })()`,
+    'the inspector to show the raw snapshot',
+  );
   const shown = JSON.parse(raw).state.client.metadata;
   check(
     "the inspector shows the real brokers' metadata",
-    shown.cluster_id === clusterId && canonical(shown.brokers.map((b) => b.port).sort()) === canonical([9092, 9093, 9094]) && partitionsOf(shown).length === PARTITIONS,
-    `${shown.brokers.map((b) => `${b.id}@${b.host}:${b.port}`).join(', ')}; ${partitionsOf(shown).map((p) => `p${p.partition} leader ${p.leader} isr [${p.isr}]`).join(', ')}`,
+    shown.cluster_id === clusterId &&
+      canonical(shown.brokers.map((b) => b.port).sort()) === canonical([9092, 9093, 9094]) &&
+      partitionsOf(shown).length === PARTITIONS,
+    `${shown.brokers.map((b) => `${b.id}@${b.host}:${b.port}`).join(', ')}; ${partitionsOf(shown)
+      .map((p) => `p${p.partition} leader ${p.leader} isr [${p.isr}]`)
+      .join(', ')}`,
   );
   await page.locator('#krabka-lab .lab-inspector #lab-tab-state').click();
   await page.locator('#krabka-lab .lab-node[data-node-id="1"]').click();
-  const stateShown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector dd[data-field="process_state"]')?.textContent || null`, 'the real broker in the inspector');
-  const stderrShown = await waitFor(page, `document.querySelector('#krabka-lab .lab-inspector pre[data-field="stderr"]')?.textContent || null`, 'the stderr tail');
-  check("a real broker's own view shows its process and its log", stateShown === 'running' && stderrShown.includes('krabka_broker'), `${stateShown}; ${stderrShown.split('\n').length} lines`);
+  const stateShown = await waitFor(
+    page,
+    `document.querySelector('#krabka-lab .lab-inspector dd[data-field="process_state"]')?.textContent || null`,
+    'the real broker in the inspector',
+  );
+  const stderrShown = await waitFor(
+    page,
+    `document.querySelector('#krabka-lab .lab-inspector pre[data-field="stderr"]')?.textContent || null`,
+    'the stderr tail',
+  );
+  check(
+    "a real broker's own view shows its process and its log",
+    stateShown === 'running' && stderrShown.includes('krabka_broker'),
+    `${stateShown}; ${stderrShown.split('\n').length} lines`,
+  );
 
   // Where the group's offsets live: every partition of `__consumer_offsets`
   // whose replicas the clients' metadata shows.
   const offsets = await page.evaluate(() => {
-    const topics = [4, 5].map((id) => window.krabkaLab.world.snapshot().nodes.find((n) => n.id === id).state.client.metadata.topics);
+    const topics = [4, 5].map(
+      (id) =>
+        window.krabkaLab.world.snapshot().nodes.find((n) => n.id === id).state.client.metadata
+          .topics,
+    );
     const found = topics.find((t) => t && t.__consumer_offsets);
     if (!found) return null;
     const parts = found.__consumer_offsets.partitions;
-    return { partitions: parts.length, replicas: [...new Set(parts.map((p) => p.replicas.length))], brokers: [...new Set(parts.flatMap((p) => p.replicas))].sort() };
+    return {
+      partitions: parts.length,
+      replicas: [...new Set(parts.map((p) => p.replicas.length))],
+      brokers: [...new Set(parts.flatMap((p) => p.replicas))].sort(),
+    };
   });
-  console.log(`  note __consumer_offsets: ${offsets ? `${offsets.partitions} partitions with ${offsets.replicas.join('/')} replicas, on brokers ${offsets.brokers.join(', ')}` : 'not in the clients\' metadata'}`);
+  console.log(
+    `  note __consumer_offsets: ${offsets ? `${offsets.partitions} partitions with ${offsets.replicas.join('/')} replicas, on brokers ${offsets.brokers.join(', ')}` : "not in the clients' metadata"}`,
+  );
 
   // Kill the leader of a partition, one that coordinates neither group (a
   // coordinator failover needs `__consumer_offsets` replicas elsewhere): its
   // leadership moves, the consumer keeps consuming, and a restart brings the
   // broker back on its volume.
-  const coordinators = [(await node(page, 5)).state.coordinator, (await node(page, auditId)).state.coordinator];
+  const coordinators = [
+    (await node(page, 5)).state.coordinator,
+    (await node(page, auditId)).state.coordinator,
+  ];
   const victim = leaders.find((p) => !coordinators.includes(p.leader)) ?? leaders[0];
   const leader = victim.leader;
   const before = (await node(page, 5)).state.processed;
@@ -584,22 +894,58 @@ async function threeBrokers(context, base, errors) {
     },
     { id: leader, speed: FAULT_SPEED },
   );
-  const killed = await node(page, leader, `(n) => n.alive === false && n.state.process.state === 'killed'`, 'the leader to be killed');
-  check(`kill stops broker ${leader}, the leader of ${TOPIC}-${victim.partition}`, killed.alive === false);
+  const killed = await node(
+    page,
+    leader,
+    `(n) => n.alive === false && n.state.process.state === 'killed'`,
+    'the leader to be killed',
+  );
+  check(
+    `kill stops broker ${leader}, the leader of ${TOPIC}-${victim.partition}`,
+    killed.alive === false,
+  );
   const movedTo = await metadata(
     page,
     `(m) => { const p = (m.topics[${JSON.stringify(TOPIC)}] || { partitions: [] }).partitions.find((x) => x.partition === ${victim.partition}); return p && p.leader >= 1 && p.leader !== ${leader}; }`,
     `the leadership of ${TOPIC}-${victim.partition} to move`,
   );
   const moved = partitionsOf(movedTo)[victim.partition];
-  check(`the leadership of ${TOPIC}-${victim.partition} moves to broker ${moved.leader} (${elapsed(killedAt)})`, moved.leader !== leader && !moved.isr.includes(leader), JSON.stringify(moved));
-  const going = await node(page, 5, `(n) => n.state.processed >= ${before + 30} && n.state.state === 'stable'`, 'the consumer to go on consuming');
-  check(`the consumer keeps consuming (${elapsed(killedAt)})`, going.state.processed >= before + 30, `${before} -> ${going.state.processed}, coordinator ${going.state.coordinator}`);
+  check(
+    `the leadership of ${TOPIC}-${victim.partition} moves to broker ${moved.leader} (${elapsed(killedAt)})`,
+    moved.leader !== leader && !moved.isr.includes(leader),
+    JSON.stringify(moved),
+  );
+  const going = await node(
+    page,
+    5,
+    `(n) => n.state.processed >= ${before + 30} && n.state.state === 'stable'`,
+    'the consumer to go on consuming',
+  );
+  check(
+    `the consumer keeps consuming (${elapsed(killedAt)})`,
+    going.state.processed >= before + 30,
+    `${before} -> ${going.state.processed}, coordinator ${going.state.coordinator}`,
+  );
   const restartedAt = Date.now();
   await page.evaluate((id) => window.krabkaLab.fault({ kind: 'restart', node: id }), leader);
-  const back = await node(page, leader, `(n) => n.alive && n.state.process.state === 'running' && n.state.process.incarnation === 2`, 'the restarted broker', BOOT_TIMEOUT);
-  const rejoin = await stderrLine(page, leader, 'starting the broker on /data/log', 'the restarted broker to start');
-  check(`restart brings broker ${leader} back on its volume (${elapsed(restartedAt)})`, back.state.process.volume === `${scenarioId}/${leader}` && rejoin.bootstrap_mode === 'Rejoin', JSON.stringify(rejoin));
+  const back = await node(
+    page,
+    leader,
+    `(n) => n.alive && n.state.process.state === 'running' && n.state.process.incarnation === 2`,
+    'the restarted broker',
+    BOOT_TIMEOUT,
+  );
+  const rejoin = await stderrLine(
+    page,
+    leader,
+    'starting the broker on /data/log',
+    'the restarted broker to start',
+  );
+  check(
+    `restart brings broker ${leader} back on its volume (${elapsed(restartedAt)})`,
+    back.state.process.volume === `${scenarioId}/${leader}` && rejoin.bootstrap_mode === 'Rejoin',
+    JSON.stringify(rejoin),
+  );
   // A client that starts again fetches fresh metadata, as a restarted Kafka
   // client does; the lab's clients otherwise refresh it only on an error or
   // after metadata.max.age.ms (5 min).
@@ -607,14 +953,18 @@ async function threeBrokers(context, base, errors) {
   for (const start = Date.now(); !inSync && Date.now() - start < STEP_TIMEOUT; ) {
     await page.evaluate(() => window.krabkaLab.fault({ kind: 'restart', node: 4 }));
     await page.waitForTimeout(3000);
-    const m = await page.evaluate(() => window.krabkaLab.world.snapshot().nodes.find((n) => n.id === 4).state.client.metadata);
+    const m = await page.evaluate(
+      () => window.krabkaLab.world.snapshot().nodes.find((n) => n.id === 4).state.client.metadata,
+    );
     const parts = m ? partitionsOf(m) : [];
     if (parts.length === PARTITIONS && parts.every((p) => p.isr.includes(leader))) inSync = parts;
   }
   check(
     `and it catches up into the ISR of every partition (${elapsed(restartedAt)})`,
     Boolean(inSync),
-    JSON.stringify((inSync || []).map((p) => ({ partition: p.partition, leader: p.leader, isr: p.isr }))),
+    JSON.stringify(
+      (inSync || []).map((p) => ({ partition: p.partition, leader: p.leader, isr: p.isr })),
+    ),
   );
   await page.evaluate(() => window.krabkaLab.world.setSpeed(1));
 
@@ -639,12 +989,17 @@ async function threeBrokers(context, base, errors) {
   const auditSettled = await allCommitted(auditId);
   check(
     `both groups committed every record: ${total} across the partitions`,
-    total > 0 && canonical(assignmentOf(auditSettled.state).map((a) => a.committed)) === canonical(hwms),
+    total > 0 &&
+      canonical(assignmentOf(auditSettled.state).map((a) => a.committed)) === canonical(hwms),
     `billing ${JSON.stringify(assignmentOf(settled.state).map((a) => a.committed))}, audit ${JSON.stringify(assignmentOf(auditSettled.state).map((a) => a.committed))}`,
   );
   const closed = await page.evaluate(() => window.krabkaLab.world.control(5, { cmd: 'close' }));
   await node(page, 5, '(n) => n.state && n.state.closed === true', 'the classic member to close');
-  check('the classic member closes: it commits and leaves its group', closed.ok === true, JSON.stringify(closed));
+  check(
+    'the classic member closes: it commits and leaves its group',
+    closed.ok === true,
+    JSON.stringify(closed),
+  );
   await page.waitForTimeout(1500); // the volumes' write-behind
   const reloadedAt = Date.now();
   await page.reload({ waitUntil: 'load' });
@@ -654,9 +1009,20 @@ async function threeBrokers(context, base, errors) {
   const rejoins = [];
   for (const id of [1, 2, 3]) {
     await node(page, id, isRunning, `broker ${id} to run after the reload`, BOOT_TIMEOUT);
-    rejoins.push(await stderrLine(page, id, 'starting the broker on /data/log', `broker ${id} to start after the reload`));
+    rejoins.push(
+      await stderrLine(
+        page,
+        id,
+        'starting the broker on /data/log',
+        `broker ${id} to start after the reload`,
+      ),
+    );
   }
-  check(`the real brokers restart from their IndexedDB volumes (${elapsed(reloadedAt)})`, rejoins.every((l) => l.bootstrap_mode === 'Rejoin'), rejoins.map((l) => JSON.stringify(l)).join(' | '));
+  check(
+    `the real brokers restart from their IndexedDB volumes (${elapsed(reloadedAt)})`,
+    rejoins.every((l) => l.bootstrap_mode === 'Rejoin'),
+    rejoins.map((l) => JSON.stringify(l)).join(' | '),
+  );
   const replayId = await page.evaluate(
     (topic) =>
       window.krabkaLab.world.addNode({
@@ -665,30 +1031,53 @@ async function threeBrokers(context, base, errors) {
         name: 'replay',
         x: 360,
         y: 480,
-        config: { bootstrap: [1, 2, 3], group: 'replay', topics: [topic], auto_offset_reset: 'earliest' },
+        config: {
+          bootstrap: [1, 2, 3],
+          group: 'replay',
+          topics: [topic],
+          auto_offset_reset: 'earliest',
+        },
       }),
     TOPIC,
   );
-  const replay = await node(page, replayId, `(n) => n.state && n.state.processed >= ${total} && n.state.state === 'stable'`, 'a new group to read every record');
+  const replay = await node(
+    page,
+    replayId,
+    `(n) => n.state && n.state.processed >= ${total} && n.state.state === 'stable'`,
+    'a new group to read every record',
+  );
   const replayed = assignmentOf(replay.state);
   check(
     `the records are still there: a new group reads all ${total} from offset 0 (${elapsed(reloadedAt)})`,
-    replay.state.processed === total && canonical(replayed.map((a) => a.position)) === canonical(hwms),
+    replay.state.processed === total &&
+      canonical(replayed.map((a) => a.position)) === canonical(hwms),
     `processed ${replay.state.processed}, positions ${JSON.stringify(replayed.map((a) => a.position))}, before the reload ${JSON.stringify(hwms)}`,
   );
-  const resumed = await node(page, 5, `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).filter((x) => x.topic === ${JSON.stringify(TOPIC)} && x.committed != null).length === ${PARTITIONS}`, 'the classic group to rejoin');
+  const resumed = await node(
+    page,
+    5,
+    `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).filter((x) => x.topic === ${JSON.stringify(TOPIC)} && x.committed != null).length === ${PARTITIONS}`,
+    'the classic group to rejoin',
+  );
   check(
     'the classic group resumes from its committed offsets',
-    canonical(assignmentOf(resumed.state).map((a) => a.committed)) === canonical(hwms) && resumed.state.processed === 0,
+    canonical(assignmentOf(resumed.state).map((a) => a.committed)) === canonical(hwms) &&
+      resumed.state.processed === 0,
     JSON.stringify(assignmentOf(resumed.state)),
   );
   // The KIP-848 member the reload stopped is still in its group: the node
   // draws the same member id from the scenario's seed and rejoins with epoch
   // 0, so the coordinator hands it back its own partitions.
-  const auditBack = await node(page, auditId, `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).filter((x) => x.topic === ${JSON.stringify(TOPIC)} && x.committed != null).length === ${PARTITIONS}`, 'the KIP-848 group to take its partitions back');
+  const auditBack = await node(
+    page,
+    auditId,
+    `(n) => n.state && n.state.state === 'stable' && (n.state.assignment || []).filter((x) => x.topic === ${JSON.stringify(TOPIC)} && x.committed != null).length === ${PARTITIONS}`,
+    'the KIP-848 group to take its partitions back',
+  );
   check(
     `the KIP-848 member rejoins its group and resumes from its committed offsets (${elapsed(reloadedAt)})`,
-    canonical(assignmentOf(auditBack.state).map((a) => a.committed)) === canonical(hwms) && auditBack.state.processed === 0,
+    canonical(assignmentOf(auditBack.state).map((a) => a.committed)) === canonical(hwms) &&
+      auditBack.state.processed === 0,
     JSON.stringify(assignmentOf(auditBack.state)),
   );
   await page.close();
@@ -708,11 +1097,15 @@ async function main() {
     }
   }
   if (!fs.existsSync(STAGED_MODULE)) {
-    console.error(`${path.relative(ROOT, STAGED_MODULE)} is missing: run \`npm run build:broker\`.`);
+    console.error(
+      `${path.relative(ROOT, STAGED_MODULE)} is missing: run \`npm run build:broker\`.`,
+    );
     process.exit(2);
   }
   const size = fs.statSync(STAGED_MODULE).size;
-  console.log(`  module: ${path.relative(ROOT, STAGED_MODULE)} (${size.toLocaleString('en')} bytes)`);
+  console.log(
+    `  module: ${path.relative(ROOT, STAGED_MODULE)} (${size.toLocaleString('en')} bytes)`,
+  );
   const pw = await loadPlaywright();
   if (!pw) {
     console.error('Playwright is not installed (neither in node_modules nor globally).');
@@ -742,7 +1135,9 @@ async function main() {
     server.close();
   }
   check('no page errors or console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-  console.log(`\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''} in ${elapsed(browserStart)} of browser time (${elapsed()} in all)`);
+  console.log(
+    `\n${passed} checks passed${failures.length ? `, ${failures.length} failed` : ''} in ${elapsed(browserStart)} of browser time (${elapsed()} in all)`,
+  );
   if (failures.length) {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);

@@ -35,19 +35,19 @@
 // in the world. The module (about 18 MB) is downloaded and compiled once per
 // tab, whatever the number of nodes, and the nodes show the download.
 
-import { base64ToBytes, bytesToBase64 } from "./storage.js";
+import { base64ToBytes, bytesToBase64 } from './storage.js';
 
 /** The node kind of a real broker. */
-export const REAL_BROKER_KIND = "krabka-broker";
+export const REAL_BROKER_KIND = 'krabka-broker';
 /** Where the site serves the broker's `wasm32-wasip1` module, with its content hash when the page knows it (J1: the service worker caches by it). */
 export const BROKER_MODULE_URL = (() => {
-  const url = new URL("../broker/krabka-broker.wasm", import.meta.url);
-  const version = globalThis.document?.getElementById("krabka-lab")?.dataset.brokerWasm;
-  if (version) url.searchParams.set("v", version);
+  const url = new URL('../broker/krabka-broker.wasm', import.meta.url);
+  const version = globalThis.document?.getElementById('krabka-lab')?.dataset.brokerWasm;
+  if (version) url.searchParams.set('v', version);
   return url.href;
 })();
 /** What a node shows when that module is missing. */
-export const MISSING_BUILD = "the real broker build is not on this site yet";
+export const MISSING_BUILD = 'the real broker build is not on this site yet';
 export const KAFKA_PORT = 9092;
 export const CONTROLLER_PORT = 9093;
 /** The process's listeners, in the order its descriptors are preopened. */
@@ -64,17 +64,33 @@ export const BLACK_HOLE_DIAL_MS = 30_000;
 // The bounds fit the broker's field types (`i32`, `i16` and a duration).
 const I32_MAX = 2_147_483_647;
 export const CONFIG_KEYS = Object.freeze({
-  voter: { type: "boolean" },
-  rack: { type: "string", path: ["rack"] },
-  num_partitions: { type: "integer", min: 1, max: I32_MAX, path: ["runtime", "num_partitions"] },
-  default_replication_factor: { type: "integer", min: 1, max: 32767, path: ["runtime", "default_replication_factor"] },
-  min_insync_replicas: { type: "integer", min: 1, max: I32_MAX, path: ["runtime", "default_min_insync_replicas"] },
-  replica_lag_time_max_ms: { type: "integer", min: 1, max: I32_MAX, path: ["replica_lag_time_max"], unit: "ms" },
+  voter: { type: 'boolean' },
+  rack: { type: 'string', path: ['rack'] },
+  num_partitions: { type: 'integer', min: 1, max: I32_MAX, path: ['runtime', 'num_partitions'] },
+  default_replication_factor: {
+    type: 'integer',
+    min: 1,
+    max: 32767,
+    path: ['runtime', 'default_replication_factor'],
+  },
+  min_insync_replicas: {
+    type: 'integer',
+    min: 1,
+    max: I32_MAX,
+    path: ['runtime', 'default_min_insync_replicas'],
+  },
+  replica_lag_time_max_ms: {
+    type: 'integer',
+    min: 1,
+    max: I32_MAX,
+    path: ['replica_lag_time_max'],
+    unit: 'ms',
+  },
 });
 // A test (or a curious reader) can point this tab at another module of this
 // site; the override lives in sessionStorage so it survives the isolation
 // reload, and only same-origin URLs are taken.
-const MODULE_OVERRIDE_KEY = "krabka-lab.broker-module";
+const MODULE_OVERRIDE_KEY = 'krabka-lab.broker-module';
 // Kafka's `socket.request.max.bytes`: a larger length prefix is not a Kafka frame.
 const MAX_KAFKA_FRAME = 100 * 1024 * 1024;
 // The bytes a connection may hold in the runtime's send buffer; the rest waits here.
@@ -88,16 +104,16 @@ const PUBLISH_DELAY_MS = 100;
 const NO_DIAL_TIMEOUT_MS = 2_147_483_647;
 // Why the runtime closed a connection when the process went away: the world
 // closes the lab side of every connection of a node it kills.
-const PROCESS_GONE = new Set(["kill", "exit", "trap", "restart", "failed"]);
+const PROCESS_GONE = new Set(['kill', 'exit', 'trap', 'restart', 'failed']);
 // Exits the lab caused itself.
-const STOPPED_BY_LAB = new Set(["kill", "restart", "failed"]);
-const RAW = "raw";
+const STOPPED_BY_LAB = new Set(['kill', 'restart', 'failed']);
+const RAW = 'raw';
 const encoder = new TextEncoder();
 
 // The runtime is loaded on first use: most readers never add a real broker.
 let runtimeModule = null;
 function runtime() {
-  runtimeModule ??= import("../wasi/host.js");
+  runtimeModule ??= import('../wasi/host.js');
   return runtimeModule;
 }
 
@@ -106,8 +122,8 @@ function runtime() {
 // reader who never ran a real broker.
 async function volumesKept() {
   try {
-    if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return true;
-    const { DB_NAME } = await import("../wasi/volumes.js");
+    if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') return true;
+    const { DB_NAME } = await import('../wasi/volumes.js');
     return (await indexedDB.databases()).some((db) => db.name === DB_NAME);
   } catch {
     return false;
@@ -130,7 +146,8 @@ function loadModule(url) {
       err.status = response.status;
       throw err;
     }
-    if (!response.headers.get("content-encoding")) entry.total = Number(response.headers.get("content-length")) || 0;
+    if (!response.headers.get('content-encoding'))
+      entry.total = Number(response.headers.get('content-length')) || 0;
     if (!response.body) {
       entry.compiling = true;
       return WebAssembly.compile(await response.arrayBuffer());
@@ -146,7 +163,9 @@ function loadModule(url) {
       }
       entry.compiling = true;
     })();
-    const module = await WebAssembly.compileStreaming(new Response(compile, { headers: { "content-type": "application/wasm" } }));
+    const module = await WebAssembly.compileStreaming(
+      new Response(compile, { headers: { 'content-type': 'application/wasm' } }),
+    );
     await counting;
     return module;
   })();
@@ -186,7 +205,7 @@ export function volumeName(scenarioId, nodeId) {
 }
 
 function base64Url(bytes) {
-  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
@@ -199,12 +218,15 @@ function base64Url(bytes) {
  */
 export async function clusterIdFor(scenarioId) {
   for (let salt = 0; ; salt++) {
-    const text = `krabka-lab/cluster-id/${scenarioId}${salt ? `/${salt}` : ""}`;
-    const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(text))).slice(0, 16);
+    const text = `krabka-lab/cluster-id/${scenarioId}${salt ? `/${salt}` : ''}`;
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text))).slice(
+      0,
+      16,
+    );
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     const id = base64Url(bytes);
-    if (!id.startsWith("-")) return id;
+    if (!id.startsWith('-')) return id;
   }
 }
 
@@ -219,7 +241,7 @@ export async function clusterIdFor(scenarioId) {
  * as for the crate's node kinds.
  */
 export function parseConfig(config) {
-  const c = config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const c = config && typeof config === 'object' && !Array.isArray(config) ? config : {};
   const unknown = Object.keys(c).find((key) => !Object.hasOwn(CONFIG_KEYS, key));
   if (unknown !== undefined) throw new Error(`unknown config key \`${unknown}\``);
   const fileConfig = {};
@@ -227,14 +249,21 @@ export function parseConfig(config) {
   for (const [key, spec] of Object.entries(CONFIG_KEYS)) {
     const value = c[key];
     if (value === null || value === undefined) continue;
-    if (spec.type === "boolean") {
-      if (typeof value !== "boolean") throw new Error(`config key \`${key}\` is a boolean`);
-    } else if (spec.type === "string") {
-      if (typeof value !== "string" || !value) throw new Error(`config key \`${key}\` is a non-empty string`);
-    } else if (!Number.isInteger(value) || value < spec.min || (spec.max !== undefined && value > spec.max)) {
-      throw new Error(`config key \`${key}\` is an integer from ${spec.min}${spec.max !== undefined ? ` to ${spec.max}` : ""}`);
+    if (spec.type === 'boolean') {
+      if (typeof value !== 'boolean') throw new Error(`config key \`${key}\` is a boolean`);
+    } else if (spec.type === 'string') {
+      if (typeof value !== 'string' || !value)
+        throw new Error(`config key \`${key}\` is a non-empty string`);
+    } else if (
+      !Number.isInteger(value) ||
+      value < spec.min ||
+      (spec.max !== undefined && value > spec.max)
+    ) {
+      throw new Error(
+        `config key \`${key}\` is an integer from ${spec.min}${spec.max !== undefined ? ` to ${spec.max}` : ''}`,
+      );
     }
-    if (key === "voter") {
+    if (key === 'voter') {
       voter = value;
       continue;
     }
@@ -248,12 +277,12 @@ export function parseConfig(config) {
 // The settings the lab's old simulated broker shared with the real one, by
 // the simulated name; the value is the real key.
 const SIMULATED_CONFIG = Object.freeze({
-  rack: "rack",
-  voter: "voter",
-  default_partitions: "num_partitions",
-  default_replication_factor: "default_replication_factor",
-  min_insync_replicas: "min_insync_replicas",
-  replica_lag_time_max_ms: "replica_lag_time_max_ms",
+  rack: 'rack',
+  voter: 'voter',
+  default_partitions: 'num_partitions',
+  default_replication_factor: 'default_replication_factor',
+  min_insync_replicas: 'min_insync_replicas',
+  replica_lag_time_max_ms: 'replica_lag_time_max_ms',
 });
 
 /**
@@ -265,7 +294,7 @@ const SIMULATED_CONFIG = Object.freeze({
  */
 export function realConfigFromSimulated(old) {
   const out = {};
-  if (!old || typeof old !== "object" || Array.isArray(old)) return out;
+  if (!old || typeof old !== 'object' || Array.isArray(old)) return out;
   for (const [from, to] of Object.entries(SIMULATED_CONFIG)) {
     if (old[from] == null) continue;
     try {
@@ -297,7 +326,12 @@ export function votersOf(scenario) {
 // create them: a consumer group would wait forever for `__consumer_offsets`.
 // Below three brokers they take what the cluster has, as a Kafka quickstart's
 // `server.properties` does.
-const INTERNAL_TOPIC_FACTORS = ["offsets_topic_replication_factor", "transaction_state_replication_factor", "share_state_replication_factor", "barrier_state_replication_factor"];
+const INTERNAL_TOPIC_FACTORS = [
+  'offsets_topic_replication_factor',
+  'transaction_state_replication_factor',
+  'share_state_replication_factor',
+  'barrier_state_replication_factor',
+];
 
 /** `fileConfig` with its internal topics' replication capped to `brokers`. */
 export function fitInternalTopics(fileConfig, brokers) {
@@ -318,7 +352,7 @@ export function processEnv({ nodeId, voters, clusterId, fileConfig, logLevel, la
   return {
     KRABKA_NODE_ID: String(nodeId),
     KRABKA_HOST: nodeIp(nodeId),
-    KRABKA_VOTERS: voters.map((id) => `${id}@${nodeIp(id)}:${CONTROLLER_PORT}`).join(","),
+    KRABKA_VOTERS: voters.map((id) => `${id}@${nodeIp(id)}:${CONTROLLER_PORT}`).join(','),
     KRABKA_CLUSTER_ID: clusterId,
     KRABKA_CONFIG: JSON.stringify(fileConfig),
     ...(logLevel ? { KRABKA_LOG: logLevel } : {}),
@@ -336,43 +370,62 @@ export function saslRequest(api, correlation, token) {
   const size = api === 17 ? 2 : 4;
   const bytes = new Uint8Array(14 + size + token.length);
   const view = new DataView(bytes.buffer);
-  view.setInt32(0, bytes.length-4); view.setInt16(4, api); view.setInt16(6, 1);
-  view.setInt32(8, correlation); view.setInt16(12, -1); // nullable client id
-  if (size === 2) view.setInt16(14, token.length); else view.setInt32(14, token.length);
-  bytes.set(token, 14+size); return bytes;
+  view.setInt32(0, bytes.length - 4);
+  view.setInt16(4, api);
+  view.setInt16(6, 1);
+  view.setInt32(8, correlation);
+  view.setInt16(12, -1); // nullable client id
+  if (size === 2) view.setInt16(14, token.length);
+  else view.setInt32(14, token.length);
+  bytes.set(token, 14 + size);
+  return bytes;
 }
 
 export function validateSaslResponse(bytes, handshake) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const expected = handshake ? -2147483648 : -2147483647;
-  if (bytes.length < 10 || view.getInt32(0) !== bytes.length-4 || view.getInt32(4) !== expected || view.getInt16(8) !== 0)
-    throw new Error("broker SASL authentication refused or returned an invalid response");
+  if (
+    bytes.length < 10 ||
+    view.getInt32(0) !== bytes.length - 4 ||
+    view.getInt32(4) !== expected ||
+    view.getInt16(8) !== 0
+  )
+    throw new Error('broker SASL authentication refused or returned an invalid response');
   let at = 10;
   const string = () => {
-    const length = view.getInt16(at); at += 2;
-    if (length < -1 || at + Math.max(0,length) > bytes.length) throw new Error("invalid SASL response string");
-    const value = length < 0 ? null : new TextDecoder().decode(bytes.subarray(at,at+length));
-    at += Math.max(0,length); return value;
+    const length = view.getInt16(at);
+    at += 2;
+    if (length < -1 || at + Math.max(0, length) > bytes.length)
+      throw new Error('invalid SASL response string');
+    const value = length < 0 ? null : new TextDecoder().decode(bytes.subarray(at, at + length));
+    at += Math.max(0, length);
+    return value;
   };
   if (handshake) {
-    const count = view.getInt32(at); at += 4;
-    if (count < 0 || count > 32) throw new Error("invalid SASL mechanisms");
-    const mechanisms = Array.from({length:count},string);
-    if (!mechanisms.includes("PLAIN")) throw new Error("broker does not support PLAIN binding");
+    const count = view.getInt32(at);
+    at += 4;
+    if (count < 0 || count > 32) throw new Error('invalid SASL mechanisms');
+    const mechanisms = Array.from({ length: count }, string);
+    if (!mechanisms.includes('PLAIN')) throw new Error('broker does not support PLAIN binding');
   } else {
     string();
-    const length = view.getInt32(at); at += 4;
-    if (length < 0 || at+length+8 !== bytes.length) throw new Error("invalid SASL authentication response");
-    at += length+8;
+    const length = view.getInt32(at);
+    at += 4;
+    if (length < 0 || at + length + 8 !== bytes.length)
+      throw new Error('invalid SASL authentication response');
+    at += length + 8;
   }
-  if (at !== bytes.length) throw new Error("unexpected SASL response bytes");
+  if (at !== bytes.length) throw new Error('unexpected SASL response bytes');
 }
 
 // ---- framing ------------------------------------------------------------------------------------
 
 /** Whether `bytes` is exactly one Kafka frame: a big-endian length prefix and that many bytes. */
 export function isKafkaFrame(bytes) {
-  return bytes.length >= 4 && new DataView(bytes.buffer, bytes.byteOffset, 4).getInt32(0) === bytes.length - 4;
+  return (
+    bytes.length >= 4 &&
+    new DataView(bytes.buffer, bytes.byteOffset, 4).getInt32(0) === bytes.length - 4
+  );
 }
 
 /**
@@ -446,9 +499,24 @@ export class KafkaFramer {
 // ---- frames -------------------------------------------------------------------------------------
 
 const endpoint = (e) => ({ node: Number(e.node), port: Number(e.port) });
-const openFrame = (src, dst, conn) => ({ src: endpoint(src), dst: endpoint(dst), conn, payload: { kind: "open" } });
-const closeFrame = (src, dst, conn) => ({ src: endpoint(src), dst: endpoint(dst), conn, payload: { kind: "close" } });
-const dataFrame = (src, dst, conn, bytes) => ({ src: endpoint(src), dst: endpoint(dst), conn, payload: { kind: "data", data: bytesToBase64(bytes) } });
+const openFrame = (src, dst, conn) => ({
+  src: endpoint(src),
+  dst: endpoint(dst),
+  conn,
+  payload: { kind: 'open' },
+});
+const closeFrame = (src, dst, conn) => ({
+  src: endpoint(src),
+  dst: endpoint(dst),
+  conn,
+  payload: { kind: 'close' },
+});
+const dataFrame = (src, dst, conn, bytes) => ({
+  src: endpoint(src),
+  dst: endpoint(dst),
+  conn,
+  payload: { kind: 'data', data: bytesToBase64(bytes) },
+});
 
 // Whether the link between two nodes drops frames: cut, or either node
 // isolated. A dial needs both directions (SYN, SYN-ACK), so a one-way cut
@@ -458,8 +526,15 @@ function linkDown(world, a, b) {
   const na = world.nodes.find((n) => n.id === a);
   const nb = world.nodes.find((n) => n.id === b);
   if (na?.isolated || nb?.isolated) return true;
-  if ((world.one_way_cuts || []).some((c) => (c.from === a && c.to === b) || (c.from === b && c.to === a))) return true;
-  return (world.links || []).some((l) => l.cut && ((l.a === a && l.b === b) || (l.a === b && l.b === a)));
+  if (
+    (world.one_way_cuts || []).some(
+      (c) => (c.from === a && c.to === b) || (c.from === b && c.to === a),
+    )
+  )
+    return true;
+  return (world.links || []).some(
+    (l) => l.cut && ((l.a === a && l.b === b) || (l.a === b && l.b === a)),
+  );
 }
 
 // The slow-disk sync time when a `disk` fault names none.
@@ -468,7 +543,7 @@ export const DEFAULT_SLOW_SYNC_MS = 200;
 function summarizeStats(stats) {
   const g = stats?.guest;
   if (!g) return null;
-  const round = (v) => (typeof v === "number" ? Math.round(v) : null);
+  const round = (v) => (typeof v === 'number' ? Math.round(v) : null);
   return {
     uptime_ms: round(g.uptimeMs),
     clock_ms: g.clock?.hostMs ?? null,
@@ -491,20 +566,20 @@ function summarizeStats(stats) {
 /** "slow (200 ms per sync)", "full (ENOSPC)", "failing (EIO)" or "ok". */
 export function describeDisk(disk) {
   switch (disk?.mode) {
-    case "slow":
+    case 'slow':
       return `slow (${disk.ms} ms per sync)`;
-    case "full":
-      return "full (ENOSPC)";
-    case "eio":
-      return "failing (EIO)";
+    case 'full':
+      return 'full (ENOSPC)';
+    case 'eio':
+      return 'failing (EIO)';
     default:
-      return "ok";
+      return 'ok';
   }
 }
 
 function describeExit(info) {
-  if (info.reason === "trap") return `trapped: ${info.error?.message || "the guest trapped"}`;
-  if (info.reason === "return") return "exited: its main returned";
+  if (info.reason === 'trap') return `trapped: ${info.error?.message || 'the guest trapped'}`;
+  if (info.reason === 'return') return 'exited: its main returned';
   return `exited with code ${info.code}`;
 }
 
@@ -515,8 +590,8 @@ class RealNode {
     this.id = id;
     // "loading" | "waiting" | "invalid" | "unavailable" | "booting" | "running"
     // | "exited" | "trapped" | "killed" | "failed"
-    this.state = "loading";
-    this.reason = "";
+    this.state = 'loading';
+    this.reason = '';
     this.gen = 0; // bumps whenever the process is stopped or replaced
     this.proc = null; // the current or last WasiProcess
     this.volume = null;
@@ -543,11 +618,11 @@ class RealNode {
     // a restart, as they belong to the machine; a pause does not.
     this.paused = false;
     this.skewMs = 0;
-    this.disk = { mode: "ok", ms: 0 };
+    this.disk = { mode: 'ok', ms: 0 };
   }
 
   get running() {
-    return this.proc !== null && this.proc.state === "running";
+    return this.proc !== null && this.proc.state === 'running';
   }
 
   get inStep() {
@@ -619,7 +694,7 @@ export class ExternalHost {
   /** Whether the module is on the site: false only for a 404, or when it cannot be reached at all. */
   async moduleAvailable() {
     try {
-      const response = await fetch(this.moduleUrl(), { method: "HEAD", cache: "no-store" });
+      const response = await fetch(this.moduleUrl(), { method: 'HEAD', cache: 'no-store' });
       return response.status !== 404;
     } catch {
       return false;
@@ -632,7 +707,8 @@ export class ExternalHost {
     if (info && !info.isolated && info.reason) {
       for (const node of this.nodes.values()) {
         // `unavailable` also records a fresh timeline event, replacing the "page reloads once" promise.
-        if (node.state === "unavailable" && node.reason !== MISSING_BUILD) this.unavailable(node, `cross-origin isolation is unavailable: ${info.reason}`);
+        if (node.state === 'unavailable' && node.reason !== MISSING_BUILD)
+          this.unavailable(node, `cross-origin isolation is unavailable: ${info.reason}`);
       }
     }
   }
@@ -659,7 +735,11 @@ export class ExternalHost {
     if (!world) return;
     const doc = this.hooks.scenario();
     const present = new Set((doc.nodes || []).map((n) => n.id));
-    const identitySet = doc.authorization ? JSON.stringify(world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === "admin"])) : null;
+    const identitySet = doc.authorization
+      ? JSON.stringify(
+          world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === 'admin']),
+        )
+      : null;
     const wanted = new Map();
     for (const n of world.nodes) if (n.kind === REAL_BROKER_KIND && n.hosted) wanted.set(n.id, n);
     for (const [id, node] of this.nodes) {
@@ -671,20 +751,22 @@ export class ExternalHost {
       const known = this.nodes.get(id);
       if (known) {
         if (known.identitySet !== undefined && known.identitySet !== identitySet) {
-          for (const conn of [...known.servers.values(), ...known.clients.values()]) this.emit(closeFrame(conn.local, conn.peer, conn.id));
+          for (const conn of [...known.servers.values(), ...known.clients.values()])
+            this.emit(closeFrame(conn.local, conn.peer, conn.id));
           known.identitySet = identitySet;
           this.stopProcess(known);
           if (n.alive) this.launch(known);
         }
-        if (known.state === "waiting" && doc.id) this.launch(known);
+        if (known.state === 'waiting' && doc.id) this.launch(known);
         continue;
       }
       const node = new RealNode(id);
       node.skewMs = Number(n.skew_ms) || 0;
-      if (n.disk && n.disk !== "ok") node.disk = { mode: n.disk, ms: n.disk === "slow" ? DEFAULT_SLOW_SYNC_MS : 0 };
+      if (n.disk && n.disk !== 'ok')
+        node.disk = { mode: n.disk, ms: n.disk === 'slow' ? DEFAULT_SLOW_SYNC_MS : 0 };
       this.nodes.set(id, node);
       if (n.alive) this.launch(node);
-      else this.setState(node, "killed", "");
+      else this.setState(node, 'killed', '');
     }
   }
 
@@ -692,34 +774,54 @@ export class ExternalHost {
   fault(fault) {
     const node = fault && fault.node != null ? this.nodes.get(Number(fault.node)) : null;
     switch (fault?.kind) {
-      case "kill":
+      case 'kill':
         if (node) this.halt(node);
         break;
-      case "restart":
+      case 'restart':
         if (node) this.relaunch(node, false);
         break;
-      case "wipe":
+      case 'wipe':
         if (node) this.relaunch(node, true);
         break;
-      case "pause":
-      case "resume":
-        if (node) this.setPaused(node, fault.kind === "pause");
+      case 'pause':
+      case 'resume':
+        if (node) this.setPaused(node, fault.kind === 'pause');
         break;
-      case "clock_skew":
+      case 'clock_skew':
         if (node) {
           node.skewMs = Math.round(Number(fault.ms) || 0);
           if (node.proc) node.proc.setClockSkew(node.skewMs);
-          this.mark(node, "skew", node.skewMs ? `wall clock (REALTIME) skewed by ${node.skewMs} ms` : "wall clock skew removed", "WARN", { skew_ms: node.skewMs });
+          this.mark(
+            node,
+            'skew',
+            node.skewMs
+              ? `wall clock (REALTIME) skewed by ${node.skewMs} ms`
+              : 'wall clock skew removed',
+            'WARN',
+            { skew_ms: node.skewMs },
+          );
           this.publish(node);
         }
         break;
-      case "disk":
+      case 'disk':
         if (node) {
-          const mode = ["ok", "slow", "full", "eio"].includes(fault.mode) ? fault.mode : "ok";
-          node.disk = { mode, ms: mode === "slow" ? Math.max(0, Math.round(Number(fault.ms) || DEFAULT_SLOW_SYNC_MS)) : 0 };
+          const mode = ['ok', 'slow', 'full', 'eio'].includes(fault.mode) ? fault.mode : 'ok';
+          node.disk = {
+            mode,
+            ms:
+              mode === 'slow'
+                ? Math.max(0, Math.round(Number(fault.ms) || DEFAULT_SLOW_SYNC_MS))
+                : 0,
+          };
           if (node.proc) node.proc.setDisk(node.disk.mode, node.disk.ms);
           node.dirty = true; // a sync in progress may be released now
-          this.mark(node, "disk", `disk ${describeDisk(node.disk)}`, mode === "ok" ? "INFO" : "WARN", { ...node.disk });
+          this.mark(
+            node,
+            'disk',
+            `disk ${describeDisk(node.disk)}`,
+            mode === 'ok' ? 'INFO' : 'WARN',
+            { ...node.disk },
+          );
           this.publish(node);
         }
         break;
@@ -749,30 +851,35 @@ export class ExternalHost {
   setPaused(node, paused) {
     if (node.paused === paused) return;
     node.paused = paused;
-    if (node.proc && node.proc.state === "running") {
+    if (node.proc && node.proc.state === 'running') {
       if (paused) node.proc.pause();
       else node.proc.resume();
     }
     node.dirty = true;
-    this.mark(node, paused ? "paused" : "resumed", paused ? "process paused (SIGSTOP): no timers, no input" : "process resumed (SIGCONT)", paused ? "WARN" : "INFO");
+    this.mark(
+      node,
+      paused ? 'paused' : 'resumed',
+      paused ? 'process paused (SIGSTOP): no timers, no input' : 'process resumed (SIGCONT)',
+      paused ? 'WARN' : 'INFO',
+    );
     this.publish(node);
   }
 
   halt(node) {
     node.paused = false;
-    const ended = node.state === "exited" || node.state === "trapped";
-    const wasKilled = node.state === "killed";
+    const ended = node.state === 'exited' || node.state === 'trapped';
+    const wasKilled = node.state === 'killed';
     this.stopProcess(node);
     if (ended) this.publish(node);
     else {
-      if (!wasKilled) this.mark(node, "killed", "process killed", "WARN");
-      this.setState(node, "killed", "");
+      if (!wasKilled) this.mark(node, 'killed', 'process killed', 'WARN');
+      this.setState(node, 'killed', '');
     }
   }
 
   relaunch(node, wipe) {
     node.paused = false;
-    node.origin = wipe ? "wiped" : "restarted";
+    node.origin = wipe ? 'wiped' : 'restarted';
     this.stopProcess(node, { forget: wipe });
     this.launch(node);
   }
@@ -799,7 +906,7 @@ export class ExternalHost {
         try {
           await (await runtime()).forget(volume);
         } catch (err) {
-          this.note(node, "error", `forgetting ${volume} failed: ${err.message}`);
+          this.note(node, 'error', `forgetting ${volume} failed: ${err.message}`);
         }
       }
     });
@@ -821,58 +928,93 @@ export class ExternalHost {
     try {
       config = parseConfig(spec?.config);
     } catch (err) {
-      this.setState(node, "invalid", `invalid config: ${err.message}`);
+      this.setState(node, 'invalid', `invalid config: ${err.message}`);
       return;
     }
     if (!doc.id) {
-      this.setState(node, "waiting", "the scenario has no identity yet: it gets one when it is saved");
+      this.setState(
+        node,
+        'waiting',
+        'the scenario has no identity yet: it gets one when it is saved',
+      );
       return;
     }
     node.volume = volumeName(doc.id, node.id);
-    this.setState(node, "loading", "downloading the broker");
+    this.setState(node, 'loading', 'downloading the broker');
     let wasi;
     let module;
     const loading = loadModule(this.moduleUrl());
     const progress = setInterval(() => {
-      if (gen !== node.gen || node.state !== "loading") return;
-      const size = loading.total ? `${megabytes(loading.loaded)} of ${megabytes(loading.total)}` : megabytes(loading.loaded);
-      const reason = loading.compiling ? "compiling the broker" : `downloading the broker: ${size}`;
-      if (reason !== node.reason) this.setState(node, "loading", reason);
+      if (gen !== node.gen || node.state !== 'loading') return;
+      const size = loading.total
+        ? `${megabytes(loading.loaded)} of ${megabytes(loading.total)}`
+        : megabytes(loading.loaded);
+      const reason = loading.compiling ? 'compiling the broker' : `downloading the broker: ${size}`;
+      if (reason !== node.reason) this.setState(node, 'loading', reason);
     }, 250);
     try {
       wasi = await runtime();
       module = await loading.promise;
     } catch (err) {
       if (gen !== node.gen) return;
-      this.unavailable(node, err && err.status === 404 ? MISSING_BUILD : `the broker module did not load: ${err.message}`);
+      this.unavailable(
+        node,
+        err && err.status === 404
+          ? MISSING_BUILD
+          : `the broker module did not load: ${err.message}`,
+      );
       return;
     } finally {
       clearInterval(progress);
     }
     if (gen !== node.gen) return;
     if (wasi.isolationProblem()) {
-      const reason = this.isolation && !this.isolation.isolated && this.isolation.reason
-        ? `cross-origin isolation is unavailable: ${this.isolation.reason}`
-        : "waiting for cross-origin isolation: the page reloads once to turn it on";
+      const reason =
+        this.isolation && !this.isolation.isolated && this.isolation.reason
+          ? `cross-origin isolation is unavailable: ${this.isolation.reason}`
+          : 'waiting for cross-origin isolation: the page reloads once to turn it on';
       this.unavailable(node, reason);
       return;
     }
     const world = this.hooks.world();
-    node.identitySet = doc.authorization ? JSON.stringify(world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === "admin"])) : null;
-    const labPrincipals = doc.authorization ? world.nodes.map((n) => n.id).sort((a,b) => a-b) : undefined;
-    let fileConfig = fitInternalTopics(config.fileConfig, (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length);
-    if (doc.authorization) fileConfig = { ...fileConfig, authorization: {
-      type: "simple", allow_everyone_if_no_acl_found: false,
-      super_users: world.nodes.filter((n) => n.kind === REAL_BROKER_KIND || n.kind === "admin").map((n) => `User:node-${n.id}@LAB.KRABKA`),
-    } };
-    const env = processEnv({ labPrincipals, nodeId: node.id, voters: votersOf(doc), clusterId: await clusterIdFor(doc.forked_from || doc.id), fileConfig, logLevel: this.hooks.logLevel?.(node.id) });
+    node.identitySet = doc.authorization
+      ? JSON.stringify(
+          world.nodes.map((n) => [n.id, n.kind === REAL_BROKER_KIND || n.kind === 'admin']),
+        )
+      : null;
+    const labPrincipals = doc.authorization
+      ? world.nodes.map((n) => n.id).sort((a, b) => a - b)
+      : undefined;
+    let fileConfig = fitInternalTopics(
+      config.fileConfig,
+      (doc.nodes || []).filter((n) => n.kind === REAL_BROKER_KIND).length,
+    );
+    if (doc.authorization)
+      fileConfig = {
+        ...fileConfig,
+        authorization: {
+          type: 'simple',
+          allow_everyone_if_no_acl_found: false,
+          super_users: world.nodes
+            .filter((n) => n.kind === REAL_BROKER_KIND || n.kind === 'admin')
+            .map((n) => `User:node-${n.id}@LAB.KRABKA`),
+        },
+      };
+    const env = processEnv({
+      labPrincipals,
+      nodeId: node.id,
+      voters: votersOf(doc),
+      clusterId: await clusterIdFor(doc.forked_from || doc.id),
+      fileConfig,
+      logLevel: this.hooks.logLevel?.(node.id),
+    });
     await this.volumeBusy.get(node.volume);
     if (gen !== node.gen) return;
-    this.clock ??= new wasi.WasiClock({ mode: "host", timeMs: this.clockMs });
+    this.clock ??= new wasi.WasiClock({ mode: 'host', timeMs: this.clockMs });
     const proc = new wasi.WasiProcess(
       {
         name: `krabka-broker-${node.id}`,
-        args: ["krabka-broker"],
+        args: ['krabka-broker'],
         env,
         listeners: LISTENER_PORTS,
         volume: node.volume,
@@ -885,31 +1027,39 @@ export class ExternalHost {
     node.proc = proc;
     node.env = env;
     if (node.skewMs) proc.setClockSkew(node.skewMs);
-    if (node.disk.mode !== "ok") proc.setDisk(node.disk.mode, node.disk.ms);
+    if (node.disk.mode !== 'ok') proc.setDisk(node.disk.mode, node.disk.ms);
     node.incarnation += 1;
     node.startedAt = this.clockMs;
-    proc.on("exit", (info) => this.exited(node, gen, info));
-    proc.on("warn", (text) => this.note(node, "warn", text));
-    proc.on("error", (err) => this.note(node, "error", err && err.message ? err.message : String(err)));
+    proc.on('exit', (info) => this.exited(node, gen, info));
+    proc.on('warn', (text) => this.note(node, 'warn', text));
+    proc.on('error', (err) =>
+      this.note(node, 'error', err && err.message ? err.message : String(err)),
+    );
     // A process that was replaced may still flush its last lines: only the current one is logged.
-    for (const stream of ["stdout", "stderr"]) {
+    for (const stream of ['stdout', 'stderr']) {
       proc.on(stream, (text) => {
         if (node.proc === proc) this.hooks.log?.(node.id, { stream, text, base: node.startedAt });
         this.publishSoon(node);
       });
     }
-    const origin = node.origin ?? (node.incarnation > 1 ? "restarted" : "started");
+    const origin = node.origin ?? (node.incarnation > 1 ? 'restarted' : 'started');
     node.origin = null;
-    const level = env.KRABKA_LOG ?? "";
-    this.mark(node, origin, `process ${origin === "wiped" ? "restarted on a fresh disk" : origin} with ${level ? `KRABKA_LOG=${level}` : "the default log level"}`, "INFO", { incarnation: node.incarnation, log_level: level });
-    this.setState(node, "booting", "");
+    const level = env.KRABKA_LOG ?? '';
+    this.mark(
+      node,
+      origin,
+      `process ${origin === 'wiped' ? 'restarted on a fresh disk' : origin} with ${level ? `KRABKA_LOG=${level}` : 'the default log level'}`,
+      'INFO',
+      { incarnation: node.incarnation, log_level: level },
+    );
+    this.setState(node, 'booting', '');
     try {
       await proc.start();
     } catch (err) {
       if (gen !== node.gen) return;
-      this.setState(node, "failed", err.message);
-      this.mark(node, "failed", `process failed to start: ${err.message}`, "ERROR");
-      this.event(node, "process_failed", { level: "error", reason: err.message });
+      this.setState(node, 'failed', err.message);
+      this.mark(node, 'failed', `process failed to start: ${err.message}`, 'ERROR');
+      this.event(node, 'process_failed', { level: 'error', reason: err.message });
       this.refusePending(node);
       return;
     }
@@ -918,7 +1068,11 @@ export class ExternalHost {
       return;
     }
     if (node.paused) proc.pause(); // paused while it booted
-    this.event(node, "process_start", { incarnation: node.incarnation, volume: node.volume, address: nodeIp(node.id) });
+    this.event(node, 'process_start', {
+      incarnation: node.incarnation,
+      volume: node.volume,
+      address: nodeIp(node.id),
+    });
     for (const frame of node.pending.splice(0)) this.input(node, frame);
     this.flushOut();
     this.ensureStats();
@@ -927,16 +1081,16 @@ export class ExternalHost {
   }
 
   unavailable(node, reason) {
-    const changed = node.state !== "unavailable" || node.reason !== reason;
-    this.setState(node, "unavailable", reason);
-    if (changed) this.event(node, "process_unavailable", { level: "warn", reason });
+    const changed = node.state !== 'unavailable' || node.reason !== reason;
+    this.setState(node, 'unavailable', reason);
+    if (changed) this.event(node, 'process_unavailable', { level: 'warn', reason });
     this.refusePending(node);
   }
 
   // The process ended without the lab stopping it.
   exited(node, gen, info) {
     if (gen !== node.gen || STOPPED_BY_LAB.has(info.reason)) return;
-    const trap = info.reason === "trap";
+    const trap = info.reason === 'trap';
     const reason = describeExit(info);
     node.exit = { reason: info.reason, code: info.code ?? null, message: reason };
     node.gen++;
@@ -945,9 +1099,19 @@ export class ExternalHost {
     node.dirty = false;
     node.settling = null;
     node.deadline = Infinity;
-    this.setState(node, trap ? "trapped" : "exited", reason);
-    this.mark(node, trap ? "trapped" : "exited", `process ${reason}`, trap || info.code ? "ERROR" : "INFO", { code: info.code ?? null });
-    this.event(node, trap ? "process_trap" : "process_exit", { level: "error", reason, code: info.code ?? null });
+    this.setState(node, trap ? 'trapped' : 'exited', reason);
+    this.mark(
+      node,
+      trap ? 'trapped' : 'exited',
+      `process ${reason}`,
+      trap || info.code ? 'ERROR' : 'INFO',
+      { code: info.code ?? null },
+    );
+    this.event(node, trap ? 'process_trap' : 'process_exit', {
+      level: 'error',
+      reason,
+      code: info.code ?? null,
+    });
     this.hooks.exited(node.id, node.exit);
   }
 
@@ -966,7 +1130,7 @@ export class ExternalHost {
 
   input(node, frame) {
     if (!node.running) {
-      if (node.state === "loading" || node.state === "booting") node.pending.push(frame);
+      if (node.state === 'loading' || node.state === 'booting') node.pending.push(frame);
       else this.refuse(frame);
       return;
     }
@@ -977,7 +1141,7 @@ export class ExternalHost {
 
   // Nothing listens: an open is refused at once, like a reset; anything else is lost.
   refuse(frame) {
-    if (frame.payload?.kind === "open") this.emit(closeFrame(frame.dst, frame.src, frame.conn));
+    if (frame.payload?.kind === 'open') this.emit(closeFrame(frame.dst, frame.src, frame.conn));
   }
 
   refusePending(node) {
@@ -988,7 +1152,7 @@ export class ExternalHost {
   toListener(node, frame) {
     const key = `${frame.src.node}:${frame.src.port}:${frame.conn}`;
     const kind = frame.payload?.kind;
-    if (kind === "open") {
+    if (kind === 'open') {
       const old = node.servers.get(key);
       if (old) this.dropConn(node, old);
       if (!LISTENER_PORTS.includes(Number(frame.dst.port))) {
@@ -999,8 +1163,13 @@ export class ExternalHost {
       const source = world.nodes.find((n) => n.id === frame.src.node);
       const authorized = Boolean(this.hooks.scenario().authorization);
       if (authorized && (!source || frame.principal !== `node-${source.id}@LAB.KRABKA`)) {
-        this.event(node, "broker_auth_failed", { level: "error", peer: frame.src.node, reason: "missing verified Kerberos identity" });
-        this.refuse(frame); return;
+        this.event(node, 'broker_auth_failed', {
+          level: 'error',
+          peer: frame.src.node,
+          reason: 'missing verified Kerberos identity',
+        });
+        this.refuse(frame);
+        return;
       }
       let wasi;
       try {
@@ -1009,31 +1178,41 @@ export class ExternalHost {
         this.refuse(frame);
         return;
       }
-      const conn = { key, wasi, local: endpoint(frame.dst), peer: endpoint(frame.src), id: frame.conn, framing: null, hold: [], held: 0, done: false };
+      const conn = {
+        key,
+        wasi,
+        local: endpoint(frame.dst),
+        peer: endpoint(frame.src),
+        id: frame.conn,
+        framing: null,
+        hold: [],
+        held: 0,
+        done: false,
+      };
       const bridge = authorized && source.kind !== REAL_BROKER_KIND;
-      conn.aclClient = bridge && source.kind !== "admin";
+      conn.aclClient = bridge && source.kind !== 'admin';
       conn.aclGate = conn.aclClient;
       if (bridge) {
         conn.framing = new KafkaFramer();
-        conn.auth = { stage: "handshake", principal: frame.principal, peer: source.id };
+        conn.auth = { stage: 'handshake', principal: frame.principal, peer: source.id };
       }
       node.servers.set(key, conn);
       this.attach(node, conn);
-      if (bridge) conn.wasi.send(saslRequest(17, -2147483648, new TextEncoder().encode("PLAIN")));
+      if (bridge) conn.wasi.send(saslRequest(17, -2147483648, new TextEncoder().encode('PLAIN')));
       return;
     }
     const conn = node.servers.get(key);
     if (!conn) return;
-    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
-    else if (kind === "close") this.closeFromLab(node, conn);
+    if (kind === 'data') this.send(node, conn, base64ToBytes(frame.payload.data));
+    else if (kind === 'close') this.closeFromLab(node, conn);
   }
 
   toDial(node, frame) {
     const conn = node.clients.get(Number(frame.conn));
     if (!conn) return;
     const kind = frame.payload?.kind;
-    if (kind === "data") this.send(node, conn, base64ToBytes(frame.payload.data));
-    else if (kind === "close") this.closeFromLab(node, conn);
+    if (kind === 'data') this.send(node, conn, base64ToBytes(frame.payload.data));
+    else if (kind === 'close') this.closeFromLab(node, conn);
   }
 
   // Bytes for the process, in order. An accepted connection is a Kafka stream
@@ -1075,10 +1254,10 @@ export class ExternalHost {
   // ---- the process's side of a connection ---------------------------------------------------
 
   attach(node, conn) {
-    conn.wasi.on("data", (bytes) => this.fromProcess(node, conn, bytes));
-    conn.wasi.on("end", () => this.endFromProcess(node, conn));
-    conn.wasi.on("close", (info) => this.closedByRuntime(node, conn, info));
-    conn.wasi.on("drain", () => this.flushHold(conn));
+    conn.wasi.on('data', (bytes) => this.fromProcess(node, conn, bytes));
+    conn.wasi.on('end', () => this.endFromProcess(node, conn));
+    conn.wasi.on('close', (info) => this.closedByRuntime(node, conn, info));
+    conn.wasi.on('drain', () => this.flushHold(conn));
   }
 
   fromProcess(node, conn, bytes) {
@@ -1087,22 +1266,36 @@ export class ExternalHost {
     if (conn.framing === null) conn.framing = RAW;
     const messages = conn.framing === RAW ? [bytes] : conn.framing.push(bytes);
     for (const message of messages) {
-      if (!conn.auth) { this.emit(dataFrame(conn.local, conn.peer, conn.id, message)); continue; }
+      if (!conn.auth) {
+        this.emit(dataFrame(conn.local, conn.peer, conn.id, message));
+        continue;
+      }
       try {
-        const handshake = conn.auth.stage === "handshake";
+        const handshake = conn.auth.stage === 'handshake';
         validateSaslResponse(message, handshake);
         if (handshake) {
-          conn.auth.stage = "authenticate";
-          const token = new TextEncoder().encode(`\0${conn.auth.principal}\0lab-only-node-${conn.auth.peer}`);
+          conn.auth.stage = 'authenticate';
+          const token = new TextEncoder().encode(
+            `\0${conn.auth.principal}\0lab-only-node-${conn.auth.peer}`,
+          );
           conn.wasi.send(saslRequest(36, -2147483647, token));
         } else {
-          this.event(node, "broker_authenticated", { peer: conn.auth.peer, principal: conn.auth.principal });
+          this.event(node, 'broker_authenticated', {
+            peer: conn.auth.peer,
+            principal: conn.auth.principal,
+          });
           conn.auth = null;
           this.flushHold(conn);
         }
       } catch (err) {
-        this.event(node, "broker_auth_failed", { level: "error", peer: conn.peer.node, reason: err.message });
-        this.emit(closeFrame(conn.local, conn.peer, conn.id)); this.dropConn(node, conn); return;
+        this.event(node, 'broker_auth_failed', {
+          level: 'error',
+          peer: conn.peer.node,
+          reason: err.message,
+        });
+        this.emit(closeFrame(conn.local, conn.peer, conn.id));
+        this.dropConn(node, conn);
+        return;
       }
     }
   }
@@ -1150,7 +1343,8 @@ export class ExternalHost {
   }
 
   dropConns(node) {
-    for (const conn of [...node.servers.values(), ...node.clients.values()]) this.dropConn(node, conn);
+    for (const conn of [...node.servers.values(), ...node.clients.values()])
+      this.dropConn(node, conn);
     node.servers.clear();
     node.clients.clear();
   }
@@ -1164,19 +1358,21 @@ export class ExternalHost {
   dial(node, gen, host, port, dial) {
     if (gen !== node.gen) return null;
     this.activity(node);
-    const advertised = host === "127.0.0.1" && port >= 9092 && port <= 19091;
+    const advertised = host === '127.0.0.1' && port >= 9092 && port <= 19091;
     const target = advertised ? port - 9091 : nodeForIp(host);
     if (advertised) port = KAFKA_PORT;
     const world = target == null ? null : this.hooks.world();
-    const peer = world ? world.nodes.find((n) => n.id === target && n.kind !== "admin") : null;
+    const peer = world ? world.nodes.find((n) => n.id === target && n.kind !== 'admin') : null;
     if (!peer) {
-      dial.refuse("EHOSTUNREACH");
+      dial.refuse('EHOSTUNREACH');
       return undefined;
     }
     if (!peer.alive) return null;
     if (linkDown(world, node.id, target)) {
       const deadline = this.hooks.now() + BLACK_HOLE_DIAL_MS;
-      return new Promise((resolve) => node.waitingDials.push({ target, port, dial, resolve, deadline }));
+      return new Promise((resolve) =>
+        node.waitingDials.push({ target, port, dial, resolve, deadline }),
+      );
     }
     return this.openDial(node, target, port, dial);
   }
@@ -1192,7 +1388,7 @@ export class ExternalHost {
           still.push(waiting);
           continue;
         }
-        waiting.dial.refuse("ETIMEDOUT");
+        waiting.dial.refuse('ETIMEDOUT');
         waiting.resolve(undefined);
         node.dirty = true;
         expired = true;
@@ -1204,7 +1400,7 @@ export class ExternalHost {
 
   openDial(node, target, port, dial) {
     const wasi = dial.accept();
-    if (wasi.state !== "open") return wasi; // the process gave up on it meanwhile
+    if (wasi.state !== 'open') return wasi; // the process gave up on it meanwhile
     const id = node.allocConn();
     const conn = {
       wasi,
@@ -1282,7 +1478,8 @@ export class ExternalHost {
 
   /** Whether a process in lockstep has input or activity it has not settled. */
   get busy() {
-    for (const node of this.nodes.values()) if (node.inStep && (node.dirty || node.settling)) return true;
+    for (const node of this.nodes.values())
+      if (node.inStep && (node.dirty || node.settling)) return true;
     return false;
   }
 
@@ -1292,13 +1489,21 @@ export class ExternalHost {
    */
   at(now, frames) {
     if (this.hooks.scenario().authorization) {
-      const ready = this.hooks.world()?.nodes.some((n) => n.kind === "admin" && n.alive !== false && n.state?.authorization?.ready);
-      for (const node of this.nodes.values()) for (const conn of node.servers.values()) {
-        if (conn.aclClient && conn.aclGate === ready) {
-          conn.aclGate = !ready;
-          if (ready) { this.flushHold(conn); node.dirty = true; }
+      const ready = this.hooks
+        .world()
+        ?.nodes.some(
+          (n) => n.kind === 'admin' && n.alive !== false && n.state?.authorization?.ready,
+        );
+      for (const node of this.nodes.values())
+        for (const conn of node.servers.values()) {
+          if (conn.aclClient && conn.aclGate === ready) {
+            conn.aclGate = !ready;
+            if (ready) {
+              this.flushHold(conn);
+              node.dirty = true;
+            }
+          }
         }
-      }
     }
     let wake = frames.length > 0;
     for (const node of this.nodes.values()) {
@@ -1333,7 +1538,10 @@ export class ExternalHost {
     const late = new Promise((resolve) => {
       timer = setTimeout(() => resolve(true), budgetMs);
     });
-    const tooLate = await Promise.race([Promise.all(waiting.map((n) => this.settle(n))).then(() => false), late]);
+    const tooLate = await Promise.race([
+      Promise.all(waiting.map((n) => this.settle(n))).then(() => false),
+      late,
+    ]);
     clearTimeout(timer);
     if (tooLate) {
       for (const node of waiting) {
@@ -1357,8 +1565,8 @@ export class ExternalHost {
         node.deadline = info.deadlineMs == null ? Infinity : Math.ceil(info.deadlineMs - 1e-6);
         if (!node.ready) {
           node.ready = true;
-          this.setState(node, "running", "");
-          this.event(node, "process_ready", { address: nodeIp(node.id) });
+          this.setState(node, 'running', '');
+          this.event(node, 'process_ready', { address: nodeIp(node.id) });
         }
       },
       () => {},
@@ -1379,7 +1587,7 @@ export class ExternalHost {
 
   setState(node, state, reason) {
     node.state = state;
-    node.reason = reason || "";
+    node.reason = reason || '';
     this.publish(node);
   }
 
@@ -1394,7 +1602,7 @@ export class ExternalHost {
   }
 
   // A lifecycle row in the Logs tab, between the lines of one process and the next.
-  mark(node, marker, message, level = "INFO", detail = {}) {
+  mark(node, marker, message, level = 'INFO', detail = {}) {
     this.hooks.log?.(node.id, { marker, message, level, detail });
   }
 
@@ -1440,9 +1648,14 @@ export class ExternalHost {
         notes: node.notes.slice(-5),
       },
       env: node.env,
-      connections: { inbound: node.servers.size, outbound: node.clients.size, waiting_dials: node.waitingDials.length, held_bytes: held },
-      stdout: proc ? proc.tail("stdout").slice(-TAIL_LINES) : [],
-      stderr: proc ? proc.tail("stderr").slice(-TAIL_LINES) : [],
+      connections: {
+        inbound: node.servers.size,
+        outbound: node.clients.size,
+        waiting_dials: node.waitingDials.length,
+        held_bytes: held,
+      },
+      stdout: proc ? proc.tail('stdout').slice(-TAIL_LINES) : [],
+      stderr: proc ? proc.tail('stderr').slice(-TAIL_LINES) : [],
       runtime: node.stats,
     };
   }
@@ -1495,7 +1708,12 @@ export class ExternalHost {
         const node = Number(v.id.slice(prefix.length));
         const usage = await wasi.usage(v.id);
         const real = this.nodes.get(node);
-        const inUse = Boolean(real && real.volume === v.id && real.proc && ["starting", "running"].includes(real.proc.state));
+        const inUse = Boolean(
+          real &&
+          real.volume === v.id &&
+          real.proc &&
+          ['starting', 'running'].includes(real.proc.state),
+        );
         return { node, volume: v.id, bytes: usage.bytes, files: usage.files, inUse };
       }),
     );

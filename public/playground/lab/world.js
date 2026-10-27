@@ -19,7 +19,7 @@
 // and blocked again before time moves on. That keeps a real process on the
 // lab's logical clock, like the nodes the module runs.
 
-import { REAL_BROKER_KIND, realConfigFromSimulated } from "./external.js";
+import { REAL_BROKER_KIND, realConfigFromSimulated } from './external.js';
 
 export const SPEEDS = [0.1, 0.5, 1, 2, 5, 20];
 const SNAPSHOT_INTERVAL_MS = 50;
@@ -116,10 +116,10 @@ export function nodePurge(id) {
 // latency, loss).
 export function faultPurge(fault) {
   switch (fault && fault.kind) {
-    case "kill":
-    case "wipe":
+    case 'kill':
+    case 'wipe':
       return nodePurge(fault.node);
-    case "partition": {
+    case 'partition': {
       const a = Number(fault.a);
       const b = Number(fault.b);
       return (f) => {
@@ -128,7 +128,7 @@ export function faultPurge(fault) {
         return (src === a && dst === b) || (src === b && dst === a);
       };
     }
-    case "isolate": {
+    case 'isolate': {
       const n = Number(fault.node);
       return (f) => (endNode(f.src) === n) !== (endNode(f.dst) === n);
     }
@@ -163,11 +163,11 @@ export class LabWorld {
     // Scenario fields the crate cannot change on a running world; the page
     // keeps them and merges them into the document it saves and shares.
     this.topics = [];
-    this.name = "";
+    this.name = '';
     this.experiment = null; // J3: the scenario's experiment, kept page-side like the name
     this.forkedFrom = null; // J3: the scenario a fork copied its broker disks from (their cluster id)
     this.hostedIds = null; // null: every node runs here
-    this.id = "";
+    this.id = '';
     // The real brokers this tab runs (`ExternalHost`), the lockstep run in
     // flight, and a counter that tells a run its world was replaced.
     this.external = null;
@@ -207,12 +207,12 @@ export class LabWorld {
     // The old world's last durable ops belong to its scenario; keep them.
     this.drainDurable();
     this.dispose();
-    this.lab = this.guard("create world", () => new this.Lab(u64(seed)));
+    this.lab = this.guard('create world', () => new this.Lab(u64(seed)));
     this.topics = [];
-    this.name = "";
+    this.name = '';
     this.experiment = null; // J3
     this.forkedFrom = null; // J3
-    this.id = "";
+    this.id = '';
     this.hostedIds = null;
     this.external?.reset();
     this.bridge?.reset();
@@ -229,17 +229,21 @@ export class LabWorld {
     const up = upgradeSimulatedBrokers(scenario);
     const doc = normalizeScenario(up.doc);
     // A simulated broker's durable image means nothing to the real broker.
-    if (images && up.ids.length) images = Object.fromEntries(Object.entries(images).filter(([id]) => !up.ids.includes(Number(id))));
+    if (images && up.ids.length)
+      images = Object.fromEntries(
+        Object.entries(images).filter(([id]) => !up.ids.includes(Number(id))),
+      );
     // J3: the experiment and the fork origin stay page-side (`scenario()` merges them back in), so a module without the fields still loads.
     const { experiment: _experiment, forked_from: _forkedFrom, ...forCrate } = doc;
     const json = JSON.stringify(forCrate);
-    if (!this.lab) this.lab = this.guard("create world", () => new this.Lab(u64(doc.seed)));
+    if (!this.lab) this.lab = this.guard('create world', () => new this.Lab(u64(doc.seed)));
     if (!this.lab) return false;
     const ids = hostedIds == null ? [] : hostedIds.length ? hostedIds : NONE_HOSTED;
     // The old world's last durable ops belong to its scenario; keep them.
     this.drainDurable();
-    const ok = this.guard("load scenario", () => {
-      if (images && Object.keys(images).length) this.lab.loadScenarioWithState(json, JSON.stringify(ids), JSON.stringify(images));
+    const ok = this.guard('load scenario', () => {
+      if (images && Object.keys(images).length)
+        this.lab.loadScenarioWithState(json, JSON.stringify(ids), JSON.stringify(images));
       else if (hostedIds == null) this.lab.loadScenario(json);
       else this.lab.loadScenarioHosted(json, JSON.stringify(ids));
       return true;
@@ -247,10 +251,10 @@ export class LabWorld {
     if (!ok) return false;
     this.hostedIds = hostedIds;
     this.topics = (doc.topics || []).map((t) => ({ ...t }));
-    this.name = doc.name || "";
+    this.name = doc.name || '';
     this.experiment = doc.experiment ?? null; // J3
     this.forkedFrom = doc.forked_from ?? null; // J3
-    this.id = doc.id || "";
+    this.id = doc.id || '';
     // Frames held for the old world's peers went with it, and so did the
     // processes of its real brokers; their volumes stay.
     this.egress.clear();
@@ -276,7 +280,7 @@ export class LabWorld {
       !this.lab ||
       cur.id !== next.id ||
       cur.seed !== next.seed ||
-      (cur.security ?? "plaintext") !== (next.security ?? "plaintext") ||
+      (cur.security ?? 'plaintext') !== (next.security ?? 'plaintext') ||
       JSON.stringify(cur.authorization) !== JSON.stringify(next.authorization) ||
       cur.links.default_latency_ms !== next.links.default_latency_ms ||
       JSON.stringify(cur.topics) !== JSON.stringify(next.topics)
@@ -289,7 +293,7 @@ export class LabWorld {
     const nextById = new Map(next.nodes.map((n) => [n.id, n]));
     for (const id of curById.keys()) {
       if (!nextById.has(id)) {
-        this.guard("remove node", () => this.lab.removeNode(id));
+        this.guard('remove node', () => this.lab.removeNode(id));
         this.egress.purge(nodePurge(id));
         this.external?.nodeRemoved(id);
       }
@@ -297,20 +301,20 @@ export class LabWorld {
     for (const spec of next.nodes) {
       const old = curById.get(spec.id);
       if (!old) {
-        this.guard("add node", () => this.lab.addNode(JSON.stringify(spec)));
+        this.guard('add node', () => this.lab.addNode(JSON.stringify(spec)));
       } else if (
         old.kind !== spec.kind ||
         old.name !== spec.name ||
         JSON.stringify(old.config) !== JSON.stringify(spec.config)
       ) {
-        this.guard("update node", () => this.lab.updateNode(spec.id, JSON.stringify(spec)));
+        this.guard('update node', () => this.lab.updateNode(spec.id, JSON.stringify(spec)));
         this.egress.purge(nodePurge(spec.id));
         this.external?.nodeRemoved(spec.id);
       } else if (old.x !== spec.x || old.y !== spec.y) {
-        this.guard("move node", () => this.lab.setPosition(spec.id, spec.x, spec.y));
+        this.guard('move node', () => this.lab.setPosition(spec.id, spec.x, spec.y));
       }
     }
-    this.name = next.name || "";
+    this.name = next.name || '';
     this.experiment = next.experiment ?? null; // J3
     this.forkedFrom = next.forked_from ?? null; // J3
     this.scenarioCache = null;
@@ -336,7 +340,7 @@ export class LabWorld {
   dispose() {
     this.egress.clear();
     this.generation += 1;
-    if (this.lab && typeof this.lab.free === "function") {
+    if (this.lab && typeof this.lab.free === 'function') {
       try {
         this.lab.free();
       } catch {
@@ -357,8 +361,16 @@ export class LabWorld {
   scenario() {
     if (this.scenarioCache) return this.scenarioCache;
     let doc = null;
-    if (this.lab) doc = this.guard("read scenario", () => JSON.parse(this.lab.scenario()));
-    if (!doc) doc = { version: 1, seed: 1, name: "", links: { default_latency_ms: 5 }, nodes: [], topics: [] };
+    if (this.lab) doc = this.guard('read scenario', () => JSON.parse(this.lab.scenario()));
+    if (!doc)
+      doc = {
+        version: 1,
+        seed: 1,
+        name: '',
+        links: { default_latency_ms: 5 },
+        nodes: [],
+        topics: [],
+      };
     doc.topics = this.topics.map((t) => ({ ...t }));
     doc.name = this.name;
     doc.id = this.id;
@@ -374,7 +386,7 @@ export class LabWorld {
 
   addNode(spec) {
     if (!this.lab) return null;
-    const id = this.guard("add node", () => this.lab.addNode(JSON.stringify(spec)));
+    const id = this.guard('add node', () => this.lab.addNode(JSON.stringify(spec)));
     if (id == null) return null;
     this.scenarioCache = null;
     this.external?.sync();
@@ -384,7 +396,7 @@ export class LabWorld {
 
   removeNode(id) {
     if (!this.lab) return;
-    this.guard("remove node", () => this.lab.removeNode(id));
+    this.guard('remove node', () => this.lab.removeNode(id));
     this.egress.purge(nodePurge(id));
     this.scenarioCache = null;
     this.external?.nodeRemoved(id);
@@ -393,7 +405,7 @@ export class LabWorld {
 
   updateNode(id, spec) {
     if (!this.lab) return false;
-    const ok = this.guard("update node", () => {
+    const ok = this.guard('update node', () => {
       this.lab.updateNode(id, JSON.stringify({ ...spec, id }));
       return true;
     });
@@ -406,7 +418,7 @@ export class LabWorld {
 
   setPosition(id, x, y) {
     if (!this.lab) return;
-    this.guard("move node", () => this.lab.setPosition(id, x, y));
+    this.guard('move node', () => this.lab.setPosition(id, x, y));
     if (this.scenarioCache) {
       const n = this.scenarioCache.nodes.find((s) => s.id === id);
       if (n) {
@@ -439,7 +451,7 @@ export class LabWorld {
   // The identity that keys the durable state. The crate keeps it on the
   // running world too, so a reload of the running scenario finds its data.
   setId(id) {
-    this.id = id || "";
+    this.id = id || '';
     this.scenarioCache = null;
     this.external?.sync();
     this.hooks.onChange();
@@ -449,7 +461,7 @@ export class LabWorld {
 
   now() {
     if (!this.lab) return 0;
-    const n = this.guard("read clock", () => this.lab.now());
+    const n = this.guard('read clock', () => this.lab.now());
     return n == null ? 0 : Number(n);
   }
 
@@ -486,7 +498,7 @@ export class LabWorld {
 
   stepUntil(ms) {
     if (!this.lab) return 0;
-    const steps = this.guard("step", () => this.lab.stepUntil(u64(ms)));
+    const steps = this.guard('step', () => this.lab.stepUntil(u64(ms)));
     return steps == null ? 0 : Number(steps);
   }
 
@@ -516,7 +528,8 @@ export class LabWorld {
     const limit = start + SETTLE_WINDOW_MS;
     let t = start;
     while (t < limit) {
-      const busy = this.guard("settle", () => this.lab.hasWorkBy(u64(limit))) || this.egress.nextAt() <= limit;
+      const busy =
+        this.guard('settle', () => this.lab.hasWorkBy(u64(limit))) || this.egress.nextAt() <= limit;
       if (!busy) break;
       t = Math.min(limit, t + SETTLE_STEP_MS);
       this.stepUntil(t);
@@ -581,15 +594,19 @@ export class LabWorld {
 
   // Hand what reached the external nodes at `now` to their processes.
   handOver(now) {
-    const raw = this.guard("drain external", () => this.lab.drainExternal());
-    const frames = raw && raw.length > 2 ? this.guard("parse external", () => JSON.parse(raw)) || [] : [];
+    const raw = this.guard('drain external', () => this.lab.drainExternal());
+    const frames =
+      raw && raw.length > 2 ? this.guard('parse external', () => JSON.parse(raw)) || [] : [];
     const client = frames.filter((t) => Number(t.frame?.dst?.node) === this.bridge?.node);
     this.bridge?.deliver(client);
-    this.external.at(now, frames.filter((t) => Number(t.frame?.dst?.node) !== this.bridge?.node));
+    this.external.at(
+      now,
+      frames.filter((t) => Number(t.frame?.dst?.node) !== this.bridge?.node),
+    );
   }
 
   hasWorkBy(ms) {
-    return Boolean(this.lab && this.guard("peek", () => this.lab.hasWorkBy(u64(ms))));
+    return Boolean(this.lab && this.guard('peek', () => this.lab.hasWorkBy(u64(ms))));
   }
 
   // The first instant in (now, limit] with something due, or null.
@@ -608,7 +625,12 @@ export class LabWorld {
   // Whether nothing is due by `limit`: no frame or timer, no held egress, no
   // process timer, no process at work.
   idleBy(limit) {
-    return !this.hasWorkBy(limit) && this.egress.nextAt() > limit && this.external.nextDeadline() > limit && !this.external.busy;
+    return (
+      !this.hasWorkBy(limit) &&
+      this.egress.nextAt() > limit &&
+      this.external.nextDeadline() > limit &&
+      !this.external.busy
+    );
   }
 
   setSpeed(speed) {
@@ -628,9 +650,9 @@ export class LabWorld {
   // clock has reached to the session layer.
   pumpEgress() {
     if (!this.lab) return;
-    const raw = this.guard("drain egress", () => this.lab.drainEgress());
+    const raw = this.guard('drain egress', () => this.lab.drainEgress());
     if (raw && raw.length > 2) {
-      const frames = this.guard("parse egress", () => JSON.parse(raw));
+      const frames = this.guard('parse egress', () => JSON.parse(raw));
       if (frames && frames.length) this.egress.hold(frames);
     }
     if (!this.egress.size) return;
@@ -641,9 +663,9 @@ export class LabWorld {
   // Hand the durable-state ops recorded since the last drain to storage.
   drainDurable() {
     if (!this.lab) return;
-    const raw = this.guard("drain durable", () => this.lab.drainDurable());
+    const raw = this.guard('drain durable', () => this.lab.drainDurable());
     if (raw && raw.length > 2) {
-      const ops = this.guard("parse durable", () => JSON.parse(raw));
+      const ops = this.guard('parse durable', () => JSON.parse(raw));
       if (ops && ops.length) this.hooks.onDurable(ops);
     }
   }
@@ -657,13 +679,15 @@ export class LabWorld {
     this.drainWire();
     if (!force && wallNow - this.lastSnapshotWall < SNAPSHOT_INTERVAL_MS) return;
     this.lastSnapshotWall = wallNow;
-    const snap = this.guard("snapshot", () => JSON.parse(this.lab.snapshot()));
+    const snap = this.guard('snapshot', () => JSON.parse(this.lab.snapshot()));
     if (snap) this.snapshotCache = snap;
     // Events first: the experiment and the invariant checks the snapshot
     // drives must see what happened up to it (a fault step, a reset).
-    const count = this.guard("count events", () => this.lab.eventCount());
+    const count = this.guard('count events', () => this.lab.eventCount());
     if (count != null && Number(count) > this.eventIndex) {
-      const events = this.guard("read events", () => JSON.parse(this.lab.eventsSince(this.eventIndex)));
+      const events = this.guard('read events', () =>
+        JSON.parse(this.lab.eventsSince(this.eventIndex)),
+      );
       if (events && events.length) {
         this.eventIndex = events[events.length - 1].index + 1;
         this.hooks.onEvents(events);
@@ -681,17 +705,18 @@ export class LabWorld {
   // Hand every frame sent since the last drain to the capture.
   drainWire() {
     if (!this.lab || !this.hooks.onWire) return;
-    const raw = this.guard("drain wire", () => this.lab.drainWire());
+    const raw = this.guard('drain wire', () => this.lab.drainWire());
     if (!raw || raw.length <= 25) return; // {"frames":[],"dropped":0}
-    const drained = this.guard("parse wire", () => JSON.parse(raw));
-    if (drained && (drained.frames.length || drained.dropped)) this.hooks.onWire(drained.frames, drained.dropped);
+    const drained = this.guard('parse wire', () => JSON.parse(raw));
+    if (drained && (drained.frames.length || drained.dropped))
+      this.hooks.onWire(drained.frames, drained.dropped);
   }
 
   // ---- faults and commands ------------------------------------------------------------
 
   fault(fault) {
     if (!this.lab) return false;
-    const ok = this.guard("fault", () => {
+    const ok = this.guard('fault', () => {
       this.lab.fault(JSON.stringify(fault));
       return true;
     });
@@ -706,7 +731,7 @@ export class LabWorld {
 
   // Returns `{ ok, answer }` or `{ ok: false, error }`; never throws.
   control(id, command) {
-    if (!this.lab) return { ok: false, error: "no world" };
+    if (!this.lab) return { ok: false, error: 'no world' };
     try {
       const answer = this.lab.control(id, JSON.stringify(command));
       return { ok: true, answer: JSON.parse(answer) };
@@ -722,30 +747,32 @@ export class LabWorld {
     if (!this.lab) return;
     this.hostedIds = ids;
     const list = ids == null ? [] : ids.length ? ids : NONE_HOSTED;
-    this.guard("set hosted", () => this.lab.setHosted(JSON.stringify(list)));
+    this.guard('set hosted', () => this.lab.setHosted(JSON.stringify(list)));
     this.external?.sync();
   }
 
   pushIngress(frames) {
     if (!this.lab || !frames.length) return;
-    this.guard("push ingress", () => this.lab.pushIngress(JSON.stringify(frames)));
+    this.guard('push ingress', () => this.lab.pushIngress(JSON.stringify(frames)));
   }
 
   applyRemoteSnapshot(id, state) {
     if (!this.lab) return;
-    this.guard("remote snapshot", () => this.lab.applyRemoteSnapshot(id, JSON.stringify(state ?? null)));
+    this.guard('remote snapshot', () =>
+      this.lab.applyRemoteSnapshot(id, JSON.stringify(state ?? null)),
+    );
   }
 
   // Frames a real broker's process sent, routed as its node at the current time.
   routeExternal(frames) {
     if (!this.lab || !frames.length) return;
-    this.guard("route external", () => this.lab.routeExternal(JSON.stringify(frames)));
+    this.guard('route external', () => this.lab.routeExternal(JSON.stringify(frames)));
   }
 
   // The world as it is right now (the cached snapshot can be 50 ms old).
   liveSnapshot() {
     if (!this.lab) return null;
-    return this.guard("snapshot", () => JSON.parse(this.lab.snapshot())) ?? null;
+    return this.guard('snapshot', () => JSON.parse(this.lab.snapshot())) ?? null;
   }
 }
 
@@ -756,12 +783,13 @@ export class LabWorld {
 // a document without simulated brokers comes back as it is, with no ids.
 export function upgradeSimulatedBrokers(scenario) {
   const nodes = scenario?.nodes;
-  if (!Array.isArray(nodes) || !nodes.some((n) => n?.kind === "broker")) return { doc: scenario, ids: [] };
+  if (!Array.isArray(nodes) || !nodes.some((n) => n?.kind === 'broker'))
+    return { doc: scenario, ids: [] };
   const ids = [];
   const doc = {
     ...scenario,
     nodes: nodes.map((n) => {
-      if (n?.kind !== "broker") return n;
+      if (n?.kind !== 'broker') return n;
       ids.push(Number(n.id));
       return { ...n, kind: REAL_BROKER_KIND, config: realConfigFromSimulated(n.config) };
     }),
@@ -772,41 +800,49 @@ export function upgradeSimulatedBrokers(scenario) {
 // Fill the defaults of a scenario document so the crate, which rejects unknown
 // keys and needs `version`, accepts what the page hands it.
 export function normalizeScenario(input) {
-  const s = input && typeof input === "object" ? input : {};
+  const s = input && typeof input === 'object' ? input : {};
   const out = {
     version: 1,
     seed: Number.isFinite(Number(s.seed)) ? Number(s.seed) : 1,
-    name: typeof s.name === "string" ? s.name : "",
+    name: typeof s.name === 'string' ? s.name : '',
     links: { default_latency_ms: Number(s.links?.default_latency_ms ?? 5) },
     link_overrides: Array.isArray(s.link_overrides) ? s.link_overrides : [],
     nodes: (Array.isArray(s.nodes) ? s.nodes : []).map((n, i) => ({
       id: Number(n.id) || 0,
-      kind: String(n.kind || ""),
+      kind: String(n.kind || ''),
       // A blank name would leave a card with no title; the Add dialog falls back the same way.
-      name: (typeof n.name === "string" && n.name.trim()) || (n.kind && Number(n.id) ? `${n.kind}-${Number(n.id)}` : ""),
+      name:
+        (typeof n.name === 'string' && n.name.trim()) ||
+        (n.kind && Number(n.id) ? `${n.kind}-${Number(n.id)}` : ''),
       // A file without positions gets a grid instead of one stacked point.
       x: n.x == null ? 140 + (i % 5) * 210 : Number(n.x) || 0,
       y: n.y == null ? 100 + Math.floor(i / 5) * 140 : Number(n.y) || 0,
-      config: n.config && typeof n.config === "object" ? n.config : {},
+      config: n.config && typeof n.config === 'object' ? n.config : {},
     })),
-    topics: (Array.isArray(s.topics) ? s.topics : []).filter((t) => t && typeof t === "object").map((t) => {
-      const topic = {
-        name: String(t.name || ""),
-        partitions: Number(t.partitions) || 1,
-        replication_factor: Number.isFinite(Number(t.replication_factor)) ? Number(t.replication_factor) : -1,
-      };
-      if (t.configs && typeof t.configs === "object" && Object.keys(t.configs).length) topic.configs = t.configs;
-      return topic;
-    }),
+    topics: (Array.isArray(s.topics) ? s.topics : [])
+      .filter((t) => t && typeof t === 'object')
+      .map((t) => {
+        const topic = {
+          name: String(t.name || ''),
+          partitions: Number(t.partitions) || 1,
+          replication_factor: Number.isFinite(Number(t.replication_factor))
+            ? Number(t.replication_factor)
+            : -1,
+        };
+        if (t.configs && typeof t.configs === 'object' && Object.keys(t.configs).length)
+          topic.configs = t.configs;
+        return topic;
+      }),
   };
-  if (typeof s.id === "string" && s.id) out.id = s.id;
+  if (typeof s.id === 'string' && s.id) out.id = s.id;
   // Preserve an invalid value too: the Rust enum rejects it instead of
   // silently downgrading an imported encrypted scenario to plaintext.
-  if (s.security != null && s.security !== "plaintext") out.security = s.security;
+  if (s.security != null && s.security !== 'plaintext') out.security = s.security;
   if (s.authorization != null) out.authorization = s.authorization;
   // J3: a scripted experiment (experiment.js) travels with the document, opaque here.
-  if (s.experiment && typeof s.experiment === "object" && !Array.isArray(s.experiment)) out.experiment = s.experiment;
+  if (s.experiment && typeof s.experiment === 'object' && !Array.isArray(s.experiment))
+    out.experiment = s.experiment;
   // J3: a fork boots its brokers from copies of another scenario's disks, so they keep that scenario's cluster id.
-  if (typeof s.forked_from === "string" && s.forked_from) out.forked_from = s.forked_from;
+  if (typeof s.forked_from === 'string' && s.forked_from) out.forked_from = s.forked_from;
   return out;
 }
