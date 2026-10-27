@@ -18,7 +18,7 @@ require (
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/fgrosse/cli v0.0.0-20190104120053-ecd919dde986 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
