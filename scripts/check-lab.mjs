@@ -324,8 +324,7 @@ async function main() {
     // Persistence: the echo node's frame counter is durable.
     const scenarioId = await waitFor(page, `window.krabkaLab.world.id || null`, 'the scenario to get an id');
     check('the scenario got an identity on autosave', /^[0-9a-f-]{8,}/.test(scenarioId), scenarioId);
-    const before = JSON.parse(await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`, 'echo-a to count 20 frames'));
-    const framesBefore = before.state.frames;
+    await waitFor(page, `(() => { const r = ${nodeState(1)}; return r && JSON.parse(r).state.frames >= 20 ? r : null; })()`, 'echo-a to count 20 frames');
     await page.evaluate(() => window.krabkaLab.storage.flush());
     await page.evaluate(() => window.krabkaLab.world.setPaused(true));
     const framesAtPause = (await readNode(page, 1)).state.frames;

@@ -2,7 +2,7 @@
 // Browser behavior is covered separately by check-site against the build.
 import fs from 'node:fs';
 import path from 'node:path';
-import { readSitemap, siteURL, scopedURL, validateXSD, advertisedSitemaps, assertCrawlable, assertSection } from './sitemap.mjs';
+import { readSitemap, scopedURL, validateXSD, advertisedSitemaps, assertCrawlable, assertSection } from './sitemap.mjs';
 import { fileURLToPath } from 'node:url';
 
 export async function checkPublishedSitemap(site, expected, { sections = true } = {}) {
