@@ -29,6 +29,14 @@ npm run benchmark -- --suite openmessaging --smoke --workloads simple-workload
 npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
 ```
 
+The default template is an E2 machine, and Compute Engine manages E2 memory
+dynamically: once the brokers hold tens of GiB of page cache, the hypervisor
+inflates the guest's virtio balloon, taking free memory at about 200 MB/s for
+three to four minutes roughly every quarter hour, which drives the kernel to
+reclaim the brokers' pages mid-trial. The workflow unloads the balloon driver
+before the trials, and the `balloon_inflate` counter in `host.jsonl` shows any
+inflation that happened anyway.
+
 Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
 and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
 Only `workflow_dispatch` triggers this workflow. It splits the run into shards,

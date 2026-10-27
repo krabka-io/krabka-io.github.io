@@ -112,6 +112,19 @@ jobs:
       - name: Authenticate private Google Cloud image pulls
         if: startsWith(inputs.krabka_image, 'us-central1-docker.pkg.dev/') || startsWith(inputs.krabka_comparison_image, 'us-central1-docker.pkg.dev/')
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      # On E2 machines the hypervisor inflates the guest's virtio balloon once
+      # the brokers hold tens of GiB of page cache, taking free memory at about
+      # 200 MB/s for three to four minutes every quarter hour. Each inflation
+      # drives the kernel to reclaim the brokers' pages mid-trial and spoils
+      # the latency percentiles. Without the driver the balloon cannot
+      # inflate; the host.jsonl balloon counters record any that does.
+      - name: Unload the virtio balloon driver so the hypervisor cannot take guest memory during a trial
+        run: |
+          if sudo -n modprobe -r virtio_balloon; then
+            echo "virtio balloon driver unloaded"
+          else
+            echo "::warning::virtio balloon driver still present; host.jsonl shows whether it inflated"
+          fi
       - name: Run this lane's shards against all three brokers
         env:
           BENCHMARK_MODE: ${{ inputs.mode }}
