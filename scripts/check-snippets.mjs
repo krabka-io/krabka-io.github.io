@@ -256,6 +256,7 @@ if (mode === 'compose') {
     shell(get('docs/quickstart/composeReadyCode'), 'compose-ready', { env });
     const output = shell(get('docs/quickstart/composeVerifyCode'), 'compose-verify', { env, stdio: ['ignore', 'pipe', 'inherit'] }).toString();
     assert(output.split('\n').includes('hello krabka'), 'Compose quickstart did not roundtrip its record');
+    shell(get('docs/quickstart/inspectSnippet'), 'quickstart-inspect', { env, timeout: 120000 });
     shell(localAssets(get('get-started/deploySnippets.docker')), 'get-started-docker', { env });
     waitForBroker();
     const consumed = shell(get('get-started/clientSnippets.cli'), 'cli-roundtrip', { env, stdio: ['ignore', 'pipe', 'inherit'], timeout: 120000 }).toString();
