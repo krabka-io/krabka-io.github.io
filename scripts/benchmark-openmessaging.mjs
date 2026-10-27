@@ -211,7 +211,11 @@ export function validateOmbResult(result, vendor, rf, config, logs = '') {
   for (const [key, expected] of [['topics', config.topics], ['partitions', config.partitionsPerTopic], ['messageSize', config.messageSize]]) {
     assert.equal(result[key], expected, `wrong OMB ${key}`);
   }
-  const minimumSamples = config.testDurationMinutes * 6;
+  // Upstream sleeps ten seconds and then collects a sample, so its intervals
+  // run a little over ten seconds, and a run can report one sample fewer than
+  // six per minute: Kafka's 15-minute 3-producer RF3 trial in run 40452124698
+  // reported 89 of 90 and was good data.
+  const minimumSamples = config.testDurationMinutes * 6 - 1;
   for (const key of ['publishRate', 'consumeRate', 'publishErrorRate', 'backlog']) {
     assert.ok(Array.isArray(result[key]) && result[key].length >= minimumSamples, `missing/truncated OMB ${key}`);
     assert.ok(result[key].every(value => Number.isFinite(value) && value >= 0), `invalid OMB ${key}`);
