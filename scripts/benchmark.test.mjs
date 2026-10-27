@@ -196,7 +196,7 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
   const workflow = await fs.readFile(new URL('../.github/workflows/openmessaging.yml', import.meta.url), 'utf8');
   const step = workflow.split("      - name: Run this lane's shards against all three brokers\n")[1]
     .split('      - name: Add report to job summary\n')[0];
-  const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
+  const script = step.split('        run: |\n')[1].replace(/^ {10}/gm, '');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-workflow-'));
   try {
     await fs.mkdir(path.join(directory, 'scripts'));
@@ -323,8 +323,8 @@ test('OpenMessaging catalog and smoke configuration keep comparison settings con
     const driver = ombDriver(vendor, 3);
     assert.doesNotMatch(driver, /max.poll.interval.ms/);
     const backlogDriver = ombDriver(vendor, 3, ombTimeoutMs(full.config, false));
-    assert.match(backlogDriver, /^  max.poll.interval.ms=6300000$/m);
-    assert.match(driver, /acks=all\n  enable.idempotence=true/);
+    assert.match(backlogDriver, /^ {2}max.poll.interval.ms=6300000$/m);
+    assert.match(driver, /acks=all\n {2}enable.idempotence=true/);
     assert.match(driver, /replicationFactor: 3/);
     assert.match(driver, /batch.size=1048576/);
     assert.match(driver, vendor === 'redpanda' ? /write.caching=true/ : /min.insync.replicas=2/);
@@ -348,13 +348,13 @@ test('OMB backlog topics retain 1.2x the backlog per partition and other topics 
       assert.match(driver, new RegExp(`^  retention.ms=-1\n  retention.bytes=${bytes}$`, 'm'));
     }
   }
-  assert.match(ombDriver('kafka', 1), /^  retention.bytes=-1$/m);
+  assert.match(ombDriver('kafka', 1), /^ {2}retention.bytes=-1$/m);
   for (const bad of [0, -2, 1.5, NaN]) assert.throws(() => ombDriver('kafka', 1, undefined, bad), /invalid retention.bytes/);
 });
 
 test('the OMB driver sets preallocate only when asked', () => {
   assert.doesNotMatch(ombDriver('krabka', 1), /preallocate/);
-  assert.match(ombDriver('krabka', 1, undefined, -1, true), /^  retention.bytes=-1\n  preallocate=true\ncommonConfig:/m);
+  assert.match(ombDriver('krabka', 1, undefined, -1, true), /^ {2}retention.bytes=-1\n {2}preallocate=true\ncommonConfig:/m);
 });
 
 const broker = (id, cpu, rss, current, inactive = 0) => ({ id, cpu_usage_us: cpu, rss_bytes: rss,
