@@ -121,6 +121,21 @@ test('a run with a shortened measurement is refused', async () => {
   await assert.rejects(publish(run, root), /departs from the upstream workloads/);
 });
 
+test('a run in which the host shaped a trial is refused', async () => {
+  const { root, run } = await fakeRun();
+  const file = path.join(run, 'rf1-kafka-1-simple-workload', 'trial.json');
+  const trial = JSON.parse(await fs.readFile(file, 'utf8'));
+  trial.metrics.measurement_window = { host: { balloon_inflated_pages: 1048576, available_min_bytes: 2 ** 30, pgsteal_kswapd: 0, pgsteal_direct: 0, allocstall: 0 } };
+  await fs.writeFile(file, JSON.stringify(trial));
+  await assert.rejects(publish(run, root), /host interfered with simple-workload RF1 kafka round 1 \(balloon inflation or direct reclaim during measurement\); repeat the run; not published/);
+  await assert.rejects(fs.access(path.join(root, 'benchmarks', 'latest-openmessaging.md')));
+  // A balloon-free window with no direct reclaim publishes.
+  trial.metrics.measurement_window.host = { balloon_inflated_pages: null, available_min_bytes: 2 ** 35, pgsteal_kswapd: 4096, pgsteal_direct: 0, allocstall: 0 };
+  await fs.writeFile(file, JSON.stringify(trial));
+  await publish(run, root);
+  await fs.access(path.join(root, 'benchmarks', 'latest-openmessaging.md'));
+});
+
 test('a run with --krabka-io-uring is refused', async () => {
   const { root, run } = await fakeRun({ contract: { krabka_seccomp: 'docker-29.8.1-default+io_uring' } });
   await assert.rejects(publish(run, root), /container security profile/);

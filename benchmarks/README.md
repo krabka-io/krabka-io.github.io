@@ -215,7 +215,8 @@ the pages the hypervisor took through the balloon, the least available memory,
 and the host-wide reclaim during the window. A trial in which the balloon
 inflated or allocations fell into direct reclaim carries a `†` after its broker
 name in `summary.md`, with the amounts under "Host interference": its latency
-came from the host, not from the broker. The totals
+came from the host, not from the broker, and the publisher refuses a run that
+contains one. The totals
 in `metrics` still cover the full capture.
 OMB does **not** check exact delivery counts or duplicate sequences. Missing or
 truncated result series, zero publish/consume traffic, publish errors, OOMs,
