@@ -140,6 +140,10 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
     for (const scenario of [
       { comparison: '', mode: 'full', calls: each([candidate]), status: 0 },
       { comparison: control, mode: 'smoke', calls: each([control, candidate, candidate, control]), status: 0 },
+      // Direct storage adds krabka's flags to every call and nothing else.
+      { comparison: '', mode: 'full', storage: 'direct', calls: each([candidate]), status: 0 },
+      { comparison: control, mode: 'smoke', storage: 'direct-io-uring', calls: each([control, candidate, candidate, control]), status: 0 },
+      { comparison: '', mode: 'full', storage: 'invalid', calls: [], status: 1 },
       // The first shard's second image fails: its remaining images are
       // skipped, the next shard still runs, and the lane fails at the end.
       { comparison: control, mode: 'dry-run', failAt: '2',
@@ -152,8 +156,8 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
           BENCHMARK_MODE: scenario.mode, LANE_SHARDS: shards.map(([w, rf]) => `rf${rf}-${w}`).join(' '),
           LANE_WORKLOADS: shards.map(([w]) => w).join(' '), LANE_RFS: shards.map(([, rf]) => rf).join(' '),
           BENCHMARK_REPETITIONS: '2', KRABKA_IMAGE: candidate,
-          KRABKA_COMPARISON_IMAGE: scenario.comparison, REDPANDA_IMAGE: 'redpanda image',
-          FAIL_AT: scenario.failAt ?? '',
+          KRABKA_COMPARISON_IMAGE: scenario.comparison, KRABKA_STORAGE: scenario.storage ?? 'page-cache',
+          REDPANDA_IMAGE: 'redpanda image', FAIL_AT: scenario.failAt ?? '',
         },
       });
       assert.ifError(result.error);
@@ -163,9 +167,10 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
         throw error;
       });
       const mode = { smoke: ['--smoke'], 'dry-run': ['--dry-run'] }[scenario.mode] ?? [];
+      const storage = { direct: ['--krabka-preallocate'], 'direct-io-uring': ['--krabka-preallocate', '--krabka-io-uring'] }[scenario.storage] ?? [];
       assert.deepEqual(calls.trim() ? calls.trim().split('\n').map(JSON.parse) : [],
         scenario.calls.map(([[workload, rf], image]) => ['--suite', 'openmessaging', '--workloads', workload,
-          '--replication-factors', rf, '--repetitions', '2', '--redpanda-image', 'redpanda image', ...mode, '--krabka-image', image]));
+          '--replication-factors', rf, '--repetitions', '2', '--redpanda-image', 'redpanda image', ...mode, ...storage, '--krabka-image', image]));
     }
     await assert.rejects(fs.stat(path.join(directory, 'unexpected')), { code: 'ENOENT' });
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
