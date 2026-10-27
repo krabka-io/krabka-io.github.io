@@ -111,8 +111,12 @@ test('actual resource reader retains user and system CPU through the sampler', a
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'benchmark-cpu-'));
   const cpu = 'usage_usec 900000\nuser_usec 200000\nsystem_usec 700000\n';
   try {
+    // No cpu.pressure: a kernel without PSI leaves those stall totals null.
     for (const [name, data] of Object.entries({ 'cpu.stat': cpu, 'memory.current': '8192',
-      'memory.stat': 'anon 4096\ninactive_file 1024\n', 'memory.events': 'oom_kill 0\n',
+      'memory.stat': 'anon 4096\ninactive_file 1024\nactive_file 512\nfile_dirty 256\nfile_writeback 128\npgscan 7\npgsteal 5\n',
+      'memory.events': 'oom_kill 0\nmax 3\nhigh 0\n',
+      'memory.pressure': 'some avg10=0.00 avg60=0.00 avg300=0.00 total=1234\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=56\n',
+      'io.pressure': 'some avg10=0.00 avg60=0.00 avg300=0.00 total=78\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=9\n',
       'cgroup.procs': `${process.pid}\n` })) await fs.writeFile(path.join(directory, name), data);
     const readBroker = runInNewContext(`(${reader.trim()})`, { fs, path, assert });
     const measure = runInNewContext(`(${sampler.trim()})`, {
@@ -122,9 +126,21 @@ test('actual resource reader retains user and system CPU through the sampler', a
     const filename = path.join(directory, 'resources.jsonl');
     const result = await measure([{ id: 'broker', cgroup: directory }], filename, async () => {});
     assert.ok(result.samples.length >= 2);
-    for (const sample of (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse)) {
+    const rows = (await fs.readFile(filename, 'utf8')).trim().split('\n').map(JSON.parse);
+    for (const sample of rows) {
       const row = sample.brokers[0];
       assert.deepEqual([row.cpu_usage_us, row.cpu_user_us, row.cpu_system_us], [900000, 200000, 700000]);
+      assert.deepEqual([row.active_file_bytes, row.file_dirty_bytes, row.file_writeback_bytes, row.pgscan, row.pgsteal,
+        row.memory_max_events, row.memory_high_events], [512, 256, 128, 7, 5, 3, 0]);
+      assert.deepEqual([row.memory_stall_us, row.memory_stall_full_us, row.io_stall_us, row.cpu_stall_us], [1234, 56, 78, null]);
+    }
+    // Host memory and reclaim counters land beside the cgroup samples.
+    const hostRows = (await fs.readFile(path.join(directory, 'host.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.deepEqual(hostRows.map(r => r.elapsed_ms), rows.map(r => r.elapsed_ms));
+    for (const { host } of hostRows) {
+      assert.ok(host.mem_available_bytes > 0 && host.mem_free_bytes > 0 && host.cached_bytes >= 0, 'host memory unavailable');
+      assert.ok(Number.isInteger(host.pgsteal_kswapd) && Number.isInteger(host.pgsteal_direct) && Number.isInteger(host.allocstall), 'host reclaim counters unavailable');
+      for (const field of ['memory_stall_us', 'memory_stall_full_us', 'io_stall_us']) assert.ok(host[field] === null || host[field] >= 0, field);
     }
     for (const counter of ['user_usec', 'system_usec']) {
       await fs.writeFile(path.join(directory, 'cpu.stat'), cpu.replace(new RegExp(`^${counter}.*\\n`, 'm'), ''));
