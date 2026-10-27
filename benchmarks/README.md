@@ -29,6 +29,14 @@ npm run benchmark -- --suite openmessaging --smoke --workloads simple-workload
 npm run benchmark -- --suite openmessaging --workloads 1-topic-16-partitions-1kb
 ```
 
+The default template is an E2 machine, and Compute Engine manages E2 memory
+dynamically: once the brokers hold tens of GiB of page cache, the hypervisor
+inflates the guest's virtio balloon, taking free memory at about 200 MB/s for
+three to four minutes roughly every quarter hour, which drives the kernel to
+reclaim the brokers' pages mid-trial. The workflow unloads the balloon driver
+before the trials, and the `balloon_inflate` counter in `host.jsonl` shows any
+inflation that happened anyway.
+
 Defaults are all three vendors, RF1/RF3, and one round; select `replication_factors`
 and `repetitions` in Actions or `--replication-factors` and `--repetitions` locally.
 Only `workflow_dispatch` triggers this workflow. It splits the run into shards,
@@ -47,10 +55,10 @@ have their upstream duration plus 30 minutes for startup and sustainable-rate pr
 or 90 extra minutes for a full backlog fill/drain (five extra minutes in smoke).
 Deadlines remain failures. Smoke is a wiring check, not a performance
 measurement of the original workload. Each shard builds OMB, into a Maven
-repository under `.benchmarks/m2-cache/` that every run on the runner shares,
-so Maven Central is asked for a dependency once per runner: run 40427360965
-built a fresh repository per shard and lost every shard after a lane's first to
-`429 Too Many Requests`.
+repository under `.benchmarks/m2-cache/` that every run on the runner shares and
+that the workflow caches between runs, from Google's mirror of Maven Central:
+Maven Central itself rate-limits the runners' egress (runs 40427360965 and
+40439747507 lost their shards to `429 Too Many Requests`).
 
 During backlog fill, upstream OMB blocks the consumer's message callback. Filling
 100 GiB at 100,000 messages/s takes about 17½ minutes, exceeding the Kafka client's
@@ -194,11 +202,21 @@ the host's memory and I/O pressure stall totals at the same times, and each
 broker sample in `resources.jsonl` carries its cgroup's file-page counts,
 reclaim scans, memory-limit events and pressure stall totals. Together they
 show whether a broker that fills its cgroup with page cache stalled in the
-kernel's reclaim, and whether the host as a whole was short of memory.
+kernel's reclaim, and whether the host as a whole was short of memory. The
+host rows also carry anonymous, shared and unreclaimable slab memory, the
+virtio balloon inflate and deflate counters and the stolen CPU ticks, so that
+free memory which disappears without any broker cgroup growing can be traced
+to a process outside the cgroups or to the hypervisor.
 `trial.json` has `metrics.measurement_window`, which covers only the OMB
 measurement: its start and end from the client log, broker CPU seconds,
 published messages (the mean publish rate times the window), messages per CPU
-second, and each device's utilization and bytes read and written. The totals
+second, each device's utilization and bytes read and written, and under `host`
+the pages the hypervisor took through the balloon, the least available memory,
+and the host-wide reclaim during the window. A trial in which the balloon
+inflated or allocations fell into direct reclaim carries a `†` after its broker
+name in `summary.md`, with the amounts under "Host interference": its latency
+came from the host, not from the broker, and the publisher refuses a run that
+contains one. The totals
 in `metrics` still cover the full capture.
 OMB does **not** check exact delivery counts or duplicate sequences. Missing or
 truncated result series, zero publish/consume traffic, publish errors, OOMs,

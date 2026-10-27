@@ -166,6 +166,19 @@ test('complete shards merge into one run in the single-runner layout', async () 
         await shard(root, { workload, rf, repetitions: 2, host: `vm-${workload}-${rf}` }),
       );
     }
+  // The hypervisor inflated the balloon during one trial's measurement.
+  const interfered = path.join(shards[3], 'rf3-krabka-2-1-topic-1-partition-1kb', 'trial.json');
+  const trial = JSON.parse(await fs.readFile(interfered, 'utf8'));
+  trial.metrics.measurement_window = {
+    host: {
+      balloon_inflated_pages: 2621440,
+      available_min_bytes: 2 * 1024 ** 3,
+      pgsteal_kswapd: 524288,
+      pgsteal_direct: 1024,
+      allocstall: 7,
+    },
+  };
+  await fs.writeFile(interfered, JSON.stringify(trial));
   const out = path.join(root, 'merged', 'gh-1-1');
   await fs.mkdir(path.dirname(out));
   assert.deepEqual(await merge(shards.reverse(), out), { run_id: 'gh-1-1', shards: 4, trials: 24 });
@@ -192,6 +205,13 @@ test('complete shards merge into one run in the single-runner layout', async () 
   assert.equal(
     summary.split('\n').filter((line) => line.startsWith('| simple-workload')).length,
     12,
+  );
+  // The interfered trial is marked in the table and itemized; the others are not.
+  assert.match(summary, /^\| 1-topic-1-partition-1kb \| 3 \| krabka † \| 2 \|/m);
+  assert.equal(summary.split('†').length - 1, 2);
+  assert.match(
+    summary,
+    /## Host interference\n\n† The host, not the broker, shaped these latencies .*\n\n- 1-topic-1-partition-1kb, RF3, krabka, round 2: balloon 10\.0 GiB inflated, 7 direct reclaim stalls, 2\.0 GiB reclaimed host-wide, available memory down to 2\.0 GiB/,
   );
 });
 
@@ -555,6 +575,7 @@ test('runs on one host share the OMB Maven repository and retry rate limits', as
       const m2 = volume(':/m2');
       repositories.push(m2);
       assert.ok(args.includes('-Daether.connector.http.retryHandler.count=8'));
+      assert.equal(args[args.indexOf('-s') + 1], '/m2/settings.xml');
       await fs.mkdir(path.join(source, 'benchmark-framework/target'), { recursive: true });
       await fs.writeFile(
         path.join(source, 'benchmark-framework/target/classpath.txt'),
@@ -578,6 +599,9 @@ test('runs on one host share the OMB Maven repository and retry rate limits', as
     assert.ok(
       runtimes[0].classpath.startsWith('/src/benchmark-framework/target/classes:/m2/dep.jar'),
     );
+    const settings = await fs.readFile(path.join(runtimes[0].m2, 'settings.xml'), 'utf8');
+    assert.match(settings, /<mirrorOf>central<\/mirrorOf>/);
+    assert.ok(settings.includes(OMB.maven_mirror));
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

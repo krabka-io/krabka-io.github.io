@@ -16,6 +16,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { checkOmbOmissions, ombOmission, validateOmbResult } from './benchmark-openmessaging.mjs';
+import { hostInterfered } from './benchmark-results.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
 const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
@@ -78,6 +79,7 @@ export async function loadRun(directory) {
   checkOmbOmissions(provenance, VENDORS);
   const trials = [];
   const rawResults = [];
+  const interfered = [];
   for (const rf of provenance.replication_factors)
     for (const vendor of VENDORS) {
       for (let repetition = 1; repetition <= provenance.repetitions; repetition++)
@@ -95,6 +97,8 @@ export async function loadRun(directory) {
             `mismatched ${file}`,
           );
           validateOmbResult(trial.omb, vendor, rf, trial.case.config);
+          if (hostInterfered(trial))
+            interfered.push(`${workload.id} RF${rf} ${vendor} round ${repetition}`);
           trials.push(compactTrial(trial));
           // Keep the complete OMB object: interval rates, backlog, all latency
           // percentiles/histograms and any future upstream fields. No resampling
@@ -113,6 +117,12 @@ export async function loadRun(directory) {
           });
         }
     }
+  // A comparison with a cell the host shaped is not a comparison. The
+  // summary marks such trials with †; the run is kept and not published.
+  assert.ok(
+    interfered.length === 0,
+    `the host interfered with ${interfered.join(', ')} (balloon inflation or direct reclaim during measurement); repeat the run; not published`,
+  );
   return { provenance, trials, rawResults };
 }
 

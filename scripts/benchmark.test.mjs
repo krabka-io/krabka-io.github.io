@@ -265,7 +265,8 @@ test('actual resource reader retains user and system CPU through the sampler', a
         [1234, 56, 78, null],
       );
     }
-    // Host memory and reclaim counters land beside the cgroup samples.
+    // Host memory and reclaim counters land beside the cgroup samples, on
+    // disk and in memory for the measurement-window metrics.
     const hostRows = (await fs.readFile(path.join(directory, 'host.jsonl'), 'utf8'))
       .trim()
       .split('\n')
@@ -274,6 +275,8 @@ test('actual resource reader retains user and system CPU through the sampler', a
       hostRows.map((r) => r.elapsed_ms),
       rows.map((r) => r.elapsed_ms),
     );
+    // The sampler ran in another context, so compare values, not prototypes.
+    assert.deepEqual(JSON.parse(JSON.stringify(result.hostSamples)), hostRows);
     for (const { host } of hostRows) {
       assert.ok(
         host.mem_available_bytes > 0 && host.mem_free_bytes > 0 && host.cached_bytes >= 0,
@@ -285,8 +288,21 @@ test('actual resource reader retains user and system CPU through the sampler', a
           Number.isInteger(host.allocstall),
         'host reclaim counters unavailable',
       );
-      for (const field of ['memory_stall_us', 'memory_stall_full_us', 'io_stall_us'])
+      assert.ok(
+        host.anon_bytes > 0 && host.shmem_bytes >= 0 && host.slab_unreclaimable_bytes > 0,
+        'host anonymous, shared and slab memory unavailable',
+      );
+      assert.ok(Number.isInteger(host.cpu_steal_ticks), 'host stolen CPU time unavailable');
+      // The balloon counters exist only on kernels with the virtio balloon driver.
+      for (const field of [
+        'balloon_inflate',
+        'balloon_deflate',
+        'memory_stall_us',
+        'memory_stall_full_us',
+        'io_stall_us',
+      ]) {
         assert.ok(host[field] === null || host[field] >= 0, field);
+      }
     }
     for (const counter of ['user_usec', 'system_usec']) {
       await fs.writeFile(
@@ -896,9 +912,27 @@ test('window metrics interpolate CPU and device counters at the window edges', (
     ended_at: '2026-10-14T00:00:15.000Z',
     seconds: 10,
   };
+  // The balloon inflated 1000 pages inside the window and 1000 more outside it;
+  // available memory bottomed inside the window.
+  const hostSamples = [
+    [0, 0, 60],
+    [10_000, 1000, 50],
+    [20_000, 2000, 55],
+    [30_000, 3000, 40],
+  ].map(([elapsed_ms, inflate, avail]) => ({
+    elapsed_ms,
+    host: {
+      balloon_inflate: inflate,
+      mem_available_bytes: avail * 1024 ** 3,
+      pgsteal_kswapd: inflate * 2,
+      pgsteal_direct: 0,
+      allocstall: inflate / 1000,
+    },
+  }));
   const metrics = windowMetrics({
     samples,
     deviceSamples,
+    hostSamples,
     startedAt: '2026-10-14T00:00:00.000Z',
     window,
     result: { publishRate: [100, 300] },
@@ -913,6 +947,36 @@ test('window metrics interpolate CPU and device counters at the window edges', (
     reads: 0,
     writes: 10_000,
   });
+  assert.deepEqual(metrics.host, {
+    balloon_inflated_pages: 1000,
+    available_min_bytes: 50 * 1024 ** 3,
+    pgsteal_kswapd: 2000,
+    pgsteal_direct: 0,
+    allocstall: 1,
+  });
+  // Without a balloon driver the counter is null, and a trial without host samples has no host block.
+  const noBalloon = hostSamples.map((s) => ({ ...s, host: { ...s.host, balloon_inflate: null } }));
+  assert.equal(
+    windowMetrics({
+      samples,
+      deviceSamples,
+      hostSamples: noBalloon,
+      startedAt: '2026-10-14T00:00:00.000Z',
+      window,
+      result: { publishRate: [100, 300] },
+    }).host.balloon_inflated_pages,
+    null,
+  );
+  assert.equal(
+    windowMetrics({
+      samples,
+      deviceSamples,
+      startedAt: '2026-10-14T00:00:00.000Z',
+      window,
+      result: { publishRate: [100, 300] },
+    }).host,
+    undefined,
+  );
   assert.throws(
     () =>
       windowMetrics({

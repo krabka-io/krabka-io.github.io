@@ -190,7 +190,14 @@ function counterAt(samples, value, t) {
 // Broker CPU, published messages and device use over the OMB measurement
 // window only. Messages are OMB's mean publish rate times the window, because
 // OMB reports rates per interval, not counts.
-export function windowMetrics({ samples, deviceSamples, startedAt, window, result }) {
+export function windowMetrics({
+  samples,
+  deviceSamples,
+  hostSamples = [],
+  startedAt,
+  window,
+  result,
+}) {
   const anchor = Date.parse(startedAt);
   const from = Date.parse(window.started_at) - anchor;
   const to = Date.parse(window.ended_at) - anchor;
@@ -218,7 +225,38 @@ export function windowMetrics({ samples, deviceSamples, startedAt, window, resul
     published_messages: Math.round(messages),
     messages_per_cpu_second: messages / cpuSeconds,
     devices,
+    ...(hostSamples.length ? { host: hostWindow(hostSamples, from, to) } : {}),
   };
+}
+
+// What the host did to the brokers during the window: pages the hypervisor
+// took through the virtio balloon (null when the guest has no balloon
+// driver), the least memory the kernel considered available, and the
+// host-wide reclaim that falls on whoever allocates, which is the brokers'
+// page cache. A nonzero balloon or direct reclaim marks the trial in the
+// summary: its latency came from the host, not from the broker.
+function hostWindow(hostSamples, from, to) {
+  const delta = (key) =>
+    hostSamples[0].host[key] === null
+      ? null
+      : counterAt(hostSamples, (s) => s.host[key], to) -
+        counterAt(hostSamples, (s) => s.host[key], from);
+  const inside = hostSamples.filter((s) => s.elapsed_ms >= from && s.elapsed_ms <= to);
+  return {
+    balloon_inflated_pages: delta('balloon_inflate'),
+    available_min_bytes: Math.min(...inside.map((s) => s.host.mem_available_bytes)),
+    pgsteal_kswapd: delta('pgsteal_kswapd'),
+    pgsteal_direct: delta('pgsteal_direct'),
+    allocstall: delta('allocstall'),
+  };
+}
+
+// True when the host, not the broker, shaped a trial's latency: the
+// hypervisor inflated the balloon or the brokers' allocations fell into
+// direct reclaim during the measurement window.
+export function hostInterfered(trial) {
+  const host = trial.metrics?.measurement_window?.host;
+  return Boolean(host && (host.balloon_inflated_pages > 0 || host.allocstall > 0));
 }
 
 // O_DIRECT check for a broker's open files. `listing` is "path flags" lines

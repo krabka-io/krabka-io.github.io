@@ -3,11 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { hostInterfered } from './benchmark-results.mjs';
 
 export const OMB = {
   repository: 'https://github.com/openmessaging/benchmark.git',
   commit: '5b1fa70951a323da26bd587174b58bb2c65b0b5c',
   build_image: 'maven@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc',
+  maven_mirror: 'https://maven-central.storage-download.googleapis.com/maven2/',
   kafka_client_version: '3.6.1',
   // Applied to the checkout before the build. Upstream's Kafka consumer sends
   // an async offset commit after every poll without waiting for the last one,
@@ -235,6 +237,27 @@ export async function prepareOmb(
     `${OMB.commit.slice(0, 12)}-${image.Id.replace(/^sha256:/, '').slice(0, 12)}`,
   );
   await fs.mkdir(m2, { recursive: true });
+  // The build's Maven settings, passed with `-s`: the image's `MAVEN_CONFIG`
+  // only places the image's reference files, and Maven looks for user
+  // settings under a home the build's uid does not have (`?/.m2`). Maven
+  // Central rate-limits the Google Cloud runners' egress (429 Too Many
+  // Requests for the plugin POMs in runs 40427360965 and 40439747507);
+  // Google's mirror of Maven Central serves the same artifacts to them
+  // without a limit, and the jars are hashed into the provenance below, so a
+  // mirror that served different bytes would fail the shard merge.
+  await fs.writeFile(
+    path.join(m2, 'settings.xml'),
+    `<settings>
+  <mirrors>
+    <mirror>
+      <id>google-maven-central</id>
+      <mirrorOf>central</mirrorOf>
+      <url>${OMB.maven_mirror}</url>
+    </mirror>
+  </mirrors>
+</settings>
+`,
+  );
   // Maven's resolver retries a 429 or 503 (its `serviceUnavailable` default)
   // this many times, this long apart, before it fails the build.
   await oneShot(
@@ -259,6 +282,8 @@ export async function prepareOmb(
       'mvn',
       '-B',
       '-ntp',
+      '-s',
+      '/m2/settings.xml',
       '-Dmaven.repo.local=/m2',
       '-Dmaven.test.skip=true',
       '-Daether.connector.http.retryHandler.count=8',
@@ -420,9 +445,26 @@ export async function writeOmbReport(directory, provenance, trials) {
   ];
   for (const trial of trials) {
     const result = trial.omb;
+    const mark = hostInterfered(trial) ? ' †' : '';
     lines.push(
-      `| ${trial.case.id} | ${trial.rf} | ${trial.vendor} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`,
+      `| ${trial.case.id} | ${trial.rf} | ${trial.vendor}${mark} | ${trial.repetition} | ${mean(result.publishRate).toFixed(0)} | ${mean(result.consumeRate).toFixed(0)} | ${result.aggregatedPublishLatency99pct.toFixed(2)} | ${result.aggregatedEndToEndLatency99pct.toFixed(2)} | ${trial.metrics.cpu_seconds.toFixed(2)} | ${(trial.metrics.rss_peak_bytes / 1024 ** 2).toFixed(2)} |`,
     );
+  }
+  const interfered = trials.filter(hostInterfered);
+  if (interfered.length) {
+    lines.push(
+      '',
+      '## Host interference',
+      '',
+      "† The host, not the broker, shaped these latencies during the measurement window: the hypervisor inflated the virtio balloon or the brokers' allocations fell into direct reclaim. Compare them with care or repeat them.",
+      '',
+    );
+    for (const trial of interfered) {
+      const host = trial.metrics.measurement_window.host;
+      lines.push(
+        `- ${trial.case.id}, RF${trial.rf}, ${trial.vendor}, round ${trial.repetition}: balloon ${host.balloon_inflated_pages === null ? 'absent' : `${((host.balloon_inflated_pages * 4096) / 1024 ** 3).toFixed(1)} GiB inflated`}, ${host.allocstall} direct reclaim stalls, ${(((host.pgsteal_kswapd + host.pgsteal_direct) * 4096) / 1024 ** 3).toFixed(1)} GiB reclaimed host-wide, available memory down to ${(host.available_min_bytes / 1024 ** 3).toFixed(1)} GiB`,
+      );
+    }
   }
   if (omitted.length) {
     lines.push('', '## Not measured', '');
