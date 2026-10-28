@@ -184,8 +184,26 @@ try {
                 );
               }
             }
-            if (route === '/get-started/')
-              for (const id of ['deploy-tabs', 'client-tabs']) {
+            if (route === '/get-started/') {
+              const clientTabs = page.locator('#client-tabs [role="tab"]');
+              t.check(
+                'client examples use evaluator order with Java selected initially',
+                JSON.stringify((await clientTabs.allTextContents()).map((text) => text.trim())) ===
+                  JSON.stringify(['Java', 'Python', 'Go', 'Node.js', 'Rust', 'Kafka CLI']) &&
+                  (await clientTabs.first().getAttribute('aria-selected')) === 'true' &&
+                  (await clientTabs.first().getAttribute('tabindex')) === '0' &&
+                  (await page.locator('#clients [role="tabpanel"]:visible').count()) === 1 &&
+                  (await page.locator('#client-c-java').isVisible()),
+              );
+              t.check(
+                'runnable project is visible without a disclosure interaction',
+                (await page.locator('#javascript-project').isVisible()) &&
+                  (await page
+                    .locator('[aria-label="Copy JavaScript example setup"]')
+                    .isVisible()) &&
+                  (await page.locator('#clients details').count()) === 0,
+              );
+              for (const id of ['client-tabs']) {
                 const tabs = page.locator(`#${id} [role="tab"]`);
                 await tabs.first().focus();
                 await page.keyboard.press('ArrowRight');
@@ -197,6 +215,7 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+            }
             if (route === '/releases/') {
               const summaries = await page
                 .locator('#release-list > li > p:last-child')
