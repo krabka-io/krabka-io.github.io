@@ -17,7 +17,7 @@ Tailwind CSS; the browser tools have separate build requirements.
 Start with the live site rather than building this repository to install a
 broker or client. Choose the route that matches your next task:
 
-- [Get started with Krabka](https://krabka.io/get-started) for the supported local setup and client examples.
+- [Get started with Krabka](https://krabka.io/get-started) for evaluation pathways, compatibility checks, and client examples.
 - [Read the documentation](https://krabka.io/docs) for component guides and operational procedures.
 - [Explore the Cluster Lab](https://krabka.io/docs/lab) to run browser-hosted cluster scenarios and deliberate faults.
 - [Inspect verification evidence](https://krabka.io/verification) for selected proved kernels, model bounds, and other correctness checks.

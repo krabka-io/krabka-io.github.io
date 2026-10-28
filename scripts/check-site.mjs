@@ -200,6 +200,18 @@ try {
                     .count()) === 1,
               );
               t.check(
+                'preflight exposes client, API, registry and tooling checks with concrete limitations',
+                await page.locator('#compatibility').evaluate((section) => {
+                  const checks = [...section.querySelectorAll('ul li')];
+                  return checks.length === 4 &&
+                    ['Clients:', 'Kafka APIs:', 'Schema registries:', 'Operational tools:']
+                      .every((label, index) => checks[index].textContent.trim().startsWith(label)) &&
+                    checks.every((item) => item.querySelector('a[href]')) &&
+                    /serves no JMX and loads no JVM plugins/.test(checks[3].textContent) &&
+                    /another revision do not establish support/.test(section.textContent);
+                }),
+              );
+              t.check(
                 'sandbox sits beside desktop pathways or below mobile pathways, with full-width clients below',
                 await page.evaluate(() => {
                   const pathways = document.querySelector('#evaluation-pathways').getBoundingClientRect();

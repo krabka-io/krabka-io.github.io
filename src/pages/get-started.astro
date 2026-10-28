@@ -155,8 +155,13 @@ npm start`;
         </section>
         <section id="compatibility" class="border-b border-white/10 py-6" aria-labelledby="preflight-check">
           <h2 id="preflight-check" class="text-2xl font-bold text-white">Preflight compatibility and parity check</h2>
-          <p class="mt-3 text-base leading-relaxed text-gray-300">Identify compatibility gaps before you invest in a broader trial. Compare your workload's client versions, required Kafka APIs, and security settings with the support matrix and linked KIP coverage. Check the test evidence for your intended release, then identify unsupported features or behavior differences that need further evaluation.</p>
-          <a href={getPath('/docs/broker/operations/support-matrix')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Check the support matrix</a>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Identify compatibility gaps before you invest in a broader trial. Check the evidence for your intended release; results from another revision do not establish support for your build.</p>
+          <ul class="mt-3 list-disc space-y-2 pl-5 text-base leading-relaxed text-gray-300">
+            <li><strong>Clients:</strong> Compare your client versions and required security settings with the <a href={getPath('/docs/broker/operations/support-matrix')} class="text-krab-400 underline underline-offset-2">release support matrix</a>.</li>
+            <li><strong>Kafka APIs:</strong> Check your application's required APIs and behavior against the <a href={getPath('/docs/broker/kip_matrix')} class="text-krab-400 underline underline-offset-2">KIP coverage matrix</a>.</li>
+            <li><strong>Schema registries:</strong> Validate your registry workflow and review the <a href={getPath('/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over')} class="text-krab-400 underline underline-offset-2">schema registry migration checks</a>, including schema IDs and compatibility settings.</li>
+            <li><strong>Operational tools:</strong> Review <a href={getPath('/docs/broker/operations/ecosystem-support#what-does-not-work')} class="text-krab-400 underline underline-offset-2">tooling limitations</a>; Krabka serves no JMX and loads no JVM plugins.</li>
+          </ul>
         </section>
         <section class="border-b border-white/10 pt-6 pb-6" aria-labelledby="staging-evaluation">
           <h2 id="staging-evaluation" class="text-2xl font-bold text-white">Non-disruptive staging evaluation</h2>
