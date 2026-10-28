@@ -13,6 +13,7 @@ import {
   watchErrors,
 } from './lab-check-lib.mjs';
 
+import { websiteSnippets } from './snippets/extract.mjs';
 import { siteCheckSuite } from './site-check-suites.mjs';
 
 const selection = siteCheckSuite(process.argv.slice(2));
@@ -21,6 +22,7 @@ const ROUTES = [
   '/docs/',
   '/get-started/',
   '/docs/quickstart/',
+  '/docs/kubernetes-quickstart/',
   '/docs/browser-tools/',
   '/docs/operations/',
   '/api/',
@@ -33,6 +35,7 @@ const ROUTES = [
 ];
 const SEARCH = [
   ['quickstart', '/docs/quickstart'],
+  ['Kubernetes quickstart', '/docs/kubernetes-quickstart'],
   ['backup', '/docs/broker/operations/backup-restore'],
   ['rolling upgrade', '/docs/broker/operations/deploy'],
   ['migrating', '/docs/migration'],
@@ -376,6 +379,78 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+            }
+            if (['/docs/', '/get-started/'].includes(route))
+              t.check(
+                'Kubernetes guide is discoverable',
+                (await page.locator('a[href$="/docs/kubernetes-quickstart"]').count()) > 0,
+              );
+            if (route === '/docs/quickstart/') {
+              const link = page.locator('#kubernetes + p a');
+              t.check(
+                'old Kubernetes anchor links to the extracted guide',
+                (await link.getAttribute('href')).endsWith('/docs/kubernetes-quickstart'),
+              );
+              t.check(
+                'local quickstart has no Helm commands',
+                !(await page
+                  .locator('main .copy-btn')
+                  .evaluateAll((buttons) =>
+                    buttons.some((button) => /helm install|kubectl run/.test(button.dataset.copy)),
+                  )),
+              );
+            }
+            if (route === '/docs/kubernetes-quickstart/') {
+              const ids = await page
+                .locator('main h2[id]')
+                .evaluateAll((headings) => headings.map((heading) => heading.id));
+              t.check(
+                'Kubernetes task order is install, round trip, inspect, cleanup',
+                JSON.stringify(ids) ===
+                  JSON.stringify([
+                    'before-you-start',
+                    'install',
+                    'round-trip',
+                    'inspect',
+                    'cleanup',
+                  ]),
+              );
+              await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+              const expected = websiteSnippets(ROOT).filter((snippet) =>
+                snippet.id.startsWith('docs/kubernetes-quickstart/'),
+              );
+              const buttons = page.locator('main .copy-btn');
+              t.check(
+                'every Kubernetes snippet has a copy control',
+                (await buttons.count()) === expected.length,
+              );
+              for (let index = 0; index < expected.length; index++) {
+                const button = buttons.nth(index);
+                t.check(
+                  `${expected[index].id}: copy payload matches tested snippet`,
+                  (await button.getAttribute('data-copy')) === expected[index].code,
+                );
+                await button.click();
+                await waitFor(
+                  page,
+                  async (code) => (await navigator.clipboard.readText()) === code,
+                  'clipboard update',
+                  5000,
+                  expected[index].code,
+                );
+                t.check(
+                  `${expected[index].id}: copy reaches clipboard`,
+                  (await page.evaluate(() => navigator.clipboard.readText())) ===
+                    expected[index].code,
+                );
+              }
+              t.check(
+                'Kubernetes snippets contain no Compose commands',
+                expected.every(
+                  (snippet) =>
+                    !/docker compose|localhost:9092|quickstart-events/.test(snippet.code),
+                ),
+              );
             }
             if (route === '/releases/') {
               const summaries = await page
