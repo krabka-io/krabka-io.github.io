@@ -372,9 +372,8 @@ try {
               );
               t.check(
                 'legacy client anchor links to the quickstart without duplicate examples',
-                (await page
-                  .locator('#clients a[href="/docs/quickstart#clients"]')
-                  .textContent()) === 'Run the client examples' &&
+                (await page.locator('#clients a[href="/docs/quickstart"]').count()) === 1 &&
+                  (await page.locator('#clients a[href^="/docs/quickstart#"]').count()) === 0 &&
                   (await page.locator('#client-tabs').count()) === 0,
               );
             }
@@ -517,8 +516,11 @@ try {
               );
               t.check(
                 'next-task cards and table of contents are present',
-                (await page.locator('#choose-your-next-task + div a').count()) ===
-                  (route === '/docs/quickstart/' ? 1 : 2) &&
+                JSON.stringify(
+                  await page
+                    .locator('#choose-your-next-task + div a')
+                    .evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+                ) === JSON.stringify(['/docs/kip-matrix', '/docs/operations']) &&
                   (await page.locator('a[href="#choose-your-next-task"]').count()) > 0,
               );
               t.check(
