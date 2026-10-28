@@ -163,6 +163,8 @@ See [the benchmark instructions](../benchmarks/README.md) for execution and publ
 
 - Every code snippet is highlighted with Shiki and one theme, `src/utils/krabka-shiki-theme.mjs`, whose palette is the one the rustdoc, Javadoc and Go API sites use. Hand-written pages render snippets through `src/components/CodeBlock.astro` (pass the Shiki language id); the synced Markdown guides get the same theme from `markdown.shikiConfig` in `astro.config.mjs`. The proof explorer highlights Coma in the browser with its own small tokenizer, because Shiki runs at build time and the explorer loads each Coma file on demand.
 
+- Authored `CodeBlock` components use `src/utils/compact-code-tokens.mjs` to merge adjacent Shiki tokens with identical styles and replace known token colors with shared `.tok-*` classes in `src/styles/custom.css`. The classes use the same `--code-*` theme variables. Unknown or compound styles stay inline. Synced Markdown rendering is unchanged.
+
 ## Source map
 
 | Location | Responsibility |

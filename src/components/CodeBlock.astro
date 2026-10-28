@@ -3,6 +3,7 @@
 // guides get the same theme through the processor in astro.config.mjs.
 import { Code } from 'astro:components';
 import theme from '../utils/krabka-shiki-theme.mjs';
+import compactCodeTokens from '../utils/compact-code-tokens.mjs';
 
 interface Props {
   code: string;
@@ -16,11 +17,11 @@ interface Props {
 
 const { code, lang = 'text', size = 'xs', class: className, highlight = [] } = Astro.props;
 const marked = new Set(highlight);
-const transformers = marked.size ? [{
+const transformers = [compactCodeTokens(), {
   line(node: { properties: Record<string, unknown> }, line: number) {
     if (marked.has(line)) node.properties.class = [node.properties.class, 'line-highlight'].filter(Boolean).join(' ');
   },
-}] : undefined;
+}];
 ---
 
 <div class:list={['code-block', size === 'sm' ? 'text-sm' : 'text-xs', className]}>
