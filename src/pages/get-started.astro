@@ -3,20 +3,6 @@ import CodeBlock from '../components/CodeBlock.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { getPath } from '../utils/paths';
 
-const deploySnippets = {
-  docker: `curl -fsSL https://krabka.io/quickstart/docker-compose.yml -o docker-compose.yml
-docker compose up -d`,
-  helm: `kubectl apply -f https://krabka.io/quickstart/crds.yaml
-helm repo add krabka https://krabka.io/charts
-helm repo update
-helm install krabka-operator krabka/krabka-operator --version 1.0.1 --skip-crds \\
-  --namespace krabka-system --create-namespace \\
-  --set-string image.digest=sha256:87449560ca14088bb01be5a827ae974b2097ab61ff800bc067fb5bb504f61669
-kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
-kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
-kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m`
-};
-
 const clientSnippets = {
   rust: `// Cargo.toml:
 //   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
@@ -49,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }`,
   go: `// go get github.com/twmb/franz-go/pkg/kgo
-// Any Kafka client library works unmodified; this one is franz-go.
+// Produce a record with the franz-go Kafka client.
 package main
 
 import (
@@ -69,19 +55,20 @@ func main() {
     fmt.Println("Produced message to Krabka!")
 }`,
   java: `// Maven dependency: org.apache.kafka:kafka-clients:4.3.1
-// Works unmodified with the standard Apache Kafka Java Producer!
+// Produce a record with the standard Apache Kafka Java client.
 import org.apache.kafka.clients.producer.*;
 import java.util.Properties;
 
 public class App {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException, java.util.concurrent.ExecutionException {
         Properties props = new Properties();
         props.put("bootstrap.servers", "localhost:9092");
         props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
         props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
 
         Producer<String, String> producer = new KafkaProducer<>(props);
-        producer.send(new ProducerRecord<>("quickstart-events", "user-1", "Hello Krabka from Java!"));
+        producer.send(new ProducerRecord<>("quickstart-events", "user-1", "Hello Krabka from Java!")).get();
+        System.out.println("Record delivered to quickstart-events.");
         producer.close();
     }
 }`,
@@ -137,146 +124,112 @@ docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-c
   --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning --max-messages 1 --timeout-ms 30000`
 };
 
-const inspectSnippet = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
-KAFKA_NETWORK="container:$(docker compose ps -q broker)"
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic quickstart-events
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server localhost:9092 describe --status
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092`;
-
 const javascriptRunCode = `mkdir krabka-javascript
 cd krabka-javascript
 curl -fsSL https://krabka.io/quickstart/javascript/package.json -o package.json
 curl -fsSL https://krabka.io/quickstart/javascript/app.cjs -o app.cjs
 npm install
 npm start`;
-
-const tasks = [
-  { title: 'Try in your browser', href: '/docs/browser-tools', text: 'Run a real broker or explore consensus and proof tools without installing software.' },
-  { title: 'Run locally', href: '/docs/quickstart', text: 'Start a broker, check readiness, and produce and read a record with containerized Kafka tools.' },
-  { title: 'Migrate from Kafka', href: '/docs/migration', text: 'Check compatibility and plan data transfer and cutover.' },
-  { title: 'Operate a cluster', href: '/docs/operations', text: 'Find backup, recovery, and upgrade procedures.' },
-  { title: 'Explore verification', href: '/verification', text: 'Read the proofs, model bounds, and limits of the correctness evidence.' },
-];
 ---
 
 <BaseLayout
-  title="Get Started | krabka"
-  description="Run krabka locally with Docker Compose or on Kubernetes with Helm, then produce and consume records from Rust, Go, Java, Python, or Node.js."
+  title="Get started | Krabka"
+  description="Evaluate Krabka with a local quickstart, browser experiments, compatibility checks, measured benchmarks, and an isolated staging cluster."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="text-left border-b border-white/10 pb-8 mb-12">
       <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-        Get started
+        Get started with Krabka
       </h1>
       <p class="mt-4 text-lg text-gray-300">
-        Choose a task, or follow the quickstart below to produce and read your first record.
+        Try Krabka with your Kafka applications, or explore it in your browser. Choose a starting point below.
       </p>
     </div>
 
-    <nav aria-label="Getting started tasks" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-8">
-      {tasks.map(task => <a href={getPath(task.href)} class="frosted-card rounded-xl p-5 border border-white/10 hover:border-krab-500/50"><h2 class="font-bold text-white">{task.title} →</h2><p class="mt-2 text-sm text-gray-400">{task.text}</p></a>)}
-    </nav>
-    <p class="mb-12 text-sm text-gray-400">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls. The local commands below use Bash and require Docker with Compose; the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">complete quickstart</a> includes readiness, expected output, and optional cleanup.</p>
-
-    <!-- Step 1: Deploy Cluster -->
-    <div class="mb-14">
-      <div class="flex items-center gap-3 mb-6">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-krab-600 text-sm font-bold text-white">1</span>
-        <h2 class="text-2xl font-bold text-white">Start a krabka cluster</h2>
+    <div id="evaluation-pathways" class="mb-14">
+      <div id="first-run-options" class="grid items-stretch gap-6 lg:grid-cols-5">
+        <section class="frosted-card flex min-w-0 flex-col rounded-2xl border border-white/10 p-6 lg:col-span-3" aria-labelledby="local-validation">
+          <h2 id="local-validation" class="text-2xl font-bold text-white">Local and CI validation</h2>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Run a local broker with the quickstart, then produce and consume your first records. Point your existing Kafka clients, kcat, or integration tests at <code>localhost:9092</code>, and repeat those checks in CI as your application changes.</p>
+          <div class="mt-auto pt-6">
+            <a href={getPath('/docs/quickstart')} class="inline-block rounded-lg bg-krab-600 px-4 py-2 font-semibold text-white hover:bg-krab-500">Run the local quickstart</a>
+          </div>
+        </section>
+        <aside class="frosted-card flex min-w-0 flex-col rounded-2xl border border-white/10 p-6 lg:col-span-2" aria-labelledby="browser-trial">
+          <h2 id="browser-trial" class="text-2xl font-bold text-white">Interactive sandbox</h2>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Try Cluster Lab in your browser without a local installation. Explore KRaft consensus, replica failover, and fault injection with WebAssembly brokers.</p>
+          <p class="mt-4 text-sm leading-relaxed text-gray-400"><span id="lab-phone-limit" class="min-[700px]:hidden">View-only on phones. </span><span id="lab-scope-limit">The simulation does not measure production throughput or disk durability.</span></p>
+          <div class="mt-auto pt-6">
+            <a href={getPath('/docs/lab/')} class="inline-block rounded-lg border border-krab-500 px-4 py-2 font-semibold text-krab-400 hover:bg-krab-500/10">Open Cluster Lab</a>
+          </div>
+        </aside>
       </div>
 
-      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
-        <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist" id="deploy-tabs" aria-label="Deployment target">
-          <button type="button" role="tab" id="deploy-tab-docker" aria-controls="deploy-docker" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Docker Compose
-          </button>
-          <button type="button" role="tab" id="deploy-tab-helm" aria-controls="deploy-helm" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Kubernetes (Helm)
-          </button>
-        </div>
-
-        <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200 relative">
-          <div id="deploy-docker" role="tabpanel" aria-labelledby="deploy-tab-docker">
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Start single-node KRaft cluster</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.docker}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" code={deploySnippets.docker} lang="bash" />
+      <div id="evaluation-depth" class="mt-12">
+        <h2 class="text-2xl font-bold text-white">Evaluate in depth</h2>
+        <section id="compatibility" class="grid items-start gap-3 border-b border-white/10 py-6 lg:grid-cols-5 lg:gap-6" aria-labelledby="preflight-check">
+          <h3 id="preflight-check" class="text-xl font-bold text-white lg:col-span-2">Preflight compatibility and parity check</h3>
+          <div class="min-w-0 lg:col-span-3">
+            <p class="text-base leading-relaxed text-gray-300">Check your clients, <a href={getPath('/docs/broker/kip_matrix')} class="text-krab-400 underline underline-offset-2">Kafka APIs</a>, <a href={getPath('/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over')} class="text-krab-400 underline underline-offset-2">schema registry workflow</a>, and <a href={getPath('/docs/broker/operations/ecosystem-support#what-does-not-work')} class="text-krab-400 underline underline-offset-2">tooling limitations</a> before a broader trial; Krabka serves no JMX and loads no JVM plugins. Use evidence for your intended release; results from another revision do not establish support for your build.</p>
+            <a href={getPath('/docs/broker/operations/support-matrix')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Check the support matrix</a>
           </div>
-
-          <div id="deploy-helm" role="tabpanel" aria-labelledby="deploy-tab-helm" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Install Operator and CRD</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={deploySnippets.helm}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" code={deploySnippets.helm} lang="bash" />
+        </section>
+        <section class="grid items-start gap-3 border-b border-white/10 py-6 lg:grid-cols-5 lg:gap-6" aria-labelledby="performance-evaluation">
+          <h3 id="performance-evaluation" class="text-xl font-bold text-white lg:col-span-2">Check performance for your workload</h3>
+          <div class="min-w-0 lg:col-span-3">
+            <p class="text-base leading-relaxed text-gray-300">Compare measured throughput, latency, and CPU use for workloads relevant to your application. Review the test conditions and limits; published results do not promise the same performance for your workload.</p>
+            <a href={getPath('/benchmarks')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Explore the benchmarks</a>
           </div>
-        </div>
+        </section>
+        <section class="grid items-start gap-3 border-b border-white/10 py-6 lg:grid-cols-5 lg:gap-6" aria-labelledby="staging-evaluation">
+          <h3 id="staging-evaluation" class="text-xl font-bold text-white lg:col-span-2">Non-disruptive staging evaluation</h3>
+          <div class="min-w-0 lg:col-span-3">
+            <p class="text-base leading-relaxed text-gray-300">Evaluate representative traffic on an isolated Krabka cluster while production clients stay on Kafka. Use the migration guide to compare application behavior and results with dual writes, MirrorMaker 2 replication, or shadow consumers, and review their limitations, precautions, and consumer offsets before you plan a cutover.</p>
+            <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Plan a staging evaluation</a>
+          </div>
+        </section>
+        <section class="grid items-start gap-3 border-b border-white/10 py-6 lg:grid-cols-5 lg:gap-6" aria-labelledby="explore-verification">
+          <h3 id="explore-verification" class="text-xl font-bold text-white lg:col-span-2">How Krabka is verified</h3>
+          <div class="min-w-0 lg:col-span-3">
+            <p class="text-base leading-relaxed text-gray-300">Explore the evidence behind Krabka's correctness claims, including formal proofs, model checking, and testing. The verification overview explains what each approach covers and where its limits lie.</p>
+            <a href={getPath('/verification')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Explore verification</a>
+          </div>
+        </section>
       </div>
     </div>
 
-    <!-- Step 2: Produce & Consume Test -->
+    <!-- Application client examples -->
     <div id="clients" class="mb-14">
       <div class="flex items-center gap-3 mb-6">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-krab-600 text-sm font-bold text-white">2</span>
-        <h2 class="text-2xl font-bold text-white">Read a record, then connect your application</h2>
+        <h2 class="text-2xl font-bold text-white">Wire-protocol verification</h2>
       </div>
 
       <p class="mb-4 max-w-3xl text-sm text-gray-300 leading-relaxed font-sans">
-        First complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">quickstart readiness check</a>. The Kafka CLI tab creates <code>quickstart-events</code>, produces <code>hello krabka</code>, and consumes one record. The other tabs are producer examples for that topic at <code>localhost:9092</code>. Run Kubernetes clients inside the cluster; the quickstart shows their bootstrap address and commands.
+        Complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">quickstart</a> before you run an example. The examples use <code>localhost:9092</code> and the <code>quickstart-events</code> topic. For Kubernetes, use the quickstart's in-cluster address. Test your application's features and security settings separately.
       </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
         <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist" id="client-tabs" aria-label="Client language">
-          <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">Kafka CLI</button>
-          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Rust
-          </button>
-          <button type="button" role="tab" id="client-tab-c-go" aria-controls="client-c-go" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Go
-          </button>
-          <button type="button" role="tab" id="client-tab-c-java" aria-controls="client-c-java" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+          <button type="button" role="tab" id="client-tab-c-java" aria-controls="client-c-java" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Java
           </button>
           <button type="button" role="tab" id="client-tab-c-python" aria-controls="client-c-python" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Python
           </button>
+          <button type="button" role="tab" id="client-tab-c-go" aria-controls="client-c-go" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Go
+          </button>
           <button type="button" role="tab" id="client-tab-c-javascript" aria-controls="client-c-javascript" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
             Node.js
           </button>
+          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Rust
+          </button>
+          <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">Kafka CLI</button>
         </div>
 
         <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
-          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Native async Rust producer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" code={clientSnippets.rust} lang="rust" />
-          </div>
-
-          <div id="client-c-go" role="tabpanel" aria-labelledby="client-tab-c-go" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Go client produce snippet</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.go}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" code={clientSnippets.go} lang="go" />
-          </div>
-
-          <div id="client-c-java" role="tabpanel" aria-labelledby="client-tab-c-java" hidden>
+          <div id="client-c-java" role="tabpanel" aria-labelledby="client-tab-c-java">
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
               <span>Standard Kafka Java client</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.java}>
@@ -290,26 +243,50 @@ const tasks = [
           <div id="client-c-python" role="tabpanel" aria-labelledby="client-tab-c-python" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
               <span>confluent-kafka Python producer</span>
-              <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.python}>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.python}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
               </button>
             </div>
             <CodeBlock size="sm" code={clientSnippets.python} lang="python" />
           </div>
 
+          <div id="client-c-go" role="tabpanel" aria-labelledby="client-tab-c-go" hidden>
+            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
+              <span>franz-go producer</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.go}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <CodeBlock size="sm" code={clientSnippets.go} lang="go" />
+          </div>
+
           <div id="client-c-javascript" role="tabpanel" aria-labelledby="client-tab-c-javascript" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
               <span>KafkaJS producer</span>
-              <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.javascript}>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.javascript}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
               </button>
             </div>
             <CodeBlock size="sm" code={clientSnippets.javascript} lang="javascript" />
           </div>
 
-          <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli">
+          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>CLI producer/consumer</span>
+              <span>Krabka Rust producer</span>
+              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <CodeBlock size="sm" code={clientSnippets.rust} lang="rust" />
+          </div>
+
+          <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli" hidden>
+            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
+              <span>Kafka CLI producer and consumer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.cli}>
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
@@ -319,45 +296,14 @@ const tasks = [
           </div>
         </div>
       </div>
-      <p class="mt-4 text-sm text-gray-400">A successful CLI round trip prints <code>hello krabka</code>. To inspect a producer example's record, run the CLI consumer without <code>--max-messages 1</code>, then press Ctrl+C to stop.</p>
-      <details class="mt-6 rounded-xl border border-white/10 p-5 space-y-4">
-        <summary class="cursor-pointer font-semibold text-white">Run the JavaScript example as a project</summary>
-        <p class="text-sm text-gray-300">Install Node.js with npm. After the local quickstart, download this project in a separate terminal and run it. It uses the same pinned KafkaJS dependency and producer code as the Node.js tab. A delivery failure exits with an error.</p>
+      <p class="mt-4 text-sm text-gray-400">The CLI example prints <code>hello krabka</code>. To read other examples' records, omit <code>--max-messages 1</code> from the consumer command. Press Ctrl+C to stop.</p>
+      <section aria-labelledby="javascript-project" class="mt-6 rounded-xl border border-white/10 p-5 space-y-4">
+        <h3 id="javascript-project" class="font-semibold text-white">Run the JavaScript example as a project</h3>
+        <p class="text-sm text-gray-300">Install Node.js with npm to run this project. Run these commands in a separate terminal after the quickstart.</p>
         <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-sm text-gray-300 hover:bg-white/10" data-copy={javascriptRunCode} aria-label="Copy JavaScript example setup">Copy setup</button>
         <CodeBlock code={javascriptRunCode} lang="bash" />
-        <p class="text-sm text-gray-400">The record value is <code>Hello Krabka from KafkaJS!</code>. Use the CLI consumer with <code>--from-beginning</code> and without <code>--max-messages 1</code> to read the topic, then press Ctrl+C to stop. <a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download package manifest</a></p>
-      </details>
-    </div>
-
-    <!-- Step 3: Inspect the cluster with the standard Kafka admin tools -->
-    <div class="mb-8">
-      <div class="flex items-center gap-3 mb-6">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-krab-600 text-sm font-bold text-white">3</span>
-        <h2 class="text-2xl font-bold text-white">Inspect the cluster with Kafka admin tools</h2>
-      </div>
-
-      <div class="space-y-4">
-        <p class="max-w-3xl text-gray-300 leading-relaxed font-sans">
-          The Apache Kafka <code class="font-mono text-krab-300 text-sm">kafka-*.sh</code> tools can describe topics, the <a href={getPath('/features/kraft')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">KRaft quorum</a>, consumer groups, and the negotiated API versions. See the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">compatibility matrix</a> for supported protocol versions.
-        </p>
-
-        <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
-          <div class="p-6 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Describe topics, quorum, groups, and API versions</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={inspectSnippet}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" code={inspectSnippet} lang="bash" />
-          </div>
-        </div>
-
-        <p class="max-w-3xl text-sm text-gray-400 leading-relaxed font-sans">
-          The broker also serves Prometheus metrics on port <code class="font-mono text-gray-300">9404</code>. To collect and query them alongside traces, logs, and profiles, see <a href="https://github.com/krabka-io/krabka-o11y" target="_blank" rel="noopener noreferrer" class="text-krab-400 hover:text-krab-300 font-semibold underline underline-offset-2">krabka-o11y</a> in the broader krabka ecosystem.
-        </p>
-      </div>
+        <p class="text-sm text-gray-400"><a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download the source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download the package manifest</a></p>
+      </section>
     </div>
   </div>
 </BaseLayout>
@@ -366,5 +312,5 @@ const tasks = [
   import { initTabs } from '../utils/tabs';
 
   // The copy buttons are wired by BaseLayout.
-  document.querySelectorAll<HTMLElement>('#deploy-tabs, #client-tabs').forEach((list) => initTabs(list));
+  document.querySelectorAll<HTMLElement>('#client-tabs').forEach((list) => initTabs(list));
 </script>

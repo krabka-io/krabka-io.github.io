@@ -418,8 +418,6 @@ if (mode === 'compose') {
       'Compose quickstart did not roundtrip its record',
     );
     shell(get('docs/quickstart/inspectSnippet'), 'quickstart-inspect', { env, timeout: 120000 });
-    shell(localAssets(get('get-started/deploySnippets.docker')), 'get-started-docker', { env });
-    waitForBroker();
     const consumed = shell(get('get-started/clientSnippets.cli'), 'cli-roundtrip', {
       env,
       stdio: ['ignore', 'pipe', 'inherit'],
@@ -429,7 +427,6 @@ if (mode === 'compose') {
       consumed.split('\n').includes('hello krabka'),
       'CLI snippet did not roundtrip its record',
     );
-    shell(get('get-started/inspectSnippet'), 'inspect', { env, timeout: 120000 });
   } finally {
     run('docker', [...compose, 'logs', '--no-color']);
     run('docker', [...compose, 'down', '--volumes', '--remove-orphans']);
@@ -462,16 +459,6 @@ if (mode === 'helm') {
       env,
       timeout: 10 * 60 * 1000,
     });
-    shell(localAssets(get('get-started/deploySnippets.helm')), 'get-started-helm', {
-      env,
-      timeout: 20 * 60 * 1000,
-    });
-    run(
-      'kubectl',
-      ['wait', '--for=condition=Ready', 'kafkatopic/quickstart', '--timeout=5m'],
-      work,
-      { env },
-    );
   } finally {
     run('kind', ['export', 'logs', `${work}/kind-logs`, '--name', project], work, { env });
     run('kind', ['delete', 'cluster', '--name', project], work, { env });

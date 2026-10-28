@@ -128,12 +128,16 @@ async function timing(page, route, visit, width, theme, navigate) {
 }
 
 try {
-  for (const width of [390, 1440])
+  for (const width of [375, 699, 700, 1024, 1440])
     for (const theme of ['light', 'dark']) {
-      for (const route of selection.site ? ROUTES : [])
+      for (const route of selection.site
+        ? [375, 1440].includes(width)
+          ? ROUTES
+          : ['/get-started/']
+        : [])
         await t.flow(`${route} ${width} ${theme}`, async () => {
           const context = await browser.newContext({
-            viewport: { width, height: 900 },
+            viewport: { width, height: width === 375 ? 667 : width === 1024 ? 768 : 900 },
             colorScheme: theme,
             reducedMotion: 'reduce',
           });
@@ -164,7 +168,7 @@ try {
                 'skip link focuses main',
                 await page.locator('#main').evaluate((el) => el === document.activeElement),
               );
-              if (width === 390) {
+              if (width === 375) {
                 const menu = page.locator('#mobile-menu-button');
                 await menu.focus();
                 await page.keyboard.press('Enter');
@@ -184,8 +188,183 @@ try {
                 );
               }
             }
-            if (route === '/get-started/')
-              for (const id of ['deploy-tabs', 'client-tabs']) {
+            if (route === '/get-started/') {
+              const pathways = page.locator('#evaluation-pathways');
+              t.check(
+                'first-run cards precede ordered full-width evaluation routes',
+                await pathways.evaluate((root) => {
+                  const first = root.querySelector('#first-run-options');
+                  const depth = root.querySelector('#evaluation-depth');
+                  const sections = [...depth.querySelectorAll('section')];
+                  return (
+                    first.nextElementSibling === depth &&
+                    first.firstElementChild.getAttribute('aria-labelledby') ===
+                      'local-validation' &&
+                    first.lastElementChild.getAttribute('aria-labelledby') === 'browser-trial' &&
+                    JSON.stringify(
+                      sections.map((section) => section.getAttribute('aria-labelledby')),
+                    ) ===
+                      JSON.stringify([
+                        'preflight-check',
+                        'performance-evaluation',
+                        'staging-evaluation',
+                        'explore-verification',
+                      ]) &&
+                    JSON.stringify(
+                      sections.map((section) =>
+                        section.lastElementChild.lastElementChild.getAttribute('href'),
+                      ),
+                    ) ===
+                      JSON.stringify([
+                        '/docs/broker/operations/support-matrix',
+                        '/benchmarks',
+                        '/docs/broker/operations/migrate-from-kafka',
+                        '/verification',
+                      ]) &&
+                    first.querySelectorAll('h2').length === 2 &&
+                    depth.querySelectorAll('h2').length === 1 &&
+                    sections.every((section) => section.querySelector('h3')) &&
+                    getComputedStyle(depth.querySelector('h2')).fontSize === '24px' &&
+                    sections.every(
+                      (section) =>
+                        getComputedStyle(section.querySelector('h3')).fontSize === '20px',
+                    ) &&
+                    depth.querySelector('h2').firstChild.textContent.trim() ===
+                      'Evaluate in depth' &&
+                    sections[3].querySelector('h3').firstChild.textContent.trim() ===
+                      'How Krabka is verified'
+                  );
+                }),
+              );
+              t.check(
+                'preflight retains client, API, registry, tooling and revision checks',
+                await page
+                  .locator('#compatibility')
+                  .evaluate(
+                    (section) =>
+                      /clients/.test(section.textContent) &&
+                      /serves no JMX and loads no JVM plugins/.test(section.textContent) &&
+                      /another revision do not establish support/.test(section.textContent) &&
+                      [
+                        '/docs/broker/kip_matrix',
+                        '/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over',
+                        '/docs/broker/operations/ecosystem-support#what-does-not-work',
+                      ].every((href) => section.querySelector(`a[href="${href}"]`)) &&
+                      section.lastElementChild.lastElementChild.textContent ===
+                        'Check the support matrix',
+                  ),
+              );
+              t.check(
+                'quickstart is primary and lab is secondary',
+                await page.locator('#first-run-options').evaluate((root) => {
+                  const quickstart = root.querySelector('section a:not(.heading-anchor)');
+                  const lab = root.querySelector('aside a:not(.heading-anchor)');
+                  return (
+                    quickstart.getAttribute('href') === '/docs/quickstart' &&
+                    lab.getAttribute('href') === '/docs/lab/' &&
+                    getComputedStyle(quickstart).backgroundColor !==
+                      getComputedStyle(lab).backgroundColor &&
+                    lab.classList.contains('border')
+                  );
+                }),
+              );
+              t.check(
+                'cards align buttons; evaluation rows use 2/5 headings and 3/5 prose on desktop, stacked below lg',
+                await page.evaluate(() => {
+                  const box = (selector) =>
+                    document.querySelector(selector).getBoundingClientRect();
+                  const first = box('#first-run-options');
+                  const quickstart = box('#first-run-options > section');
+                  const lab = box('#first-run-options > aside');
+                  const depth = box('#evaluation-depth');
+                  const clients = box('#clients');
+                  const columns =
+                    innerWidth >= 1024
+                      ? Math.abs(quickstart.top - lab.top) < 1 &&
+                        lab.left >= quickstart.right &&
+                        Math.abs(quickstart.height - lab.height) < 1 &&
+                        quickstart.width / lab.width > 1.5 &&
+                        quickstart.width / lab.width < 1.6 &&
+                        Math.abs(
+                          box('#first-run-options > section a:not(.heading-anchor)').bottom -
+                            box('#first-run-options > aside a:not(.heading-anchor)').bottom,
+                        ) < 1
+                      : lab.top >= quickstart.bottom && Math.abs(quickstart.width - lab.width) < 1;
+                  const fullWidth = [
+                    ...document.querySelectorAll('#evaluation-depth section'),
+                  ].every((section) => {
+                    const rect = section.getBoundingClientRect();
+                    const heading = section.querySelector('h3').getBoundingClientRect();
+                    const paragraph = section.querySelector('p').getBoundingClientRect();
+                    const body = section.lastElementChild.getBoundingClientRect();
+                    const lineHeight = parseFloat(
+                      getComputedStyle(section.querySelector('h3')).lineHeight,
+                    );
+                    return (
+                      Math.abs(rect.width - first.width) < 1 &&
+                      getComputedStyle(section).borderBottomWidth === '1px' &&
+                      Math.abs(paragraph.width - body.width) < 1 &&
+                      (innerWidth >= 1024
+                        ? Math.abs(heading.top - body.top) < 1 &&
+                          Math.abs((heading.width + 24) / 2 - (body.width + 24) / 3) < 1 &&
+                          heading.height <= 2 * lineHeight + 1
+                        : Math.abs(heading.width - rect.width) < 1 && body.top >= heading.bottom)
+                    );
+                  });
+                  return (
+                    columns &&
+                    fullWidth &&
+                    depth.top >= first.bottom &&
+                    clients.top >= depth.bottom &&
+                    Math.abs(clients.width - first.width) < 1
+                  );
+                }),
+              );
+              t.check(
+                'lab phone warning matches 699/700 breakpoint; simulation scope stays visible',
+                (await page.locator('#lab-phone-limit').isVisible()) === width <= 699 &&
+                  (await page.locator('#lab-scope-limit').isVisible()) &&
+                  (await page.locator('#lab-scope-limit').textContent()) ===
+                    'The simulation does not measure production throughput or disk durability.',
+              );
+              t.check(
+                'local validation includes CI; combined lab caveats precede its bottom-aligned action',
+                await page.locator('#first-run-options').evaluate((root) => {
+                  const local = root.querySelector('section > p');
+                  const caveat = root.querySelector('#lab-scope-limit').parentElement;
+                  const lab = root.querySelector('aside');
+                  return (
+                    local.textContent ===
+                      'Run a local broker with the quickstart, then produce and consume your first records. Point your existing Kafka clients, kcat, or integration tests at localhost:9092, and repeat those checks in CI as your application changes.' &&
+                    caveat.querySelector('#lab-phone-limit') &&
+                    caveat.textContent ===
+                      'View-only on phones. The simulation does not measure production throughput or disk durability.' &&
+                    caveat.nextElementSibling === lab.lastElementChild &&
+                    [...root.children].every((card) =>
+                      card.lastElementChild.classList.contains('mt-auto'),
+                    )
+                  );
+                }),
+              );
+              const clientTabs = page.locator('#client-tabs [role="tab"]');
+              t.check(
+                'client examples use evaluator order with Java selected initially',
+                JSON.stringify((await clientTabs.allTextContents()).map((text) => text.trim())) ===
+                  JSON.stringify(['Java', 'Python', 'Go', 'Node.js', 'Rust', 'Kafka CLI']) &&
+                  (await clientTabs.first().getAttribute('aria-selected')) === 'true' &&
+                  (await clientTabs.first().getAttribute('tabindex')) === '0' &&
+                  (await page.locator('#clients [role="tabpanel"]:visible').count()) === 1 &&
+                  (await page.locator('#client-c-java').isVisible()),
+              );
+              t.check(
+                'runnable project is visible without a disclosure interaction',
+                (await page.locator('#javascript-project').isVisible()) &&
+                  (await page
+                    .locator('[aria-label="Copy JavaScript example setup"]')
+                    .isVisible()) &&
+                  (await page.locator('#clients details').count()) === 0,
+              );
+              for (const id of ['client-tabs']) {
                 const tabs = page.locator(`#${id} [role="tab"]`);
                 await tabs.first().focus();
                 await page.keyboard.press('ArrowRight');
@@ -197,6 +376,7 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+            }
             if (route === '/releases/') {
               const summaries = await page
                 .locator('#release-list > li > p:last-child')
@@ -257,7 +437,7 @@ try {
           }
         });
 
-      for (const route of selection.toolRoutes)
+      for (const route of [375, 1440].includes(width) ? selection.toolRoutes : [])
         await t.flow(`${route} startup ${width} ${theme}`, async () => {
           const context = await newLabContext(browser, { width, height: 900 });
           await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
