@@ -141,6 +141,7 @@ try {
         await t.flow(`${route} ${width} ${theme}`, async () => {
           const context = await browser.newContext({
             viewport: { width, height: width === 375 ? 667 : width === 1024 ? 768 : 900 },
+            userAgent: 'krabka-dev-klaw',
             colorScheme: theme,
             reducedMotion: 'reduce',
           });
@@ -385,12 +386,36 @@ try {
                 'Kubernetes guide is discoverable',
                 (await page.locator('a[href$="/docs/kubernetes-quickstart"]').count()) > 0,
               );
-            if (route === '/docs/quickstart/') {
-              const link = page.locator('#kubernetes + p a');
+            if (['/docs/quickstart/', '/docs/kubernetes-quickstart/'].includes(route)) {
+              const switcher = page.getByRole('navigation', { name: 'Quickstart environment' });
               t.check(
-                'old Kubernetes anchor links to the extracted guide',
-                (await link.getAttribute('href')).endsWith('/docs/kubernetes-quickstart'),
+                'environment switch has two plain links and one current page',
+                (await switcher.locator('a').count()) === 2 &&
+                  (await switcher.locator('a[aria-current="page"]').count()) === 1 &&
+                  (await switcher.locator('a[aria-current="page"]').getAttribute('href')).replace(
+                    /\/$/,
+                    '',
+                  ) === route.replace(/\/$/, '') &&
+                  (await switcher.locator('[role="tab"]').count()) === 0,
               );
+              t.check(
+                'next-task cards and table of contents are present',
+                (await page.locator('#choose-your-next-task + div a').count()) === 2 &&
+                  (await page.locator('a[href="#choose-your-next-task"]').count()) > 0,
+              );
+              t.check(
+                'command labels and copy controls have no outer card',
+                await page
+                  .locator('main .copy-btn')
+                  .evaluateAll((buttons) =>
+                    buttons.every(
+                      (button) =>
+                        !button.parentElement.parentElement.classList.contains('frosted-card'),
+                    ),
+                  ),
+              );
+            }
+            if (route === '/docs/quickstart/') {
               t.check(
                 'local quickstart has no Helm commands',
                 !(await page
@@ -405,14 +430,16 @@ try {
                 .locator('main h2[id]')
                 .evaluateAll((headings) => headings.map((heading) => heading.id));
               t.check(
-                'Kubernetes task order is install, round trip, inspect, cleanup',
+                'Kubernetes task order includes separate installation and cluster steps',
                 JSON.stringify(ids) ===
                   JSON.stringify([
                     'before-you-start',
                     'install',
+                    'create-cluster',
                     'round-trip',
                     'inspect',
                     'cleanup',
+                    'choose-your-next-task',
                   ]),
               );
               await context.grantPermissions(['clipboard-read', 'clipboard-write']);
