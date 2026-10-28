@@ -130,19 +130,11 @@ curl -fsSL https://krabka.io/quickstart/javascript/package.json -o package.json
 curl -fsSL https://krabka.io/quickstart/javascript/app.cjs -o app.cjs
 npm install
 npm start`;
-
-const tasks = [
-  { title: 'Try in your browser', href: '/docs/browser-tools', text: 'Run a real broker or explore consensus and proof tools without installing software.' },
-  { title: 'Run locally', href: '/docs/quickstart', text: 'Start a broker, check readiness, and produce and read a record with containerized Kafka tools.' },
-  { title: 'Migrate from Kafka', href: '/docs/migration', text: 'Check compatibility and plan data transfer and cutover.' },
-  { title: 'Operate a cluster', href: '/docs/operations', text: 'Find backup, recovery, and upgrade procedures.' },
-  { title: 'Explore verification', href: '/verification', text: 'Read the proofs, model bounds, and limits of the correctness evidence.' },
-];
 ---
 
 <BaseLayout
   title="Get started | Krabka"
-  description="Choose how to explore Krabka, connect an application with Kafka clients, or run the Node.js example project after the local quickstart."
+  description="Evaluate Krabka with browser experiments, local Kafka clients, compatibility checks, and an isolated staging cluster."
 >
   <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
     <div class="text-left border-b border-white/10 pb-8 mb-12">
@@ -150,23 +142,57 @@ const tasks = [
         Get started
       </h1>
       <p class="mt-4 text-lg text-gray-300">
-        Choose a task, or connect your application after the local quickstart.
+        Evaluate Krabka against the Kafka clients, tools, and workloads you already use. Start with a browser experiment or a local broker, then check compatibility before a staging trial.
       </p>
     </div>
 
-    <nav aria-label="Getting started tasks" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-8">
-      {tasks.map(task => <a href={getPath(task.href)} class="frosted-card rounded-xl p-5 border border-white/10 hover:border-krab-500/50"><h2 class="font-bold text-white">{task.title}</h2><p class="mt-2 text-sm text-gray-400">{task.text}</p></a>)}
+    <nav aria-label="Evaluation pathways" class="space-y-6 mb-12">
+      <section class="frosted-card rounded-xl p-5 border border-white/10" aria-labelledby="browser-trial">
+        <h2 id="browser-trial" class="text-xl font-bold text-white">Zero-install browser trial</h2>
+        <p class="mt-2 text-sm text-gray-300">Use Cluster Lab to inspect KRaft consensus and partition failover. Try minimum ISR behavior, rack splits, and fault injection, then inspect the records and network traffic.</p>
+        <p class="mt-2 text-sm text-gray-400">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls. Its virtual clock and network do not measure production throughput or disk durability.</p>
+        <a href={getPath('/docs/lab/')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Open Cluster Lab</a>
+      </section>
+      <section class="frosted-card rounded-xl p-5 border border-white/10" aria-labelledby="local-validation">
+        <h2 id="local-validation" class="text-xl font-bold text-white">Local and CI validation</h2>
+        <p class="mt-2 text-sm text-gray-300">Run your integration test suite, local microservices, or kcat and Kafka CLI tools against a local Krabka broker at <code>localhost:9092</code>. Change the bootstrap address in a test configuration and verify delivery, consumption, and the APIs your application uses.</p>
+        <p class="mt-2 text-sm text-gray-400">The quickstart owns the pinned Docker Compose and Helm runbooks, readiness checks, and first-record validation. Helm clients use the documented in-cluster bootstrap address instead of localhost.</p>
+        <a href={getPath('/docs/quickstart')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Run the local quickstart</a>
+      </section>
+      <section id="compatibility" class="frosted-card rounded-xl p-5 border border-white/10" aria-labelledby="preflight-check">
+        <h2 id="preflight-check" class="text-xl font-bold text-white">Pre-flight compatibility and parity check</h2>
+        <p class="mt-2 text-sm text-gray-300">Check your client version, protocol features, schema registry, and operational tools before switching a workload. A producer round trip is not evidence of full application parity.</p>
+        <ul class="mt-3 list-disc pl-5 space-y-3 text-sm text-gray-300">
+          <li><strong>Client evidence:</strong> the release support matrix records Java kafka-clients tests for Kafka 3.4, 3.5, 3.8, 4.0.0, 4.1.0, and 4.3.1; librdkafka 1.8.2 and 2.15.0; sarama through kaf 0.2.14; and krabka-client-rs. The website snippet harness also covers confluent-kafka (librdkafka), franz-go, KafkaJS, and krabka-client-rs. These are specific tested paths, not a guarantee for every version or configuration.</li>
+          <li><strong>Wire protocol:</strong> Kafka 3.x and 4.x API compatibility depends on the API key and request version negotiated with <code>ApiVersions</code>. Check the release-stream targets and KIP matrix for the Produce, Fetch, group, transaction, and admin features your application needs.</li>
+          <li><strong>Schema registries:</strong> verify serializers, subject compatibility, and registry recovery with your registry version. MirrorMaker 2 does not migrate registry subjects as a separate service; the migration guide describes registry export or a controlled <code>_schemas</code> transfer.</li>
+          <li><strong>Unsupported interfaces:</strong> no broker-side JVM plugins or JMX endpoint. JMX-only dashboards and Cruise Control cannot use those interfaces; scrape Prometheus metrics instead.</li>
+          <li><strong>Partial and planned features:</strong> streams topology description updates and <code>streams.rack.aware.assignment.tags</code> are unsupported. Schema-aware geo-replication transforms and secured standalone replicator clients remain future work. Check the matrices for other gaps and behavior differences.</li>
+        </ul>
+        <p class="mt-3 text-sm text-gray-400">Release evidence is tied to the broker revision named in each row; historical results do not qualify a later build. Rerun the relevant checks on the image you intend to evaluate.</p>
+        <p class="mt-3 text-sm"><a href={getPath('/docs/broker/operations/support-matrix')} class="text-krab-400 underline underline-offset-2">Check tested versions and release evidence</a> · <a href={getPath('/versions#wire-compatibility')} class="text-krab-400 underline underline-offset-2">Check wire compatibility targets</a> · <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">Review KIP support and gaps</a> · <a href={getPath('/docs/broker/operations/ecosystem-support')} class="text-krab-400 underline underline-offset-2">Check ecosystem tool interfaces</a></p>
+      </section>
+      <section class="frosted-card rounded-xl p-5 border border-white/10" aria-labelledby="staging-evaluation">
+        <h2 id="staging-evaluation" class="text-xl font-bold text-white">Non-disruptive staging evaluation</h2>
+        <p class="mt-2 text-sm text-gray-300">Use a separate Krabka cluster and test identities. Keep production producers and consumer groups on Kafka while you compare results; do not change their bootstrap addresses for the trial.</p>
+        <ul class="mt-3 list-disc pl-5 space-y-3 text-sm text-gray-300">
+          <li><strong>Dual-writing:</strong> send an approved test workload to both clusters and compare keys, values, ordering, and delivery failures. Writes to two clusters are not one atomic transaction; handle partial failures and duplicates.</li>
+          <li><strong>MirrorMaker 2 active-passive replication:</strong> copy an explicitly approved topic set one way into the isolated target. Use least-privilege source access and keep cutover separate from evaluation; replication adds source load and copies data.</li>
+          <li><strong>Shadow consumer verification:</strong> use separate consumer groups and disable external side effects. Compare records and application results without committing offsets for production groups.</li>
+        </ul>
+        <p class="mt-3 text-sm text-gray-400">MirrorMaker 2 changes target offsets and does not preserve producer IDs or transactional state. Registry data and credentials need separate handling; apply the guide's transaction-isolation and offset-translation checks before any cutover.</p>
+        <p class="mt-3 text-sm"><a href={getPath('/docs/migration')} class="text-krab-400 underline underline-offset-2">Plan migration and cutover</a> · <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="text-krab-400 underline underline-offset-2">Follow the MirrorMaker 2 replication procedure</a></p>
+      </section>
     </nav>
-    <p class="mb-12 text-sm text-gray-400">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls.</p>
 
     <!-- Application client examples -->
     <div id="clients" class="mb-14">
       <div class="flex items-center gap-3 mb-6">
-        <h2 class="text-2xl font-bold text-white">Connect your application</h2>
+        <h2 class="text-2xl font-bold text-white">Wire-protocol verification</h2>
       </div>
 
       <p class="mb-4 max-w-3xl text-sm text-gray-300 leading-relaxed font-sans">
-        First complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">local quickstart</a> so a broker is running at <code>localhost:9092</code> and the <code>quickstart-events</code> topic exists. These producer examples connect to that local broker. For Kubernetes, use the in-cluster bootstrap address and commands in the quickstart.
+        First complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">local quickstart</a> so a broker is running at <code>localhost:9092</code> and the <code>quickstart-events</code> topic exists. These examples verify that standard Kafka client libraries can connect and publish to Krabka with the bootstrap address changed, without a Krabka-specific adapter. They test record delivery, not every client feature; validate your own workload and security configuration separately. For Kubernetes, use the in-cluster bootstrap address and commands in the quickstart.
       </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">

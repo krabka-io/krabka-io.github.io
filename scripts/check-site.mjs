@@ -185,6 +185,19 @@ try {
               }
             }
             if (route === '/get-started/') {
+              const pathways = page.locator('nav[aria-label="Evaluation pathways"]');
+              t.check(
+                'four evaluation pathways expose lab, runbook, compatibility and migration destinations',
+                (await pathways.locator('section').count()) === 4 &&
+                  (await pathways.locator('a[href="/docs/lab/"]').count()) === 1 &&
+                  (await pathways.locator('a[href="/docs/quickstart"]').count()) === 1 &&
+                  (await pathways
+                    .locator('a[href="/docs/broker/operations/support-matrix"]')
+                    .count()) === 1 &&
+                  (await pathways
+                    .locator('a[href="/docs/broker/operations/migrate-from-kafka"]')
+                    .count()) === 1,
+              );
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(
                 'client examples use evaluator order with Java selected initially',
