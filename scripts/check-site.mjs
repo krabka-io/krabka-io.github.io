@@ -200,17 +200,49 @@ try {
                     .count()) === 1,
               );
               t.check(
-                'sandbox sits beside desktop pathways or below mobile pathways, with full-width clients below',
+                'sandbox sits beside desktop pathways or below mobile pathways',
                 await page.evaluate(() => {
-                  const pathways = document.querySelector('#evaluation-pathways').getBoundingClientRect();
-                  const main = document.querySelector('#evaluation-pathways > div').getBoundingClientRect();
-                  const aside = document.querySelector('#evaluation-pathways aside').getBoundingClientRect();
-                  const clients = document.querySelector('#clients').getBoundingClientRect();
-                  const columns = innerWidth >= 1024
-                    ? Math.abs(main.top - aside.top) < 1 && aside.left >= main.right && main.width / aside.width > 1.9 && main.width / aside.width < 2.3
-                    : aside.top >= main.bottom;
-                  return columns && clients.top >= Math.max(main.bottom, aside.bottom)
-                    && Math.abs(clients.width - pathways.width) < 1;
+                  const main = document
+                    .querySelector('#evaluation-pathways > div')
+                    .getBoundingClientRect();
+                  const aside = document
+                    .querySelector('#evaluation-pathways aside')
+                    .getBoundingClientRect();
+                  const columns =
+                    innerWidth >= 1024
+                      ? Math.abs(main.top - aside.top) < 1 &&
+                        aside.left >= main.right &&
+                        main.width / aside.width > 1.9 &&
+                        main.width / aside.width < 2.3
+                      : aside.top >= main.bottom;
+                  return columns;
+                }),
+              );
+              t.check(
+                'evaluation page links to application examples without embedding them',
+                (await page.locator('#client-tabs').count()) === 0 &&
+                  (await page
+                    .locator('a[href="/docs/quickstart#connect-your-application"]')
+                    .count()) === 1,
+              );
+            }
+            if (route === '/docs/quickstart/') {
+              t.check(
+                'application connection follows CLI inspection and precedes cleanup',
+                await page.evaluate(() => {
+                  const headings = [...document.querySelectorAll('main h2')].map((el) =>
+                    [...el.childNodes]
+                      .filter((node) => node.nodeType === Node.TEXT_NODE)
+                      .map((node) => node.textContent)
+                      .join('')
+                      .trim(),
+                  );
+                  const connect = headings.indexOf('5. Connect your application');
+                  return (
+                    connect > 0 &&
+                    headings[connect - 1] === '4. Inspect the cluster with Kafka admin tools' &&
+                    headings[connect + 1] === 'Clean up the local broker'
+                  );
                 }),
               );
               const clientTabs = page.locator('#client-tabs [role="tab"]');

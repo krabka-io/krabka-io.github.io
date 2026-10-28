@@ -46,7 +46,9 @@ test('startup and verification omit cleanup; the download matches the tested pro
       `${snippet.id} includes cleanup`,
     );
   }
-  const javascript = snippets.find((s) => s.id === 'get-started/clientSnippets.javascript').code;
+  const javascript = snippets.find(
+    (s) => s.id === 'docs/quickstart/clientSnippets.javascript',
+  ).code;
   assert.equal(
     readFileSync('public/quickstart/javascript/app.cjs', 'utf8').trim(),
     javascript.trim(),

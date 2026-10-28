@@ -1,5 +1,5 @@
 ---
-// The home page's client section: excerpts of the get-started client snippets,
+// The home page's client section: excerpts of the quickstart client snippets,
 // which CI runs against a real broker. See src/utils/client-excerpts.mjs.
 import fs from 'node:fs';
 import CodeBlock from './CodeBlock.astro';
@@ -7,8 +7,8 @@ import { getPath } from '../utils/paths';
 import { readDeclaration } from '../../scripts/snippets/extract.mjs';
 import { buildExcerpts } from '../utils/client-excerpts.mjs';
 
-const source = fs.readFileSync('src/pages/get-started.astro', 'utf8');
-const excerpts = buildExcerpts(readDeclaration(source, 'clientSnippets', {}, 'get-started'));
+const source = fs.readFileSync('src/pages/docs/quickstart.astro', 'utf8');
+const excerpts = buildExcerpts(readDeclaration(source, 'clientSnippets', {}, 'docs/quickstart'));
 ---
 
 <section aria-labelledby="clients-heading" data-no-anchor class="py-12 md:py-16">
@@ -50,7 +50,7 @@ const excerpts = buildExcerpts(readDeclaration(source, 'clientSnippets', {}, 'ge
     <p class="mt-3 text-sm text-gray-400">Each example runs against krabka nightly in CI.</p>
     <!-- Every home section ends the same way: one verb-led link to its full version. -->
     <p class="mt-3">
-      <a href={getPath('/get-started')} class="text-sm font-semibold text-krab-400 underline underline-offset-4 hover:text-krab-300">Run the complete examples</a>
+      <a href={getPath('/docs/quickstart#connect-your-application')} class="text-sm font-semibold text-krab-400 underline underline-offset-4 hover:text-krab-300">Run the complete examples</a>
     </p>
   </div>
 </section>

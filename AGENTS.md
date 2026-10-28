@@ -27,7 +27,7 @@ Use theme variables and Tailwind color classes, not hardcoded hex or rgba colors
 
 ## Code samples
 
-- The get-started client snippets run against a real broker in CI
+- The quickstart client snippets run against a real broker in CI
   (`scripts/check-snippets.mjs`). Do not change their record values.
 - The home page shows excerpts cut from those snippets at build time
   (`src/utils/client-excerpts.mjs`). Do not copy code into the home page by
