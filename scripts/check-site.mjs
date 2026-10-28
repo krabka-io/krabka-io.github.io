@@ -390,10 +390,14 @@ try {
                     .count()) === 1 &&
                   (await page.locator('#client-c-java').isVisible()),
               );
+              const projectButton = page.getByRole('button', {
+                name: 'Copy Node.js project setup',
+                exact: true,
+              });
               t.check(
-                'runnable project is visible without a disclosure interaction',
-                (await page.locator('#javascript-project').isVisible()) &&
-                  (await page.locator('[aria-label="Copy Node.js project setup"]').isVisible()) &&
+                'Node.js project is hidden with Java selected and absent from the table of contents',
+                !(await projectButton.isVisible()) &&
+                  (await page.locator('a[href="#javascript-project"]').count()) === 0 &&
                   (await page.locator('section[aria-labelledby="clients"] details').count()) === 0,
               );
               for (const id of ['client-tabs']) {
@@ -424,8 +428,8 @@ try {
               for (const tab of await page.locator('#client-tabs [role="tab"]').all()) {
                 await tab.click();
                 const panel = page.locator('#' + (await tab.getAttribute('aria-controls')));
-                const button = panel.locator('.copy-btn');
-                const code = panel.locator('pre code');
+                const button = panel.locator('.copy-btn').first();
+                const code = panel.locator('pre code').first();
                 t.check(
                   'client displayed code matches copy payload',
                   (await code.textContent()) === (await button.getAttribute('data-copy')),
@@ -444,20 +448,67 @@ try {
                   'client tab explains its expected output',
                   await panel.evaluate((el) => {
                     const source = el.querySelector('pre code').textContent;
-                    const expected = el.lastElementChild.textContent;
+                    const output = el.querySelector('.code-block').nextElementSibling;
+                    const expected = output.textContent;
                     return (
                       expected.startsWith('The example prints ') &&
                       (source.includes('Delivered to partition')
                         ? expected.includes('Delivered to partition 0 at offset N.')
-                        : source.includes(el.lastElementChild.querySelector('code').textContent))
+                        : source.includes(output.querySelector('code').textContent))
                     );
                   }),
                 );
+                if ((await tab.getAttribute('aria-controls')) === 'client-c-javascript') {
+                  const project = websiteSnippets(ROOT).find(
+                    (snippet) => snippet.id === 'docs/quickstart/javascriptRunCode',
+                  );
+                  t.check(
+                    'Node.js project is visible inside its selected tab',
+                    await projectButton.isVisible(),
+                  );
+                  t.check(
+                    'Node.js project displayed code and copy payload match the tested commands',
+                    (await projectButton.getAttribute('data-copy')) === project.code &&
+                      (await panel.locator('pre code').nth(1).textContent()) === project.code,
+                  );
+                  await projectButton.click();
+                  await waitFor(
+                    page,
+                    async (code) => (await navigator.clipboard.readText()) === code,
+                    'Node.js project clipboard update',
+                    5000,
+                    project.code,
+                  );
+                  t.check(
+                    'Node.js project copy writes the full setup',
+                    (await page.evaluate(() => navigator.clipboard.readText())) === project.code,
+                  );
+                  for (const asset of ['app.cjs', 'package.json']) {
+                    const link = panel.locator(`a[href="/quickstart/javascript/${asset}"]`);
+                    t.check(
+                      `Node.js ${asset} download is visible and serves the packaged file`,
+                      (await link.isVisible()) &&
+                        (await (
+                          await context.request.get(base + (await link.getAttribute('href')))
+                        ).text()) ===
+                          fs.readFileSync(
+                            path.join(ROOT, 'public/quickstart/javascript', asset),
+                            'utf8',
+                          ),
+                    );
+                  }
+                } else {
+                  t.check(
+                    'Node.js project is hidden outside its tab',
+                    !(await projectButton.isVisible()),
+                  );
+                }
                 if (width >= 1024)
                   t.check(
                     'client code fits desktop without horizontal scrolling',
                     await panel
                       .locator('pre')
+                      .first()
                       .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
                   );
                 t.check(
