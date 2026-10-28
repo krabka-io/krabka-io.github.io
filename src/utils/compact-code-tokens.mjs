@@ -1,8 +1,17 @@
 // Reuse the site's theme tokens instead of repeating a color style on each span.
 // The selectors live in custom.css. Unknown styles stay inline unchanged.
 const tones = new Set([
-  'fg', 'dim', 'comment', 'keyword', 'call', 'type', 'string',
-  'number', 'constant', 'macro', 'invalid',
+  'fg',
+  'dim',
+  'comment',
+  'keyword',
+  'call',
+  'type',
+  'string',
+  'number',
+  'constant',
+  'macro',
+  'invalid',
 ]);
 
 export default function compactCodeTokens() {

@@ -419,7 +419,6 @@ if (mode === 'compose') {
       'Compose quickstart did not roundtrip its record',
     );
     shell(get('docs/quickstart/inspectSnippet'), 'quickstart-inspect', { env, timeout: 120000 });
-
   } finally {
     run('docker', [...compose, 'logs', '--no-color']);
     run('docker', [...compose, 'down', '--volumes', '--remove-orphans']);
