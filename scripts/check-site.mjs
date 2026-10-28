@@ -187,8 +187,9 @@ try {
             if (route === '/get-started/') {
               const pathways = page.locator('#evaluation-pathways');
               t.check(
-                'four evaluation pathways expose lab, runbook, compatibility and migration destinations',
-                (await pathways.locator('section').count()) === 4 &&
+                'three evaluation pathways and a sandbox aside expose the evaluation destinations',
+                (await pathways.locator('section').count()) === 3 &&
+                  (await pathways.locator('aside a[href="/docs/lab/"]').count()) === 1 &&
                   (await pathways.locator('a[href="/docs/lab/"]').count()) === 1 &&
                   (await pathways.locator('a[href="/docs/quickstart"]').count()) === 1 &&
                   (await pathways
@@ -197,6 +198,20 @@ try {
                   (await pathways
                     .locator('a[href="/docs/broker/operations/migrate-from-kafka"]')
                     .count()) === 1,
+              );
+              t.check(
+                'sandbox sits beside desktop pathways or below mobile pathways, with full-width clients below',
+                await page.evaluate(() => {
+                  const pathways = document.querySelector('#evaluation-pathways').getBoundingClientRect();
+                  const main = document.querySelector('#evaluation-pathways > div').getBoundingClientRect();
+                  const aside = document.querySelector('#evaluation-pathways aside').getBoundingClientRect();
+                  const clients = document.querySelector('#clients').getBoundingClientRect();
+                  const columns = innerWidth >= 1024
+                    ? Math.abs(main.top - aside.top) < 1 && aside.left >= main.right && main.width / aside.width > 1.9 && main.width / aside.width < 2.3
+                    : aside.top >= main.bottom;
+                  return columns && clients.top >= Math.max(main.bottom, aside.bottom)
+                    && Math.abs(clients.width - pathways.width) < 1;
+                }),
               );
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(

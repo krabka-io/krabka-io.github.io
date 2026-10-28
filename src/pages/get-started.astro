@@ -146,54 +146,38 @@ npm start`;
       </p>
     </div>
 
-    <div id="evaluation-pathways" class="mb-14">
-      <section class="border-b border-white/10 py-8 first:pt-0" aria-labelledby="browser-trial">
-        <div class="max-w-3xl">
-          <h2 id="browser-trial" class="text-2xl font-bold text-white">Try Krabka in your browser</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Explore cluster behavior and failures in Cluster Lab without a local installation.</p>
-          <p class="mt-3 text-base leading-relaxed text-gray-400">Phones support viewing only. The simulation does not measure production throughput or disk durability.</p>
-          <a href={getPath('/docs/lab/')} class="mt-4 inline-block text-krab-400 underline underline-offset-2">Open Cluster Lab</a>
-        </div>
-      </section>
-      <section class="border-b border-white/10 py-8" aria-labelledby="local-validation">
-        <div class="max-w-3xl">
-          <h2 id="local-validation" class="text-2xl font-bold text-white">Test your application locally</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Start a broker and test your Kafka clients or integration suite. The quickstart covers setup, readiness checks, and your first record.</p>
-          <a href={getPath('/docs/quickstart')} class="mt-4 inline-block text-krab-400 underline underline-offset-2">Run the quickstart</a>
-        </div>
-      </section>
-      <section id="compatibility" class="border-b border-white/10 py-8" aria-labelledby="preflight-check">
-        <div class="max-w-3xl">
-          <h2 id="preflight-check" class="text-2xl font-bold text-white">Check compatibility</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Review these areas before a trial with your workload:</p>
-          <ul class="mt-4 list-disc pl-5 space-y-2 text-base leading-relaxed text-gray-300">
-            <li>Check your client version against the <a href={getPath('/docs/broker/operations/support-matrix')} class="text-krab-400 underline underline-offset-2">release test results</a>.</li>
-            <li>Compare the APIs you use with the <a href={getPath('/versions#wire-compatibility')} class="text-krab-400 underline underline-offset-2">wire compatibility targets</a> and <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">KIP support matrix</a>.</li>
-            <li>Check your schema registry and serializers against the <a href={getPath('/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over')} class="text-krab-400 underline underline-offset-2">registry guidance</a>.</li>
-            <li>Review <a href={getPath('/docs/broker/operations/ecosystem-support')} class="text-krab-400 underline underline-offset-2">tool support</a>, including alternatives to broker-side JVM plugins and JMX.</li>
-          </ul>
-          <p class="mt-4 text-base leading-relaxed text-gray-400">Test your workload on the broker version you plan to use; a successful producer example does not prove full compatibility.</p>
-        </div>
-      </section>
-      <section class="border-b border-white/10 py-8" aria-labelledby="staging-evaluation">
-        <div class="max-w-3xl">
-          <h2 id="staging-evaluation" class="text-2xl font-bold text-white">Evaluate in staging</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Use a separate cluster and test identities. Keep production clients on Kafka during the trial.</p>
-          <ul class="mt-4 list-disc pl-5 space-y-2 text-base leading-relaxed text-gray-300">
-            <li>Compare writes from an approved test workload to both clusters, including partial failures and duplicates.</li>
-            <li>Replicate approved topics with MirrorMaker 2, with checks for added source load.</li>
-            <li>Compare results with shadow consumers in separate groups, with external side effects disabled.</li>
-          </ul>
-          <p class="mt-4 text-base leading-relaxed text-gray-400">Replication does not preserve source offsets or transactional state; registry data and credentials need separate handling.</p>
-          <p class="mt-4 flex flex-col items-start gap-2 text-base"><a href={getPath('/docs/migration')} class="text-krab-400 underline underline-offset-2">Review migration limits before cutover</a> <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="text-krab-400 underline underline-offset-2">Follow the replication procedure</a></p>
-        </div>
-      </section>
+    <div id="evaluation-pathways" class="mb-14 grid items-start gap-8 lg:grid-cols-3 lg:gap-12">
+      <div class="min-w-0 lg:col-span-2">
+        <section class="border-b border-white/10 pb-6" aria-labelledby="local-validation">
+          <h2 id="local-validation" class="text-2xl font-bold text-white">Local and CI validation</h2>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Point your existing applications, kcat, or integration tests at a local broker on <code>localhost:9092</code>.</p>
+          <a href={getPath('/docs/quickstart')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Run the local quickstart</a>
+        </section>
+        <section id="compatibility" class="border-b border-white/10 py-6" aria-labelledby="preflight-check">
+          <h2 id="preflight-check" class="text-2xl font-bold text-white">Preflight compatibility and parity check</h2>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Review tested Kafka versions, KIP support, and unsupported APIs against your workload.</p>
+          <a href={getPath('/docs/broker/operations/support-matrix')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Check the support matrix</a>
+        </section>
+        <section class="border-b border-white/10 pt-6 pb-6" aria-labelledby="staging-evaluation">
+          <h2 id="staging-evaluation" class="text-2xl font-bold text-white">Non-disruptive staging evaluation</h2>
+          <p class="mt-3 text-base leading-relaxed text-gray-300">Plan dual writes, MirrorMaker 2 replication, or shadow consumers in an isolated trial. Keep production clients on Kafka and disable external side effects.</p>
+          <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="mt-3 inline-block text-krab-400 underline underline-offset-2">Plan a staging evaluation</a>
+        </section>
+      </div>
+
+      <aside class="frosted-card rounded-2xl border border-white/10 p-6" aria-labelledby="browser-trial">
+        <h2 id="browser-trial" class="text-xl font-bold text-white">Interactive sandbox</h2>
+        <p class="mt-4 text-base leading-relaxed text-gray-300">Try Cluster Lab in your browser without a local installation.</p>
+        <p class="mt-3 text-base leading-relaxed text-gray-300">Explore KRaft consensus, replica failover, and fault injection with WebAssembly brokers.</p>
+        <a href={getPath('/docs/lab/')} class="mt-6 inline-block rounded-lg bg-krab-600 px-4 py-2 font-semibold text-white hover:bg-krab-500">Open Cluster Lab</a>
+        <p class="mt-4 text-sm leading-relaxed text-gray-400">View-only on mobile. The simulation does not measure production throughput or disk durability.</p>
+      </aside>
     </div>
 
     <!-- Application client examples -->
     <div id="clients" class="mb-14">
       <div class="flex items-center gap-3 mb-6">
-        <h2 class="text-2xl font-bold text-white">Connect a client</h2>
+        <h2 class="text-2xl font-bold text-white">Wire-protocol verification</h2>
       </div>
 
       <p class="mb-4 max-w-3xl text-sm text-gray-300 leading-relaxed font-sans">
