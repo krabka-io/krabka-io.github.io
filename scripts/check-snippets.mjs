@@ -443,7 +443,11 @@ if (mode === 'helm') {
       work,
       { env },
     );
-    shell(localAssets(get('docs/kubernetes-quickstart/helmCode')), 'helm-start', {
+    shell(localAssets(get('docs/kubernetes-quickstart/helmInstallCode')), 'helm-install', {
+      env,
+      timeout: 25 * 60 * 1000,
+    });
+    shell(localAssets(get('docs/kubernetes-quickstart/helmClusterCode')), 'helm-cluster', {
       env,
       timeout: 25 * 60 * 1000,
     });
