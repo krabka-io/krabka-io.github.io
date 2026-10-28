@@ -391,6 +391,9 @@ try {
               t.check(
                 'environment switch has two plain links and one current page',
                 (await switcher.locator('a').count()) === 2 &&
+                  JSON.stringify(
+                    (await switcher.locator('a').allTextContents()).map((text) => text.trim()),
+                  ) === JSON.stringify(['Local (Docker)', 'Kubernetes']) &&
                   (await switcher.locator('a[aria-current="page"]').count()) === 1 &&
                   (await switcher.locator('a[aria-current="page"]').getAttribute('href')).replace(
                     /\/$/,
@@ -404,13 +407,17 @@ try {
                   (await page.locator('a[href="#choose-your-next-task"]').count()) > 0,
               );
               t.check(
-                'command labels and copy controls have no outer card',
+                'copy controls stay right-aligned without redundant labels or outer cards',
                 await page
                   .locator('main .copy-btn')
                   .evaluateAll((buttons) =>
                     buttons.every(
                       (button) =>
-                        !button.parentElement.parentElement.classList.contains('frosted-card'),
+                        !button.parentElement.parentElement.classList.contains('frosted-card') &&
+                        button.parentElement.children.length === 1 &&
+                        button.parentElement.textContent.trim() === 'Copy' &&
+                        getComputedStyle(button.parentElement).justifyContent === 'flex-end' &&
+                        !!button.getAttribute('aria-label'),
                     ),
                   ),
               );
@@ -426,6 +433,11 @@ try {
               );
             }
             if (route === '/docs/kubernetes-quickstart/') {
+              t.check(
+                'Kubernetes prerequisites start with the Bash terminal requirement',
+                (await page.locator('#before-you-start + ul > li').first().textContent()) ===
+                  'Use a Bash terminal. On Windows, use a Bash terminal that can run kubectl and helm.',
+              );
               const ids = await page
                 .locator('main h2[id]')
                 .evaluateAll((headings) => headings.map((heading) => heading.id));

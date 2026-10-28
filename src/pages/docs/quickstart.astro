@@ -59,21 +59,21 @@ const composeCleanupCode = `docker compose down --volumes`;
     <h2 id="local" class="text-xl font-bold text-white pt-2">1. Start a local broker</h2>
     <p>Download the Compose file and start its single-node KRaft broker.</p>
     <div class="space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Start</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCode} aria-label="Copy local startup commands">Copy</button></div>
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCode} aria-label="Copy local startup commands">Copy</button></div>
       <CodeBlock code={composeCode} lang="bash" />
     </div>
 
     <h2 class="text-xl font-bold text-white pt-2">2. Check that the broker is ready</h2>
     <p>The Kafka tools use the broker container's network. Continue when <code>kafka-topics.sh --list</code> completes without an error. An empty topic list is expected before you create a topic. If startup is still in progress, repeat this check. Use <code>docker compose logs broker</code> to inspect a failed startup.</p>
     <div class="space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Check readiness</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeReadyCode} aria-label="Copy local readiness check">Copy</button></div>
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeReadyCode} aria-label="Copy local readiness check">Copy</button></div>
       <CodeBlock code={composeReadyCode} lang="bash" />
     </div>
 
     <h2 class="text-xl font-bold text-white pt-2">3. Create a topic, produce, and consume</h2>
     <p>Create <code>quickstart-events</code>, send <code>hello krabka</code>, and read one record. You can repeat these commands with the same topic.</p>
     <div class="space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Verify the round trip</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeVerifyCode} aria-label="Copy local record round trip">Copy</button></div>
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeVerifyCode} aria-label="Copy local record round trip">Copy</button></div>
       <CodeBlock code={composeVerifyCode} lang="bash" />
     </div>
     <p>The consumer prints <code>hello krabka</code> and exits after one record. If it times out, confirm that readiness passes and that the producer finished successfully.</p>
@@ -81,7 +81,7 @@ const composeCleanupCode = `docker compose down --volumes`;
     <h2 class="text-xl font-bold text-white pt-2">4. Inspect the cluster with Kafka admin tools</h2>
     <p>Use the Apache Kafka admin tools to describe <code>quickstart-events</code>, inspect the KRaft quorum, list consumer groups, and check the negotiated API versions. See the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">compatibility matrix</a> for supported protocol versions.</p>
     <div class="space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Inspect topics, quorum, groups, and API versions</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={inspectSnippet} aria-label="Copy local cluster inspection commands">Copy</button></div>
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={inspectSnippet} aria-label="Copy local cluster inspection commands">Copy</button></div>
       <CodeBlock code={inspectSnippet} lang="bash" />
     </div>
     <p>The topic description shows <code>quickstart-events</code>. The quorum command reports its leader and voters. The consumer-group list can be empty.</p>
@@ -90,7 +90,7 @@ const composeCleanupCode = `docker compose down --volumes`;
     <h2 class="text-xl font-bold text-white pt-2">Clean up the local broker</h2>
     <p>Cleanup is optional. This stops the local broker and <strong>deletes its Docker volume, including all records.</strong> Keep the broker running to try a client example.</p>
     <div class="space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Clean up</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCleanupCode} aria-label="Copy local cleanup commands">Copy</button></div>
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCleanupCode} aria-label="Copy local cleanup commands">Copy</button></div>
       <CodeBlock code={composeCleanupCode} lang="bash" />
     </div>
 
