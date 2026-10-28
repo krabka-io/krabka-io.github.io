@@ -351,7 +351,7 @@ test('data-driven routes have concrete tracked inputs, not unreviewed gaps or ge
     );
   }
   assert.ok(
-    routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/pages/get-started.astro'),
+    routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/pages/docs/quickstart.astro'),
   );
   assert.ok(
     routeInputs(process.cwd(), 'https://krabka.io/').inputs.includes('src/data/versions.json'),

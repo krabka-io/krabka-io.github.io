@@ -23,7 +23,8 @@ test('extract the website literals, including shell escapes and release interpol
   assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
   assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));
   assert(snippets.find((s) => s.id === 'docs/quickstart/inspectSnippet'));
-  assert(!snippets.some((s) => /^get-started\/(deploySnippets\.|inspectSnippet)/.test(s.id)));
+  assert(!snippets.some((s) => s.id.startsWith('get-started/')));
+  assert.equal(snippets.filter((s) => s.id.startsWith('docs/quickstart/clientSnippets.')).length, 6);
 });
 
 test('new or missing displayed snippets fail coverage', () => {
@@ -51,7 +52,7 @@ test('startup and verification omit cleanup; the download matches the tested pro
       `${snippet.id} includes cleanup`,
     );
   }
-  const javascript = snippets.find((s) => s.id === 'get-started/clientSnippets.javascript').code;
+  const javascript = snippets.find((s) => s.id === 'docs/quickstart/clientSnippets.javascript').code;
   assert.equal(
     readFileSync('public/quickstart/javascript/app.cjs', 'utf8').trim(),
     javascript.trim(),

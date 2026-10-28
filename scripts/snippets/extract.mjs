@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 export const pages = {
-  'get-started': [
+  'get-started': [],
+  'docs/quickstart': [
     'clientSnippets.java',
     'clientSnippets.python',
     'clientSnippets.go',
@@ -11,8 +12,6 @@ export const pages = {
     'clientSnippets.rust',
     'clientSnippets.cli',
     'javascriptRunCode',
-  ],
-  'docs/quickstart': [
     'composeCode',
     'composeReadyCode',
     'composeVerifyCode',
@@ -33,7 +32,7 @@ export const pages = {
 
 // Evaluates one literal snippet declaration (`const name = \x60...\x60` or `const name = {...}`)
 // from a page's source, never its imports or scripts. The home page reads the
-// tested get-started client snippets through this too, so it cannot drift from them.
+// tested local quickstart client snippets through this too, so it cannot drift from them.
 export function readDeclaration(source, name, scope = {}, page = 'page') {
   const declaration = source.match(
     new RegExp(`const ${name} = (\x60(?:\\\\[\\s\\S]|[^\x60])*\x60|\\{[\\s\\S]*?^\\});`, 'm'),

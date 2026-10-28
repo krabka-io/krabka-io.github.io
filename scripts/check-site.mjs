@@ -147,6 +147,8 @@ try {
           });
           try {
             const page = await context.newPage();
+            if (await page.evaluate(() => navigator.userAgent) !== 'krabka-dev-klaw')
+              throw new Error('Website checks need the agent User-Agent before navigation');
             errorBags.push(watchErrors(page, `${route} ${width} ${theme}`, base));
             await timing(page, route, 'cold-context', width, theme, () =>
               page.goto(base + route, { waitUntil: 'load' }),
@@ -281,7 +283,7 @@ try {
                   const quickstart = box('#first-run-options > section');
                   const lab = box('#first-run-options > aside');
                   const depth = box('#evaluation-depth');
-                  const clients = box('#clients');
+                  const clientLink = box('#clients');
                   const columns =
                     innerWidth >= 1024
                       ? Math.abs(quickstart.top - lab.top) < 1 &&
@@ -319,8 +321,8 @@ try {
                     columns &&
                     fullWidth &&
                     depth.top >= first.bottom &&
-                    clients.top >= depth.bottom &&
-                    Math.abs(clients.width - first.width) < 1
+                    clientLink.top >= depth.bottom &&
+                    Math.abs(clientLink.width - first.width) < 1
                   );
                 }),
               );
@@ -350,6 +352,13 @@ try {
                   );
                 }),
               );
+              t.check(
+                'legacy client anchor links to the quickstart without duplicate examples',
+                (await page.locator('#clients a').getAttribute('href')) === '/docs/quickstart#clients' &&
+                  (await page.locator('#client-tabs').count()) === 0,
+              );
+            }
+            if (route === '/docs/quickstart/') {
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(
                 'client examples use evaluator order with Java selected initially',
@@ -357,7 +366,7 @@ try {
                   JSON.stringify(['Java', 'Python', 'Go', 'Node.js', 'Rust', 'Kafka CLI']) &&
                   (await clientTabs.first().getAttribute('aria-selected')) === 'true' &&
                   (await clientTabs.first().getAttribute('tabindex')) === '0' &&
-                  (await page.locator('#clients [role="tabpanel"]:visible').count()) === 1 &&
+                  (await page.locator('section[aria-labelledby="clients"] [role="tabpanel"]:visible').count()) === 1 &&
                   (await page.locator('#client-c-java').isVisible()),
               );
               t.check(
@@ -366,7 +375,7 @@ try {
                   (await page
                     .locator('[aria-label="Copy JavaScript example setup"]')
                     .isVisible()) &&
-                  (await page.locator('#clients details').count()) === 0,
+                  (await page.locator('section[aria-labelledby="clients"] details').count()) === 0,
               );
               for (const id of ['client-tabs']) {
                 const tabs = page.locator(`#${id} [role="tab"]`);
@@ -380,6 +389,47 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+              t.check(
+                'application step precedes admin inspection and cleanup',
+                await page.locator('main h2').evaluateAll((headings) => {
+                  const text = headings.map((heading) => heading.textContent);
+                  const clients = text.findIndex((heading) => heading.startsWith('4. Connect'));
+                  return clients >= 0 && text[clients + 1].startsWith('5. Inspect') &&
+                    text[clients + 2].startsWith('Clean up');
+                }),
+              );
+              await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+              for (const tab of await page.locator('#client-tabs [role="tab"]').all()) {
+                await tab.click();
+                const panel = page.locator('#' + await tab.getAttribute('aria-controls'));
+                const button = panel.locator('.copy-btn');
+                const code = panel.locator('pre code');
+                t.check('client displayed code matches copy payload',
+                  (await code.textContent()) === (await button.getAttribute('data-copy')));
+                await button.click();
+                t.check('client copy writes the full example',
+                  (await page.evaluate(() => navigator.clipboard.readText())) ===
+                    (await button.getAttribute('data-copy')));
+                t.check('client panel stays within the page at this width',
+                  await panel.evaluate((el) => el.getBoundingClientRect().right <= innerWidth + 1));
+                t.check('shared token classes resolve to the active theme colors',
+                  await code.evaluate((root) => [...root.querySelectorAll('[class*="tok-"]')].every((node) => {
+                    const tone = [...node.classList].find((name) => name.startsWith('tok-')).slice(4);
+                    const probe = document.createElement('span');
+                    probe.style.color = `var(--code-${tone})`;
+                    document.body.append(probe);
+                    const expected = getComputedStyle(probe).color;
+                    probe.remove();
+                    return getComputedStyle(node).color === expected;
+                  })));
+
+              }
+              await clientTabs.first().click();
+              await page.waitForFunction(() => [...document.querySelectorAll('main .copy-btn')]
+                .every((button) => button.textContent.trim() === 'Copy'));
+              await page.locator('section[aria-labelledby="clients"]').screenshot({
+                path: path.join(output, `client-examples-${width}-${theme}.png`),
+              });
             }
             if (['/docs/', '/get-started/'].includes(route))
               t.check(
@@ -557,6 +607,8 @@ try {
           await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
           try {
             const page = await context.newPage();
+            if (await page.evaluate(() => navigator.userAgent) !== 'krabka-dev-klaw')
+              throw new Error('Website checks need the agent User-Agent before navigation');
             errorBags.push(
               watchErrors(page, `${route} ${width} ${theme}`, base, {
                 ignore: (_m, url) => url.endsWith('/why3-web/manifest.json'),

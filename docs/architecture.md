@@ -57,7 +57,7 @@ logic that changes content, and tracked data. The route map adds file-read
 inputs that imports cannot discover. Benchmark pages include tracked report
 and trial files; the explorer uses tracked LFS archives rather than generated
 archive JSON. Verification pages include the synced broker catalog and tracked
-kernel/model data. The homepage also includes the get-started source used for
+kernel/model data. The homepage also includes the local quickstart source used for
 its client excerpts and the tracked version data used in homepage structured
 data. Other pages do not inherit that unused layout import. The proof explorer includes its tracked scripts and data,
 the sync generator, and the broker catalog rather than treating its generated
