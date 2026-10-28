@@ -128,9 +128,13 @@ async function timing(page, route, visit, width, theme, navigate) {
 }
 
 try {
-  for (const width of [390, 1440])
+  for (const width of [375, 699, 700, 1024, 1440])
     for (const theme of ['light', 'dark']) {
-      for (const route of selection.site ? ROUTES : [])
+      for (const route of selection.site
+        ? [375, 1440].includes(width)
+          ? ROUTES
+          : ['/get-started/']
+        : [])
         await t.flow(`${route} ${width} ${theme}`, async () => {
           const context = await browser.newContext({
             viewport: { width, height: 900 },
@@ -164,7 +168,7 @@ try {
                 'skip link focuses main',
                 await page.locator('#main').evaluate((el) => el === document.activeElement),
               );
-              if (width === 390) {
+              if (width === 375) {
                 const menu = page.locator('#mobile-menu-button');
                 await menu.focus();
                 await page.keyboard.press('Enter');
@@ -187,43 +191,117 @@ try {
             if (route === '/get-started/') {
               const pathways = page.locator('#evaluation-pathways');
               t.check(
-                'three evaluation pathways and a sandbox aside expose the evaluation destinations',
-                (await pathways.locator('section').count()) === 3 &&
-                  (await pathways.locator('aside a[href="/docs/lab/"]').count()) === 1 &&
-                  (await pathways.locator('a[href="/docs/lab/"]').count()) === 1 &&
-                  (await pathways.locator('a[href="/docs/quickstart"]').count()) === 1 &&
-                  (await pathways
-                    .locator('a[href="/docs/broker/operations/support-matrix"]')
-                    .count()) === 1 &&
-                  (await pathways
-                    .locator('a[href="/docs/broker/operations/migrate-from-kafka"]')
-                    .count()) === 1,
-              );
-              t.check(
-                'preflight exposes client, API, registry and tooling checks with concrete limitations',
-                await page.locator('#compatibility').evaluate((section) => {
-                  const checks = [...section.querySelectorAll('ul li')];
-                  return checks.length === 4 &&
-                    ['Clients:', 'Kafka APIs:', 'Schema registries:', 'Operational tools:']
-                      .every((label, index) => checks[index].textContent.trim().startsWith(label)) &&
-                    checks.every((item) => item.querySelector('a[href]')) &&
-                    /serves no JMX and loads no JVM plugins/.test(checks[3].textContent) &&
-                    /another revision do not establish support/.test(section.textContent);
+                'first-run cards precede ordered full-width evaluation routes',
+                await pathways.evaluate((root) => {
+                  const first = root.querySelector('#first-run-options');
+                  const depth = root.querySelector('#evaluation-depth');
+                  const sections = [...depth.querySelectorAll('section')];
+                  return (
+                    first.nextElementSibling === depth &&
+                    first.firstElementChild.getAttribute('aria-labelledby') ===
+                      'local-validation' &&
+                    first.lastElementChild.getAttribute('aria-labelledby') === 'browser-trial' &&
+                    JSON.stringify(
+                      sections.map((section) => section.getAttribute('aria-labelledby')),
+                    ) ===
+                      JSON.stringify([
+                        'preflight-check',
+                        'performance-evaluation',
+                        'staging-evaluation',
+                        'explore-verification',
+                      ]) &&
+                    JSON.stringify(
+                      sections.map((section) => section.lastElementChild.getAttribute('href')),
+                    ) ===
+                      JSON.stringify([
+                        '/docs/broker/operations/support-matrix',
+                        '/benchmarks',
+                        '/docs/broker/operations/migrate-from-kafka',
+                        '/verification',
+                      ]) &&
+                    depth.querySelector('h2').firstChild.textContent.trim() ===
+                      'Evaluate in depth' &&
+                    sections[3].querySelector('h3').firstChild.textContent.trim() ===
+                      'How Krabka is verified'
+                  );
                 }),
               );
               t.check(
-                'sandbox sits beside desktop pathways or below mobile pathways, with full-width clients below',
+                'preflight retains client, API, registry, tooling and revision checks',
+                await page
+                  .locator('#compatibility')
+                  .evaluate(
+                    (section) =>
+                      /clients/.test(section.textContent) &&
+                      /serves no JMX and loads no JVM plugins/.test(section.textContent) &&
+                      /another revision do not establish support/.test(section.textContent) &&
+                      [
+                        '/docs/broker/kip_matrix',
+                        '/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over',
+                        '/docs/broker/operations/ecosystem-support#what-does-not-work',
+                      ].every((href) => section.querySelector(`a[href="${href}"]`)) &&
+                      section.lastElementChild.textContent === 'Check the support matrix',
+                  ),
+              );
+              t.check(
+                'quickstart is primary and lab is secondary',
+                await page.locator('#first-run-options').evaluate((root) => {
+                  const quickstart = root.querySelector('section a:not(.heading-anchor)');
+                  const lab = root.querySelector('aside a:not(.heading-anchor)');
+                  return (
+                    quickstart.getAttribute('href') === '/docs/quickstart' &&
+                    lab.getAttribute('href') === '/docs/lab/' &&
+                    getComputedStyle(quickstart).backgroundColor !==
+                      getComputedStyle(lab).backgroundColor &&
+                    lab.classList.contains('border')
+                  );
+                }),
+              );
+              t.check(
+                'cards are equal-height 60/40 on desktop, quickstart first when stacked; depth and clients span the column',
                 await page.evaluate(() => {
-                  const pathways = document.querySelector('#evaluation-pathways').getBoundingClientRect();
-                  const main = document.querySelector('#evaluation-pathways > div').getBoundingClientRect();
-                  const aside = document.querySelector('#evaluation-pathways aside').getBoundingClientRect();
-                  const clients = document.querySelector('#clients').getBoundingClientRect();
-                  const columns = innerWidth >= 1024
-                    ? Math.abs(main.top - aside.top) < 1 && aside.left >= main.right && main.width / aside.width > 1.9 && main.width / aside.width < 2.3
-                    : aside.top >= main.bottom;
-                  return columns && clients.top >= Math.max(main.bottom, aside.bottom)
-                    && Math.abs(clients.width - pathways.width) < 1;
+                  const box = (selector) =>
+                    document.querySelector(selector).getBoundingClientRect();
+                  const first = box('#first-run-options');
+                  const quickstart = box('#first-run-options > section');
+                  const lab = box('#first-run-options > aside');
+                  const depth = box('#evaluation-depth');
+                  const clients = box('#clients');
+                  const columns =
+                    innerWidth >= 1024
+                      ? Math.abs(quickstart.top - lab.top) < 1 &&
+                        lab.left >= quickstart.right &&
+                        Math.abs(quickstart.height - lab.height) < 1 &&
+                        quickstart.width / lab.width > 1.5 &&
+                        quickstart.width / lab.width < 1.6
+                      : lab.top >= quickstart.bottom && Math.abs(quickstart.width - lab.width) < 1;
+                  const fullWidth = [
+                    ...document.querySelectorAll('#evaluation-depth section'),
+                  ].every((section) => {
+                    const rect = section.getBoundingClientRect();
+                    const heading = section.querySelector('h3').getBoundingClientRect();
+                    const paragraph = section.querySelector('p').getBoundingClientRect();
+                    return (
+                      Math.abs(rect.width - first.width) < 1 &&
+                      Math.abs(heading.width - rect.width) < 1 &&
+                      paragraph.width <= 700
+                    );
+                  });
+                  return (
+                    columns &&
+                    fullWidth &&
+                    depth.top >= first.bottom &&
+                    clients.top >= depth.bottom &&
+                    Math.abs(clients.width - first.width) < 1
+                  );
                 }),
+              );
+              t.check(
+                'lab phone warning matches 699/700 breakpoint; simulation scope stays visible',
+                (await page.locator('#lab-phone-limit').isVisible()) === width <= 699 &&
+                  (await page.locator('#lab-scope-limit').isVisible()) &&
+                  (await page.locator('#lab-scope-limit').textContent()) ===
+                    'The simulation does not measure production throughput or disk durability.',
               );
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(
@@ -316,7 +394,7 @@ try {
           }
         });
 
-      for (const route of selection.toolRoutes)
+      for (const route of [375, 1440].includes(width) ? selection.toolRoutes : [])
         await t.flow(`${route} startup ${width} ${theme}`, async () => {
           const context = await newLabContext(browser, { width, height: 900 });
           await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
