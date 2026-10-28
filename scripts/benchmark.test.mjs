@@ -379,7 +379,7 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
     'utf8',
   );
   const step = workflow
-    .split("      - name: Run this lane's shards against all three brokers\n")[1]
+    .split("      - name: Run this lane's shards against the selected brokers\n")[1]
     .split('      - name: Add report to job summary\n')[0];
   const script = step.split('        run: |\n')[1].replace(/^ {10}/gm, '');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-workflow-'));
@@ -405,6 +405,14 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
       {
         comparison: control,
         mode: 'smoke',
+        calls: each([control, candidate, candidate, control]),
+        status: 0,
+      },
+      // A krabka-only comparison passes the vendors through to every call.
+      {
+        comparison: control,
+        mode: 'full',
+        vendors: 'krabka',
         calls: each([control, candidate, candidate, control]),
         status: 0,
       },
@@ -445,6 +453,7 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
           LANE_WORKLOADS: shards.map(([w]) => w).join(' '),
           LANE_RFS: shards.map(([, rf]) => rf).join(' '),
           BENCHMARK_REPETITIONS: '2',
+          BENCHMARK_VENDORS: scenario.vendors ?? 'krabka,kafka,redpanda',
           KRABKA_IMAGE: candidate,
           KRABKA_COMPARISON_IMAGE: scenario.comparison,
           KRABKA_STORAGE: scenario.storage ?? 'page-cache',
@@ -477,6 +486,8 @@ test('OpenMessaging lanes run every shard, balance image order, preserve argumen
           rf,
           '--repetitions',
           '2',
+          '--vendors',
+          scenario.vendors ?? 'krabka,kafka,redpanda',
           '--redpanda-image',
           'redpanda image',
           ...mode,

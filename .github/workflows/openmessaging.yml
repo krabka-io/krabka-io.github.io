@@ -39,6 +39,10 @@ on:
       krabka_comparison_image:
         description: 'Optional control image: run control/candidate/candidate/control on one worker'
         type: string
+      vendors:
+        description: 'Brokers to run, comma-separated from krabka, kafka, redpanda. Fewer than all three is an experiment: not merged, not published.'
+        type: string
+        default: krabka,kafka,redpanda
       redpanda_image:
         description: 'Published Redpanda image or digest'
         type: string
@@ -130,13 +134,14 @@ jobs:
           else
             echo "::warning::virtio balloon driver still present; host.jsonl shows whether it inflated"
           fi
-      - name: Run this lane's shards against all three brokers
+      - name: Run this lane's shards against the selected brokers
         env:
           BENCHMARK_MODE: ${{ inputs.mode }}
           LANE_SHARDS: ${{ matrix.lane.shards }}
           LANE_WORKLOADS: ${{ matrix.lane.workloads }}
           LANE_RFS: ${{ matrix.lane.rfs }}
           BENCHMARK_REPETITIONS: ${{ inputs.repetitions }}
+          BENCHMARK_VENDORS: ${{ inputs.vendors }}
           KRABKA_IMAGE: ${{ inputs.krabka_image }}
           KRABKA_COMPARISON_IMAGE: ${{ inputs.krabka_comparison_image }}
           KRABKA_STORAGE: ${{ inputs.krabka_storage }}
@@ -169,7 +174,8 @@ jobs:
             for image in "${images[@]}"; do
               if ! node scripts/benchmark.mjs --suite openmessaging --workloads "${workloads[$i]}" \
                   --replication-factors "${rfs[$i]}" --repetitions "$BENCHMARK_REPETITIONS" \
-                  --redpanda-image "$REDPANDA_IMAGE" "${mode[@]}" "${storage[@]}" --krabka-image "$image"; then
+                  --vendors "$BENCHMARK_VENDORS" --redpanda-image "$REDPANDA_IMAGE" \
+                  "${mode[@]}" "${storage[@]}" --krabka-image "$image"; then
                 failed+=("${shards[$i]}")
                 break
               fi
@@ -214,9 +220,10 @@ jobs:
     # Assemble the shards into one run in the single-runner layout, so
     # scripts/publish-openmessaging.mjs can publish it. Fails unless every
     # workload x RF x broker x round is present exactly once. A control/candidate
-    # comparison keeps its four separate reports per shard and is not merged.
+    # comparison keeps its four separate reports per shard and is not merged,
+    # and neither is a run of fewer than all three brokers.
     needs: [plan, benchmark]
-    if: ${{ !cancelled() && inputs.mode != 'dry-run' && inputs.krabka_comparison_image == '' }}
+    if: ${{ !cancelled() && inputs.mode != 'dry-run' && inputs.krabka_comparison_image == '' && inputs.vendors == 'krabka,kafka,redpanda' }}
     runs-on: ubuntu-26.04
     steps:
       - name: Keep temporary files off the size-limited /tmp tmpfs
