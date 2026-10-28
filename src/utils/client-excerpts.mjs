@@ -1,4 +1,4 @@
-// The home page shows short excerpts of the quickstart client snippets, which
+// The home page shows short excerpts of the get-started client snippets, which
 // CI runs against a real broker (scripts/check-snippets.mjs). The excerpts are
 // cut from those strings at build time rather than copied, and a pattern that
 // no longer matches fails the build, so the home page cannot drift from the

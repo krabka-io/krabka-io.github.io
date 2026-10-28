@@ -166,7 +166,7 @@ if (mode === 'go') {
   write('go/go.mod', 'module website-snippets\n\ngo 1.26.0\n');
   shell(`cd '${goDir}'\n${install}\ngo get github.com/twmb/franz-go@v1.21.6`, 'go-dependencies');
   const examples = [
-    ['producer', get('docs/quickstart/clientSnippets.go')],
+    ['producer', get('get-started/clientSnippets.go')],
     ['columnar', get('docs/streams-go/goCode')],
   ];
   const expected = [
@@ -264,7 +264,7 @@ if (mode === 'rust') {
     `[package]\nname = "website-snippets"\nversion = "0.0.0"\nedition = "2024"\n[workspace]\n[dependencies]\nbytes = "1"\ntokio = { version = "1", features = ["macros", "rt-multi-thread"] }\n${names.map(dependency).join('\n')}\n${patches}`,
   );
   for (const [name, id] of Object.entries({
-    producer: 'docs/quickstart/clientSnippets.rust',
+    producer: 'get-started/clientSnippets.rust',
     compressed: 'docs/streams-rs/producerCode',
     consumer: 'docs/streams-rs/consumerCode',
     share: 'docs/streams-rs/shareConsumerCode',
@@ -305,7 +305,7 @@ if (mode === 'java') {
       `java/${name}/build.gradle.kts`,
       `plugins { java }\nrepositories { mavenCentral() }\n${dependencies}\n`,
     );
-    write(`java/${name}/src/main/java/App.java`, get('docs/quickstart/clientSnippets.java'));
+    write(`java/${name}/src/main/java/App.java`, get('get-started/clientSnippets.java'));
     if (name === 'guide') {
       for (const [index, block] of blocks.entries()) {
         if (block.lang !== 'java') continue;
@@ -360,7 +360,7 @@ if (mode === 'java') {
 }
 
 if (mode === 'python' || mode === 'javascript') {
-  const code = get(`docs/quickstart/clientSnippets.${mode}`);
+  const code = get(`get-started/clientSnippets.${mode}`);
   const dir = `${work}/${mode}`;
   let command, args;
   if (mode === 'python') {
@@ -418,7 +418,7 @@ if (mode === 'compose') {
       'Compose quickstart did not roundtrip its record',
     );
     shell(get('docs/quickstart/inspectSnippet'), 'quickstart-inspect', { env, timeout: 120000 });
-    const consumed = shell(get('docs/quickstart/clientSnippets.cli'), 'cli-roundtrip', {
+    const consumed = shell(get('get-started/clientSnippets.cli'), 'cli-roundtrip', {
       env,
       stdio: ['ignore', 'pipe', 'inherit'],
       timeout: 120000,

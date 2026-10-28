@@ -4,134 +4,6 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import { getPath } from '../../utils/paths';
 import versions from '../../data/versions.json';
 
-const clientSnippets = {
-  rust: `// Cargo.toml:
-//   krabka-client-producer = { git = "https://github.com/krabka-io/krabka-client-rs", rev = "c4ce581587772b3750d88c61f3389d9626a20235" }
-//   plus the [patch.crates-io] block from that revision's Cargo.toml (see /docs/streams-rs)
-//   bytes = "1"
-//   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-use bytes::Bytes;
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let producer = Producer::builder()
-        .bootstrap("localhost:9092")
-        .acks(Acks::All)
-        .build()
-        .await?;
-
-    let metadata = producer
-        .send(ProducerRecord {
-            topic: "quickstart-events".into(),
-            key: Some(Bytes::from("user-1")),
-            value: Some(Bytes::from("Hello Krabka from Rust!")),
-            ..Default::default()
-        })
-        .await?;
-
-    producer.flush().await?;
-    producer.close().await?;
-    println!("Delivered to partition {} at offset {}.", metadata.partition, metadata.offset);
-    Ok(())
-}`,
-  go: `// go get github.com/twmb/franz-go/pkg/kgo
-// Produce a record with the franz-go Kafka client.
-package main
-
-import (
-    "context"
-    "fmt"
-
-    "github.com/twmb/franz-go/pkg/kgo"
-)
-
-func main() {
-    cl, err := kgo.NewClient(kgo.SeedBrokers("localhost:9092"))
-    if err != nil { panic(err) }
-    defer cl.Close()
-
-    rec := &kgo.Record{Topic: "quickstart-events", Key: []byte("user-1"), Value: []byte("Hello Krabka from Go!")}
-    if err := cl.ProduceSync(context.Background(), rec).FirstErr(); err != nil { panic(err) }
-    fmt.Println("Produced message to Krabka!")
-}`,
-  java: `// Maven dependency: org.apache.kafka:kafka-clients:4.3.1
-// Produce a record with the standard Apache Kafka Java client.
-import org.apache.kafka.clients.producer.*;
-import java.util.Properties;
-
-public class App {
-    public static void main(String[] args) throws InterruptedException, java.util.concurrent.ExecutionException {
-        Properties props = new Properties();
-        props.put("bootstrap.servers", "localhost:9092");
-        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-
-        Producer<String, String> producer = new KafkaProducer<>(props);
-        producer.send(new ProducerRecord<>("quickstart-events", "user-1", "Hello Krabka from Java!")).get();
-        System.out.println("Record delivered to quickstart-events.");
-        producer.close();
-    }
-}`,
-  python: `# python -m pip install confluent-kafka==2.15.1
-# Save as app.py and run: python app.py
-from confluent_kafka import Producer
-
-producer = Producer({"bootstrap.servers": "localhost:9092"})
-
-def delivered(error, message):
-    if error is not None:
-        raise RuntimeError(str(error))
-    print(f"Delivered to partition {message.partition()} at offset {message.offset()}.")
-
-producer.produce(
-    "quickstart-events",
-    key="user-1",
-    value="Hello Krabka from Python!",
-    on_delivery=delivered,
-)
-if producer.flush(30) != 0:
-    raise TimeoutError("Message delivery timed out")`,
-  javascript: `// npm install kafkajs@2.2.4
-// Save as app.cjs and run: node app.cjs
-const { Kafka } = require('kafkajs');
-
-async function main() {
-    const kafka = new Kafka({ clientId: 'quickstart', brokers: ['localhost:9092'] });
-    const producer = kafka.producer();
-    await producer.connect();
-    try {
-        await producer.send({
-            topic: 'quickstart-events',
-            messages: [{ key: 'user-1', value: 'Hello Krabka from KafkaJS!' }],
-        });
-        console.log('Record delivered to quickstart-events.');
-    } finally {
-        await producer.disconnect();
-    }
-}
-
-main().catch(error => {
-    console.error(error);
-    process.exitCode = 1;
-});`,
-  cli: `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
-KAFKA_NETWORK="container:$(docker compose ps -q broker)"
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-topics.sh \\
-  --bootstrap-server localhost:9092 --create --if-not-exists --topic quickstart-events --partitions 1 --replication-factor 1
-printf 'hello krabka\\n' | docker run --rm -i --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" \\
-  /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic quickstart-events
-docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-console-consumer.sh \\
-  --bootstrap-server localhost:9092 --topic quickstart-events --from-beginning --max-messages 1 --timeout-ms 30000`
-};
-
-const javascriptRunCode = `mkdir krabka-javascript
-cd krabka-javascript
-curl -fsSL https://krabka.io/quickstart/javascript/package.json -o package.json
-curl -fsSL https://krabka.io/quickstart/javascript/app.cjs -o app.cjs
-npm install
-npm start`;
-
 const brokerVersion = versions.broker.version;
 const operatorVersion = versions.operator.version;
 
@@ -189,7 +61,7 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
   <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
     <div class="border-b border-white/10 pb-4">
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run Krabka and read your first record</h1>
-      <p class="mt-2 text-gray-400">Run a local Krabka broker, then produce and consume your first record with containerized Kafka tools.</p>
+      <p class="mt-2 text-gray-400">Run a local Krabka broker, then produce and consume your first record with containerized Kafka tools. Keep the broker running to try a client example.</p>
     </div>
 
     <h2 class="text-xl font-bold text-white">Before you start</h2>
@@ -233,116 +105,8 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     <p>The topic description shows <code>quickstart-events</code>. The quorum command reports its leader and voters. The consumer-group list can be empty.</p>
     <p>The broker also serves Prometheus metrics on port <code>9404</code>. To collect metrics alongside traces, logs, and profiles, see <a href="https://github.com/krabka-io/krabka-o11y" class="text-krab-400 underline underline-offset-2">krabka-o11y</a>.</p>
 
-    <!-- Application client examples -->
-    <section id="clients" aria-labelledby="connect-your-application" class="min-w-0">
-      <div class="flex items-center gap-3 mb-6">
-        <h2 id="connect-your-application" class="text-xl font-bold text-white pt-2">5. Connect your application</h2>
-      </div>
-
-      <p class="mb-4 text-sm text-gray-300 leading-relaxed font-sans">
-        Keep the local broker running. Choose a client example below to send a record to <code>quickstart-events</code> at <code>localhost:9092</code>. Run application clients on the Docker host. Test your application's features and security settings separately.
-      </p>
-
-      <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
-        <div class="flex flex-wrap border-b border-white/10 bg-slate-950/80 px-4 py-2.5 gap-2" role="tablist" id="client-tabs" aria-label="Client language">
-          <button type="button" role="tab" id="client-tab-c-java" aria-controls="client-c-java" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Java
-          </button>
-          <button type="button" role="tab" id="client-tab-c-python" aria-controls="client-c-python" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Python
-          </button>
-          <button type="button" role="tab" id="client-tab-c-go" aria-controls="client-c-go" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Go
-          </button>
-          <button type="button" role="tab" id="client-tab-c-javascript" aria-controls="client-c-javascript" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Node.js
-          </button>
-          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
-            Rust
-          </button>
-          <button type="button" role="tab" id="client-tab-c-cli" aria-controls="client-c-cli" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">Kafka CLI</button>
-        </div>
-
-        <div class="p-4 sm:p-5 bg-slate-950/90 font-mono text-sm leading-relaxed text-gray-200">
-          <div id="client-c-java" role="tabpanel" aria-labelledby="client-tab-c-java">
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Standard Kafka Java client</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.java}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.java} lang="java" />
-          </div>
-
-          <div id="client-c-python" role="tabpanel" aria-labelledby="client-tab-c-python" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>confluent-kafka Python producer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.python}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.python} lang="python" />
-          </div>
-
-          <div id="client-c-go" role="tabpanel" aria-labelledby="client-tab-c-go" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>franz-go producer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.go}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.go} lang="go" />
-          </div>
-
-          <div id="client-c-javascript" role="tabpanel" aria-labelledby="client-tab-c-javascript" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>KafkaJS producer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.javascript}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.javascript} lang="javascript" />
-          </div>
-
-          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Krabka Rust producer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.rust} lang="rust" />
-          </div>
-
-          <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli" hidden>
-            <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Kafka CLI producer and consumer</span>
-              <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.cli}>
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <CodeBlock size="sm" class="code-block-bare" code={clientSnippets.cli} lang="bash" />
-          </div>
-        </div>
-      </div>
-      <p class="mt-4 text-sm text-gray-400">The CLI example prints <code>hello krabka</code>. To read other examples' records, omit <code>--max-messages 1</code> from the consumer command. Press Ctrl+C to stop.</p>
-      <section aria-labelledby="javascript-project" class="mt-6 rounded-xl border border-white/10 p-5 space-y-4">
-        <h3 id="javascript-project" class="font-semibold text-white">Run the JavaScript example as a project</h3>
-        <p class="text-sm text-gray-300">Install Node.js with npm to run this project. Run these commands in a separate terminal while the local broker is running.</p>
-        <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-sm text-gray-300 hover:bg-white/10" data-copy={javascriptRunCode} aria-label="Copy JavaScript example setup">Copy setup</button>
-        <CodeBlock code={javascriptRunCode} lang="bash" />
-        <p class="text-sm text-gray-400"><a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download the source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download the package manifest</a></p>
-      </section>
-    </section>
-
-    <h2 id="local-cleanup" class="text-xl font-bold text-white pt-2">Clean up the local broker</h2>
-    <p>Cleanup is optional. This stops the local broker and <strong>deletes its Docker volume, including all records.</strong></p>
+    <h2 class="text-xl font-bold text-white pt-2">Clean up the local broker</h2>
+    <p>Cleanup is optional. This stops the local broker and <strong>deletes its Docker volume, including all records.</strong> Keep the broker running to try a client example.</p>
     <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
       <div class="flex justify-between gap-3 items-center"><span>Clean up</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCleanupCode} aria-label="Copy local cleanup commands">Copy</button></div>
       <CodeBlock code={composeCleanupCode} lang="bash" />
@@ -350,7 +114,7 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
 
     <h2 class="text-xl font-bold text-white pt-2">Choose your next task</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <a href={getPath('/get-started')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Plan a broader evaluation</h3><p class="mt-1 text-gray-400">Check compatibility and plan an isolated staging trial.</p></a>
+      <a href={getPath('/get-started#clients')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Connect your application</h3><p class="mt-1 text-gray-400">Use a client example, including a downloadable JavaScript project.</p></a>
       <a href={getPath('/docs/operations')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Operate a cluster</h3><p class="mt-1 text-gray-400">Read recovery and upgrade procedures for your Krabka version.</p></a>
     </div>
 
@@ -374,9 +138,3 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     </div>
   </div>
 </DocsLayout>
-
-<script>
-  import { initTabs } from '../../utils/tabs';
-
-  document.querySelectorAll<HTMLElement>('#client-tabs').forEach((list) => initTabs(list));
-</script>
