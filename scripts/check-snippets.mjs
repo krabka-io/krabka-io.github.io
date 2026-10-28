@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertHelmInspection } from './snippets/helm-inspection.mjs';
 import { websiteSnippets, markdownSnippets } from './snippets/extract.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -442,11 +443,15 @@ if (mode === 'helm') {
       work,
       { env },
     );
-    shell(localAssets(get('docs/quickstart/helmCode')), 'helm-start', {
+    shell(localAssets(get('docs/kubernetes-quickstart/helmInstallCode')), 'helm-install', {
       env,
       timeout: 25 * 60 * 1000,
     });
-    const result = shell(get('docs/quickstart/helmVerifyCode'), 'helm-verify', {
+    shell(localAssets(get('docs/kubernetes-quickstart/helmClusterCode')), 'helm-cluster', {
+      env,
+      timeout: 25 * 60 * 1000,
+    });
+    const result = shell(get('docs/kubernetes-quickstart/helmVerifyCode'), 'helm-verify', {
       env,
       stdio: ['ignore', 'pipe', 'inherit'],
       timeout: 5 * 60 * 1000,
@@ -455,13 +460,23 @@ if (mode === 'helm') {
       result.split('\n').includes('hello krabka'),
       'Helm quickstart did not roundtrip its record',
     );
-    shell(localAssets(get('docs/quickstart/helmCleanupCode')), 'helm-cleanup', {
+    const inspection = shell(get('docs/kubernetes-quickstart/helmInspectCode'), 'helm-inspect', {
+      env,
+      stdio: ['ignore', 'pipe', 'inherit'],
+      timeout: 6 * 60 * 1000,
+    }).toString();
+    write('helm-inspect.log', inspection);
+    assertHelmInspection(inspection);
+    shell(localAssets(get('docs/kubernetes-quickstart/helmCleanupCode')), 'helm-cleanup', {
       env,
       timeout: 10 * 60 * 1000,
     });
   } finally {
-    run('kind', ['export', 'logs', `${work}/kind-logs`, '--name', project], work, { env });
-    run('kind', ['delete', 'cluster', '--name', project], work, { env });
+    try {
+      run('kind', ['export', 'logs', `${work}/kind-logs`, '--name', project], work, { env });
+    } finally {
+      run('kind', ['delete', 'cluster', '--name', project], work, { env });
+    }
   }
 }
 

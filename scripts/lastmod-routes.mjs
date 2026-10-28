@@ -32,6 +32,7 @@ export const authoredRoutes = {
   '/docs/playground': 'src/pages/docs/playground.astro',
   '/docs/proof-explorer': 'src/pages/docs/proof-explorer.astro',
   '/docs/qualification': 'src/pages/docs/qualification.astro',
+  '/docs/kubernetes-quickstart': 'src/pages/docs/kubernetes-quickstart.astro',
   '/docs/quickstart': 'src/pages/docs/quickstart.astro',
   '/docs/rebalancer': 'src/pages/docs/rebalancer.astro',
   '/docs/runtime-architecture': 'src/pages/docs/runtime-architecture.astro',

@@ -13,6 +13,7 @@ import {
   watchErrors,
 } from './lab-check-lib.mjs';
 
+import { websiteSnippets } from './snippets/extract.mjs';
 import { siteCheckSuite } from './site-check-suites.mjs';
 
 const selection = siteCheckSuite(process.argv.slice(2));
@@ -21,6 +22,7 @@ const ROUTES = [
   '/docs/',
   '/get-started/',
   '/docs/quickstart/',
+  '/docs/kubernetes-quickstart/',
   '/docs/browser-tools/',
   '/docs/operations/',
   '/api/',
@@ -33,6 +35,7 @@ const ROUTES = [
 ];
 const SEARCH = [
   ['quickstart', '/docs/quickstart'],
+  ['Kubernetes quickstart', '/docs/kubernetes-quickstart'],
   ['backup', '/docs/broker/operations/backup-restore'],
   ['rolling upgrade', '/docs/broker/operations/deploy'],
   ['migrating', '/docs/migration'],
@@ -138,6 +141,7 @@ try {
         await t.flow(`${route} ${width} ${theme}`, async () => {
           const context = await browser.newContext({
             viewport: { width, height: width === 375 ? 667 : width === 1024 ? 768 : 900 },
+            userAgent: 'krabka-dev-klaw',
             colorScheme: theme,
             reducedMotion: 'reduce',
           });
@@ -376,6 +380,116 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+            }
+            if (['/docs/', '/get-started/'].includes(route))
+              t.check(
+                'Kubernetes guide is discoverable',
+                (await page.locator('a[href$="/docs/kubernetes-quickstart"]').count()) > 0,
+              );
+            if (['/docs/quickstart/', '/docs/kubernetes-quickstart/'].includes(route)) {
+              const switcher = page.getByRole('navigation', { name: 'Quickstart environment' });
+              t.check(
+                'environment switch has two plain links and one current page',
+                (await switcher.locator('a').count()) === 2 &&
+                  JSON.stringify(
+                    (await switcher.locator('a').allTextContents()).map((text) => text.trim()),
+                  ) === JSON.stringify(['Local (Docker)', 'Kubernetes']) &&
+                  (await switcher.locator('a[aria-current="page"]').count()) === 1 &&
+                  (await switcher.locator('a[aria-current="page"]').getAttribute('href')).replace(
+                    /\/$/,
+                    '',
+                  ) === route.replace(/\/$/, '') &&
+                  (await switcher.locator('[role="tab"]').count()) === 0,
+              );
+              t.check(
+                'next-task cards and table of contents are present',
+                (await page.locator('#choose-your-next-task + div a').count()) === 2 &&
+                  (await page.locator('a[href="#choose-your-next-task"]').count()) > 0,
+              );
+              t.check(
+                'copy controls stay right-aligned without redundant labels or outer cards',
+                await page
+                  .locator('main .copy-btn')
+                  .evaluateAll((buttons) =>
+                    buttons.every(
+                      (button) =>
+                        !button.parentElement.parentElement.classList.contains('frosted-card') &&
+                        button.parentElement.children.length === 1 &&
+                        button.parentElement.textContent.trim() === 'Copy' &&
+                        getComputedStyle(button.parentElement).justifyContent === 'flex-end' &&
+                        !!button.getAttribute('aria-label'),
+                    ),
+                  ),
+              );
+            }
+            if (route === '/docs/quickstart/') {
+              t.check(
+                'local quickstart has no Helm commands',
+                !(await page
+                  .locator('main .copy-btn')
+                  .evaluateAll((buttons) =>
+                    buttons.some((button) => /helm install|kubectl run/.test(button.dataset.copy)),
+                  )),
+              );
+            }
+            if (route === '/docs/kubernetes-quickstart/') {
+              t.check(
+                'Kubernetes prerequisites start with the Bash terminal requirement',
+                (await page.locator('#before-you-start + ul > li').first().textContent()) ===
+                  'Use a Bash terminal. On Windows, use a Bash terminal that can run kubectl and helm.',
+              );
+              const ids = await page
+                .locator('main h2[id]')
+                .evaluateAll((headings) => headings.map((heading) => heading.id));
+              t.check(
+                'Kubernetes task order includes separate installation and cluster steps',
+                JSON.stringify(ids) ===
+                  JSON.stringify([
+                    'before-you-start',
+                    'install',
+                    'create-cluster',
+                    'round-trip',
+                    'inspect',
+                    'cleanup',
+                    'choose-your-next-task',
+                  ]),
+              );
+              await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+              const expected = websiteSnippets(ROOT).filter((snippet) =>
+                snippet.id.startsWith('docs/kubernetes-quickstart/'),
+              );
+              const buttons = page.locator('main .copy-btn');
+              t.check(
+                'every Kubernetes snippet has a copy control',
+                (await buttons.count()) === expected.length,
+              );
+              for (let index = 0; index < expected.length; index++) {
+                const button = buttons.nth(index);
+                t.check(
+                  `${expected[index].id}: copy payload matches tested snippet`,
+                  (await button.getAttribute('data-copy')) === expected[index].code,
+                );
+                await button.click();
+                await waitFor(
+                  page,
+                  async (code) => (await navigator.clipboard.readText()) === code,
+                  'clipboard update',
+                  5000,
+                  expected[index].code,
+                );
+                t.check(
+                  `${expected[index].id}: copy reaches clipboard`,
+                  (await page.evaluate(() => navigator.clipboard.readText())) ===
+                    expected[index].code,
+                );
+              }
+              t.check(
+                'Kubernetes snippets contain no Compose commands',
+                expected.every(
+                  (snippet) =>
+                    !/docker compose|localhost:9092|quickstart-events/.test(snippet.code),
+                ),
+              );
             }
             if (route === '/releases/') {
               const summaries = await page

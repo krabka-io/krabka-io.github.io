@@ -1,0 +1,119 @@
+---
+import QuickstartSwitch from '../../components/QuickstartSwitch.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import versions from '../../data/versions.json';
+
+const brokerVersion = versions.broker.version;
+const operatorVersion = versions.operator.version;
+
+const helmInstallCode = `kubectl apply -f https://krabka.io/quickstart/crds.yaml
+helm repo add krabka https://krabka.io/charts
+helm repo update
+helm install krabka-operator krabka/krabka-operator --version ${operatorVersion} --skip-crds \\
+  --namespace krabka-system --create-namespace
+kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m`;
+
+const helmClusterCode = `kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
+kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
+kubectl wait --for=condition=Ready kafkatopic/quickstart --timeout=5m`;
+
+const helmVerifyCode = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
+kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
+  /bin/bash -lc "$(cat <<'KAFKA_VERIFY'
+printf 'hello krabka\\n' | /opt/kafka/bin/kafka-console-producer.sh \\
+  --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 \\
+  --topic quickstart &&
+/opt/kafka/bin/kafka-console-consumer.sh \\
+  --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 \\
+  --topic quickstart --from-beginning --max-messages 1 --timeout-ms 30000
+KAFKA_VERIFY
+)"`;
+
+const helmInspectCode = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
+kubectl run "kafka-inspect-$RANDOM" -n default --image="$KAFKA_TOOLS" \\
+  --restart=Never --rm -i --pod-running-timeout=120s \\
+  --overrides='{"spec":{"activeDeadlineSeconds":240}}' --command -- \\
+  /bin/bash -seuo pipefail <<'KAFKA_INSPECT'
+    BOOTSTRAP=m20-quickstart-broker-headless.default.svc.cluster.local:9092
+    echo "[topic]"
+    timeout 45s /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" --describe --topic quickstart
+    echo "[quorum]"
+    timeout 45s /opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server "$BOOTSTRAP" describe --status
+    echo "[groups]"
+    timeout 45s /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server "$BOOTSTRAP" --list
+    echo "[api]"
+    timeout 45s /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "$BOOTSTRAP"
+KAFKA_INSPECT`;
+
+const helmCleanupCode = `kubectl delete kafkatopic/quickstart
+kubectl delete kafka/m20-quickstart
+kubectl delete kafkanodepool/brokers --ignore-not-found
+helm uninstall krabka-operator -n krabka-system
+kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
+---
+
+<DocsLayout
+  title="Kubernetes quickstart"
+  description="Deploy Krabka with Helm on a disposable Kubernetes cluster, check readiness, and produce and consume a record with Kafka tools inside the cluster."
+  currentSlug="/docs/kubernetes-quickstart"
+>
+  <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run Krabka on Kubernetes</h1>
+      <QuickstartSwitch current="kubernetes" />
+      <p class="mt-2 text-gray-400">Install the operator and a three-node broker cluster, then send and read your first record. This configuration is for evaluation, not a production deployment.</p>
+    </div>
+    <h2 class="text-xl font-bold text-white pt-2">Before you start</h2>
+    <ul class="list-disc pl-5 space-y-2">
+      <li>Use a Bash terminal. On Windows, use a Bash terminal that can run <code>kubectl</code> and <code>helm</code>.</li>
+      <li>Use a disposable Kubernetes cluster with <code>kubectl</code> and Helm 3 configured.</li>
+      <li>Make sure that the cluster has capacity for three broker pods.</li>
+      <li>Make sure that the cluster has a default storage class for the three 1 GiB persistent volumes.</li>
+      <li>Confirm that <code>kubectl config current-context</code> selects this disposable cluster.</li>
+      <li>Use the <code>default</code> namespace in your context. The brokers use <code>default</code>, and the operator uses <code>krabka-system</code>.</li>
+      <li>Use a cluster without another installation of these CRDs.</li>
+    </ul>
+    <p>This example runs <code>krabka-operator</code> {operatorVersion} and <code>krabka-broker</code> {brokerVersion}.</p>
+    <h2 id="install" class="text-xl font-bold text-white pt-2">1. Install the operator</h2>
+    <div class="space-y-3">
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmInstallCode} aria-label="Copy Kubernetes operator installation commands">Copy</button></div>
+      <CodeBlock code={helmInstallCode} lang="bash" />
+    </div>
+    <h2 id="create-cluster" class="text-xl font-bold text-white pt-2">2. Create the cluster and wait for readiness</h2>
+    <div class="space-y-3">
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmClusterCode} aria-label="Copy Kubernetes cluster creation and readiness commands">Copy</button></div>
+      <CodeBlock code={helmClusterCode} lang="bash" />
+    </div>
+    <p>If readiness fails, inspect <code>kubectl get pods -n default</code>, <code>kubectl get pvc -n default</code>, and <code>kubectl logs deployment/krabka-operator-krabka-operator -n krabka-system</code>. Resolve image-pull, storage, or scheduling errors before continuing.</p>
+    <h2 id="round-trip" class="text-xl font-bold text-white pt-2">3. Produce and consume a record</h2>
+    <p>Continue when both <code>kubectl wait</code> commands report that the Ready condition is met. The manifest creates the <code>quickstart</code> topic. Run Kafka tools inside the cluster because brokers advertise in-cluster names.</p>
+    <div class="space-y-3">
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmVerifyCode} aria-label="Copy Kubernetes record round trip">Copy</button></div>
+      <CodeBlock code={helmVerifyCode} lang="bash" />
+    </div>
+    <p>The consumer prints <code>hello krabka</code>. See <a href={getPath('/docs/operator')} class="text-krab-400 underline underline-offset-2">Configure the operator</a> to change this deployment.</p>
+    <h2 id="inspect" class="text-xl font-bold text-white pt-2">4. Inspect the cluster with Kafka admin tools</h2>
+    <p>Run these tools inside the cluster. The bootstrap address uses the broker service in the <code>default</code> namespace; a port-forward alone does not make advertised in-cluster broker names reachable from your host.</p>
+    <div class="space-y-3">
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmInspectCode} aria-label="Copy Kubernetes cluster inspection commands">Copy</button></div>
+      <CodeBlock code={helmInspectCode} lang="bash" />
+    </div>
+    <p>The topic description shows <code>quickstart</code> with one partition and one replica. The quorum status reports a leader ID and the current voters. The consumer-group list can be empty; a successful empty result is valid. The API output lists broker IDs and supported version ranges. See the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">compatibility matrix</a> for supported Kafka APIs.</p>
+    <p>Each tool has a 45-second limit. The command stops if a tool fails, and the inspection pod has a four-minute deadline. If a command fails, check cluster readiness and DNS before repeating it. Each run uses a new pod name, separate from the round-trip pod.</p>
+    <h2 id="cleanup" class="text-xl font-bold text-white pt-2">Clean up the Kubernetes example</h2>
+    <p>Cleanup is optional. These commands remove the example cluster, topic, operator, and Krabka CRDs. <strong>Deleting CRDs affects every resource of those types.</strong> Run this only in the disposable cluster used for this example. Check your storage policy before removing persistent volumes.</p>
+    <div class="space-y-3">
+      <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCleanupCode} aria-label="Copy Kubernetes cleanup commands">Copy</button></div>
+      <CodeBlock code={helmCleanupCode} lang="bash" />
+    </div>
+    <p>Review the <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2">operations guides</a> before deploying your own cluster.</p>
+    <h2 class="text-xl font-bold text-white pt-2">Choose your next task</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <a href={getPath('/get-started#clients')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Connect your application</h3><p class="mt-1 text-gray-400">Use a client example, including a downloadable JavaScript project.</p></a>
+      <a href={getPath('/docs/operations')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Operate a cluster</h3><p class="mt-1 text-gray-400">Read recovery and upgrade procedures for your Krabka version.</p></a>
+    </div>
+
+  </div>
+</DocsLayout>

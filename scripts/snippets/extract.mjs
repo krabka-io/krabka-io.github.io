@@ -18,8 +18,12 @@ export const pages = {
     'composeVerifyCode',
     'inspectSnippet',
     'composeCleanupCode',
-    'helmCode',
+  ],
+  'docs/kubernetes-quickstart': [
+    'helmInstallCode',
+    'helmClusterCode',
     'helmVerifyCode',
+    'helmInspectCode',
     'helmCleanupCode',
   ],
   'docs/streams-rs': ['producerCode', 'consumerCode', 'shareConsumerCode', 'streamsCode'],
