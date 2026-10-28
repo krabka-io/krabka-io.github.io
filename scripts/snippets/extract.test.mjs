@@ -5,7 +5,7 @@ import { astroSnippets, markdownSnippets, websiteSnippets } from './extract.mjs'
 
 test('extract the website literals, including shell escapes and release interpolation', () => {
   const snippets = websiteSnippets(process.cwd());
-  assert.equal(snippets.length, 22);
+  assert.equal(snippets.length, 23);
   assert(
     snippets
       .find((s) => s.id === 'docs/quickstart/composeVerifyCode')

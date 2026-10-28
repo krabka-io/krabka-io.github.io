@@ -22,6 +22,7 @@ export const pages = {
   'docs/kubernetes-quickstart': [
     'helmCode',
     'helmVerifyCode',
+    'helmInspectCode',
     'helmCleanupCode',
   ],
   'docs/streams-rs': ['producerCode', 'consumerCode', 'shareConsumerCode', 'streamsCode'],

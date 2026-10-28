@@ -16,11 +16,7 @@ function contract(doc) {
   assert.equal(checkout.with['fetch-depth'], 0);
   for (const [name, run, id] of [
     ['Select CI checks', 'node scripts/ci-changes.mjs', 'changes'],
-    [
-      'Test snippet extraction and coverage',
-      'node --test scripts/snippets/extract.test.mjs',
-      undefined,
-    ],
+    ['Test snippet extraction and coverage', 'npm run test:snippets', undefined],
   ]) {
     const step = changes.steps.find((step) => step.name === name);
     assert.equal(step.run, run);
