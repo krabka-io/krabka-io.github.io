@@ -1,0 +1,65 @@
+---
+import CodeBlock from '../../components/CodeBlock.astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getPath } from '../../utils/paths';
+import versions from '../../data/versions.json';
+
+const brokerVersion = versions.broker.version;
+const operatorVersion = versions.operator.version;
+
+const helmCode = `kubectl apply -f https://krabka.io/quickstart/crds.yaml
+helm repo add krabka https://krabka.io/charts
+helm repo update
+helm install krabka-operator krabka/krabka-operator --version ${operatorVersion} --skip-crds \\
+  --namespace krabka-system --create-namespace
+kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
+kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
+kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
+kubectl wait --for=condition=Ready kafkatopic/quickstart --timeout=5m`;
+
+const helmVerifyCode = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
+kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
+  /bin/bash -lc "printf 'hello krabka\\n' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart && /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart --from-beginning --max-messages 1 --timeout-ms 30000"`;
+
+const helmCleanupCode = `kubectl delete kafkatopic/quickstart
+kubectl delete kafka/m20-quickstart
+kubectl delete kafkanodepool/brokers --ignore-not-found
+helm uninstall krabka-operator -n krabka-system
+kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
+---
+
+<DocsLayout
+  title="Kubernetes quickstart guide"
+  description="Deploy Krabka with Helm on a disposable Kubernetes cluster, check readiness, and produce and consume a record with Kafka tools inside the cluster."
+  currentSlug="/docs/kubernetes-quickstart"
+>
+  <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
+    <div class="border-b border-white/10 pb-4">
+      <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run Krabka on Kubernetes</h1>
+      <p class="mt-2 text-gray-400">Install the operator and a three-node broker cluster, then send and read your first record. This configuration is for evaluation, not a production deployment.</p>
+    </div>
+    <p>For a local Docker Compose broker, use the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">local quickstart</a>.</p>
+    <h2 class="text-xl font-bold text-white pt-2">Before you start</h2>
+    <p>Use a disposable Kubernetes cluster with <code>kubectl</code> and Helm 3 configured. The cluster needs capacity for three broker pods and a default storage class for their 1 GiB persistent volumes. Confirm that <code>kubectl config current-context</code> selects this disposable cluster and that your context uses the <code>default</code> namespace. These commands use the default namespace for a three-node broker cluster and <code>krabka-system</code> for the operator. Use a cluster without another installation of these CRDs. This example runs <code>krabka-operator</code> {operatorVersion} and <code>krabka-broker</code> {brokerVersion}.</p>
+    <h2 id="install" class="text-xl font-bold text-white pt-2">1. Install and check readiness</h2>
+    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+      <div class="flex justify-between gap-3 items-center"><span>Start and wait for readiness</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCode} aria-label="Copy Kubernetes startup commands">Copy</button></div>
+      <CodeBlock code={helmCode} lang="bash" />
+    </div>
+    <p>If readiness fails, inspect <code>kubectl get pods -n default</code>, <code>kubectl get pvc -n default</code>, and <code>kubectl logs deployment/krabka-operator-krabka-operator -n krabka-system</code>. Resolve image-pull, storage, or scheduling errors before continuing.</p>
+    <h2 id="round-trip" class="text-xl font-bold text-white pt-2">2. Produce and consume a record</h2>
+    <p>Continue when both <code>kubectl wait</code> commands report that the Ready condition is met. The manifest creates the <code>quickstart</code> topic. Run Kafka tools inside the cluster because brokers advertise in-cluster names.</p>
+    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+      <div class="flex justify-between gap-3 items-center"><span>Verify the Kubernetes round trip</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmVerifyCode} aria-label="Copy Kubernetes record round trip">Copy</button></div>
+      <CodeBlock code={helmVerifyCode} lang="bash" />
+    </div>
+    <p>The consumer prints <code>hello krabka</code>. See <a href={getPath('/docs/operator')} class="text-krab-400 underline underline-offset-2">Configure the operator</a> to change this deployment.</p>
+    <h2 id="cleanup" class="text-xl font-bold text-white pt-2">Clean up the Kubernetes example</h2>
+    <p>Cleanup is optional. These commands remove the example cluster, topic, operator, and Krabka CRDs. <strong>Deleting CRDs affects every resource of those types.</strong> Run this only in the disposable cluster used for this example. Check your storage policy before removing persistent volumes.</p>
+    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
+      <div class="flex justify-between gap-3 items-center"><span>Clean up</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCleanupCode} aria-label="Copy Kubernetes cleanup commands">Copy</button></div>
+      <CodeBlock code={helmCleanupCode} lang="bash" />
+    </div>
+    <p>Review the <a href={getPath('/docs/operations')} class="text-krab-400 underline underline-offset-2">operations guides</a> before deploying your own cluster.</p>
+  </div>
+</DocsLayout>

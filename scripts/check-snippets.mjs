@@ -442,11 +442,11 @@ if (mode === 'helm') {
       work,
       { env },
     );
-    shell(localAssets(get('docs/quickstart/helmCode')), 'helm-start', {
+    shell(localAssets(get('docs/kubernetes-quickstart/helmCode')), 'helm-start', {
       env,
       timeout: 25 * 60 * 1000,
     });
-    const result = shell(get('docs/quickstart/helmVerifyCode'), 'helm-verify', {
+    const result = shell(get('docs/kubernetes-quickstart/helmVerifyCode'), 'helm-verify', {
       env,
       stdio: ['ignore', 'pipe', 'inherit'],
       timeout: 5 * 60 * 1000,
@@ -455,7 +455,7 @@ if (mode === 'helm') {
       result.split('\n').includes('hello krabka'),
       'Helm quickstart did not roundtrip its record',
     );
-    shell(localAssets(get('docs/quickstart/helmCleanupCode')), 'helm-cleanup', {
+    shell(localAssets(get('docs/kubernetes-quickstart/helmCleanupCode')), 'helm-cleanup', {
       env,
       timeout: 10 * 60 * 1000,
     });

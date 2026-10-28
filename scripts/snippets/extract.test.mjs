@@ -11,10 +11,10 @@ test('extract the website literals, including shell escapes and release interpol
       .find((s) => s.id === 'docs/quickstart/composeVerifyCode')
       .code.includes("printf 'hello krabka\\n'"),
   );
-  assert(snippets.find((s) => s.id === 'docs/quickstart/helmCode').code.includes(' \\\n'));
+  assert(snippets.find((s) => s.id === 'docs/kubernetes-quickstart/helmCode').code.includes(' \\\n'));
   assert(!snippets.find((s) => s.id.endsWith('/javaGradle')).code.includes('${'));
   const versions = JSON.parse(readFileSync('src/data/versions.json', 'utf8'));
-  const helm = snippets.find((s) => s.id === 'docs/quickstart/helmCode').code;
+  const helm = snippets.find((s) => s.id === 'docs/kubernetes-quickstart/helmCode').code;
   assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
   assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));
   assert(snippets.find((s) => s.id === 'docs/quickstart/inspectSnippet'));
@@ -39,7 +39,7 @@ test('new or missing displayed snippets fail coverage', () => {
 test('startup and verification omit cleanup; the download matches the tested producer', () => {
   const snippets = websiteSnippets(process.cwd());
   for (const snippet of snippets.filter(
-    (s) => s.id.startsWith('docs/quickstart/') && !s.id.includes('Cleanup'),
+    (s) => /^docs\/(quickstart|kubernetes-quickstart)\//.test(s.id) && !s.id.includes('Cleanup'),
   )) {
     assert(
       !/docker compose down|kubectl delete|helm uninstall/.test(snippet.code),

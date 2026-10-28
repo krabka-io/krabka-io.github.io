@@ -32,30 +32,11 @@ docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-b
 
 const composeCleanupCode = `docker compose down --volumes`;
 
-const helmCode = `kubectl apply -f https://krabka.io/quickstart/crds.yaml
-helm repo add krabka https://krabka.io/charts
-helm repo update
-helm install krabka-operator krabka/krabka-operator --version ${operatorVersion} --skip-crds \\
-  --namespace krabka-system --create-namespace
-kubectl rollout status deployment/krabka-operator-krabka-operator -n krabka-system --timeout=5m
-kubectl apply -f https://krabka.io/quickstart/krabka-cluster.yaml
-kubectl wait --for=condition=Ready kafka/m20-quickstart --timeout=10m
-kubectl wait --for=condition=Ready kafkatopic/quickstart --timeout=5m`;
-
-const helmVerifyCode = `KAFKA_TOOLS=docker.io/apache/kafka@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7
-kubectl run kafka-tools --image="$KAFKA_TOOLS" --restart=Never --rm -i --command -- \\
-  /bin/bash -lc "printf 'hello krabka\\n' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart && /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server m20-quickstart-broker-headless.default.svc.cluster.local:9092 --topic quickstart --from-beginning --max-messages 1 --timeout-ms 30000"`;
-
-const helmCleanupCode = `kubectl delete kafkatopic/quickstart
-kubectl delete kafka/m20-quickstart
-kubectl delete kafkanodepool/brokers --ignore-not-found
-helm uninstall krabka-operator -n krabka-system
-kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
 ---
 
 <DocsLayout
   title="Quickstart guide"
-  description="Start a local Krabka broker, check readiness, create a topic, and produce and read a record with containerized Kafka tools. Kubernetes steps included."
+  description="Start a local Krabka broker, check readiness, create a topic, and produce and read a record with containerized Kafka tools."
   currentSlug="/docs/quickstart"
 >
   <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
@@ -64,6 +45,7 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
       <p class="mt-2 text-gray-400">Run a local Krabka broker, then produce and consume your first record with containerized Kafka tools. Keep the broker running to try a client example.</p>
     </div>
 
+    <p>Using Kubernetes? Follow the <a href={getPath('/docs/kubernetes-quickstart')} class="text-krab-400 underline underline-offset-2">Kubernetes quickstart</a> for Helm installation and in-cluster commands.</p>
     <h2 class="text-xl font-bold text-white">Before you start</h2>
     <ul class="list-disc pl-5 space-y-2">
       <li>Install Docker with Docker Compose. Start Docker.</li>
@@ -119,22 +101,6 @@ kubectl delete -f https://krabka.io/quickstart/crds.yaml`;
     </div>
 
     <h2 id="kubernetes" class="text-xl font-bold text-white pt-2">Kubernetes option</h2>
-    <p>Use a disposable Kubernetes cluster with <code>kubectl</code> and Helm configured. These commands use the default namespace for a three-node broker cluster and <code>krabka-system</code> for the operator. Use a cluster without another installation of these CRDs. This example runs <code>krabka-operator</code> {operatorVersion} and <code>krabka-broker</code> {brokerVersion}.</p>
-    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Start and wait for readiness</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCode} aria-label="Copy Kubernetes startup commands">Copy</button></div>
-      <CodeBlock code={helmCode} lang="bash" />
-    </div>
-    <p>Continue when both <code>kubectl wait</code> commands report that the Ready condition is met. The manifest creates the <code>quickstart</code> topic. Run Kafka tools inside the cluster because brokers advertise in-cluster names.</p>
-    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Verify the Kubernetes round trip</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmVerifyCode} aria-label="Copy Kubernetes record round trip">Copy</button></div>
-      <CodeBlock code={helmVerifyCode} lang="bash" />
-    </div>
-    <p>The consumer prints <code>hello krabka</code>. See <a href={getPath('/docs/operator')} class="text-krab-400 underline underline-offset-2">Configure the operator</a> to change this deployment.</p>
-    <h2 class="text-xl font-bold text-white pt-2">Clean up the Kubernetes example</h2>
-    <p>Cleanup is optional. These commands remove the example cluster, topic, operator, and Krabka CRDs. <strong>Deleting CRDs affects every resource of those types.</strong> Run this only in the disposable cluster used for this example. Check your storage policy before removing persistent volumes.</p>
-    <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
-      <div class="flex justify-between gap-3 items-center"><span>Clean up</span><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={helmCleanupCode} aria-label="Copy Kubernetes cleanup commands">Copy</button></div>
-      <CodeBlock code={helmCleanupCode} lang="bash" />
-    </div>
+    <p>To deploy with Helm and run Kafka tools inside the cluster, follow the <a href={getPath('/docs/kubernetes-quickstart')} class="text-krab-400 underline underline-offset-2">Kubernetes quickstart</a>.</p>
   </div>
 </DocsLayout>

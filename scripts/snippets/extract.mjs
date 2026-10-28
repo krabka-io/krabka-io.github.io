@@ -18,6 +18,8 @@ export const pages = {
     'composeVerifyCode',
     'inspectSnippet',
     'composeCleanupCode',
+  ],
+  'docs/kubernetes-quickstart': [
     'helmCode',
     'helmVerifyCode',
     'helmCleanupCode',
