@@ -185,7 +185,7 @@ try {
               }
             }
             if (route === '/get-started/') {
-              const pathways = page.locator('nav[aria-label="Evaluation pathways"]');
+              const pathways = page.locator('#evaluation-pathways');
               t.check(
                 'four evaluation pathways expose lab, runbook, compatibility and migration destinations',
                 (await pathways.locator('section').count()) === 4 &&
