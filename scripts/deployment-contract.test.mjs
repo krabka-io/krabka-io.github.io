@@ -10,6 +10,105 @@ const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.me
 const lab = "steps.changes.outputs.lab == 'true'";
 const proofs = "steps.changes.outputs.proofs == 'true'";
 const mainOnly = "github.ref == 'refs/heads/main'";
+const mainPush = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
+const buildCondition = "${{ !cancelled() && needs.promote.outputs.promoted != 'true' }}";
+const smokeCondition =
+  "${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}";
+const deployCondition =
+  "${{ always() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.promote.outputs.promoted == 'true')) }}";
+const normalize = (value) => value?.replace(/\s+/g, ' ').trim();
+
+// Evaluate this workflow's job expressions with GitHub's implicit success gate.
+// Expressions come only from the checked-in workflow and test mutations.
+function runs(
+  expression,
+  {
+    event = 'push',
+    ref = 'refs/heads/main',
+    promoted = '',
+    promote = 'success',
+    build = 'success',
+    deploy = 'success',
+    cancelled = false,
+  } = {},
+) {
+  const source = (expression || 'true').replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  if (
+    !/\b(always|cancelled|success|failure)\(/.test(source) &&
+    [promote, build, deploy].some((result) => result !== 'success')
+  )
+    return false;
+  const values = {
+    'github.event_name': event,
+    'github.ref': ref,
+    'needs.promote.outputs.promoted': promoted,
+    'needs.promote.result': promote,
+    'needs.build.result': build,
+    'needs.deploy.result': deploy,
+  };
+  let js = source;
+  for (const [key, value] of Object.entries(values)) js = js.replaceAll(key, JSON.stringify(value));
+  js = js.replaceAll('always()', 'true').replaceAll('cancelled()', String(cancelled));
+  return Boolean(Function(`"use strict"; return (${js});`)());
+}
+
+function gateScenarios(doc) {
+  for (const event of [
+    'pull_request',
+    'merge_group',
+    'schedule',
+    'workflow_dispatch',
+    'repository_dispatch',
+    'push',
+  ]) {
+    for (const promote of ['success', 'failure', 'skipped', 'cancelled']) {
+      for (const promoted of ['', 'false']) {
+        assert.equal(
+          runs(doc.jobs.build.if, { event, promote, promoted }),
+          true,
+          `${event}: ${promote} with ${promoted} cannot skip build`,
+        );
+        assert.equal(
+          runs(doc.jobs.build.if, { event, promote, promoted, cancelled: true }),
+          false,
+          'cancelled workflow does not build',
+        );
+      }
+    }
+  }
+  assert.equal(
+    runs(doc.jobs.build.if, { promoted: 'true' }),
+    false,
+    'completed promotion skips rebuild',
+  );
+  for (const build of ['success', 'failure', 'cancelled', 'skipped']) {
+    for (const promoted of ['', 'false', 'true']) {
+      assert.equal(
+        runs(doc.jobs.deploy.if, { build, promoted }),
+        build === 'success' || (build === 'skipped' && promoted === 'true'),
+        'only validated bytes can deploy',
+      );
+      assert.equal(
+        runs(doc.jobs.deploy.if, { build, promoted, ref: 'refs/pull/1/merge' }),
+        false,
+        'PR cannot deploy',
+      );
+      for (const promote of ['success', 'failure', 'skipped']) {
+        for (const deploy of ['success', 'failure', 'skipped', 'cancelled']) {
+          assert.equal(
+            runs(doc.jobs['production-smoke'].if, { build, promote, deploy }),
+            deploy === 'success',
+            'successful deployment runs smoke despite skipped/failed ancestors',
+          );
+          assert.equal(
+            runs(doc.jobs['production-smoke'].if, { build, promote, deploy, cancelled: true }),
+            false,
+          );
+        }
+      }
+    }
+  }
+}
 
 // This is a contract for the current workflow, not a general shell analyzer.
 // Keep guarded commands explicit. Review this contract when their shape changes.
@@ -34,13 +133,18 @@ function command(job, name, run, condition) {
 }
 
 function contract(doc, pkg) {
-  const { build, deploy, 'production-smoke': smoke } = doc.jobs;
+  const { promote, build, deploy, 'production-smoke': smoke } = doc.jobs;
+  gateScenarios(doc);
+  blocking(promote, 'promote');
+  assert.deepEqual(promote.permissions, { contents: 'read', actions: 'read' });
+  assert.equal(promote.outputs.promoted, '${{ steps.result.outputs.promoted }}');
   assert.deepEqual(doc.permissions, { contents: 'read' });
   assert.deepEqual(deploy.permissions, { pages: 'write', 'id-token': 'write' });
   assert.equal(build.permissions, undefined, 'build inherits read-only permissions');
-  blocking(build, 'build');
-  blocking(deploy, 'deploy', mainOnly);
-  blocking(smoke, 'production-smoke', mainOnly);
+  blocking(build, 'build', buildCondition);
+  assert.equal(normalize(deploy.if), deployCondition);
+  blocking(deploy, 'deploy', deploy.if);
+  blocking(smoke, 'production-smoke', smokeCondition);
   for (const job of [doc, build, deploy, smoke]) {
     assert.equal(
       job.defaults?.run,
@@ -50,7 +154,7 @@ function contract(doc, pkg) {
   }
   assert.deepEqual(doc.on.pull_request.branches, ['main'], 'pull requests run the required build');
   assert.deepEqual(doc.on.push.branches, ['main'], 'main pushes run the release pipeline');
-  assert.equal(deploy.needs, 'build', 'deploy needs a successful build');
+  assert.deepEqual(deploy.needs, ['promote', 'build']);
   assert.equal(smoke.needs, 'deploy', 'production smoke needs a successful deployment');
 
   const tests = command(build, 'Check website validation and sync guards', 'npm run test:website');
@@ -183,7 +287,7 @@ function contract(doc, pkg) {
   // not skipped dependency jobs that can accidentally suppress the merge gate.
   for (const step of build.steps)
     assert.ok(step['continue-on-error'] === undefined || step['continue-on-error'] === false);
-  assert.equal(build.needs, undefined);
+  assert.equal(build.needs, 'promote');
   assert.equal(build.name, undefined, 'required build check keeps its name');
   const uploads = build.steps.filter((step) =>
     step.uses?.startsWith('actions/upload-pages-artifact@'),
@@ -195,6 +299,80 @@ function contract(doc, pkg) {
     tests < compile && compile < checks && checks < build.steps.indexOf(uploads[0]),
     'regressions and build checks run before the Pages upload',
   );
+
+  for (const name of [
+    'Checkout promotion helpers',
+    'Setup promotion Node.js',
+    'Find validated exact-commit queue site',
+  ]) {
+    blocking(
+      promote.steps.find((step) => step.name === name),
+      name,
+      mainPush,
+    );
+  }
+  command(
+    promote,
+    'Find validated exact-commit queue site',
+    'node scripts/pages-promotion.mjs',
+    mainPush,
+  );
+  const downloadQueue = promote.steps.find((step) => step.id === 'download');
+  assert.equal(
+    downloadQueue.uses,
+    'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333',
+  );
+  assert.deepEqual(downloadQueue.with, {
+    'artifact-ids': '${{ steps.candidate.outputs.artifact-id }}',
+    'run-id': '${{ steps.candidate.outputs.run-id }}',
+    'github-token': '${{ github.token }}',
+    'digest-mismatch': 'error',
+    'merge-multiple': true,
+    path: '${{ runner.temp }}/queue-download',
+  });
+  assert.equal(downloadQueue.if, "steps.candidate.outputs.found == 'true'");
+  const unpack = promote.steps.find((step) => step.id === 'unpack');
+  assert.equal(unpack.if, "steps.download.outcome == 'success'");
+  assert.equal(
+    unpack.run,
+    'python3 scripts/unpack-queue-site.py "${RUNNER_TEMP}/queue-download/site.tar" "${RUNNER_TEMP}/queue-site"',
+  );
+  const promotedUpload = promote.steps.find((step) => step.id === 'upload');
+  assert.equal(promotedUpload.if, "steps.unpack.outcome == 'success'");
+  assert.equal(promotedUpload.uses, uploads[0].uses);
+  assert.equal(promotedUpload.with.path, '${{ runner.temp }}/queue-site');
+  const result = promote.steps.find((step) => step.id === 'result');
+  blocking(result, 'promotion result', 'always()');
+  assert.equal(result.env.UPLOAD_OUTCOME, '${{ steps.upload.outcome }}');
+  assert.match(
+    result.run,
+    /if \[\[ "\$\{UPLOAD_OUTCOME\}" == success \]\]; then\n *echo 'promoted=true'/,
+  );
+  assert.match(result.run, /else\n *echo 'promoted=false'/);
+  const freeze = command(
+    build,
+    'Freeze validated queue site',
+    'mkdir -p "${RUNNER_TEMP}/validated-queue-site"\ntar -cf "${RUNNER_TEMP}/validated-queue-site/site.tar" -C dist .',
+    "github.event_name == 'merge_group'",
+  );
+  const queueUpload = build.steps.find((step) => step.name === 'Upload validated queue site');
+  blocking(queueUpload, 'queue upload', "github.event_name == 'merge_group'");
+  assert.equal(
+    queueUpload.uses,
+    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+  );
+  assert.deepEqual(queueUpload.with, {
+    name: 'validated-queue-site',
+    path: '${{ runner.temp }}/validated-queue-site/site.tar',
+    'if-no-files-found': 'error',
+    'retention-days': 1,
+  });
+  assert.ok(freeze < build.steps.indexOf(queueUpload));
+  for (const [name] of suites)
+    assert.ok(
+      build.steps.findIndex((step) => step.name === name) < freeze,
+      `${name} precedes queue freeze`,
+    );
 
   const publish = deploy.steps.filter((step) => step.uses?.startsWith('actions/deploy-pages@'));
   assert.equal(publish.length, 1, 'one Pages deployment');
@@ -260,6 +438,45 @@ test('deployment preserves blocking build, validation, upload and production smo
 const step = (doc, name, job = 'build') => doc.jobs[job].steps.find((entry) => entry.name === name);
 const validation = 'Check built links, SEO and page budgets';
 const mutations = {
+  'transitive skip suppresses smoke': (doc) => {
+    doc.jobs['production-smoke'].if = mainOnly;
+  },
+  'smoke after failed deployment': (doc) => {
+    doc.jobs['production-smoke'].if = `\${{ !cancelled() && ${mainOnly} }}`;
+  },
+  'main-only promote job': (doc) => {
+    doc.jobs.promote.if = mainPush;
+  },
+  'PR build skipped': (doc) => {
+    doc.jobs.build.if = "${{ !cancelled() && github.event_name != 'pull_request' }}";
+  },
+  'merge-group build skipped': (doc) => {
+    doc.jobs.build.if = "${{ !cancelled() && github.event_name != 'merge_group' }}";
+  },
+  'promote failure skips build': (doc) => {
+    doc.jobs.build.if = "${{ needs.promote.outputs.promoted != 'true' }}";
+  },
+  'empty promote output skips build': (doc) => {
+    doc.jobs.build.if = "${{ !cancelled() && needs.promote.outputs.promoted == 'false' }}";
+  },
+  'missing digest policy': (doc) => {
+    delete doc.jobs.promote.steps.find((step) => step.id === 'download').with['digest-mismatch'];
+  },
+  'weak digest policy': (doc) => {
+    doc.jobs.promote.steps.find((step) => step.id === 'download').with['digest-mismatch'] = 'warn';
+  },
+  'missing immutable artifact ID': (doc) => {
+    delete doc.jobs.promote.steps.find((step) => step.id === 'download').with['artifact-ids'];
+  },
+  'queue uploaded from PR': (doc) => {
+    step(doc, 'Upload validated queue site').if = "github.event_name == 'pull_request'";
+  },
+  'queue retention expanded': (doc) => {
+    step(doc, 'Upload validated queue site').with['retention-days'] = 14;
+  },
+  'promote without unpack': (doc) => {
+    doc.jobs.promote.steps.find((step) => step.id === 'upload').if = 'always()';
+  },
   'workflow Pages write': (doc) => {
     doc.permissions.pages = 'write';
   },

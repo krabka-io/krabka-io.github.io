@@ -1,9 +1,8 @@
 # Website CI selection
 
-For the proposed SDK, permissions, merge-queue artifact promotion, and later
-cache/job changes, see the [CI optimization plan](ci-optimization-plan.md).
-The SDK and least-privilege changes are implemented; promotion and output-cache
-changes remain proposed in this layer. This page describes its current workflow.
+For the evidence, implemented SDK and promotion changes, and proposed output
+caches or measured job split, see the [CI optimization plan](ci-optimization-plan.md).
+Hosted timing comparisons remain pending; these changes do not establish a speedup.
 
 The required `build` check runs on every pull request to `main`. There are no
 workflow path filters. The job keeps ordinary validation in one blocking chain;
@@ -53,9 +52,35 @@ or request an OIDC token.
 
 ## Release and manual runs
 
-Main pushes, schedules, release dispatches, and manual runs select full coverage.
-Only `refs/heads/main` can upload and deploy Pages. The production concurrency
-group remains serialized through deployment and smoke checks. Each PR has its
+Schedules, release dispatches, and manual runs select fresh full coverage. Every
+merge-group run also selects full coverage and uploads the complete validated
+site as `validated-queue-site`, with one-day retention. Each main push first
+looks for a successful merge-group run in this repository and this workflow at
+exactly its full commit SHA. It never uses a nearest ancestor, matching tree,
+PR head, or intermediate batch SHA.
+
+The consumer downloads the immutable artifact ID with the pinned v8 action and
+explicit `digest-mismatch: error`. The action checks GitHub's server digest;
+there is no custom checksum or provenance file. The package is unpacked into
+clean staging after path, file-type, and required-content checks. Those same
+bytes become this main run's Pages artifact, without synchronization or rebuild.
+The source run and fallback reason appear in the workflow summary.
+
+Missing, expired, incomplete, or corrupt artifacts and lookup/download failures
+select the original full build and validation chain. A main push without a
+matching queue run does the same. Queue promotion deliberately reuses that
+queue run's synchronized sibling content; scheduled and release-triggered full
+builds remain the freshness backstop.
+
+`promote` runs on every event and reports false except after a completed main-push
+promotion. The required `build` uses `!cancelled()` and runs on failed/skipped
+promotion or empty outputs. It never skips on PR or merge-group events. Deployment
+requires a successful full build or a skipped build with explicit completed
+promotion; a failed or cancelled build blocks it. Only `refs/heads/main` can upload
+and deploy Pages. The production concurrency
+group remains serialized through deployment and smoke checks. Smoke explicitly
+requires successful deployment and uses `!cancelled()` to prevent a skipped or
+failed transitive ancestor from suppressing it; its validation commands are unchanged. Each PR has its
 own concurrency group and cancels its superseded runs; it cannot cancel production.
 Snippet execution also cancels only superseded PR runs.
 
@@ -106,6 +131,11 @@ ignored failures, path filters, incorrect conditions, missing ready events, and
 production cancellation. Bridge scenarios also check draft/ready transitions,
 push and queue ranges, conservative fallbacks, and the gate's failure states.
 `npm run test:snippets` checks extraction coverage.
+
+Promotion tests cover wrong SHA/repository/workflow/event, failed or cancelled
+producers, retention, missing/invalid digests, admin-bypass pushes, forced-refresh
+events, invalid packages, and gate mutations. Server digest mismatch rejection is
+delegated to the pinned v8 action; local fixtures do not simulate a hosted transfer.
 
 Compare hosted Actions runner time and wall-clock time after push. Local timings
 are not a hosted-runner comparison. Keep full scheduled checks as the integration

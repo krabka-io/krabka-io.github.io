@@ -24,7 +24,71 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
+  # Always report false outside a main push. A failed lookup/transfer falls back
+  # to build; it must not suppress the required check through dependency skips.
+  promote:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      promoted: ${{ steps.result.outputs.promoted }}
+    steps:
+      - name: Checkout promotion helpers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup promotion Node.js
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Find validated exact-commit queue site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: candidate
+        run: node scripts/pages-promotion.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Download validated queue site
+        if: steps.candidate.outputs.found == 'true'
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ steps.candidate.outputs.artifact-id }}
+          run-id: ${{ steps.candidate.outputs.run-id }}
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+          merge-multiple: true
+          path: ${{ runner.temp }}/queue-download
+      - name: Validate and unpack queue site
+        if: steps.download.outcome == 'success'
+        id: unpack
+        continue-on-error: true
+        run: python3 scripts/unpack-queue-site.py "${RUNNER_TEMP}/queue-download/site.tar" "${RUNNER_TEMP}/queue-site"
+      - name: Upload promoted Pages artifact
+        if: steps.unpack.outcome == 'success'
+        id: upload
+        continue-on-error: true
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/queue-site
+      - name: Report promotion result
+        if: always()
+        id: result
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          if [[ "${UPLOAD_OUTCOME}" == success ]]; then
+            echo 'promoted=true' >> "${GITHUB_OUTPUT}"
+            echo 'Validated queue bytes uploaded for this main run.' >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo 'promoted=false' >> "${GITHUB_OUTPUT}"
+            echo 'Full-build fallback: no completed promotion (not eligible, missing candidate, or lookup/download/validation/upload failed).' >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
   build:
+    needs: promote
+    if: ${{ !cancelled() && needs.promote.outputs.promoted != 'true' }}
     runs-on: ubuntu-26.04
     steps:
       - name: Keep temporary files off the size-limited /tmp tmpfs
@@ -231,6 +295,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # The complete validated queue site, not a PR-head or mutable sibling build.
+      - name: Freeze validated queue site
+        if: github.event_name == 'merge_group'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/validated-queue-site"
+          tar -cf "${RUNNER_TEMP}/validated-queue-site/site.tar" -C dist .
+      - name: Upload validated queue site
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validated-queue-site
+          path: ${{ runner.temp }}/validated-queue-site/site.tar
+          if-no-files-found: error
+          retention-days: 1
+
       # Only main deploys. A pull request, or helm-index.yml's dispatch on its
       # branch, runs `build` alone, as the ruleset's required check.
       - name: Upload GitHub Pages artifact
@@ -240,12 +319,15 @@ jobs:
           path: './dist'
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      ${{ always() && github.ref == 'refs/heads/main' &&
+          (needs.build.result == 'success' ||
+           (needs.build.result == 'skipped' && needs.promote.outputs.promoted == 'true')) }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-26.04
-    needs: build
+    needs: [promote, build]
     permissions:
       pages: write
       id-token: write
@@ -257,7 +339,9 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   production-smoke:
-    if: github.ref == 'refs/heads/main'
+    # success() also sees skipped/failed transitive ancestors. After promotion
+    # (or successful fallback from a failed promote), gate on deployment itself.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}
     needs: deploy
     runs-on: ubuntu-26.04
     timeout-minutes: 10

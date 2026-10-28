@@ -1,12 +1,13 @@
 # Website CI optimization plan
 
-Status: SDK reconstruction implemented; hosted timing comparison pending. The
-remaining workflow and output-cache changes are proposed. Reviewed 27 October
-2026 against commit
+Status: stable SDK reconstruction, deployment-only write permissions, and
+exact-commit queue promotion are implemented in this branch. Hosted timing and
+promotion-hit comparisons remain pending. Complete-output caches and a measured
+job split remain proposed. The design was reviewed 27 October 2026 against
 `60fac298189ea16a438ce75cd39050b3b5cbaa69`, with workflow/installer scope
-cross-checked through `b315812336be92a32386052bb2c56dfe428d2ec5`. This layer implements the stable SDK path and its ownership rules; it does not
-change the deployment workflow. [CI selection](ci.md) and
-[verified tool downloads](tool-downloads.md) describe current behavior.
+cross-checked through `b315812336be92a32386052bb2c56dfe428d2ec5`.
+[CI selection](ci.md) and [verified tool downloads](tool-downloads.md) describe
+the implemented behavior. No recovered-minute or post-merge timing claim is made.
 
 ## Evidence and priorities
 
@@ -32,7 +33,7 @@ remains blocked on successful validation of the bytes being deployed.
 
 ## Stable SDK reconstruction
 
-The installer currently uses `mkdtemp` for each installation. The SDK helper
+Before this change, the installer used `mkdtemp` for each SDK installation. The SDK helper
 puts that path into `CC_wasm32_wasip1`, `AR_wasm32_wasip1`, and
 `CFLAGS_wasm32_wasip1`. Cargo reruns build scripts when tracked environment
 values change. This is a concrete invalidation mechanism, not proof that it is
@@ -72,8 +73,8 @@ ownership rules in the same change. Do not claim recovered minutes in advance.
 
 ## Least privilege and checkouts
 
-The workflow currently grants `pages: write` and `id-token: write` at workflow
-scope. Default to `contents: read`; give Pages/OIDC rights only to the deployment
+Before this change, the workflow granted `pages: write` and `id-token: write`
+at workflow scope. Default to `contents: read`; give Pages/OIDC rights only to the deployment
 job. Give the promotion lookup/download job `actions: read`. Artifact transfer
 does not justify granting build/test jobs Pages or OIDC write permissions.
 
@@ -114,7 +115,9 @@ Require a present server digest in candidate metadata. Download/extract into
 clean staging, validate the package, then re-upload the same files as this main
 run's Pages artifact. Set `promoted=true` only after all these steps succeed.
 No resynchronization, rebuild, or content mutation occurs after queue validation.
-Production smoke stays unchanged; deploy dependencies/conditions change below.
+Production smoke commands stay unchanged. Its job condition explicitly requires
+a successful deployment and uses a status function so skipped/failed ancestors
+do not suppress smoke; deploy dependencies/conditions change below.
 
 Schedules, release dispatches, and manual runs retain fresh full synchronization,
 build, and validation. A main push without an eligible queue producer also uses
@@ -148,6 +151,9 @@ deploy:
     ${{ always() && github.ref == 'refs/heads/main' &&
         (needs.build.result == 'success' ||
          (needs.build.result == 'skipped' && needs.promote.outputs.promoted == 'true')) }}
+production-smoke:
+  needs: deploy
+  if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}
 ```
 
 The build status function overrides implicit success gating: failed/skipped
@@ -155,8 +161,12 @@ promote or absent outputs still run build unless cancelled. Build must never
 skip on `pull_request` or `merge_group`. Failed/cancelled builds block deploy;
 a skipped build authorizes deployment only with explicit `promoted=true`.
 Scheduled/manual/release main builds still deploy after full validation.
+GitHub applies implicit success gating to the dependency chain, not just the
+immediate deployment job. The smoke status guard preserves smoke after a
+promoted/skipped build or successful fallback from failed promotion, and still
+rejects failed/skipped deployment or workflow cancellation.
 
-In the implementation PR, replace `assert.equal(build.needs, undefined)` in
+The implementation replaces `assert.equal(build.needs, undefined)` in
 `scripts/deployment-contract.test.mjs` with graph-aware contracts and mutations:
 
 - Reject build skipped on `pull_request` or `merge_group`.

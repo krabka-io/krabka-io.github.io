@@ -62,6 +62,7 @@ test('native download entrypoints delegate to the verified installer', () => {
     'why3-web/build-why3-web.sh': 2,
     '.github/workflows/deploy.yml': 1, // compares live WASM, never executes it
     'scripts/install-tool.py': 1,
+    'scripts/pages-promotion.mjs': 1, // authenticated metadata only; v8 downloads the artifact
     'scripts/sync-docs.mjs': 2,
     'scripts/check-api-links.mjs': 1,
     'scripts/check-production.mjs': 2,
