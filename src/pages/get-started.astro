@@ -142,53 +142,50 @@ npm start`;
         Get started
       </h1>
       <p class="mt-4 text-lg text-gray-300">
-        Evaluate Krabka against the Kafka clients, tools, and workloads you already use. Start with a browser experiment or a local broker, then check compatibility before a staging trial.
+        Explore Krabka in your browser, or try it with your Kafka applications. Choose a starting point below.
       </p>
     </div>
 
     <div id="evaluation-pathways" class="mb-14">
-      <section class="border-b border-white/10 py-10 first:pt-0" aria-labelledby="browser-trial">
-        <div class="max-w-3xl [overflow-wrap:anywhere]">
-          <h2 id="browser-trial" class="text-2xl font-bold text-white">Zero-install browser trial</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Use Cluster Lab to inspect KRaft consensus and partition failover. Try minimum ISR behavior, rack splits, and fault injection, then inspect the records and network traffic.</p>
-          <p class="mt-4 text-base leading-relaxed text-gray-400">Cluster Lab is view-only on phones. Use a wider screen for editing and fault controls. Its virtual clock and network do not measure production throughput or disk durability.</p>
-          <a href={getPath('/docs/lab/')} class="mt-6 inline-block text-krab-400 underline underline-offset-2">Open Cluster Lab</a>
+      <section class="border-b border-white/10 py-8 first:pt-0" aria-labelledby="browser-trial">
+        <div class="max-w-3xl">
+          <h2 id="browser-trial" class="text-2xl font-bold text-white">Try Krabka in your browser</h2>
+          <p class="mt-4 text-base leading-relaxed text-gray-300">Explore cluster behavior and failures in Cluster Lab without a local installation.</p>
+          <p class="mt-3 text-base leading-relaxed text-gray-400">Phones support viewing only. The simulation does not measure production throughput or disk durability.</p>
+          <a href={getPath('/docs/lab/')} class="mt-4 inline-block text-krab-400 underline underline-offset-2">Open Cluster Lab</a>
         </div>
       </section>
-      <section class="border-b border-white/10 py-10 first:pt-0" aria-labelledby="local-validation">
-        <div class="max-w-3xl [overflow-wrap:anywhere]">
-          <h2 id="local-validation" class="text-2xl font-bold text-white">Local and CI validation</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Run your integration test suite, local microservices, or kcat and Kafka CLI tools against a local Krabka broker at <code>localhost:9092</code>. Change the bootstrap address in a test configuration and verify delivery, consumption, and the APIs your application uses.</p>
-          <p class="mt-4 text-base leading-relaxed text-gray-400">The quickstart owns the pinned Docker Compose and Helm runbooks, readiness checks, and first-record validation. Helm clients use the documented in-cluster bootstrap address instead of localhost.</p>
-          <a href={getPath('/docs/quickstart')} class="mt-6 inline-block text-krab-400 underline underline-offset-2">Run the local quickstart</a>
+      <section class="border-b border-white/10 py-8" aria-labelledby="local-validation">
+        <div class="max-w-3xl">
+          <h2 id="local-validation" class="text-2xl font-bold text-white">Test your application locally</h2>
+          <p class="mt-4 text-base leading-relaxed text-gray-300">Start a broker and test your Kafka clients or integration suite. The quickstart covers setup, readiness checks, and your first record.</p>
+          <a href={getPath('/docs/quickstart')} class="mt-4 inline-block text-krab-400 underline underline-offset-2">Run the quickstart</a>
         </div>
       </section>
-      <section id="compatibility" class="border-b border-white/10 py-10 first:pt-0" aria-labelledby="preflight-check">
-        <div class="max-w-3xl [overflow-wrap:anywhere]">
-          <h2 id="preflight-check" class="text-2xl font-bold text-white">Pre-flight compatibility and parity check</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Check your client version, protocol features, schema registry, and operational tools before switching a workload. A producer round trip is not evidence of full application parity.</p>
-          <ul class="mt-6 list-disc pl-5 space-y-4 text-base leading-relaxed text-gray-300">
-            <li><strong>Client evidence:</strong> the release support matrix records Java kafka-clients tests for Kafka 3.4, 3.5, 3.8, 4.0.0, 4.1.0, and 4.3.1; librdkafka 1.8.2 and 2.15.0; sarama through kaf 0.2.14; and krabka-client-rs. The website snippet harness also covers confluent-kafka (librdkafka), franz-go, KafkaJS, and krabka-client-rs. These are specific tested paths, not a guarantee for every version or configuration.</li>
-            <li><strong>Wire protocol:</strong> Kafka 3.x and 4.x API compatibility depends on the API key and request version negotiated with <code>ApiVersions</code>. Check the release-stream targets and KIP matrix for the Produce, Fetch, group, transaction, and admin features your application needs.</li>
-            <li><strong>Schema registries:</strong> verify serializers, subject compatibility, and registry recovery with your registry version. MirrorMaker 2 does not migrate registry subjects as a separate service; the migration guide describes registry export or a controlled <code>_schemas</code> transfer.</li>
-            <li><strong>Unsupported interfaces:</strong> no broker-side JVM plugins or JMX endpoint. JMX-only dashboards and Cruise Control cannot use those interfaces; scrape Prometheus metrics instead.</li>
-            <li><strong>Partial and planned features:</strong> streams topology description updates and <code>streams.rack.aware.assignment.tags</code> are unsupported. Schema-aware geo-replication transforms and secured standalone replicator clients remain future work. Check the matrices for other gaps and behavior differences.</li>
+      <section id="compatibility" class="border-b border-white/10 py-8" aria-labelledby="preflight-check">
+        <div class="max-w-3xl">
+          <h2 id="preflight-check" class="text-2xl font-bold text-white">Check compatibility</h2>
+          <p class="mt-4 text-base leading-relaxed text-gray-300">Review these areas before a trial with your workload:</p>
+          <ul class="mt-4 list-disc pl-5 space-y-2 text-base leading-relaxed text-gray-300">
+            <li>Check your client version against the <a href={getPath('/docs/broker/operations/support-matrix')} class="text-krab-400 underline underline-offset-2">release test results</a>.</li>
+            <li>Compare the APIs you use with the <a href={getPath('/versions#wire-compatibility')} class="text-krab-400 underline underline-offset-2">wire compatibility targets</a> and <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">KIP support matrix</a>.</li>
+            <li>Check your schema registry and serializers against the <a href={getPath('/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over')} class="text-krab-400 underline underline-offset-2">registry guidance</a>.</li>
+            <li>Review <a href={getPath('/docs/broker/operations/ecosystem-support')} class="text-krab-400 underline underline-offset-2">tool support</a>, including alternatives to broker-side JVM plugins and JMX.</li>
           </ul>
-          <p class="mt-6 text-base leading-relaxed text-gray-400">Release evidence is tied to the broker revision named in each row; historical results do not qualify a later build. Rerun the relevant checks on the image you intend to evaluate.</p>
-          <p class="mt-6 flex flex-col items-start gap-3 text-base"><a href={getPath('/docs/broker/operations/support-matrix')} class="text-krab-400 underline underline-offset-2">Check tested versions and release evidence</a> <a href={getPath('/versions#wire-compatibility')} class="text-krab-400 underline underline-offset-2">Check wire compatibility targets</a> <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">Review KIP support and gaps</a> <a href={getPath('/docs/broker/operations/ecosystem-support')} class="text-krab-400 underline underline-offset-2">Check ecosystem tool interfaces</a></p>
+          <p class="mt-4 text-base leading-relaxed text-gray-400">Test your workload on the broker version you plan to use; a successful producer example does not prove full compatibility.</p>
         </div>
       </section>
-      <section class="border-b border-white/10 py-10 first:pt-0" aria-labelledby="staging-evaluation">
-        <div class="max-w-3xl [overflow-wrap:anywhere]">
-          <h2 id="staging-evaluation" class="text-2xl font-bold text-white">Non-disruptive staging evaluation</h2>
-          <p class="mt-4 text-base leading-relaxed text-gray-300">Use a separate Krabka cluster and test identities. Keep production producers and consumer groups on Kafka while you compare results; do not change their bootstrap addresses for the trial.</p>
-          <ul class="mt-6 list-disc pl-5 space-y-4 text-base leading-relaxed text-gray-300">
-            <li><strong>Dual-writing:</strong> send an approved test workload to both clusters and compare keys, values, ordering, and delivery failures. Writes to two clusters are not one atomic transaction; handle partial failures and duplicates.</li>
-            <li><strong>MirrorMaker 2 active-passive replication:</strong> copy an explicitly approved topic set one way into the isolated target. Use least-privilege source access and keep cutover separate from evaluation; replication adds source load and copies data.</li>
-            <li><strong>Shadow consumer verification:</strong> use separate consumer groups and disable external side effects. Compare records and application results without committing offsets for production groups.</li>
+      <section class="border-b border-white/10 py-8" aria-labelledby="staging-evaluation">
+        <div class="max-w-3xl">
+          <h2 id="staging-evaluation" class="text-2xl font-bold text-white">Evaluate in staging</h2>
+          <p class="mt-4 text-base leading-relaxed text-gray-300">Use a separate cluster and test identities. Keep production clients on Kafka during the trial.</p>
+          <ul class="mt-4 list-disc pl-5 space-y-2 text-base leading-relaxed text-gray-300">
+            <li>Compare writes from an approved test workload to both clusters, including partial failures and duplicates.</li>
+            <li>Replicate approved topics with MirrorMaker 2, with checks for added source load.</li>
+            <li>Compare results with shadow consumers in separate groups, with external side effects disabled.</li>
           </ul>
-          <p class="mt-6 text-base leading-relaxed text-gray-400">MirrorMaker 2 changes target offsets and does not preserve producer IDs or transactional state. Registry data and credentials need separate handling; apply the guide's transaction-isolation and offset-translation checks before any cutover.</p>
-          <p class="mt-6 flex flex-col items-start gap-3 text-base"><a href={getPath('/docs/migration')} class="text-krab-400 underline underline-offset-2">Plan migration and cutover</a> <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="text-krab-400 underline underline-offset-2">Follow the MirrorMaker 2 replication procedure</a></p>
+          <p class="mt-4 text-base leading-relaxed text-gray-400">Replication does not preserve source offsets or transactional state; registry data and credentials need separate handling.</p>
+          <p class="mt-4 flex flex-col items-start gap-2 text-base"><a href={getPath('/docs/migration')} class="text-krab-400 underline underline-offset-2">Review migration limits before cutover</a> <a href={getPath('/docs/broker/operations/migrate-from-kafka')} class="text-krab-400 underline underline-offset-2">Follow the replication procedure</a></p>
         </div>
       </section>
     </div>
@@ -196,11 +193,11 @@ npm start`;
     <!-- Application client examples -->
     <div id="clients" class="mb-14">
       <div class="flex items-center gap-3 mb-6">
-        <h2 class="text-2xl font-bold text-white">Wire-protocol verification</h2>
+        <h2 class="text-2xl font-bold text-white">Connect a client</h2>
       </div>
 
       <p class="mb-4 max-w-3xl text-sm text-gray-300 leading-relaxed font-sans">
-        First complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">local quickstart</a> so a broker is running at <code>localhost:9092</code> and the <code>quickstart-events</code> topic exists. These examples verify that standard Kafka client libraries can connect and publish to Krabka with the bootstrap address changed, without a Krabka-specific adapter. They test record delivery, not every client feature; validate your own workload and security configuration separately. For Kubernetes, use the in-cluster bootstrap address and commands in the quickstart.
+        Complete the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2">quickstart</a> before you run an example. The examples use <code>localhost:9092</code> and the <code>quickstart-events</code> topic. For Kubernetes, use the quickstart's in-cluster address. Test your application's features and security settings separately.
       </p>
 
       <div class="frosted-card rounded-2xl overflow-hidden border border-white/10">
@@ -248,7 +245,7 @@ npm start`;
 
           <div id="client-c-go" role="tabpanel" aria-labelledby="client-tab-c-go" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Go client produce snippet</span>
+              <span>franz-go producer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.go}>
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
@@ -270,7 +267,7 @@ npm start`;
 
           <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>Native async Rust producer</span>
+              <span>Krabka Rust producer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.rust}>
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
@@ -281,7 +278,7 @@ npm start`;
 
           <div id="client-c-cli" role="tabpanel" aria-labelledby="client-tab-c-cli" hidden>
             <div class="flex justify-between items-center gap-3 text-xs text-gray-400 mb-2 font-sans">
-              <span>CLI producer/consumer</span>
+              <span>Kafka CLI producer and consumer</span>
               <button type="button" class="copy-btn flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-gray-300 hover:bg-white/10 hover:text-white transition-all font-sans" data-copy={clientSnippets.cli}>
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                 <span>Copy</span>
@@ -291,13 +288,13 @@ npm start`;
           </div>
         </div>
       </div>
-      <p class="mt-4 text-sm text-gray-400">A successful CLI round trip prints <code>hello krabka</code>. To inspect a producer example's record, run the CLI consumer without <code>--max-messages 1</code>, then press Ctrl+C to stop.</p>
+      <p class="mt-4 text-sm text-gray-400">The CLI example prints <code>hello krabka</code>. To read other examples' records, omit <code>--max-messages 1</code> from the consumer command. Press Ctrl+C to stop.</p>
       <section aria-labelledby="javascript-project" class="mt-6 rounded-xl border border-white/10 p-5 space-y-4">
         <h3 id="javascript-project" class="font-semibold text-white">Run the JavaScript example as a project</h3>
-        <p class="text-sm text-gray-300">Install Node.js with npm. After the local quickstart, download this project in a separate terminal and run it. It uses the same pinned KafkaJS dependency and producer code as the Node.js tab. A delivery failure exits with an error.</p>
+        <p class="text-sm text-gray-300">Install Node.js with npm to run this project. Run these commands in a separate terminal after the quickstart.</p>
         <button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 text-sm text-gray-300 hover:bg-white/10" data-copy={javascriptRunCode} aria-label="Copy JavaScript example setup">Copy setup</button>
         <CodeBlock code={javascriptRunCode} lang="bash" />
-        <p class="text-sm text-gray-400">The record value is <code>Hello Krabka from KafkaJS!</code>. Use the CLI consumer with <code>--from-beginning</code> and without <code>--max-messages 1</code> to read the topic, then press Ctrl+C to stop. <a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download package manifest</a></p>
+        <p class="text-sm text-gray-400"><a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download the source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download the package manifest</a></p>
       </section>
     </div>
   </div>
