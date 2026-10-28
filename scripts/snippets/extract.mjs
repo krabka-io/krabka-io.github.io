@@ -4,15 +4,12 @@ import { runInNewContext } from 'node:vm';
 
 export const pages = {
   'get-started': [
-    'deploySnippets.docker',
-    'deploySnippets.helm',
-    'clientSnippets.rust',
-    'clientSnippets.go',
     'clientSnippets.java',
     'clientSnippets.python',
+    'clientSnippets.go',
     'clientSnippets.javascript',
+    'clientSnippets.rust',
     'clientSnippets.cli',
-    'inspectSnippet',
     'javascriptRunCode',
   ],
   'docs/quickstart': [
