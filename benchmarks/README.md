@@ -70,16 +70,20 @@ size, offered rate, warm-up and post-drain duration are preserved.
 
 Set `krabka_comparison_image` to a control image and `krabka_image` to a candidate
 to compare them on the same worker in control/candidate/candidate/control order.
-Each invocation runs all three vendors with fresh storage and the selected workload,
-RF and repetition settings. With `repetitions=1`, each Krabka image gets two rounds;
-the four invocations retain separate reports and provenance. The series stops after
-a failed invocation, and its diagnostics remain available. For example:
+Each invocation runs the selected vendors with fresh storage and the selected
+workload, RF and repetition settings. With `repetitions=1`, each Krabka image gets
+two rounds; the four invocations retain separate reports and provenance. The series
+stops after a failed invocation, and its diagnostics remain available. `vendors`
+selects the brokers each invocation runs; a comparison of two Krabka images needs
+only `vendors=krabka`, which takes a third of the time. A run of fewer than all
+three brokers is an experiment: it is not merged and cannot be published. For
+example:
 
 ```sh
 gh workflow run openmessaging.yml -f mode=full \
   -f workloads=max-rate-1-topic-16-partitions-1kb -f replication_factors=3 \
   -f repetitions=1 -f krabka_comparison_image="$CONTROL_IMAGE" \
-  -f krabka_image="$CANDIDATE_IMAGE"
+  -f krabka_image="$CANDIDATE_IMAGE" -f vendors=krabka
 ```
 
 The runner builds [OpenMessaging commit 5b1fa709](https://github.com/openmessaging/benchmark/tree/5b1fa70951a323da26bd587174b58bb2c65b0b5c)
@@ -164,7 +168,7 @@ single-runner layout to the `openmessaging-<run>-<attempt>` artifact. That run's
 `provenance.json` keeps each shard's host, runner and CPU sets under `shards`; the
 top-level host fields are the first shard's. A failed, cancelled or incomplete shard
 fails the merge. A `krabka_comparison_image` series keeps its four reports per shard
-and is not merged.
+and is not merged, and neither is a run whose `vendors` leave out a broker.
 
 "Same OMB build" means the same OMB commit, patch hashes, build image and
 dependency jars under `/m2`. Each runner builds OMB itself, and Maven stamps the
