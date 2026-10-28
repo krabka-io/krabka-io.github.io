@@ -8,7 +8,12 @@ import { readDeclaration } from '../../scripts/snippets/extract.mjs';
 import { buildExcerpts } from '../utils/client-excerpts.mjs';
 
 const source = fs.readFileSync('src/pages/docs/quickstart.astro', 'utf8');
-const excerpts = buildExcerpts(readDeclaration(source, 'clientSnippets', {}, 'docs/quickstart'));
+const snippets = readDeclaration(source, 'clientSnippets', {}, 'docs/quickstart');
+// The CLI round trip is already shown in Step 3; do not duplicate it in the client tabs.
+const excerpts = buildExcerpts({
+  ...snippets,
+  cli: readDeclaration(source, 'composeVerifyCode', {}, 'docs/quickstart'),
+});
 ---
 
 <section aria-labelledby="clients-heading" data-no-anchor class="py-12 md:py-16">

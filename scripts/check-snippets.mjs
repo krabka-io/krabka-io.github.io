@@ -419,15 +419,7 @@ if (mode === 'compose') {
       'Compose quickstart did not roundtrip its record',
     );
     shell(get('docs/quickstart/inspectSnippet'), 'quickstart-inspect', { env, timeout: 120000 });
-    const consumed = shell(get('docs/quickstart/clientSnippets.cli'), 'cli-roundtrip', {
-      env,
-      stdio: ['ignore', 'pipe', 'inherit'],
-      timeout: 120000,
-    }).toString();
-    assert(
-      consumed.split('\n').includes('hello krabka'),
-      'CLI snippet did not roundtrip its record',
-    );
+
   } finally {
     run('docker', [...compose, 'logs', '--no-color']);
     run('docker', [...compose, 'down', '--volumes', '--remove-orphans']);

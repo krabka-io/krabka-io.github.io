@@ -10,7 +10,6 @@ export const pages = {
     'clientSnippets.go',
     'clientSnippets.javascript',
     'clientSnippets.rust',
-    'clientSnippets.cli',
     'javascriptRunCode',
     'composeCode',
     'composeReadyCode',

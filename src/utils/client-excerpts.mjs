@@ -13,7 +13,7 @@ export const clientExcerpts = [
     label: 'Java',
     lang: 'java',
     library: (code) => code.match(/kafka-clients:(\S+)/)?.[1].replace(/^/, 'kafka-clients '),
-    segments: [{ from: /^\s*Properties props = /, to: /producer\.send\(/ }],
+    segments: [{ from: /^\s*Properties props = /, to: /\)\)\.get\(\);/ }],
     address: /bootstrap\.servers/,
   },
   {
