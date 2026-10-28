@@ -137,7 +137,7 @@ try {
         : [])
         await t.flow(`${route} ${width} ${theme}`, async () => {
           const context = await browser.newContext({
-            viewport: { width, height: 900 },
+            viewport: { width, height: width === 375 ? 667 : width === 1024 ? 768 : 900 },
             colorScheme: theme,
             reducedMotion: 'reduce',
           });
@@ -211,7 +211,9 @@ try {
                         'explore-verification',
                       ]) &&
                     JSON.stringify(
-                      sections.map((section) => section.lastElementChild.getAttribute('href')),
+                      sections.map((section) =>
+                        section.lastElementChild.lastElementChild.getAttribute('href'),
+                      ),
                     ) ===
                       JSON.stringify([
                         '/docs/broker/operations/support-matrix',
@@ -219,6 +221,14 @@ try {
                         '/docs/broker/operations/migrate-from-kafka',
                         '/verification',
                       ]) &&
+                    first.querySelectorAll('h2').length === 2 &&
+                    depth.querySelectorAll('h2').length === 1 &&
+                    sections.every((section) => section.querySelector('h3')) &&
+                    getComputedStyle(depth.querySelector('h2')).fontSize === '24px' &&
+                    sections.every(
+                      (section) =>
+                        getComputedStyle(section.querySelector('h3')).fontSize === '20px',
+                    ) &&
                     depth.querySelector('h2').firstChild.textContent.trim() ===
                       'Evaluate in depth' &&
                     sections[3].querySelector('h3').firstChild.textContent.trim() ===
@@ -240,7 +250,8 @@ try {
                         '/docs/broker/operations/migrate-from-kafka#cut-the-schema-registry-over',
                         '/docs/broker/operations/ecosystem-support#what-does-not-work',
                       ].every((href) => section.querySelector(`a[href="${href}"]`)) &&
-                      section.lastElementChild.textContent === 'Check the support matrix',
+                      section.lastElementChild.lastElementChild.textContent ===
+                        'Check the support matrix',
                   ),
               );
               t.check(
@@ -258,7 +269,7 @@ try {
                 }),
               );
               t.check(
-                'cards are equal-height 60/40 on desktop, quickstart first when stacked; depth and clients span the column',
+                'cards align buttons; evaluation rows use 2/5 headings and 3/5 prose on desktop, stacked below lg',
                 await page.evaluate(() => {
                   const box = (selector) =>
                     document.querySelector(selector).getBoundingClientRect();
@@ -273,7 +284,11 @@ try {
                         lab.left >= quickstart.right &&
                         Math.abs(quickstart.height - lab.height) < 1 &&
                         quickstart.width / lab.width > 1.5 &&
-                        quickstart.width / lab.width < 1.6
+                        quickstart.width / lab.width < 1.6 &&
+                        Math.abs(
+                          box('#first-run-options > section a:not(.heading-anchor)').bottom -
+                            box('#first-run-options > aside a:not(.heading-anchor)').bottom,
+                        ) < 1
                       : lab.top >= quickstart.bottom && Math.abs(quickstart.width - lab.width) < 1;
                   const fullWidth = [
                     ...document.querySelectorAll('#evaluation-depth section'),
@@ -281,10 +296,19 @@ try {
                     const rect = section.getBoundingClientRect();
                     const heading = section.querySelector('h3').getBoundingClientRect();
                     const paragraph = section.querySelector('p').getBoundingClientRect();
+                    const body = section.lastElementChild.getBoundingClientRect();
+                    const lineHeight = parseFloat(
+                      getComputedStyle(section.querySelector('h3')).lineHeight,
+                    );
                     return (
                       Math.abs(rect.width - first.width) < 1 &&
-                      Math.abs(heading.width - rect.width) < 1 &&
-                      paragraph.width <= 700
+                      getComputedStyle(section).borderBottomWidth === '1px' &&
+                      Math.abs(paragraph.width - body.width) < 1 &&
+                      (innerWidth >= 1024
+                        ? Math.abs(heading.top - body.top) < 1 &&
+                          Math.abs((heading.width + 24) / 2 - (body.width + 24) / 3) < 1 &&
+                          heading.height <= 2 * lineHeight + 1
+                        : Math.abs(heading.width - rect.width) < 1 && body.top >= heading.bottom)
                     );
                   });
                   return (
@@ -302,6 +326,25 @@ try {
                   (await page.locator('#lab-scope-limit').isVisible()) &&
                   (await page.locator('#lab-scope-limit').textContent()) ===
                     'The simulation does not measure production throughput or disk durability.',
+              );
+              t.check(
+                'local validation includes CI; combined lab caveats precede its bottom-aligned action',
+                await page.locator('#first-run-options').evaluate((root) => {
+                  const local = root.querySelector('section > p');
+                  const caveat = root.querySelector('#lab-scope-limit').parentElement;
+                  const lab = root.querySelector('aside');
+                  return (
+                    local.textContent ===
+                      'Run a local broker with the quickstart, then produce and consume your first records. Point your existing Kafka clients, kcat, or integration tests at localhost:9092, and repeat those checks in CI as your application changes.' &&
+                    caveat.querySelector('#lab-phone-limit') &&
+                    caveat.textContent ===
+                      'View-only on phones. The simulation does not measure production throughput or disk durability.' &&
+                    caveat.nextElementSibling === lab.lastElementChild &&
+                    [...root.children].every((card) =>
+                      card.lastElementChild.classList.contains('mt-auto'),
+                    )
+                  );
+                }),
               );
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(
