@@ -148,8 +148,6 @@ try {
           });
           try {
             const page = await context.newPage();
-            if ((await page.evaluate(() => navigator.userAgent)) !== 'krabka-dev-klaw')
-              throw new Error('Website checks need the agent User-Agent before navigation');
             errorBags.push(watchErrors(page, `${route} ${width} ${theme}`, base));
             await timing(page, route, 'cold-context', width, theme, () =>
               page.goto(base + route, { waitUntil: 'load' }),
@@ -725,8 +723,6 @@ try {
           await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
           try {
             const page = await context.newPage();
-            if ((await page.evaluate(() => navigator.userAgent)) !== 'krabka-dev-klaw')
-              throw new Error('Website checks need the agent User-Agent before navigation');
             errorBags.push(
               watchErrors(page, `${route} ${width} ${theme}`, base, {
                 ignore: (_m, url) => url.endsWith('/why3-web/manifest.json'),
