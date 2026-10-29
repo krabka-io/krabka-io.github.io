@@ -13,6 +13,7 @@ import {
   watchErrors,
 } from './lab-check-lib.mjs';
 
+import { buildExcerpts } from '../src/utils/client-excerpts.mjs';
 import { websiteSnippets } from './snippets/extract.mjs';
 import { siteCheckSuite } from './site-check-suites.mjs';
 
@@ -192,6 +193,24 @@ try {
                 );
               }
             }
+            if (route === '/') {
+              const snippets = websiteSnippets(ROOT);
+              const clients = Object.fromEntries(
+                snippets
+                  .filter((s) => s.id.includes('/clientSnippets.'))
+                  .map((s) => [s.id.split('.').at(-1), s.code]),
+              );
+              const cli = snippets.find((s) => s.id.endsWith('/composeVerifyCode')).code;
+              for (const excerpt of buildExcerpts({ ...clients, cli })) {
+                await page.locator(`#home-tab-${excerpt.id}`).click();
+                t.check(
+                  `home ${excerpt.label} excerpt matches the tested source`,
+                  (await page.locator(`#home-panel-${excerpt.id} pre code`).textContent()) ===
+                    excerpt.text,
+                );
+              }
+              await page.locator('#home-tab-java').click();
+            }
             if (route === '/get-started/') {
               const pathways = page.locator('#evaluation-pathways');
               t.check(
@@ -261,7 +280,7 @@ try {
               t.check(
                 'quickstart is primary and lab is secondary',
                 await page.locator('#first-run-options').evaluate((root) => {
-                  const quickstart = root.querySelector('section a:not(.heading-anchor)');
+                  const quickstart = root.querySelector('section > .mt-auto > a');
                   const lab = root.querySelector('aside a:not(.heading-anchor)');
                   return (
                     quickstart.getAttribute('href') === '/docs/quickstart' &&
@@ -281,7 +300,6 @@ try {
                   const quickstart = box('#first-run-options > section');
                   const lab = box('#first-run-options > aside');
                   const depth = box('#evaluation-depth');
-                  const clients = box('#clients');
                   const columns =
                     innerWidth >= 1024
                       ? Math.abs(quickstart.top - lab.top) < 1 &&
@@ -290,7 +308,7 @@ try {
                         quickstart.width / lab.width > 1.5 &&
                         quickstart.width / lab.width < 1.6 &&
                         Math.abs(
-                          box('#first-run-options > section a:not(.heading-anchor)').bottom -
+                          box('#first-run-options > section > .mt-auto > a').bottom -
                             box('#first-run-options > aside a:not(.heading-anchor)').bottom,
                         ) < 1
                       : lab.top >= quickstart.bottom && Math.abs(quickstart.width - lab.width) < 1;
@@ -319,8 +337,8 @@ try {
                     columns &&
                     fullWidth &&
                     depth.top >= first.bottom &&
-                    clients.top >= depth.bottom &&
-                    Math.abs(clients.width - first.width) < 1
+                    document.querySelector('#clients') ===
+                      document.querySelector('#first-run-options > section')
                   );
                 }),
               );
@@ -350,23 +368,35 @@ try {
                   );
                 }),
               );
+              t.check(
+                'legacy client anchor links to the quickstart without duplicate examples',
+                (await page.locator('#clients a[href="/docs/quickstart"]').count()) === 1 &&
+                  (await page.locator('#clients a[href^="/docs/quickstart#"]').count()) === 0 &&
+                  (await page.locator('#client-tabs').count()) === 0,
+              );
+            }
+            if (route === '/docs/quickstart/') {
               const clientTabs = page.locator('#client-tabs [role="tab"]');
               t.check(
                 'client examples use evaluator order with Java selected initially',
                 JSON.stringify((await clientTabs.allTextContents()).map((text) => text.trim())) ===
-                  JSON.stringify(['Java', 'Python', 'Go', 'Node.js', 'Rust', 'Kafka CLI']) &&
+                  JSON.stringify(['Java', 'Python', 'Go', 'Node.js', 'Rust']) &&
                   (await clientTabs.first().getAttribute('aria-selected')) === 'true' &&
                   (await clientTabs.first().getAttribute('tabindex')) === '0' &&
-                  (await page.locator('#clients [role="tabpanel"]:visible').count()) === 1 &&
+                  (await page
+                    .locator('section[aria-labelledby="clients"] [role="tabpanel"]:visible')
+                    .count()) === 1 &&
                   (await page.locator('#client-c-java').isVisible()),
               );
+              const projectButton = page.getByRole('button', {
+                name: 'Copy Node.js project setup',
+                exact: true,
+              });
               t.check(
-                'runnable project is visible without a disclosure interaction',
-                (await page.locator('#javascript-project').isVisible()) &&
-                  (await page
-                    .locator('[aria-label="Copy JavaScript example setup"]')
-                    .isVisible()) &&
-                  (await page.locator('#clients details').count()) === 0,
+                'Node.js project is hidden with Java selected and absent from the table of contents',
+                !(await projectButton.isVisible()) &&
+                  (await page.locator('a[href="#javascript-project"]').count()) === 0 &&
+                  (await page.locator('section[aria-labelledby="clients"] details').count()) === 0,
               );
               for (const id of ['client-tabs']) {
                 const tabs = page.locator(`#${id} [role="tab"]`);
@@ -380,6 +410,138 @@ try {
                     (await page.locator(`#${panel}`).isVisible()),
                 );
               }
+              t.check(
+                'application step precedes admin inspection and cleanup',
+                await page.locator('main h2').evaluateAll((headings) => {
+                  const text = headings.map((heading) => heading.textContent);
+                  const clients = text.findIndex((heading) => heading.startsWith('4. Connect'));
+                  return (
+                    clients >= 0 &&
+                    text[clients + 1].startsWith('5. Inspect') &&
+                    text[clients + 2].startsWith('Clean up')
+                  );
+                }),
+              );
+              await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+              for (const tab of await page.locator('#client-tabs [role="tab"]').all()) {
+                await tab.click();
+                const panel = page.locator('#' + (await tab.getAttribute('aria-controls')));
+                const button = panel.locator('.copy-btn').first();
+                const code = panel.locator('pre code').first();
+                t.check(
+                  'client displayed code matches copy payload',
+                  (await code.textContent()) === (await button.getAttribute('data-copy')),
+                );
+                await button.click();
+                t.check(
+                  'client copy writes the full example',
+                  (await page.evaluate(() => navigator.clipboard.readText())) ===
+                    (await button.getAttribute('data-copy')),
+                );
+                t.check(
+                  'client panel stays within the page at this width',
+                  await panel.evaluate((el) => el.getBoundingClientRect().right <= innerWidth + 1),
+                );
+                t.check(
+                  'client tab explains its expected output',
+                  await panel.evaluate((el) => {
+                    const source = el.querySelector('pre code').textContent;
+                    const output = el.querySelector('.code-block').nextElementSibling;
+                    const expected = output.textContent;
+                    return (
+                      expected.startsWith('The example prints ') &&
+                      (source.includes('Delivered to partition')
+                        ? expected.includes('Delivered to partition 0 at offset N.')
+                        : source.includes(output.querySelector('code').textContent))
+                    );
+                  }),
+                );
+                if ((await tab.getAttribute('aria-controls')) === 'client-c-javascript') {
+                  const project = websiteSnippets(ROOT).find(
+                    (snippet) => snippet.id === 'docs/quickstart/javascriptRunCode',
+                  );
+                  t.check(
+                    'Node.js project is visible inside its selected tab',
+                    await projectButton.isVisible(),
+                  );
+                  t.check(
+                    'Node.js project displayed code and copy payload match the tested commands',
+                    (await projectButton.getAttribute('data-copy')) === project.code &&
+                      (await panel.locator('pre code').nth(1).textContent()) === project.code,
+                  );
+                  await projectButton.click();
+                  await waitFor(
+                    page,
+                    async (code) => (await navigator.clipboard.readText()) === code,
+                    'Node.js project clipboard update',
+                    5000,
+                    project.code,
+                  );
+                  t.check(
+                    'Node.js project copy writes the full setup',
+                    (await page.evaluate(() => navigator.clipboard.readText())) === project.code,
+                  );
+                  for (const asset of ['app.cjs', 'package.json']) {
+                    const link = panel.locator(`a[href="/quickstart/javascript/${asset}"]`);
+                    t.check(
+                      `Node.js ${asset} download is visible and serves the packaged file`,
+                      (await link.isVisible()) &&
+                        (await (
+                          await context.request.get(base + (await link.getAttribute('href')))
+                        ).text()) ===
+                          fs.readFileSync(
+                            path.join(ROOT, 'public/quickstart/javascript', asset),
+                            'utf8',
+                          ),
+                    );
+                  }
+                } else {
+                  t.check(
+                    'Node.js project is hidden outside its tab',
+                    !(await projectButton.isVisible()),
+                  );
+                }
+                if (width >= 1024)
+                  t.check(
+                    'client code fits desktop without horizontal scrolling',
+                    await panel
+                      .locator('pre')
+                      .first()
+                      .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+                  );
+                t.check(
+                  'shared token classes resolve to the active theme colors',
+                  await code.evaluate((root) =>
+                    [...root.querySelectorAll('[class*="tok-"]')].every((node) => {
+                      const tone = [...node.classList]
+                        .find((name) => name.startsWith('tok-'))
+                        .slice(4);
+                      const probe = document.createElement('span');
+                      probe.style.color = `var(--code-${tone})`;
+                      document.body.append(probe);
+                      const expected = getComputedStyle(probe).color;
+                      probe.remove();
+                      return getComputedStyle(node).color === expected;
+                    }),
+                  ),
+                );
+
+                await panel.screenshot({
+                  path: path.join(
+                    output,
+                    `client-${await tab.getAttribute('aria-controls')}-${width}-${theme}.png`,
+                  ),
+                });
+              }
+              await clientTabs.first().click();
+              await page.waitForFunction(() =>
+                [...document.querySelectorAll('main .copy-btn')].every(
+                  (button) => button.textContent.trim() === 'Copy',
+                ),
+              );
+              await page.locator('section[aria-labelledby="clients"]').screenshot({
+                path: path.join(output, `client-examples-${width}-${theme}.png`),
+              });
             }
             if (['/docs/', '/get-started/'].includes(route))
               t.check(
@@ -403,7 +565,11 @@ try {
               );
               t.check(
                 'next-task cards and table of contents are present',
-                (await page.locator('#choose-your-next-task + div a').count()) === 2 &&
+                JSON.stringify(
+                  await page
+                    .locator('#choose-your-next-task + div a')
+                    .evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+                ) === JSON.stringify(['/docs/kip-matrix', '/docs/operations']) &&
                   (await page.locator('a[href="#choose-your-next-task"]').count()) > 0,
               );
               t.check(

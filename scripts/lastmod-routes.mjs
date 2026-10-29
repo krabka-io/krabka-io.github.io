@@ -68,7 +68,7 @@ const benchmarkInputs = [
   'benchmarks/openmessaging/**/intervals.json',
 ];
 const generatedInputs = {
-  '/': ['src/pages/get-started.astro', 'src/data/versions.json', ...benchmarkInputs],
+  '/': ['src/pages/docs/quickstart.astro', 'src/data/versions.json', ...benchmarkInputs],
   '/benchmarks': benchmarkInputs,
   '/benchmarks/explorer': ['benchmarks/archive/README.md', 'benchmarks/archive/*.tar.gz'],
   '/docs/lab': ['public/playground/lab/**', 'public/playground/*.html'],

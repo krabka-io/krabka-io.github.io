@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { buildExcerpts } from '../../src/utils/client-excerpts.mjs';
 import { astroSnippets, markdownSnippets, websiteSnippets } from './extract.mjs';
 
 test('extract the website literals, including shell escapes and release interpolation', () => {
   const snippets = websiteSnippets(process.cwd());
-  assert.equal(snippets.length, 24);
+  assert.equal(snippets.length, 23);
   assert(
     snippets
       .find((s) => s.id === 'docs/quickstart/composeVerifyCode')
@@ -23,7 +24,11 @@ test('extract the website literals, including shell escapes and release interpol
   assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
   assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));
   assert(snippets.find((s) => s.id === 'docs/quickstart/inspectSnippet'));
-  assert(!snippets.some((s) => /^get-started\/(deploySnippets\.|inspectSnippet)/.test(s.id)));
+  assert(!snippets.some((s) => s.id.startsWith('get-started/')));
+  assert.equal(
+    snippets.filter((s) => s.id.startsWith('docs/quickstart/clientSnippets.')).length,
+    5,
+  );
 });
 
 test('new or missing displayed snippets fail coverage', () => {
@@ -51,7 +56,9 @@ test('startup and verification omit cleanup; the download matches the tested pro
       `${snippet.id} includes cleanup`,
     );
   }
-  const javascript = snippets.find((s) => s.id === 'get-started/clientSnippets.javascript').code;
+  const javascript = snippets.find(
+    (s) => s.id === 'docs/quickstart/clientSnippets.javascript',
+  ).code;
   assert.equal(
     readFileSync('public/quickstart/javascript/app.cjs', 'utf8').trim(),
     javascript.trim(),
@@ -98,4 +105,25 @@ test('split Helm startup retains command order and the round trip retains shell 
   assert(script.includes('--max-messages 1 --timeout-ms 30000'));
   assert(!/set -|pipefail/.test(script));
   assert(script.includes("printf 'hello krabka\\n'"));
+});
+
+test('home excerpts use the five application sources and the tested Step 3 CLI round trip', () => {
+  const snippets = websiteSnippets(process.cwd());
+  const clients = Object.fromEntries(
+    snippets
+      .filter((s) => s.id.includes('/clientSnippets.'))
+      .map((s) => [s.id.split('.').at(-1), s.code]),
+  );
+  assert(!('cli' in clients));
+  const cli = snippets.find((s) => s.id.endsWith('/composeVerifyCode')).code;
+  const excerpts = buildExcerpts({ ...clients, cli });
+  assert.deepEqual(
+    excerpts.map((e) => e.id),
+    ['java', 'python', 'go', 'javascript', 'cli'],
+  );
+  assert(excerpts.find((e) => e.id === 'java').text.includes(')).get();'));
+  assert(
+    excerpts.find((e) => e.id === 'go').text.includes('Value: []byte("Hello Krabka from Go!")'),
+  );
+  assert(excerpts.find((e) => e.id === 'cli').text.includes('--bootstrap-server localhost:9092'));
 });

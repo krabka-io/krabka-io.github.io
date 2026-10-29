@@ -278,7 +278,7 @@ These safeguards support the guide; they are not content to show in the visitor 
 
 ### Code samples
 
-The get-started client snippets run against a real broker in CI through `scripts/check-snippets.mjs`. Do not change their record values. Homepage code excerpts are cut from those snippets at build time through `src/utils/client-excerpts.mjs`; do not maintain handwritten copies on the homepage. Every `<CodeBlock>` on a page listed in `scripts/snippets/extract.mjs` needs CI coverage there.
+The local quickstart client snippets run against a real broker in CI through `scripts/check-snippets.mjs`. Do not change their record values. Homepage code excerpts are cut from those snippets at build time through `src/utils/client-excerpts.mjs`; do not maintain handwritten copies on the homepage. Every `<CodeBlock>` on a page listed in `scripts/snippets/extract.mjs` needs CI coverage there.
 
 ### Documentation ownership and links
 

@@ -57,7 +57,7 @@ logic that changes content, and tracked data. The route map adds file-read
 inputs that imports cannot discover. Benchmark pages include tracked report
 and trial files; the explorer uses tracked LFS archives rather than generated
 archive JSON. Verification pages include the synced broker catalog and tracked
-kernel/model data. The homepage also includes the get-started source used for
+kernel/model data. The homepage also includes the local quickstart source used for
 its client excerpts and the tracked version data used in homepage structured
 data. Other pages do not inherit that unused layout import. The proof explorer includes its tracked scripts and data,
 the sync generator, and the broker catalog rather than treating its generated
@@ -162,6 +162,8 @@ See [the benchmark instructions](../benchmarks/README.md) for execution and publ
 ## Code highlighting
 
 - Every code snippet is highlighted with Shiki and one theme, `src/utils/krabka-shiki-theme.mjs`, whose palette is the one the rustdoc, Javadoc and Go API sites use. Hand-written pages render snippets through `src/components/CodeBlock.astro` (pass the Shiki language id); the synced Markdown guides get the same theme from `markdown.shikiConfig` in `astro.config.mjs`. The proof explorer highlights Coma in the browser with its own small tokenizer, because Shiki runs at build time and the explorer loads each Coma file on demand.
+
+- Authored `CodeBlock` components use `src/utils/compact-code-tokens.mjs` to merge adjacent Shiki tokens with identical styles and replace known token colors with shared `.tok-*` classes in `src/styles/custom.css`. The classes use the same `--code-*` theme variables. Unknown or compound styles stay inline. Synced Markdown rendering is unchanged.
 
 ## Source map
 

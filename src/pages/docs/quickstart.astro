@@ -32,18 +32,156 @@ docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_TOOLS" /opt/kafka/bin/kafka-b
 
 const composeCleanupCode = `docker compose down --volumes`;
 
+const clientSnippets = {
+  rust: `// Cargo.toml:
+//   [dependencies]
+//   bytes = "1"
+//   tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+//   [dependencies.krabka-client-producer]
+//   git = "https://github.com/krabka-io/krabka-client-rs"
+//   rev = "c4ce581587772b3750d88c61f3389d9626a20235"
+//   plus the [patch.crates-io] block from that revision's Cargo.toml
+//   (see /docs/streams-rs)
+use bytes::Bytes;
+use krabka_client_producer::{Acks, Producer, ProducerRecord};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let producer = Producer::builder()
+        .bootstrap("localhost:9092")
+        .acks(Acks::All)
+        .build()
+        .await?;
+
+    let metadata = producer
+        .send(ProducerRecord {
+            topic: "quickstart-events".into(),
+            key: Some(Bytes::from("user-1")),
+            value: Some(Bytes::from("Hello Krabka from Rust!")),
+            ..Default::default()
+        })
+        .await?;
+
+    producer.flush().await?;
+    producer.close().await?;
+    println!(
+        "Delivered to partition {} at offset {}.",
+        metadata.partition, metadata.offset
+    );
+    Ok(())
+}`,
+  go: `// go get github.com/twmb/franz-go/pkg/kgo
+// Produce a record with the franz-go Kafka client.
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/twmb/franz-go/pkg/kgo"
+)
+
+func main() {
+    cl, err := kgo.NewClient(kgo.SeedBrokers("localhost:9092"))
+    if err != nil { panic(err) }
+    defer cl.Close()
+
+    rec := &kgo.Record{
+        Topic: "quickstart-events",
+        Key: []byte("user-1"),
+        Value: []byte("Hello Krabka from Go!"),
+    }
+    if err := cl.ProduceSync(context.Background(), rec).FirstErr(); err != nil {
+        panic(err)
+    }
+    fmt.Println("Produced message to Krabka!")
+}`,
+  java: `// Maven dependency: org.apache.kafka:kafka-clients:4.3.1
+// Produce a record with the standard Apache Kafka Java client.
+import org.apache.kafka.clients.producer.*;
+import java.util.Properties;
+
+public class App {
+    public static void main(String[] args)
+            throws InterruptedException,
+                   java.util.concurrent.ExecutionException {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "localhost:9092");
+        props.put("key.serializer",
+            "org.apache.kafka.common.serialization.StringSerializer");
+        props.put("value.serializer",
+            "org.apache.kafka.common.serialization.StringSerializer");
+
+        Producer<String, String> producer = new KafkaProducer<>(props);
+        producer.send(new ProducerRecord<>(
+            "quickstart-events", "user-1", "Hello Krabka from Java!"
+        )).get();
+        System.out.println("Record delivered to quickstart-events.");
+        producer.close();
+    }
+}`,
+  python: `# python -m pip install confluent-kafka==2.15.1
+# Save as app.py and run: python app.py
+from confluent_kafka import Producer
+
+producer = Producer({"bootstrap.servers": "localhost:9092"})
+
+def delivered(error, message):
+    if error is not None:
+        raise RuntimeError(str(error))
+    print(f"Delivered to partition {message.partition()} at offset {message.offset()}.")
+
+producer.produce(
+    "quickstart-events",
+    key="user-1",
+    value="Hello Krabka from Python!",
+    on_delivery=delivered,
+)
+if producer.flush(30) != 0:
+    raise TimeoutError("Message delivery timed out")`,
+  javascript: `// npm install kafkajs@2.2.4
+// Save as app.cjs and run: node app.cjs
+const { Kafka } = require('kafkajs');
+
+async function main() {
+    const kafka = new Kafka({ clientId: 'quickstart', brokers: ['localhost:9092'] });
+    const producer = kafka.producer();
+    await producer.connect();
+    try {
+        await producer.send({
+            topic: 'quickstart-events',
+            messages: [{ key: 'user-1', value: 'Hello Krabka from KafkaJS!' }],
+        });
+        console.log('Record delivered to quickstart-events.');
+    } finally {
+        await producer.disconnect();
+    }
+}
+
+main().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});`
+};
+
+const javascriptRunCode = `mkdir krabka-javascript
+cd krabka-javascript
+curl -fsSL https://krabka.io/quickstart/javascript/package.json -o package.json
+curl -fsSL https://krabka.io/quickstart/javascript/app.cjs -o app.cjs
+npm install
+npm start`;
 ---
 
 <DocsLayout
   title="Local quickstart"
-  description="Start a local Krabka broker, check readiness, create a topic, and produce and read a record with containerized Kafka tools."
+  description="Start a local Krabka broker, check readiness, and send records with Kafka tools and application client examples."
   currentSlug="/docs/quickstart"
 >
   <div class="space-y-6 font-sans text-sm text-gray-300 leading-relaxed">
     <div class="border-b border-white/10 pb-4">
       <h1 class="text-3xl font-extrabold text-white sm:text-4xl">Run Krabka and read your first record</h1>
       <QuickstartSwitch current="local" />
-      <p class="mt-2 text-gray-400">Run a local Krabka broker, then produce and consume your first record with containerized Kafka tools. Keep the broker running to try a client example.</p>
+      <p class="mt-2 text-gray-400">Run a local Krabka broker, produce and consume your first record with containerized Kafka tools, and connect your application with a client example.</p>
     </div>
 
     <h2 class="text-xl font-bold text-white">Before you start</h2>
@@ -78,7 +216,81 @@ const composeCleanupCode = `docker compose down --volumes`;
     </div>
     <p>The consumer prints <code>hello krabka</code> and exits after one record. If it times out, confirm that readiness passes and that the producer finished successfully.</p>
 
-    <h2 class="text-xl font-bold text-white pt-2">4. Inspect the cluster with Kafka admin tools</h2>
+    <!-- Application client examples -->
+    <section aria-labelledby="clients" class="space-y-4 min-w-0">
+      <h2 id="clients" class="text-xl font-bold text-white pt-2">4. Connect your application</h2>
+
+      <p>Keep the broker running after Step 3. These examples use <code>localhost:9092</code> and the <code>quickstart-events</code> topic. Java, Python, Go, and Node.js use Kafka clients without custom adapters or Krabka SDKs. The Rust example uses the Krabka Rust producer.</p>
+      <p>For Kubernetes, use the <a href={getPath('/docs/kubernetes-quickstart#round-trip')} class="text-krab-400 underline underline-offset-2">in-cluster round trip</a>; these localhost examples do not connect to that cluster unchanged.</p>
+      <p>Test your application's features and security settings separately.</p>
+
+      <div class="min-w-0">
+        <div class="flex flex-wrap border-b border-white/10 px-4 py-2.5 gap-2" role="tablist" id="client-tabs" aria-label="Client language">
+          <button type="button" role="tab" id="client-tab-c-java" aria-controls="client-c-java" aria-selected="true" tabindex="0" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Java
+          </button>
+          <button type="button" role="tab" id="client-tab-c-python" aria-controls="client-c-python" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Python
+          </button>
+          <button type="button" role="tab" id="client-tab-c-go" aria-controls="client-c-go" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Go
+          </button>
+          <button type="button" role="tab" id="client-tab-c-javascript" aria-controls="client-c-javascript" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Node.js
+          </button>
+          <button type="button" role="tab" id="client-tab-c-rust" aria-controls="client-c-rust" aria-selected="false" tabindex="-1" class="rounded-lg px-3.5 py-1.5 text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 aria-selected:bg-krab-600 aria-selected:text-white">
+            Rust
+          </button>
+        </div>
+
+        <div class="py-4 text-sm leading-relaxed text-gray-200">
+          <div id="client-c-java" role="tabpanel" aria-labelledby="client-tab-c-java">
+            <p class="mb-3 font-sans text-sm text-gray-300">Install JDK 21 or later. Use the dependency shown in the example.</p>
+            <div class="flex justify-end gap-3 items-center mb-2"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10 font-sans" data-copy={clientSnippets.java} aria-label="Copy Java example">Copy</button></div>
+            <CodeBlock size="sm" code={clientSnippets.java} lang="java" />
+            <p class="mt-3 font-sans text-gray-300">The example prints <code>Record delivered to quickstart-events.</code></p>
+          </div>
+
+          <div id="client-c-python" role="tabpanel" aria-labelledby="client-tab-c-python" hidden>
+            <p class="mb-3 font-sans text-sm text-gray-300">Install Python with pip. Use the installation command shown in the example.</p>
+            <div class="flex justify-end gap-3 items-center mb-2"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10 font-sans" data-copy={clientSnippets.python} aria-label="Copy Python example">Copy</button></div>
+            <CodeBlock size="sm" code={clientSnippets.python} lang="python" />
+            <p class="mt-3 font-sans text-gray-300">The example prints <code>Delivered to partition 0 at offset N.</code></p>
+          </div>
+
+          <div id="client-c-go" role="tabpanel" aria-labelledby="client-tab-c-go" hidden>
+            <p class="mb-3 font-sans text-sm text-gray-300">Install Go. Use the module command shown in the example.</p>
+            <div class="flex justify-end gap-3 items-center mb-2"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10 font-sans" data-copy={clientSnippets.go} aria-label="Copy Go example">Copy</button></div>
+            <CodeBlock size="sm" code={clientSnippets.go} lang="go" />
+            <p class="mt-3 font-sans text-gray-300">The example prints <code>Produced message to Krabka!</code></p>
+          </div>
+
+          <div id="client-c-javascript" role="tabpanel" aria-labelledby="client-tab-c-javascript" hidden>
+            <p class="mb-3 font-sans text-sm text-gray-300">Install Node.js with npm.</p>
+            <div class="flex justify-end gap-3 items-center mb-2"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10 font-sans" data-copy={clientSnippets.javascript} aria-label="Copy Node.js example">Copy</button></div>
+            <CodeBlock size="sm" code={clientSnippets.javascript} lang="javascript" />
+            <p class="mt-3 font-sans text-gray-300">The example prints <code>Record delivered to quickstart-events.</code></p>
+            <div class="mt-6 space-y-4">
+              <p>To run it as a project instead:</p>
+              <p class="text-sm text-gray-300">Keep the broker running. Run these commands in a separate terminal.</p>
+              <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={javascriptRunCode} aria-label="Copy Node.js project setup">Copy</button></div>
+              <CodeBlock code={javascriptRunCode} lang="bash" />
+              <p class="text-sm text-gray-400"><a href={getPath('/quickstart/javascript/app.cjs')} class="text-krab-400 underline underline-offset-2">Download the source</a> · <a href={getPath('/quickstart/javascript/package.json')} class="text-krab-400 underline underline-offset-2">Download the package manifest</a></p>
+            </div>
+          </div>
+
+          <div id="client-c-rust" role="tabpanel" aria-labelledby="client-tab-c-rust" hidden>
+            <p class="mb-3 font-sans text-sm text-gray-300">Install Rust with Cargo. Use the pinned producer, and add the <code>[patch.crates-io]</code> block that the example describes.</p>
+            <div class="flex justify-end gap-3 items-center mb-2"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10 font-sans" data-copy={clientSnippets.rust} aria-label="Copy Rust example">Copy</button></div>
+            <CodeBlock size="sm" code={clientSnippets.rust} lang="rust" />
+            <p class="mt-3 font-sans text-gray-300">The example prints <code>Delivered to partition 0 at offset N.</code></p>
+          </div>
+        </div>
+      </div>
+      <p class="mt-4 text-sm text-gray-400">To read all records from <code>quickstart-events</code>, omit <code>--max-messages 1</code> from the Step 3 consumer command and press Ctrl+C to stop.</p>
+    </section>
+
+    <h2 class="text-xl font-bold text-white pt-2">5. Inspect the cluster with Kafka admin tools</h2>
     <p>Use the Apache Kafka admin tools to describe <code>quickstart-events</code>, inspect the KRaft quorum, list consumer groups, and check the negotiated API versions. See the <a href={getPath('/docs/kip-matrix')} class="text-krab-400 underline underline-offset-2">compatibility matrix</a> for supported protocol versions.</p>
     <div class="space-y-3">
       <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={inspectSnippet} aria-label="Copy local cluster inspection commands">Copy</button></div>
@@ -88,7 +300,7 @@ const composeCleanupCode = `docker compose down --volumes`;
     <p>The broker also serves Prometheus metrics on port <code>9404</code>. To collect metrics alongside traces, logs, and profiles, see <a href="https://github.com/krabka-io/krabka-o11y" class="text-krab-400 underline underline-offset-2">krabka-o11y</a>.</p>
 
     <h2 class="text-xl font-bold text-white pt-2">Clean up the local broker</h2>
-    <p>Cleanup is optional. This stops the local broker and <strong>deletes its Docker volume, including all records.</strong> Keep the broker running to try a client example.</p>
+    <p>Cleanup is optional. This stops the local broker and <strong>deletes its Docker volume, including all records.</strong></p>
     <div class="space-y-3">
       <div class="flex justify-end gap-3 items-center"><button type="button" class="copy-btn rounded bg-white/5 px-2 py-1 hover:bg-white/10" data-copy={composeCleanupCode} aria-label="Copy local cleanup commands">Copy</button></div>
       <CodeBlock code={composeCleanupCode} lang="bash" />
@@ -96,9 +308,15 @@ const composeCleanupCode = `docker compose down --volumes`;
 
     <h2 class="text-xl font-bold text-white pt-2">Choose your next task</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <a href={getPath('/get-started#clients')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Connect your application</h3><p class="mt-1 text-gray-400">Use a client example, including a downloadable JavaScript project.</p></a>
+      <a href={getPath('/docs/kip-matrix')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Check compatibility</h3><p class="mt-1 text-gray-400">Compare the supported Kafka APIs with the APIs your clients use.</p></a>
       <a href={getPath('/docs/operations')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50"><h3 class="font-bold text-white">Operate a cluster</h3><p class="mt-1 text-gray-400">Read recovery and upgrade procedures for your Krabka version.</p></a>
     </div>
 
   </div>
 </DocsLayout>
+
+<script>
+  import { initTabs } from '../../utils/tabs';
+
+  document.querySelectorAll<HTMLElement>('#client-tabs').forEach((list) => initTabs(list));
+</script>
