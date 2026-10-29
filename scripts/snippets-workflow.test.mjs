@@ -29,6 +29,7 @@ function contract(doc) {
   assert.equal(snippets['continue-on-error'], undefined);
   assert.deepEqual(snippets.strategy.matrix.suite, [
     'check',
+    'standalone',
     'compose',
     'helm',
     'rust',
@@ -96,9 +97,13 @@ for (const [name, mutate] of Object.entries({
     mutate(doc);
     assert.throws(() => contract(doc));
   });
-test('snippet scenarios: content, draft and ready; all release events select all eight shards', () => {
+test('snippet scenarios: content, draft and ready; release events select all shards', () => {
   const event = { pull_request: { draft: false } };
   assert.equal(selectChecks('pull_request', event, () => ['docs/architecture.md']).snippets, false);
+  assert.equal(
+    selectChecks('pull_request', event, () => ['src/pages/docs/broker.astro']).snippets,
+    true,
+  );
   assert.equal(
     selectChecks('pull_request', event, () => ['public/quickstart/docker-compose.yml']).snippets,
     true,

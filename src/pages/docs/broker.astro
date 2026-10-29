@@ -13,7 +13,7 @@ const runCommand = `# 1. Initialize KRaft metadata on a fresh storage volume
 docker run --rm \\
   -v krabka-data:/var/lib/krabka \\
   --entrypoint /usr/bin/krabka-format \\
-  ghcr.io/krabka-io/krabka-broker:latest \\
+  ghcr.io/krabka-io/krabka-broker:${activeRelease} \\
   --log-dir=/var/lib/krabka \\
   --standalone \\
   --node-id=1 \\
@@ -24,18 +24,21 @@ docker run -d \\
   --name krabka \\
   -p 9092:9092 \\
   -v krabka-data:/var/lib/krabka \\
-  ghcr.io/krabka-io/krabka-broker:latest \\
+  ghcr.io/krabka-io/krabka-broker:${activeRelease} \\
   --listen-addr=0.0.0.0:9092 \\
   --advertised-listener=localhost:9092 \\
   --log-dir=/var/lib/krabka \\
-  --process-roles=controller,broker`;
+  --process-roles=controller,broker \\
+  --offsets-topic-replication-factor=1 \\
+  --transaction-state-replication-factor=1 \\
+  --transaction-state-min-isr=1`;
 
 const brokerCrates = [
   { name: 'krabka-broker', desc: 'Cluster-capable Kafka-compatible broker: request handlers, coordinators, partition replication, quotas, and the krabka-broker daemon binary' },
   { name: 'krabka-raft', desc: 'Metadata KRaft quorum (KIP-595 KraftController)' },
   { name: 'krabka-kraft-core', desc: 'Deterministic, sans-IO KRaft consensus core (KIP-595/996)' },
   { name: 'krabka-log', desc: 'Byte-compatible reader and writer for Apache Kafka\'s on-disk log format' },
-  { name: 'krabka-logfmt', desc: 'Structured-JSON tracing log formatter shared across krabka services' },
+  { name: 'krabka-logfmt', desc: 'Structured-JSON tracing log formatter shared across Krabka services' },
   { name: 'krabka-remote-storage', desc: 'KIP-405 tiered-storage SPI (RemoteStorageManager and RemoteLogMetadataManager) with reference implementations; ships the krabka-worm-verify binary' },
   { name: 'krabka-remote-storage-topic', desc: 'Topic-backed RemoteLogMetadataManager for tiered storage' },
   { name: 'krabka-object-store', desc: 'Unified object-store construction (S3-compatible, GCS, local filesystem) shared by tiered storage and the observability blockstore' },
@@ -55,7 +58,7 @@ const brokerCrates = [
 
 <DocsLayout
   title="Broker Engine Overview (krabka-broker)"
-  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the krabka broker."
+  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the Krabka broker."
   currentSlug="/docs/broker"
 >
   <div class="space-y-6 font-sans">
@@ -113,6 +116,12 @@ const brokerCrates = [
 
       <!-- Quickstart Running Broker -->
       <h2 class="text-xl font-bold text-white pt-2">Running a Broker</h2>
+      <p>
+        Install Docker and use a fresh <code>krabka-data</code> named volume for this
+        single-node evaluation. Docker initializes the volume from the image's writable
+        data directory. These commands are not instructions for upgrading an existing cluster.
+        Port <code>9092</code> and the container name <code>krabka</code> must be available.
+      </p>
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
         <div class="flex items-center justify-between text-xs text-gray-400">
           <span>Docker Run (Single-Node KRaft)</span>
@@ -122,6 +131,11 @@ const brokerCrates = [
         </div>
         <CodeBlock code={runCommand} lang="bash" />
       </div>
+      <p>
+        A running container does not confirm broker readiness. Follow the
+        <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">complete Docker Compose quickstart</a>
+        for readiness checks, a produce-and-consume round trip, and cleanup.
+      </p>
 
       <!-- Published Crates Table -->
       <h2 class="text-xl font-bold text-white pt-2">Broker Crates & Subsystems</h2>
@@ -202,11 +216,11 @@ const brokerCrates = [
       <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
         <a href={getPath('/docs/broker/verification')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
-          <div class="text-sm font-bold text-white">Verification Catalog →</div>
+          <div class="text-sm font-bold text-white">Verification catalog</div>
           <p class="text-xs text-gray-400 mt-1">Every Creusot-proved kernel, every Stateright model, and the preconditions each caller has to establish.</p>
         </a>
         <a href={getPath('/docs/runtime-architecture')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
-          <div class="text-sm font-bold text-white">Runtime Architecture →</div>
+          <div class="text-sm font-bold text-white">Runtime architecture</div>
           <p class="text-xs text-gray-400 mt-1">Operational topology, internal broker components, and control plane reconcile loops.</p>
         </a>
       </div>

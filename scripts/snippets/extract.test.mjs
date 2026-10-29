@@ -7,7 +7,7 @@ import { astroSnippets, markdownSnippets, websiteSnippets } from './extract.mjs'
 
 test('extract the website literals, including shell escapes and release interpolation', () => {
   const snippets = websiteSnippets(process.cwd());
-  assert.equal(snippets.length, 23);
+  assert.equal(snippets.length, 24);
   assert(
     snippets
       .find((s) => s.id === 'docs/quickstart/composeVerifyCode')
@@ -20,6 +20,12 @@ test('extract the website literals, including shell escapes and release interpol
   );
   assert(!snippets.find((s) => s.id.endsWith('/javaGradle')).code.includes('${'));
   const versions = JSON.parse(readFileSync('src/data/versions.json', 'utf8'));
+  const standalone = snippets.find((s) => s.id === 'docs/broker/runCommand').code;
+  assert.equal(
+    standalone.split(`ghcr.io/krabka-io/krabka-broker:v${versions.broker.version}`).length - 1,
+    2,
+  );
+  assert(!standalone.includes(':latest') && !standalone.includes('${'));
   const helm = snippets.find((s) => s.id === 'docs/kubernetes-quickstart/helmInstallCode').code;
   assert(helm.includes(`--version ${versions.operator.version} --skip-crds`));
   assert(!helm.includes('--set image.') && !helm.includes('--set-string image.'));

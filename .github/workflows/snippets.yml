@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [check, compose, helm, rust, go, java, python, javascript]
+        suite: [check, standalone, compose, helm, rust, go, java, python, javascript]
     steps:
       - name: Keep temporary files off the size-limited /tmp tmpfs
         run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
@@ -67,7 +67,7 @@ jobs:
           go-version: '1.27.x'
           cache: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        if: matrix.suite == 'java'
+        if: matrix.suite == 'java' || matrix.suite == 'standalone'
         with:
           distribution: temurin
           java-version: '21'
