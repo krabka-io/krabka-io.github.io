@@ -58,7 +58,7 @@ const brokerCrates = [
 
 <DocsLayout
   title="Broker Engine Overview (krabka-broker)"
-  description="Architecture, request handling pipeline, storage layout, and KRaft consensus in the Krabka broker."
+  description="Run a single-node Krabka broker with Docker, then explore its architecture, request pipeline, storage layout, and KRaft consensus."
   currentSlug="/docs/broker"
 >
   <div class="space-y-6 font-sans">
@@ -117,10 +117,9 @@ const brokerCrates = [
       <!-- Quickstart Running Broker -->
       <h2 class="text-xl font-bold text-white pt-2">Running a Broker</h2>
       <p>
-        Install Docker and use a fresh <code>krabka-data</code> named volume for this
-        single-node evaluation. Docker initializes the volume from the image's writable
-        data directory. These commands are not instructions for upgrading an existing cluster.
-        Port <code>9092</code> and the container name <code>krabka</code> must be available.
+        Install Docker, make sure port <code>9092</code> and the container name
+        <code>krabka</code> are free, and use a fresh <code>krabka-data</code> named volume.
+        These commands are for a single-node evaluation, not for upgrading an existing cluster.
       </p>
       <div class="frosted-card rounded-xl p-5 border border-white/10 space-y-3">
         <div class="flex items-center justify-between text-xs text-gray-400">
@@ -132,9 +131,10 @@ const brokerCrates = [
         <CodeBlock code={runCommand} lang="bash" />
       </div>
       <p>
-        A running container does not confirm broker readiness. Follow the
-        <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">complete Docker Compose quickstart</a>
-        for readiness checks, a produce-and-consume round trip, and cleanup.
+        Run <code>docker logs krabka</code> and look for <code>krabka-broker started</code>
+        with <code>listen_addr</code> set to <code>0.0.0.0:9092</code>.
+        Follow the <a href={getPath('/docs/quickstart')} class="text-krab-400 underline underline-offset-2 hover:text-krab-300">Local quickstart</a>
+        for a Kafka API readiness check, a produce-and-consume round trip, and cleanup.
       </p>
 
       <!-- Published Crates Table -->
@@ -216,11 +216,11 @@ const brokerCrates = [
       <h2 class="text-xl font-bold text-white pt-2">Related Resources</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 not-prose pt-1">
         <a href={getPath('/docs/broker/verification')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
-          <div class="text-sm font-bold text-white">Verification catalog</div>
+          <div class="text-sm font-bold text-white">Verification catalog →</div>
           <p class="text-xs text-gray-400 mt-1">Every Creusot-proved kernel, every Stateright model, and the preconditions each caller has to establish.</p>
         </a>
         <a href={getPath('/docs/runtime-architecture')} class="p-4 rounded-xl frosted-card border border-white/10 hover:border-krab-500/50 transition-colors block">
-          <div class="text-sm font-bold text-white">Runtime architecture</div>
+          <div class="text-sm font-bold text-white">Runtime architecture →</div>
           <p class="text-xs text-gray-400 mt-1">Operational topology, internal broker components, and control plane reconcile loops.</p>
         </a>
       </div>
