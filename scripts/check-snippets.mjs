@@ -14,7 +14,9 @@ const work = `${root}/.snippets`;
 const mode = process.argv[2] ?? 'check';
 const project = `website-snippets-${process.pid}`;
 assert(
-  ['check', 'compose', 'helm', 'rust', 'go', 'java', 'python', 'javascript'].includes(mode),
+  ['check', 'standalone', 'compose', 'helm', 'rust', 'go', 'java', 'python', 'javascript'].includes(
+    mode,
+  ),
   `Unknown suite: ${mode}`,
 );
 mkdirSync(work, { recursive: true });
@@ -89,6 +91,7 @@ async function guide(language) {
 const toolsImage = get('docs/quickstart/composeReadyCode').match(/KAFKA_TOOLS=(\S+)/)[1];
 const compose = ['compose', '--project-name', project, '-f', `${work}/docker-compose.yml`];
 function brokerNetwork() {
+  if (mode === 'standalone') return `container:${project}`;
   const id = run('docker', [...compose, 'ps', '-q', 'broker'], work, {
     stdio: ['ignore', 'pipe', 'inherit'],
   })
@@ -399,6 +402,115 @@ if (mode === 'python' || mode === 'javascript') {
       `Hello Krabka from ${mode === 'python' ? 'Python' : 'KafkaJS'}!`,
     );
   });
+}
+
+if (mode === 'standalone') {
+  const volume = `${project}-data`;
+  const code = get('docs/broker/runCommand')
+    .replaceAll('krabka-data:', `${volume}:`)
+    .replace('--name krabka', `--name ${project}`)
+    .replace('-p 9092:9092', '-p 127.0.0.1::9092');
+  // Only names and the published host port change. In particular, do not repair
+  // permissions or add broker flags outside the displayed command.
+  const image = code.match(/ghcr\.io\/krabka-io\/krabka-broker:\S+/)[0];
+  // Refuse pre-existing resources before entering the cleanup scope.
+  for (const [kind, filter] of [
+    ['volume', `name=^${volume}$`],
+    ['container', `name=^/${project}$`],
+  ]) {
+    assert.equal(
+      run(
+        'docker',
+        [...(kind === 'volume' ? ['volume', 'ls', '-q'] : ['ps', '-aq']), '--filter', filter],
+        work,
+        {
+          stdio: ['ignore', 'pipe', 'inherit'],
+        },
+      )
+        .toString()
+        .trim(),
+      '',
+      `Standalone suite needs a fresh ${kind}`,
+    );
+  }
+  try {
+    shell(code, 'standalone-start');
+    run('docker', [
+      'image',
+      'inspect',
+      image,
+      '--format',
+      '{{json .RepoDigests}} user={{.Config.User}}',
+    ]);
+    waitForBroker();
+    // Compile against the same client jar that the pinned tools image runs.
+    write(
+      'standalone/kafka-clients.jar',
+      run(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--entrypoint',
+          '/bin/sh',
+          toolsImage,
+          '-c',
+          'cat /opt/kafka/libs/kafka-clients-*.jar',
+        ],
+        work,
+        { stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 32 * 1024 * 1024 },
+      ),
+    );
+    run('javac', [
+      '--release',
+      '21',
+      '-cp',
+      `${work}/standalone/kafka-clients.jar`,
+      '-d',
+      `${work}/standalone`,
+      `${root}/scripts/snippets/StandaloneCheck.java`,
+    ]);
+    run(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--network',
+        brokerNetwork(),
+        '-v',
+        `${work}/standalone:/fixture:ro`,
+        '--entrypoint',
+        'java',
+        toolsImage,
+        '-cp',
+        '/opt/kafka/libs/*:/fixture',
+        'StandaloneCheck',
+      ],
+      work,
+      { timeout: 3 * 60 * 1000 },
+    );
+  } finally {
+    const container = run('docker', ['ps', '-aq', '--filter', `name=^/${project}$`], work, {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+      .toString()
+      .trim();
+    if (container) {
+      run('docker', ['logs', project]);
+      run('docker', ['rm', '-f', project]);
+    }
+    const remainingVolume = run(
+      'docker',
+      ['volume', 'ls', '-q', '--filter', `name=^${volume}$`],
+      work,
+      {
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    )
+      .toString()
+      .trim();
+    if (remainingVolume) run('docker', ['volume', 'rm', volume]);
+  }
 }
 
 if (mode === 'compose') {

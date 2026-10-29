@@ -4,6 +4,7 @@ import { runInNewContext } from 'node:vm';
 
 export const pages = {
   'get-started': [],
+  'docs/broker': ['runCommand'],
   'docs/quickstart': [
     'clientSnippets.java',
     'clientSnippets.python',
@@ -40,8 +41,8 @@ export function readDeclaration(source, name, scope = {}, page = 'page') {
   return runInNewContext(`(${declaration[1]})`, scope, { timeout: 1000 });
 }
 
-export function astroSnippets(source, page, releaseNumber, operatorVersion) {
-  const scope = { releaseNumber, operatorVersion };
+export function astroSnippets(source, page, releaseNumber, operatorVersion, activeRelease) {
+  const scope = { releaseNumber, operatorVersion, activeRelease };
   for (const name of new Set(pages[page].map((key) => key.split('.')[0]))) {
     scope[name] = readDeclaration(source, name, scope, page);
   }
@@ -89,6 +90,7 @@ export function websiteSnippets(root) {
       page,
       (versions['streams-java']?.activeRelease || 'v1.4.2').replace(/^v/, ''),
       versions.operator.version,
+      `v${versions.broker.version}`,
     ),
   );
 }
