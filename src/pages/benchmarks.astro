@@ -6,7 +6,8 @@ import BenchmarkOverview from '../components/BenchmarkOverview.astro';
 import BenchmarkMatrix from '../components/BenchmarkMatrix.astro';
 import BenchmarkHint from '../components/BenchmarkHint.astro';
 import { getPath } from '../utils/paths';
-import { methodologyURL, format, openmessaging } from '../utils/benchmarks.mjs';
+import { methodologyURL, format, openmessaging, openmessagingDirect } from '../utils/benchmarks.mjs';
+import { comparison } from '../utils/benchmark-story.mjs';
 
 const latency = (ms: number | null) => ms === null ? '—' : ms >= 1000 ? format(ms / 1000, 1) + ' s' : format(ms, ms < 10 ? 1 : 0) + ' ms';
 const offered = (rate: number) => rate > 0 ? format(rate) + '/s' : 'max (probed)';
@@ -15,6 +16,16 @@ const ombSameHost = !ombShards.length || new Set(ombShards.map(s => JSON.stringi
 const ombDerived = ombShards.filter(s => s.derived_from);
 const ombRetriable = (openmessaging?.trials ?? []).reduce((sum, t) => sum + (t.retriable_commit_failures ?? 0), 0);
 const ombCompleted = openmessaging ? new Date(openmessaging.provenance.completed_at).toISOString() : null;
+// The direct-storage run: krabka with preallocated segments written with
+// O_DIRECT, published separately for the comparison with Redpanda. The page
+// shows it only when one is published.
+const direct = openmessagingDirect;
+const directBrokers = direct ? direct.images.filter(image => image.id !== 'kafka') : [];
+const directShards = direct?.provenance.shards ?? [];
+const directSameHost = !directShards.length || new Set(directShards.map(s => JSON.stringify([s.host?.cpu_model, s.host?.memory_total_bytes]))).size === 1;
+const directCompleted = direct ? new Date(direct.provenance.completed_at).toISOString() : null;
+const directSummary = direct ? comparison(direct, 'redpanda') : null;
+const percent = (value: number) => `${Math.round(value * 100)}%`;
 const repeat = `# Resolve and check the pinned images and local prerequisites
 npm run benchmark -- --suite openmessaging --dry-run
 
@@ -33,6 +44,7 @@ npm run benchmark -- --suite openmessaging`;
       <p class="mt-4 text-sm text-gray-400">These are our measurements using OMB, with source and configuration linked below.</p>
       {!openmessaging && <p class="mt-4 text-gray-300">No complete OpenMessaging run has been published yet.</p>}
       {openmessaging && <a href="#charts" class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Explore the charts</a>}
+      {direct && <a href="#openmessaging-direct" class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Compare with Redpanda using direct I/O</a>}
       <a href={getPath('/benchmarks/explorer')} class="mt-6 mr-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Explore every captured sample</a>
       <a href="#methodology" class="mt-6 inline-block text-sm font-semibold text-krab-400 underline underline-offset-4">Methodology and reproduction</a>
     </header>
@@ -62,6 +74,7 @@ npm run benchmark -- --suite openmessaging`;
             OMB reports rates and latency, not exact delivery or duplicate checks. Backlog workloads fill a 100 GB backlog before consumers drain it, so their end-to-end latency includes that wait.
             CPU and memory windows include client startup, warm-up, rate probing, measurement and shutdown. Results apply only to this runner, these images and these workloads.
           </p>
+          {direct && <p>Krabka writes its segments through the Linux page cache in this run. Redpanda writes with <code>O_DIRECT</code>, so the comparison with Redpanda uses <a href="#openmessaging-direct" class="text-krab-400 underline underline-offset-2 hover:text-krab-300">a separate run with Krabka's direct I/O</a>.</p>}
         </div>
         <OpenMessagingCharts />
         {openmessaging.rows.map(group => (
@@ -117,6 +130,61 @@ npm run benchmark -- --suite openmessaging`;
           </dl>
           <p class="mt-5 text-sm text-gray-300">The <a href={openmessaging.summaryURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">run summary</a> lists every trial, and the <a href={openmessaging.provenanceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">provenance</a> records the host, CPU sets, OMB commit, client jar hashes and effective driver settings.</p>
         </details>
+      </section>
+    )}
+
+    {direct && (
+      <section id="openmessaging-direct" aria-labelledby="openmessaging-direct-heading" class="mt-16 scroll-mt-24">
+        <h2 id="openmessaging-direct-heading" class="text-2xl font-bold text-white sm:text-3xl">Krabka with direct I/O compared with Redpanda</h2>
+        <div class="mt-4 max-w-4xl space-y-3 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
+          <p>
+            Redpanda writes its log segments with <code>O_DIRECT</code>, which bypasses the Linux page cache. For the comparison with Redpanda, a separate full run sets <code>preallocate=true</code> on Krabka's benchmark topics. Krabka then preallocates its segments and writes them with <code>O_DIRECT</code>. In every Krabka trial, the runner checked that the brokers held their active segments open with <code>O_DIRECT</code>.
+            {directSummary && <>Across {directSummary.count} max-rate workload and replication-factor pairs, Krabka's median publish rate was {percent(directSummary.throughput)} of Redpanda's, with a range of {percent(directSummary.min)} to {percent(directSummary.max)}. </>}
+          </p>
+          <p>
+            The run used the upstream OMB workloads and Kafka {direct.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against {directBrokers.map(image => image.label).join(' and ')}.
+            {directSameHost
+              ? <>All trials ran on one {direct.provenance.host.cpu_model} host with {direct.provenance.host.logical_cpus} logical CPUs, the brokers one at a time,</>
+              : <>Each workload and replication factor ran on its own {direct.provenance.host.logical_cpus}-vCPU machine ({directShards.length} in all), the brokers one at a time on that machine,</>}
+            with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
+            {direct.omitted.filter(o => o.vendor !== 'kafka').map(o => <>{direct.images.find(image => image.id === o.vendor).name} was not measured on {o.workload} at RF{o.rf}: {o.reason} </>)}
+            Run {direct.provenance.run_id}, completed <time datetime={directCompleted}>{directCompleted.slice(0, 10)}</time>; {direct.provenance.repetitions === 1 ? 'one round' : direct.provenance.repetitions + ' rounds (medians shown)'} per workload.
+            Apache Kafka also ran in this run with its usual page-cache writes; its results are in the run summary.
+          </p>
+          <p>
+            Krabka acknowledges in-sync replication with <code>acks=all</code>; Redpanda acknowledges a Raft majority with <code>write.caching=true</code>. This does not establish equal crash durability.
+            Results apply only to this runner, these images and these workloads.
+          </p>
+        </div>
+        {direct.rows.map(group => (
+          <div class="mt-8">
+            <h3 class="text-lg font-semibold text-white">Direct I/O, replication factor {group.rf}</h3>
+            <div class="relative mt-3 overflow-x-auto rounded-xl border border-white/10">
+              <table class="w-full min-w-[40rem] text-left text-xs" aria-label={`Mean publish rate and end-to-end p99 latency for Krabka with direct I/O and Redpanda, RF${group.rf}`}>
+                <thead class="bg-slate-950/60 text-gray-400">
+                  <tr>
+                    <th scope="col" rowspan="2" class="px-3 py-2 font-semibold">Workload</th>
+                    <th scope="col" rowspan="2" class="px-3 py-2 font-semibold text-right">Offered</th>
+                    {directBrokers.map(image => <th scope="colgroup" colspan="2" class="px-3 pt-2 font-semibold text-center text-white">{image.name}</th>)}
+                  </tr>
+                  <tr>
+                    {directBrokers.map(() => <><th scope="col" class="px-3 pb-2 font-normal text-right">msg/s</th><th scope="col" class="px-3 pb-2 font-normal text-right">E2E p99</th></>)}
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5 text-gray-300">
+                  {group.cases.map(workload => (
+                    <tr>
+                      <th scope="row" class="px-3 py-2 font-mono font-normal text-gray-200 whitespace-nowrap"><BenchmarkHint workload={workload} rf={group.rf} label={workload.id} /></th>
+                      <td class="px-3 py-2 text-right whitespace-nowrap">{offered(workload.config.producerRate)}</td>
+                      {workload.vendors.filter(v => v.id !== 'kafka').map(v => <><td class="px-3 py-2 text-right tabular-nums">{v.omitted ? <span title={v.omitted}>not measured</span> : format(v.publish_rate)}</td><td class="px-3 py-2 text-right tabular-nums whitespace-nowrap">{latency(v.end_to_end_p99_ms)}</td></>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+        <p class="mt-5 text-sm text-gray-300">The <a href={direct.summaryURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">direct I/O run summary</a> lists every trial, and its <a href={direct.provenanceURL} class="text-krab-400 underline underline-offset-4 hover:text-krab-300">provenance</a> records the host, image digests, OMB commit and Krabka's storage setting.</p>
       </section>
     )}
 

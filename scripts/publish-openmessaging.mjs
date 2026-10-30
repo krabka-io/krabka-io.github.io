@@ -9,6 +9,13 @@
 // benchmarks/openmessaging/<run-id>/ (provenance.json, summary.md and a
 // compact trials.json, intervals.json and gzip-compressed raw OMB results) plus
 // benchmarks/latest-openmessaging.md, which the website follows.
+//
+// A run in which krabka wrote its segments with preallocate=true and O_DIRECT
+// (the workflow's krabka_storage=direct) is the site's comparison with
+// Redpanda, which does its own direct I/O. It goes to
+// benchmarks/openmessaging-direct/<run-id>/ and
+// benchmarks/latest-openmessaging-direct.md and leaves the page-cache run's
+// files alone.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -16,9 +23,10 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { checkOmbOmissions, ombOmission, validateOmbResult } from './benchmark-openmessaging.mjs';
-import { hostInterfered } from './benchmark-results.mjs';
+import { OMB_STORAGE as STORAGE, hostInterfered } from './benchmark-results.mjs';
 
 const VENDORS = ['krabka', 'kafka', 'redpanda'];
+
 const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
 
 // The figures the website shows for one trial, taken from OMB's own result.
@@ -56,21 +64,24 @@ export async function loadRun(directory) {
   assert.equal(provenance.suite, 'openmessaging', 'not an OpenMessaging run');
   assert.equal(provenance.mode, 'full', 'only full runs are published; smoke is a wiring check');
   assert.equal(provenance.status, 'complete', 'run is not complete');
-  // The published run is the site's standard comparison, so krabka must run
-  // as it ships: no broker settings passed with --krabka-env and no
-  // preallocate override. Those runs are experiments, kept but not published.
+  // krabka must run as it ships, except for one published variant: segments
+  // preallocated and written with O_DIRECT (--krabka-preallocate), the mode in
+  // which krabka is compared with Redpanda. Broker settings passed with
+  // --krabka-env and the io_uring seccomp profile stay experiments, kept but
+  // not published.
   assert.ok(
     !provenance.contract?.krabka_env?.length,
     'a run with --krabka-env broker settings is an experiment and is not published',
   );
   assert.ok(
-    !provenance.contract?.krabka_preallocate,
-    'a run with --krabka-preallocate is an experiment and is not published',
-  );
-  assert.ok(
     !provenance.contract?.krabka_seccomp,
     "a run with --krabka-io-uring changes krabka's container security profile and is not published",
   );
+  assert.ok(
+    [undefined, true, false].includes(provenance.contract?.krabka_preallocate),
+    'krabka_preallocate must be a boolean',
+  );
+  const storage = provenance.contract?.krabka_preallocate ? 'direct' : 'page-cache';
   assert.ok(
     provenance.contract?.test_duration_minutes === undefined,
     'a run with --test-duration-minutes departs from the upstream workloads and is not published',
@@ -97,6 +108,16 @@ export async function loadRun(directory) {
             `mismatched ${file}`,
           );
           validateOmbResult(trial.omb, vendor, rf, trial.case.config);
+          // The runner fails a direct-mode trial whose brokers it could not
+          // see holding their active segments open with O_DIRECT; check the
+          // record anyway, so a fallback to buffered writes is never
+          // published as direct I/O.
+          if (storage === 'direct' && vendor === 'krabka')
+            assert.equal(
+              trial.direct_io?.verified,
+              true,
+              `${workload.id} RF${rf} krabka round ${repetition}: O_DIRECT not verified`,
+            );
           if (hostInterfered(trial))
             interfered.push(`${workload.id} RF${rf} ${vendor} round ${repetition}`);
           trials.push(compactTrial(trial));
@@ -123,20 +144,22 @@ export async function loadRun(directory) {
     interfered.length === 0,
     `the host interfered with ${interfered.join(', ')} (balloon inflation or direct reclaim during measurement); repeat the run; not published`,
   );
-  return { provenance, trials, rawResults };
+  return { provenance, storage, trials, rawResults };
 }
 
 export async function publish(directory, root = process.cwd()) {
-  const { provenance, trials, rawResults } = await loadRun(directory);
-  const destination = path.join(root, 'benchmarks', 'openmessaging', provenance.run_id);
-  assert.equal(
-    await fs.stat(destination).then(
-      () => true,
-      () => false,
-    ),
-    false,
-    'run already published',
-  );
+  const { provenance, storage, trials, rawResults } = await loadRun(directory);
+  const { directory: published, pointer } = STORAGE[storage];
+  const destination = path.join(root, 'benchmarks', published, provenance.run_id);
+  for (const { directory: other } of Object.values(STORAGE))
+    assert.equal(
+      await fs.stat(path.join(root, 'benchmarks', other, provenance.run_id)).then(
+        () => true,
+        () => false,
+      ),
+      false,
+      'run already published',
+    );
   await fs.mkdir(destination, { recursive: true });
   await fs.mkdir(path.join(destination, 'omb-results'));
   for (const result of rawResults)
@@ -162,15 +185,17 @@ export async function publish(directory, root = process.cwd()) {
   await fs.writeFile(path.join(destination, 'summary.md'), summary);
   await fs.writeFile(path.join(destination, 'trials.json'), `${JSON.stringify(trials, null, 2)}\n`);
   await fs.writeFile(
-    path.join(root, 'benchmarks', 'latest-openmessaging.md'),
-    `[Dated report and per-trial results](openmessaging/${provenance.run_id}/summary.md)\n\n${summary}`,
+    path.join(root, 'benchmarks', pointer),
+    `[Dated report and per-trial results](${published}/${provenance.run_id}/summary.md)\n\n${summary}`,
   );
-  return { run_id: provenance.run_id, trials: trials.length };
+  return { run_id: provenance.run_id, storage, trials: trials.length };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const directory = process.argv[2];
   assert.ok(directory, 'usage: node scripts/publish-openmessaging.mjs <artifact>/<run-id>');
-  const { run_id, trials } = await publish(path.resolve(directory));
-  console.log(`Published OpenMessaging run ${run_id}: ${trials} trials.`);
+  const { run_id, storage, trials } = await publish(path.resolve(directory));
+  console.log(
+    `Published OpenMessaging run ${run_id} (krabka storage: ${storage}): ${trials} trials.`,
+  );
 }

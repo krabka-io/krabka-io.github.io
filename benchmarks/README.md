@@ -18,9 +18,10 @@ gh workflow run openmessaging.yml -f mode=smoke
 # Run a narrower workload or repeat the comparison three times
 gh workflow run openmessaging.yml -f mode=full \
   -f workloads=1-topic-16-partitions-1kb -f repetitions=3
-# Write krabka's segments with preallocate=true and O_DIRECT (direct-io-uring
-# adds the io_uring seccomp profile). Such a run is an experiment: the
-# publisher does not publish it.
+# Write krabka's segments with preallocate=true and O_DIRECT. The publisher
+# publishes such a run separately, as the comparison with Redpanda.
+# direct-io-uring adds the io_uring seccomp profile; that run is an
+# experiment and is not published.
 gh workflow run openmessaging.yml -f mode=full -f krabka_storage=direct
 
 # The same runner works on a prepared Linux host; no npm install is needed
@@ -237,6 +238,27 @@ rejects smoke, failed and incomplete matrices, re-validates every trial, and wri
 `intervals.json`, and `omb-results/*.json.gz`) and `latest-openmessaging.md`, which the `/benchmarks` page follows. Review
 and commit those files; the full diagnostic artifact stays in Actions for 30 days.
 
+The publisher accepts two storage modes for krabka and refuses every other
+broker setting: runs with `--krabka-env`, `--krabka-io-uring` (the
+`direct-io-uring` workflow choice, which changes krabka's seccomp profile) or
+`--test-duration-minutes` are experiments and are not published.
+
+- **Page cache** (the default, `krabka_storage=page-cache`): krabka runs as it
+  ships. This run is the site's main comparison and goes to
+  `benchmarks/openmessaging/<run-id>/` and `latest-openmessaging.md`.
+- **Direct** (`krabka_storage=direct`, that is `--krabka-preallocate`): krabka's
+  benchmark topics set `preallocate=true`, so krabka preallocates its segments
+  and writes them with `O_DIRECT`. Redpanda also writes with `O_DIRECT`, so the
+  site compares krabka with Redpanda in this mode. The publisher also requires
+  `direct_io.verified` in every krabka trial. The run goes to
+  `benchmarks/openmessaging-direct/<run-id>/` and
+  `latest-openmessaging-direct.md` and does not replace the page-cache run.
+  The `/benchmarks` page shows it as a separate krabka-and-Redpanda comparison,
+  and the overview's direct I/O summary uses it instead of the single-workload
+  experiment. Until a direct run is published, the page shows neither.
+
+A run ID is published once, in one of the two directories.
+
 New publications retain the complete upstream OMB result object for every trial as
 `omb-results/rf<RF>-<vendor>-<round>-<workload>.json.gz`. `intervals.json` indexes
 these files by workload, RF, vendor and repetition, with sample counts and SHA-256
@@ -272,8 +294,8 @@ filesystem or storage layout the gap could be smaller or larger.
 
 Since 1.0.2, krabka can write active segments with `O_DIRECT` when a topic sets
 `preallocate=true`, on Linux 6.1 or later where the filesystem reports direct-I/O
-alignment. It is off by default and the benchmark does not set `preallocate`, so krabka
-writes through the page cache here. Making direct I/O the default is an
+alignment. It is off by default and the default benchmark run does not set `preallocate`, so krabka
+writes through the page cache there; a separately published direct run sets it (see above). Making direct I/O the default is an
 open question ([krabka-broker#1333](https://github.com/krabka-io/krabka-broker/issues/1333)).
 These results compare the brokers as they ship.
 
@@ -386,9 +408,9 @@ OMB rates alone cannot establish delivery correctness or crash durability.
 
 ### Publication work before adoption
 
-The publisher currently refuses `krabka_preallocate` overrides in the default
-suite. Add a separate direct-mode publication track before adopting this gate;
-do not relax the default-mode guard. Preserve the mode, image digests, disk
+The publisher publishes a `krabka_preallocate` run as a separate direct-mode
+track (`benchmarks/openmessaging-direct/`) and keeps it out of the default-mode
+suite and its release history. Preserve the mode, image digests, disk
 state, repetition ID, failed attempts and telemetry coverage in its schema.
 Teach the viewer to group by mode and storage stack before it compares releases.
 
