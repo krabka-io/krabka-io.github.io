@@ -1,0 +1,91 @@
+name: Validate pinned site archives
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_sha:
+        description: Exact website commit containing the composition catalog and lock
+        required: true
+        type: string
+      lock_path:
+        description: Checked-in archive lock relative to the website checkout
+        required: true
+        default: docs/site-archives.lock.json
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Require an immutable site revision
+        env:
+          SITE_SHA: ${{ inputs.site_sha }}
+        run: '[[ "$SITE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Checkout pinned site configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.site_sha }}
+      - name: Checkout archive validation tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: krabka-io/tooling
+          ref: 2d2db15b48c940ab5ebb08bdd93d31bb637524fa
+          path: .site-tooling
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Check complete site composition
+        env:
+          LOCK_PATH: ${{ inputs.lock_path }}
+          SITE_SHA: ${{ inputs.site_sha }}
+        run: |
+          mkdir -p artifacts/site-archives
+          node scripts/site-archives.mjs > artifacts/site-archives/composition.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            import { checkLock } from "./scripts/site-archives.mjs";
+            try {
+              const relative = path.relative(fs.realpathSync(process.cwd()), fs.realpathSync(process.env.LOCK_PATH));
+              if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+                throw new Error("Lock path must be inside the pinned site checkout");
+              }
+              checkLock(
+                JSON.parse(fs.readFileSync("artifacts/site-archives/composition.json")),
+                JSON.parse(fs.readFileSync(process.env.LOCK_PATH)));
+            } catch (error) {
+              fs.writeFileSync("artifacts/site-archives/report.json", JSON.stringify({
+                schema_version: 1, status: "failed", components: [],
+                errors: ["Composition preflight: " + error.message]
+              }, null, 2) + "\n");
+              throw error;
+            }
+          '
+          printf 'Pinned site commit: %s\n' "$SITE_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install archive browser dependencies
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/archive-check-env"
+          "${RUNNER_TEMP}/archive-check-env/bin/pip" install playwright==1.64.1
+          "${RUNNER_TEMP}/archive-check-env/bin/python" -m playwright install --with-deps chromium
+      - name: Validate every pinned archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCK_PATH: ${{ inputs.lock_path }}
+        run: |
+          "${RUNNER_TEMP}/archive-check-env/bin/python" .site-tooling/actions/validate-composed-pages/compose.py \
+            --manifest "$LOCK_PATH" \
+            --work-dir "${RUNNER_TEMP}/site-archives" \
+            --report artifacts/site-archives/report.json
+      - name: Save composition and validation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: site-archive-validation
+          path: artifacts/site-archives
+          if-no-files-found: warn
+          retention-days: 14
