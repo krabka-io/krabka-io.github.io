@@ -884,7 +884,16 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68cc8f3ec44f553652fecb0b534726b2ca5d4684a54a593f0aedfe766b3e76fd"
 dependencies = [
- "creusot-std-proc",
+ "creusot-std-proc 0.13.0",
+]
+
+[[package]]
+name = "creusot-std"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b019630da7e585ab18eff475d7ea820474c3fc0cd05a57706facf37f67ab2705"
+dependencies = [
+ "creusot-std-proc 0.14.0",
 ]
 
 [[package]]
@@ -893,7 +902,20 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9530985d4aff8273851f018c36422944f70717d7aa9e0c724c3deab004bd6db"
 dependencies = [
- "pearlite-syn",
+ "pearlite-syn 0.13.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "uuid",
+]
+
+[[package]]
+name = "creusot-std-proc"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a21564d3da8f97ce00e03125d0c3f7c9faedfa68e5d182d88beb25c82c12d25"
+dependencies = [
+ "pearlite-syn 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -2424,9 +2446,9 @@ dependencies = [
  "bytes",
  "futures-util",
  "krabka-client-core",
- "krabka-ids",
+ "krabka-ids 0.6.0",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.6.0",
  "refined_type",
  "thiserror",
  "tokio",
@@ -2449,10 +2471,10 @@ dependencies = [
  "futures-util",
  "hmac",
  "krabka-compression",
- "krabka-ids",
+ "krabka-ids 0.6.0",
  "krabka-protocol",
  "krabka-security",
- "krabka-units",
+ "krabka-units 0.6.0",
  "p12-keystore",
  "pbkdf2",
  "pkcs8",
@@ -2488,7 +2510,7 @@ dependencies = [
  "krabka-client-core",
  "krabka-compression",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.6.0",
  "refined_type",
  "thiserror",
  "tokio",
@@ -2510,7 +2532,7 @@ dependencies = [
  "krabka-client-producer",
  "krabka-protocol",
  "krabka-schema-serde",
- "krabka-units",
+ "krabka-units 0.6.0",
  "pollster",
  "refined_type",
  "serde",
@@ -2529,7 +2551,7 @@ dependencies = [
  "assert2",
  "bytes",
  "flate2",
- "krabka-units",
+ "krabka-units 0.6.0",
  "lz4rip",
  "refined_type",
  "ruzstd",
@@ -2551,15 +2573,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "krabka-kraft-core"
-version = "1.0.1"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=6c64d9a7b077c05c2f1573d12f5b84ed08187e18#6c64d9a7b077c05c2f1573d12f5b84ed08187e18"
+name = "krabka-ids"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f11c50697df95087891a0f07bdcf4571a34269fd809d103865059be031f79219"
 dependencies = [
  "assert2",
+ "base64 0.23.1",
+ "derive_more",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "krabka-kraft-core"
+version = "1.1.5"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8#988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8"
+dependencies = [
+ "assert2",
+ "bon",
  "bytes",
+ "derive_more",
  "krabka-macros",
- "krabka-units",
- "krabka-verified",
+ "krabka-units 0.7.0",
+ "krabka-verified 1.1.5",
  "krabka-voters",
  "refined_type",
  "serde",
@@ -2569,8 +2607,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-macros"
-version = "1.0.1"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=6c64d9a7b077c05c2f1573d12f5b84ed08187e18#6c64d9a7b077c05c2f1573d12f5b84ed08187e18"
+version = "1.1.5"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8#988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8"
 dependencies = [
  "moxy",
 ]
@@ -2592,11 +2630,11 @@ dependencies = [
  "jsonschema",
  "kdc",
  "krabka-client-streams",
- "krabka-ids",
+ "krabka-ids 0.6.0",
  "krabka-kraft-core",
  "krabka-protocol",
- "krabka-units",
- "krabka-verified",
+ "krabka-units 0.6.0",
+ "krabka-verified 1.0.1",
  "picky-asn1",
  "picky-krb",
  "prost",
@@ -2621,7 +2659,7 @@ dependencies = [
  "bytes",
  "crc-fast",
  "krabka-compression",
- "krabka-units",
+ "krabka-units 0.6.0",
  "serde_json",
  "strum 0.28.0",
  "thiserror",
@@ -2637,7 +2675,7 @@ dependencies = [
  "assert2",
  "bytes",
  "jsonschema",
- "krabka-units",
+ "krabka-units 0.6.0",
  "prost",
  "prost-reflect",
  "protox-parse",
@@ -2662,7 +2700,7 @@ dependencies = [
  "hmac",
  "jsonpath-rust",
  "krabka-sspi",
- "krabka-units",
+ "krabka-units 0.6.0",
  "pbkdf2",
  "rcgen",
  "refined_type",
@@ -2744,23 +2782,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "krabka-units"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a3512411ae4ab4e9a236c0736424a29d721ad4ca112798e675d0600361a8228"
+dependencies = [
+ "num-traits",
+ "serde",
+ "thiserror",
+ "uom",
+]
+
+[[package]]
 name = "krabka-verified"
 version = "1.0.1"
 source = "git+https://github.com/krabka-io/krabka-broker?rev=6c64d9a7b077c05c2f1573d12f5b84ed08187e18#6c64d9a7b077c05c2f1573d12f5b84ed08187e18"
 dependencies = [
  "assert2",
- "creusot-std",
+ "creusot-std 0.13.0",
  "derive_more",
- "krabka-ids",
+ "krabka-ids 0.6.0",
+]
+
+[[package]]
+name = "krabka-verified"
+version = "1.1.5"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8#988d07552fb5e9b5c2e6d2d99fce26052b2ec7e8"
+dependencies = [
+ "assert2",
+ "bon",
+ "creusot-std 0.14.0",
+ "derive_more",
+ "krabka-ids 0.7.0",
+ "krabka-macros",
 ]
 
 [[package]]
 name = "krabka-voters"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a69f6c1fd194500277340ccb4e731d97ea56c632bcea5481fc92b09e537dc62"
 dependencies = [
  "assert2",
- "krabka-ids",
+ "krabka-ids 0.7.0",
  "serde",
  "uuid",
 ]
@@ -3532,6 +3596,17 @@ name = "pearlite-syn"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d109ea947aee5910cb3a17ec83e0f026e05934b12335b97d05d825320b4cb15"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pearlite-syn"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0cada22bee420c97f91bd98f0e1effdd6ef5ab219df0561f35144dcb504ebfd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6751,6 +6826,11 @@ version = "0.6.0"
 source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
 
 [[patch.unused]]
+name = "krabka-kraft-core"
+version = "1.0.1"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=6c64d9a7b077c05c2f1573d12f5b84ed08187e18#6c64d9a7b077c05c2f1573d12f5b84ed08187e18"
+
+[[patch.unused]]
 name = "krabka-log"
 version = "1.0.1"
 source = "git+https://github.com/krabka-io/krabka-broker?rev=6c64d9a7b077c05c2f1573d12f5b84ed08187e18#6c64d9a7b077c05c2f1573d12f5b84ed08187e18"
@@ -6904,3 +6984,8 @@ source = "git+https://github.com/krabka-io/krabka-o11y?rev=c6643b232c4ead91079fc
 name = "krabka-traces"
 version = "0.4.0"
 source = "git+https://github.com/krabka-io/krabka-o11y?rev=c6643b232c4ead91079fc649b98fa9fa72f2d288#c6643b232c4ead91079fc649b98fa9fa72f2d288"
+
+[[patch.unused]]
+name = "krabka-voters"
+version = "0.6.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
