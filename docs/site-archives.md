@@ -2,7 +2,8 @@
 
 The component catalog in `src/data/api-reference.json` owns the API entry paths.
 `scripts/site-archives.mjs` derives the root website and component archive mounts
-from that catalog. An API entry can be below the archive root: Java mounts at
+from that catalog. Optional `extraRenderPages` entries select additional
+archive-relative HTML pages without embedding repository-specific paths in the generator. An API entry can be below the archive root: Java mounts at
 `/krabka-streams-java/` and renders `api/index.html`.
 
 Generate the desired composition with:
@@ -54,3 +55,19 @@ gate:
    fails clearly instead of selecting replacement artifacts implicitly.
 
 The existing `deploy.yml` and its queue promotion behavior are unchanged here.
+
+## Bootstrap ordering and expiry
+
+Do not enable a mandatory composition lock before the complete baseline exists.
+Packaging fixes can be prepared separately from production gate activation, but
+standalone validation still checks every same-host link: CLI's `/api` link needs
+the real root website archive and its transitive component archives. Removing the
+lock alone cannot make that check pass. Do not use fake hosts, stubs, or exclusions
+to obtain a successful baseline run. Coordinate baseline creation across publishers
+and validate the full set before activation. Publishing or merging those changes
+requires separate approval.
+
+The shared rustdoc uploader retains new archives for 90 days by default, subject
+to repository policy. Other publishers must configure comparable retention. This
+does not extend existing artifacts. Refresh the reviewed lock before its earliest
+artifact expiry; expired or deleted artifacts continue to fail closed.
