@@ -35,7 +35,11 @@ export function composition(entries) {
       id: entry.id,
       site_url: `https://krabka.io${mount}`,
       repo: `krabka-io/${entry.repo}`,
-      render_pages: [`${suffix}index.html`],
+      render_pages: [
+        `${suffix}index.html`,
+        // Preserve the pilot's rendered crate-page check, not only its landing page.
+        ...(entry.id === 'cli' ? ['krabka-cli/krabka_cli/index.html'] : []),
+      ],
     });
   }
   return { schema_version: 1, components };

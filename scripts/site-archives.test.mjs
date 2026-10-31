@@ -11,6 +11,10 @@ test('composition covers the site and catalog, mounting Java at its repository r
   const result = composition(catalog);
   assert.equal(result.components.length, catalog.length + 1);
   assert.equal(result.components[0].site_url, 'https://krabka.io/');
+  assert.deepEqual(result.components.find(({ id }) => id === 'cli').render_pages, [
+    'index.html',
+    'krabka-cli/krabka_cli/index.html',
+  ]);
   assert.deepEqual(
     result.components.find(({ id }) => id === 'streams-java'),
     {
