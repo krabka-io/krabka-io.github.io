@@ -11,7 +11,12 @@ import {
   latestRunId,
   loadOpenMessaging,
 } from '../src/utils/benchmarks.mjs';
-import { comparison, directComparison, matrixValue } from '../src/utils/benchmark-story.mjs';
+import {
+  comparison,
+  directComparison,
+  matrixValue,
+  throughput,
+} from '../src/utils/benchmark-story.mjs';
 import { benchmarkHint } from '../src/utils/benchmark-hints.mjs';
 import { median } from './benchmark-results.mjs';
 
@@ -43,10 +48,7 @@ test('release comparisons use paired max-rate ratios and exclude omissions', () 
         c.vendors.find((v) => v.id === 'kafka'),
       ]);
     assert.equal(summary.count, pairs.length);
-    assert.equal(
-      summary.throughput,
-      median(pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
-    );
+    assert.equal(summary.throughput, median(pairs.map(([a, b]) => throughput(a) / throughput(b))));
   }
   const omission = openmessaging.rows
     .flatMap((g) => g.cases)
@@ -94,6 +96,25 @@ test('release comparisons use paired max-rate ratios and exclude omissions', () 
   assert.equal(comparison(slower).efficiency, 0.25);
   assert.equal(comparison(slower).efficientCount, 0);
   assert.equal(comparison({ rows: [] }), null);
+  // A consumer that falls behind caps the workload at its consume rate.
+  const behind = {
+    rows: [
+      {
+        rf: 1,
+        cases: [
+          {
+            config: { producerRate: 0 },
+            vendors: [
+              { id: 'krabka', publish_rate: 150, consume_rate: 110, cpu_seconds: 50 },
+              { id: 'redpanda', publish_rate: 100, consume_rate: 100, cpu_seconds: 50 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  assert.equal(comparison(behind, 'redpanda').throughput, 1.1);
+  assert.equal(comparison(behind, 'redpanda').efficiency, 1.1);
 });
 
 test('direct I/O parity wording requires every reported round to be within the bound', () => {
@@ -205,6 +226,7 @@ function publishedRun(base, directory, id, contract) {
         repetition: 1,
         case: { id: 'max-rate', config },
         publish_rate: rate,
+        consume_rate: rate,
         publish_latency_ms: { p99: 2 },
         end_to_end_latency_ms: { p99: 4 },
         rss_peak_bytes: 1,

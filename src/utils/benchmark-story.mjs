@@ -3,6 +3,13 @@ import { median, isMaxRate } from './home-benchmark.mjs';
 export const releaseVersion = (run) =>
   run.provenance.images.krabka.requested.split(':').at(-1).replace(/^v/, '');
 
+// The rate a workload sustained end to end: the lower of its publish and
+// consume rates, so a consumer that falls behind does not count as faster.
+export const throughput = (vendor) =>
+  vendor.consume_rate > 0
+    ? Math.min(vendor.publish_rate, vendor.consume_rate)
+    : vendor.publish_rate;
+
 export function comparison(run, peer = 'kafka', size, rf) {
   const pairs = run.rows
     .flatMap((group) =>
@@ -18,16 +25,17 @@ export function comparison(run, peer = 'kafka', size, rf) {
           workload.vendors.find((v) => v.id === peer),
         ]),
     )
-    .filter(([a, b]) => a?.publish_rate > 0 && b?.publish_rate > 0);
+    .filter(([a, b]) => a?.publish_rate > 0 && b?.publish_rate > 0)
+    .map(([a, b]) => [a, b, throughput(a) / throughput(b)]);
   if (!pairs.length) return null;
   const efficiencies = pairs
     .filter(([a, b]) => a.cpu_seconds > 0 && b.cpu_seconds > 0)
-    .map(([a, b]) => a.publish_rate / a.cpu_seconds / (b.publish_rate / b.cpu_seconds));
+    .map(([a, b]) => throughput(a) / a.cpu_seconds / (throughput(b) / b.cpu_seconds));
   return {
     count: pairs.length,
-    throughput: median(pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
-    min: Math.min(...pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
-    max: Math.max(...pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
+    throughput: median(pairs.map(([, , ratio]) => ratio)),
+    min: Math.min(...pairs.map(([, , ratio]) => ratio)),
+    max: Math.max(...pairs.map(([, , ratio]) => ratio)),
     efficiency: efficiencies.length ? median(efficiencies) : null,
     efficientCount: efficiencies.filter((value) => value > 1).length,
   };

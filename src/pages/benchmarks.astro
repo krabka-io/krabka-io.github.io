@@ -62,7 +62,7 @@ npm run benchmark -- --suite openmessaging`;
               : null}
             {ombSameHost
               ? <>All trials ran on one {openmessaging.provenance.host.cpu_model} host with {openmessaging.provenance.host.logical_cpus} logical CPUs, the brokers one at a time,</>
-              : <>Each workload and replication factor ran on its own {openmessaging.provenance.host.logical_cpus}-vCPU machine ({openmessaging.provenance.shards.length} in all), the brokers one at a time on that machine,</>}
+              : <>Each workload and replication factor ran as its own shard on a {openmessaging.provenance.host.logical_cpus}-vCPU machine ({openmessaging.provenance.shards.length} shards), the brokers one at a time on that machine,</>}
             with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
             {ombDerived.length > 0 && <>The run merges {openmessaging.provenance.shards.length} invocations; {ombDerived.map(s => `RF${s.derived_from.replication_factor}${s.derived_from.workloads ? ` (${s.derived_from.workloads.length} workloads)` : ''}`).join(' and ')} came from {ombDerived.length === 1 ? 'an invocation' : 'invocations'} that did not finish cleanly, keeping only workloads whose trials had all completed and passed; anything left out was rerun for all three brokers{openmessaging.omitted.length > 0 && ', except the trials listed as not measured below'}. Each shard's source run and reason are in the provenance. </>}
             {openmessaging.omitted.map(o => <>{openmessaging.images.find(image => image.id === o.vendor).name} was not measured on {o.workload} at RF{o.rf}: {o.reason} </>)}
@@ -139,13 +139,13 @@ npm run benchmark -- --suite openmessaging`;
         <div class="mt-4 max-w-4xl space-y-3 text-sm text-gray-300 leading-relaxed [overflow-wrap:anywhere]">
           <p>
             Redpanda writes its log segments with <code>O_DIRECT</code>, which bypasses the Linux page cache. For the comparison with Redpanda, a separate full run sets <code>preallocate=true</code> on Krabka's benchmark topics. Krabka then preallocates its segments and writes them with <code>O_DIRECT</code>. In every Krabka trial, the runner checked that the brokers held their active segments open with <code>O_DIRECT</code>.
-            {directSummary && <>Across {directSummary.count} max-rate workload and replication-factor pairs, Krabka's median publish rate was {percent(directSummary.throughput)} of Redpanda's, with a range of {percent(directSummary.min)} to {percent(directSummary.max)}. </>}
+            {directSummary && <>Across {directSummary.count} max-rate workload and replication-factor pairs, Krabka's median throughput (the lower of each workload's publish and consume rates) was {percent(directSummary.throughput)} of Redpanda's, with a range of {percent(directSummary.min)} to {percent(directSummary.max)}. </>}
           </p>
           <p>
             The run used the upstream OMB workloads and Kafka {direct.provenance.openmessaging?.kafka_client_version ?? '3.6.1'} client against {directBrokers.map(image => image.label).join(' and ')}.
             {directSameHost
               ? <>All trials ran on one {direct.provenance.host.cpu_model} host with {direct.provenance.host.logical_cpus} logical CPUs, the brokers one at a time,</>
-              : <>Each workload and replication factor ran on its own {direct.provenance.host.logical_cpus}-vCPU machine ({directShards.length} in all), the brokers one at a time on that machine,</>}
+              : <>Each workload and replication factor ran as its own shard on a {direct.provenance.host.logical_cpus}-vCPU machine ({directShards.length} shards), the brokers one at a time on that machine,</>}
             with fresh storage per trial, four CPUs and 10 GiB per broker, and a separate client.
             {direct.omitted.filter(o => o.vendor !== 'kafka').map(o => <>{direct.images.find(image => image.id === o.vendor).name} was not measured on {o.workload} at RF{o.rf}: {o.reason} </>)}
             Run {direct.provenance.run_id}, completed <time datetime={directCompleted}>{directCompleted.slice(0, 10)}</time>; {direct.provenance.repetitions === 1 ? 'one round' : direct.provenance.repetitions + ' rounds (medians shown)'} per workload.
