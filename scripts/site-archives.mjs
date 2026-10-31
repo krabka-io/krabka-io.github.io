@@ -29,17 +29,23 @@ export function composition(entries) {
     if (suffix && !/^(?:[a-z0-9-]+\/)+$/.test(suffix)) {
       throw new Error(`Invalid API entry path: ${entry.apiPath}`);
     }
+    const extraRenderPages = entry.extraRenderPages ?? [];
+    if (
+      !Array.isArray(extraRenderPages) ||
+      extraRenderPages.some(
+        (page) =>
+          typeof page !== 'string' || !/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.html$/.test(page),
+      )
+    ) {
+      throw new Error(`Invalid extra render pages: ${entry.id}`);
+    }
     ids.add(entry.id);
     mounts.add(mount);
     components.push({
       id: entry.id,
       site_url: `https://krabka.io${mount}`,
       repo: `krabka-io/${entry.repo}`,
-      render_pages: [
-        `${suffix}index.html`,
-        // Preserve the pilot's rendered crate-page check, not only its landing page.
-        ...(entry.id === 'cli' ? ['krabka-cli/krabka_cli/index.html'] : []),
-      ],
+      render_pages: [`${suffix}index.html`, ...extraRenderPages],
     });
   }
   return { schema_version: 1, components };

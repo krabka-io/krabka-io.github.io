@@ -60,3 +60,20 @@ test('lock requires the entire catalog and exact routes independently of artifac
     assert.throws(() => checkLock(desired, invalid), /differ/);
   }
 });
+
+test('extra render pages are catalog-driven and archive-relative', () => {
+  const entry = { ...catalog[0], extraRenderPages: ['crate/type.html'] };
+  assert.deepEqual(composition([entry]).components[1].render_pages, [
+    'index.html',
+    'crate/type.html',
+  ]);
+  for (const extraRenderPages of [
+    'index.html',
+    [null],
+    ['../index.html'],
+    ['/index.html'],
+    ['https://elsewhere/index.html'],
+  ]) {
+    assert.throws(() => composition([{ ...entry, extraRenderPages }]), /extra render/);
+  }
+});
