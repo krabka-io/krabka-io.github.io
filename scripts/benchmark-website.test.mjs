@@ -1,9 +1,22 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { openmessaging, benchmarkHistory } from '../src/utils/benchmarks.mjs';
-import { comparison, directComparison, matrixValue } from '../src/utils/benchmark-story.mjs';
+import {
+  openmessaging,
+  openmessagingDirect,
+  benchmarkHistory,
+  latestRunId,
+  loadOpenMessaging,
+} from '../src/utils/benchmarks.mjs';
+import {
+  comparison,
+  directComparison,
+  matrixValue,
+  throughput,
+} from '../src/utils/benchmark-story.mjs';
 import { benchmarkHint } from '../src/utils/benchmark-hints.mjs';
 import { median } from './benchmark-results.mjs';
 
@@ -35,10 +48,7 @@ test('release comparisons use paired max-rate ratios and exclude omissions', () 
         c.vendors.find((v) => v.id === 'kafka'),
       ]);
     assert.equal(summary.count, pairs.length);
-    assert.equal(
-      summary.throughput,
-      median(pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
-    );
+    assert.equal(summary.throughput, median(pairs.map(([a, b]) => throughput(a) / throughput(b))));
   }
   const omission = openmessaging.rows
     .flatMap((g) => g.cases)
@@ -86,6 +96,25 @@ test('release comparisons use paired max-rate ratios and exclude omissions', () 
   assert.equal(comparison(slower).efficiency, 0.25);
   assert.equal(comparison(slower).efficientCount, 0);
   assert.equal(comparison({ rows: [] }), null);
+  // A consumer that falls behind caps the workload at its consume rate.
+  const behind = {
+    rows: [
+      {
+        rf: 1,
+        cases: [
+          {
+            config: { producerRate: 0 },
+            vendors: [
+              { id: 'krabka', publish_rate: 150, consume_rate: 110, cpu_seconds: 50 },
+              { id: 'redpanda', publish_rate: 100, consume_rate: 100, cpu_seconds: 50 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  assert.equal(comparison(behind, 'redpanda').throughput, 1.1);
+  assert.equal(comparison(behind, 'redpanda').efficiency, 1.1);
 });
 
 test('direct I/O parity wording requires every reported round to be within the bound', () => {
@@ -160,4 +189,112 @@ test('custom suites are refused before creating artifacts or starting Docker', (
   assert.equal(help.status, 0);
   assert.match(help.stdout, /OpenMessaging/);
   assert.doesNotMatch(help.stdout, /throughput\|curves/);
+});
+
+// A published run as scripts/publish-openmessaging.mjs leaves it, with one
+// max-rate workload at RF1.
+function publishedRun(base, directory, id, contract) {
+  const config = { messageSize: 1024, partitionsPerTopic: 16, producerRate: 0 };
+  const run = path.join(base, directory, id);
+  fs.mkdirSync(run, { recursive: true });
+  const image = (name) => ({
+    requested: `${name}:1.0.0`,
+    reference: `${name}@sha256:${'0'.repeat(64)}`,
+  });
+  fs.writeFileSync(
+    path.join(run, 'provenance.json'),
+    JSON.stringify({
+      run_id: id,
+      suite: 'openmessaging',
+      mode: 'full',
+      status: 'complete',
+      completed_at: '2026-10-30T00:00:00Z',
+      repetitions: 1,
+      replication_factors: [1],
+      cases: [{ id: 'max-rate', config }],
+      images: { krabka: image('krabka'), kafka: image('kafka'), redpanda: image('redpanda') },
+      contract,
+    }),
+  );
+  const rates = { krabka: 900, kafka: 800, redpanda: 1000 };
+  fs.writeFileSync(
+    path.join(run, 'trials.json'),
+    JSON.stringify(
+      Object.entries(rates).map(([vendor, rate]) => ({
+        vendor,
+        rf: 1,
+        repetition: 1,
+        case: { id: 'max-rate', config },
+        publish_rate: rate,
+        consume_rate: rate,
+        publish_latency_ms: { p99: 2 },
+        end_to_end_latency_ms: { p99: 4 },
+        rss_peak_bytes: 1,
+        cpu_seconds: 10,
+      })),
+    ),
+  );
+  fs.writeFileSync(path.join(run, 'summary.md'), '# OpenMessaging broker comparison\n');
+}
+
+test('the page has no direct I/O comparison until a direct run is published', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'omb-site-'));
+  assert.equal(latestRunId('direct', base), null);
+  assert.equal(loadOpenMessaging(latestRunId('direct', base), 'direct', base), null);
+  // The repository's own data follows the same rule.
+  assert.equal(
+    openmessagingDirect === null,
+    !fs.existsSync('benchmarks/latest-openmessaging-direct.md'),
+  );
+  if (openmessagingDirect) assert.equal(openmessagingDirect.storage, 'direct');
+  assert.equal(openmessaging.storage, 'page-cache');
+  for (const run of benchmarkHistory) assert.equal(run.storage, 'page-cache');
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('a direct run loads from its own directory and pointer for the Redpanda comparison', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'omb-site-'));
+  publishedRun(base, 'openmessaging-direct', 'run-d', { krabka_preallocate: true });
+  fs.writeFileSync(
+    path.join(base, 'latest-openmessaging-direct.md'),
+    '[Dated report and per-trial results](openmessaging-direct/run-d/summary.md)\n',
+  );
+  const run = loadOpenMessaging(latestRunId('direct', base), 'direct', base);
+  assert.equal(run.storage, 'direct');
+  assert.match(run.summaryURL, /\/benchmarks\/openmessaging-direct\/run-d\/summary\.md$/);
+  assert.equal(comparison(run, 'redpanda').throughput, 0.9);
+  // The page-cache pointer is separate and still absent.
+  assert.equal(latestRunId('page-cache', base), null);
+  // A pointer that names the other storage mode's directory is refused.
+  fs.writeFileSync(
+    path.join(base, 'latest-openmessaging-direct.md'),
+    '[Dated report and per-trial results](openmessaging/run-d/summary.md)\n',
+  );
+  assert.throws(() => latestRunId('direct', base), /must link to benchmarks\/openmessaging-direct/);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('a run is shown only under the storage mode krabka ran with', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'omb-site-'));
+  publishedRun(base, 'openmessaging', 'direct-in-page-cache', { krabka_preallocate: true });
+  publishedRun(base, 'openmessaging-direct', 'page-cache-in-direct', {
+    krabka_preallocate: false,
+  });
+  publishedRun(base, 'openmessaging-direct', 'io-uring', {
+    krabka_preallocate: true,
+    krabka_seccomp: 'docker-29.8.1-default+io_uring',
+  });
+  assert.throws(
+    () => loadOpenMessaging('direct-in-page-cache', 'page-cache', base),
+    /holds only runs with krabka's page-cache storage/,
+  );
+  assert.throws(
+    () => loadOpenMessaging('page-cache-in-direct', 'direct', base),
+    /holds only runs with krabka's direct storage/,
+  );
+  assert.throws(
+    () => loadOpenMessaging('io-uring', 'direct', base),
+    /only page-cache and direct OpenMessaging runs/,
+  );
+  fs.rmSync(base, { recursive: true, force: true });
 });

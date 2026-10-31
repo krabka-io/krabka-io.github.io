@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { VENDORS, median } from '../../scripts/benchmark-results.mjs';
+import { OMB_STORAGE as STORAGE, VENDORS, median } from '../../scripts/benchmark-results.mjs';
 
 const root = path.resolve('benchmarks');
 const names = { krabka: 'krabka', kafka: 'Apache Kafka', redpanda: 'Redpanda' };
@@ -33,18 +33,32 @@ const ombImageLabels = {
   'sha256:8c515d335e89455525fb1ad4d9986769c9dd18e44fb259250919c6e7cb53bd84':
     'krabka-broker 1.0.5 (ac9deff, signed release)',
 };
-function latestRunId() {
-  const pointer = path.join(root, 'latest-openmessaging.md');
-  if (!fs.existsSync(pointer)) return null;
+// The run a storage mode's pointer file names, or null when none is published.
+export function latestRunId(storage = 'page-cache', base = root) {
+  const { directory, pointer } = STORAGE[storage];
+  const file = path.join(base, pointer);
+  if (!fs.existsSync(file)) return null;
   const match = fs
-    .readFileSync(pointer, 'utf8')
-    .match(/^\[Dated report and per-trial results\]\(openmessaging\/([\w-]+)\/summary\.md\)/);
+    .readFileSync(file, 'utf8')
+    .match(/^\[Dated report and per-trial results\]\(([\w-]+)\/([\w-]+)\/summary\.md\)/);
   assert.ok(match, 'latest OpenMessaging report must link to a dated run');
-  return match[1];
+  assert.equal(match[1], directory, `the ${storage} report must link to benchmarks/${directory}/`);
+  return match[2];
 }
-export function loadOpenMessaging(id) {
+// krabka's storage mode in a run: its segments written through the page cache,
+// as krabka ships, or preallocated and written with O_DIRECT. The publisher
+// refuses every other broker setting.
+export function krabkaStorage(provenance) {
+  assert.ok(
+    !provenance.contract?.krabka_env?.length && !provenance.contract?.krabka_seccomp,
+    'only page-cache and direct OpenMessaging runs can drive the website',
+  );
+  return provenance.contract?.krabka_preallocate ? 'direct' : 'page-cache';
+}
+export function loadOpenMessaging(id, storage = 'page-cache', base = root) {
   if (!id) return null;
-  const directory = path.join(root, 'openmessaging', id);
+  const published = STORAGE[storage].directory;
+  const directory = path.join(base, published, id);
   const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'provenance.json'), 'utf8'));
   assert.equal(provenance.run_id, id, 'OpenMessaging provenance must match the report');
   assert.equal(
@@ -54,6 +68,11 @@ export function loadOpenMessaging(id) {
   );
   assert.equal(provenance.mode, 'full', 'smoke measurements cannot drive the website');
   assert.equal(provenance.status, 'complete', 'only complete OpenMessaging runs are published');
+  assert.equal(
+    krabkaStorage(provenance),
+    storage,
+    `benchmarks/${published}/ holds only runs with krabka's ${storage} storage`,
+  );
   const trials = JSON.parse(fs.readFileSync(path.join(directory, 'trials.json'), 'utf8'));
   // Trials the run left out on purpose, each with its reason. The publisher
   // checks the list; the page shows each one as not measured.
@@ -71,8 +90,7 @@ export function loadOpenMessaging(id) {
       provenance.repetitions,
     'incomplete OpenMessaging matrix',
   );
-  const sourceURL =
-    'https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/openmessaging/' + id;
+  const sourceURL = `https://github.com/krabka-io/krabka-io.github.io/tree/main/benchmarks/${published}/${id}`;
   const images = VENDORS.map((id) => {
     const image = provenance.images[id];
     const digest = image.reference.split('@').at(-1);
@@ -106,6 +124,7 @@ export function loadOpenMessaging(id) {
             name: image.name,
             omitted: omission.reason,
             publish_rate: null,
+            consume_rate: null,
             end_to_end_p99_ms: null,
             publish_p99_ms: null,
             rss_peak_bytes: null,
@@ -122,6 +141,7 @@ export function loadOpenMessaging(id) {
           id: image.id,
           name: image.name,
           publish_rate: pick(selected, (t) => t.publish_rate),
+          consume_rate: pick(selected, (t) => t.consume_rate),
           end_to_end_p99_ms: pick(selected, (t) => t.end_to_end_latency_ms.p99),
           publish_p99_ms: pick(selected, (t) => t.publish_latency_ms.p99),
           rss_peak_bytes: pick(selected, (t) => t.rss_peak_bytes),
@@ -131,13 +151,14 @@ export function loadOpenMessaging(id) {
     })),
   }));
   return {
+    storage,
     provenance,
     images,
     rows,
     trials,
     omitted,
     sourceURL,
-    archiveURL: fs.existsSync(path.join(root, 'archive', provenance.run_id + '.tar.gz'))
+    archiveURL: fs.existsSync(path.join(base, 'archive', provenance.run_id + '.tar.gz'))
       ? 'https://github.com/krabka-io/krabka-io.github.io/blob/main/benchmarks/archive/README.md'
       : null,
     intervalsURL: fs.existsSync(path.join(directory, 'intervals.json'))
@@ -148,8 +169,11 @@ export function loadOpenMessaging(id) {
   };
 }
 export const openmessaging = loadOpenMessaging(latestRunId());
+// The comparison with Redpanda, which does its own direct I/O: a separate full
+// run in which krabka also writes with O_DIRECT. Null until one is published.
+export const openmessagingDirect = loadOpenMessaging(latestRunId('direct'), 'direct');
 export const benchmarkHistory = fs
   .readdirSync(path.join(root, 'openmessaging'))
   .filter((id) => fs.existsSync(path.join(root, 'openmessaging', id, 'trials.json')))
-  .map(loadOpenMessaging)
+  .map((id) => loadOpenMessaging(id))
   .sort((a, b) => a.provenance.completed_at.localeCompare(b.provenance.completed_at));
