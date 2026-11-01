@@ -40,10 +40,19 @@ test('release comparisons use paired max-rate ratios and exclude omissions', () 
       median(pairs.map(([a, b]) => a.publish_rate / b.publish_rate)),
     );
   }
-  const omission = openmessaging.rows
-    .flatMap((g) => g.cases)
-    .find((c) => c.vendors.some((v) => v.omitted));
-  assert.equal(matrixValue(omission.vendors, 'redpanda', 'publish_rate'), null);
+  // An omitted trial has no ratio. A fixture, since the latest run need not
+  // have an omission.
+  assert.equal(
+    matrixValue(
+      [
+        { id: 'krabka', publish_rate: 1 },
+        { id: 'redpanda', omitted: 'not measured', publish_rate: null },
+      ],
+      'redpanda',
+      'publish_rate',
+    ),
+    null,
+  );
   assert.equal(
     matrixValue(
       [
