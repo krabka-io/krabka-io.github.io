@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { serve, DIST_DIR, installedChromium } from './lab-check-lib.mjs';
+import { isMaxRate } from '../src/utils/home-benchmark.mjs';
 
 const archive = JSON.parse(fs.readFileSync('src/data/benchmark-archive.json', 'utf8'));
 const latest = archive.runs[0];
@@ -72,7 +73,21 @@ try {
   );
   assert.equal(await page.locator('[data-matrix-row]:visible').count(), 14);
   await page.selectOption('[data-matrix-peer]', 'redpanda');
-  assert.match(await page.locator('[data-matrix-summary]').textContent(), /1 not measured/);
+  // Max-rate rows of the latest run without a krabka or Redpanda trial; the
+  // latest run need not have any.
+  const unmeasured = latest.provenance.cases
+    .filter((c) => isMaxRate(c.config))
+    .flatMap((c) => latest.provenance.replication_factors.map((rf) => [c.id, rf]))
+    .filter(([id, rf]) =>
+      ['krabka', 'redpanda'].some(
+        (vendor) =>
+          !latest.trials.some((t) => t.vendor === vendor && t.rf === rf && t.case.id === id),
+      ),
+    ).length;
+  assert.match(
+    await page.locator('[data-matrix-summary]').textContent(),
+    new RegExp(`${unmeasured} not measured`),
+  );
   await page.selectOption('[data-matrix-metric]', 'end_to_end_p99_ms');
   assert.match(await page.locator('[data-matrix-note]').textContent(), /aggregate p99/);
   await page.selectOption('[data-matrix-filter]', 'all');
