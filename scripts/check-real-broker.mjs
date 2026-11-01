@@ -379,7 +379,7 @@ async function node(page, id, pred = '() => true', label = `node ${id}`, timeout
           stderr: state.stderr?.slice(-5),
         })
       : 'no state';
-    throw new Error(`${err.message}; node ${id} was ${brief.slice(0, 1500)}`);
+    throw new Error(`${err.message}; node ${id} was ${brief.slice(0, 1500)}`, { cause: err });
   }
 }
 

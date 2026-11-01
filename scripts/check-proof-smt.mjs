@@ -141,7 +141,9 @@ try {
           .locator('.px-check-ok, .px-check-partial, .px-check-failed')
           .waitFor({ timeout: 300_000 });
       } catch (error) {
-        throw new Error(`${error.message}\n${await page.locator('.px-check').innerText()}`);
+        throw new Error(`${error.message}\n${await page.locator('.px-check').innerText()}`, {
+          cause: error,
+        });
       }
       const status = await page.locator('.px-check-status').innerText();
       assert.match(status, /leaves re-proved in the browser/);
