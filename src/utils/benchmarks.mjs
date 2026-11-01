@@ -105,6 +105,11 @@ export function loadOpenMessaging(id, storage = 'page-cache', base = root) {
     };
   });
   const pick = (list, key) => (list.length ? median(list.map((t) => key(t))) : null);
+  // The rate one trial sustained end to end, taken per trial before the median
+  // across rounds, so one round's fast publish and another's fast consume do
+  // not combine into a rate no round reached.
+  const sustained = (t) =>
+    t.consume_rate > 0 ? Math.min(t.publish_rate, t.consume_rate) : t.publish_rate;
   const rows = provenance.replication_factors.map((rf) => ({
     rf,
     cases: provenance.cases.map((workload) => ({
@@ -125,6 +130,7 @@ export function loadOpenMessaging(id, storage = 'page-cache', base = root) {
             omitted: omission.reason,
             publish_rate: null,
             consume_rate: null,
+            throughput: null,
             end_to_end_p99_ms: null,
             publish_p99_ms: null,
             rss_peak_bytes: null,
@@ -142,6 +148,7 @@ export function loadOpenMessaging(id, storage = 'page-cache', base = root) {
           name: image.name,
           publish_rate: pick(selected, (t) => t.publish_rate),
           consume_rate: pick(selected, (t) => t.consume_rate),
+          throughput: pick(selected, sustained),
           end_to_end_p99_ms: pick(selected, (t) => t.end_to_end_latency_ms.p99),
           publish_p99_ms: pick(selected, (t) => t.publish_latency_ms.p99),
           rss_peak_bytes: pick(selected, (t) => t.rss_peak_bytes),

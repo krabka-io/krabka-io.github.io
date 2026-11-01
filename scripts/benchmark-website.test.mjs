@@ -298,3 +298,47 @@ test('a run is shown only under the storage mode krabka ran with', () => {
   );
   fs.rmSync(base, { recursive: true, force: true });
 });
+
+test('throughput takes the lower rate of each round before the median across rounds', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'omb-site-'));
+  publishedRun(base, 'openmessaging', 'rounds', {});
+  const run = path.join(base, 'openmessaging', 'rounds');
+  const provenance = JSON.parse(fs.readFileSync(path.join(run, 'provenance.json'), 'utf8'));
+  fs.writeFileSync(
+    path.join(run, 'provenance.json'),
+    JSON.stringify({ ...provenance, repetitions: 3 }),
+  );
+  const [template] = JSON.parse(fs.readFileSync(path.join(run, 'trials.json'), 'utf8'));
+  // krabka's rounds each reached 10 or 100 messages/s end to end; the medians of
+  // its publish and consume rates are both 100, but its median round is 10.
+  const rounds = {
+    krabka: [
+      [100, 10],
+      [10, 100],
+      [100, 100],
+    ],
+  };
+  const trials = ['krabka', 'kafka', 'redpanda'].flatMap((vendor) =>
+    (
+      rounds[vendor] ?? [
+        [100, 100],
+        [100, 100],
+        [100, 100],
+      ]
+    ).map(([publish, consume], i) => ({
+      ...template,
+      vendor,
+      repetition: i + 1,
+      publish_rate: publish,
+      consume_rate: consume,
+    })),
+  );
+  fs.writeFileSync(path.join(run, 'trials.json'), JSON.stringify(trials));
+  const loaded = loadOpenMessaging('rounds', 'page-cache', base);
+  const krabka = loaded.rows[0].cases[0].vendors.find((v) => v.id === 'krabka');
+  assert.equal(krabka.publish_rate, 100);
+  assert.equal(krabka.consume_rate, 100);
+  assert.equal(throughput(krabka), 10);
+  assert.equal(comparison(loaded, 'redpanda').throughput, 0.1);
+  fs.rmSync(base, { recursive: true, force: true });
+});

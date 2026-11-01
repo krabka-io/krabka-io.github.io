@@ -5,10 +5,13 @@ export const releaseVersion = (run) =>
 
 // The rate a workload sustained end to end: the lower of its publish and
 // consume rates, so a consumer that falls behind does not count as faster.
+// A loaded run carries it per trial, as the median across rounds of each
+// round's lower rate; a row without it falls back to its median rates.
 export const throughput = (vendor) =>
-  vendor.consume_rate > 0
+  vendor.throughput ??
+  (vendor.consume_rate > 0
     ? Math.min(vendor.publish_rate, vendor.consume_rate)
-    : vendor.publish_rate;
+    : vendor.publish_rate);
 
 export function comparison(run, peer = 'kafka', size, rf) {
   const pairs = run.rows
