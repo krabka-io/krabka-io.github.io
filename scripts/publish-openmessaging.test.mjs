@@ -18,7 +18,7 @@ const config = {
 };
 const series = (value) => Array(6).fill(value);
 
-async function fakeRun(overrides = {}) {
+async function fakeRun(overrides = {}, { directIo } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omb-publish-'));
   const run = path.join(root, 'artifact', 'run-1');
   await fs.mkdir(run, { recursive: true });
@@ -62,6 +62,7 @@ async function fakeRun(overrides = {}) {
         },
         metrics: { cpu_seconds: 10, rss_peak_bytes: 1048576, working_set_peak_bytes: 2097152 },
         time_series: { samples: [] },
+        ...(vendor === 'krabka' && directIo ? { direct_io: directIo } : {}),
       }),
     );
   }
@@ -71,7 +72,7 @@ async function fakeRun(overrides = {}) {
 
 test('a complete full run is published with a compact trial list and a latest pointer', async () => {
   const { root, run } = await fakeRun();
-  assert.deepEqual(await publish(run, root), { run_id: 'run-1', trials: 3 });
+  assert.deepEqual(await publish(run, root), { run_id: 'run-1', storage: 'page-cache', trials: 3 });
   const trials = JSON.parse(
     await fs.readFile(
       path.join(root, 'benchmarks', 'openmessaging', 'run-1', 'trials.json'),
@@ -109,7 +110,7 @@ test('a run that omits a trial with a reason is published without it', async () 
   ];
   const { root, run } = await fakeRun({ omitted });
   await fs.rm(path.join(run, 'rf1-redpanda-1-simple-workload'), { recursive: true });
-  assert.deepEqual(await publish(run, root), { run_id: 'run-1', trials: 2 });
+  assert.deepEqual(await publish(run, root), { run_id: 'run-1', storage: 'page-cache', trials: 2 });
   const provenance = JSON.parse(
     await fs.readFile(
       path.join(root, 'benchmarks', 'openmessaging', 'run-1', 'provenance.json'),
@@ -126,17 +127,67 @@ test('a run that omits a trial with a reason is published without it', async () 
   }
 });
 
-test('runs with broker settings or a preallocate override are experiments and are refused', async () => {
-  for (const [contract, message] of [
-    [{ krabka_env: ['KRABKA_LOG_TAIL_CACHE_SIZE=32MiB'] }, /--krabka-env/],
-    [{ krabka_preallocate: true }, /--krabka-preallocate/],
+test('runs with broker settings are experiments and are refused', async () => {
+  for (const contract of [
+    { krabka_env: ['KRABKA_LOG_TAIL_CACHE_SIZE=32MiB'] },
+    { krabka_env: ['KRABKA_LOG_TAIL_CACHE_SIZE=32MiB'], krabka_preallocate: true },
   ]) {
-    const { root, run } = await fakeRun({ contract });
-    await assert.rejects(publish(run, root), message);
+    const { root, run } = await fakeRun({ contract }, { directIo: { verified: true } });
+    await assert.rejects(publish(run, root), /--krabka-env/);
     await assert.rejects(fs.access(path.join(root, 'benchmarks', 'latest-openmessaging.md')));
+    await assert.rejects(
+      fs.access(path.join(root, 'benchmarks', 'latest-openmessaging-direct.md')),
+    );
   }
   const { root, run } = await fakeRun({ contract: { krabka_env: [], krabka_preallocate: false } });
-  assert.deepEqual(await publish(run, root), { run_id: 'run-1', trials: 3 });
+  assert.deepEqual(await publish(run, root), {
+    run_id: 'run-1',
+    storage: 'page-cache',
+    trials: 3,
+  });
+});
+
+test('a direct-storage run is published to its own directory and pointer', async () => {
+  const { root, run } = await fakeRun(
+    { contract: { krabka_preallocate: true } },
+    { directIo: { verified: true } },
+  );
+  // The page-cache run already on the site stays as it is.
+  const pageCache = path.join(root, 'benchmarks', 'latest-openmessaging.md');
+  await fs.writeFile(pageCache, 'page-cache pointer\n');
+  assert.deepEqual(await publish(run, root), { run_id: 'run-1', storage: 'direct', trials: 3 });
+  assert.equal(await fs.readFile(pageCache, 'utf8'), 'page-cache pointer\n');
+  await assert.rejects(fs.access(path.join(root, 'benchmarks', 'openmessaging', 'run-1')));
+  const published = path.join(root, 'benchmarks', 'openmessaging-direct', 'run-1');
+  for (const file of ['provenance.json', 'summary.md', 'trials.json', 'intervals.json'])
+    await fs.access(path.join(published, file));
+  assert.match(
+    await fs.readFile(path.join(root, 'benchmarks', 'latest-openmessaging-direct.md'), 'utf8'),
+    /^\[Dated report and per-trial results\]\(openmessaging-direct\/run-1\/summary\.md\)/,
+  );
+  await assert.rejects(publish(run, root), /already published/);
+});
+
+test('a run id is published once across storage modes', async () => {
+  const { root, run } = await fakeRun(
+    { contract: { krabka_preallocate: true } },
+    { directIo: { verified: true } },
+  );
+  await fs.mkdir(path.join(root, 'benchmarks', 'openmessaging', 'run-1'), { recursive: true });
+  await assert.rejects(publish(run, root), /already published/);
+});
+
+test('a direct-storage run without verified O_DIRECT on every krabka trial is refused', async () => {
+  for (const directIo of [undefined, { verified: false, error: 'not seen' }]) {
+    const { root, run } = await fakeRun({ contract: { krabka_preallocate: true } }, { directIo });
+    await assert.rejects(
+      publish(run, root),
+      /simple-workload RF1 krabka round 1: O_DIRECT not verified/,
+    );
+    await assert.rejects(
+      fs.access(path.join(root, 'benchmarks', 'latest-openmessaging-direct.md')),
+    );
+  }
 });
 
 test('publication preserves every raw OMB field and interval in compressed results with verified checksums', async () => {
@@ -215,8 +266,15 @@ test('a run in which the host shaped a trial is refused', async () => {
 });
 
 test('a run with --krabka-io-uring is refused', async () => {
-  const { root, run } = await fakeRun({
-    contract: { krabka_seccomp: 'docker-29.8.1-default+io_uring' },
-  });
+  // As the workflow's direct-io-uring storage records it: preallocate plus the
+  // io_uring seccomp profile.
+  const { root, run } = await fakeRun(
+    {
+      contract: { krabka_preallocate: true, krabka_seccomp: 'docker-29.8.1-default+io_uring' },
+    },
+    { directIo: { verified: true } },
+  );
   await assert.rejects(publish(run, root), /container security profile/);
+  await assert.rejects(fs.access(path.join(root, 'benchmarks', 'latest-openmessaging-direct.md')));
+  await assert.rejects(fs.access(path.join(root, 'benchmarks', 'openmessaging-direct')));
 });

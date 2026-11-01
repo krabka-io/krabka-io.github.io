@@ -298,3 +298,10 @@ export function directIoCheck(listing, arch, topicPrefix = 'test-topic-') {
     .sort();
   return { partitions: newest.size, direct: verified.length, unwritten, missing, verified };
 }
+
+// Where scripts/publish-openmessaging.mjs publishes a run for each krabka
+// storage mode, and where the website (src/utils/benchmarks.mjs) reads it.
+export const OMB_STORAGE = {
+  'page-cache': { directory: 'openmessaging', pointer: 'latest-openmessaging.md' },
+  direct: { directory: 'openmessaging-direct', pointer: 'latest-openmessaging-direct.md' },
+};

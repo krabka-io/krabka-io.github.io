@@ -66,6 +66,11 @@ const benchmarkInputs = [
   'benchmarks/openmessaging/**/trials.json',
   'benchmarks/openmessaging/**/summary.md',
   'benchmarks/openmessaging/**/intervals.json',
+  'benchmarks/latest-openmessaging-direct.md',
+  'benchmarks/openmessaging-direct/**/provenance.json',
+  'benchmarks/openmessaging-direct/**/trials.json',
+  'benchmarks/openmessaging-direct/**/summary.md',
+  'benchmarks/openmessaging-direct/**/intervals.json',
 ];
 const generatedInputs = {
   '/': ['src/pages/docs/quickstart.astro', 'src/data/versions.json', ...benchmarkInputs],
