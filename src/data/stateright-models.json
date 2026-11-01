@@ -36,6 +36,23 @@
     "summary": "Drives the host's retained-batch bookkeeping around the proved producer_decision kernel and compares every answer with an independent classification by Kafka's rules over a ghost window of the five batches Kafka retains. Any disagreement becomes a counterexample, and witnesses require duplicates of the last, an older, and the oldest retained batch, an out-of-order refusal, and an epoch bump."
   },
   {
+    "id": "inflight_model",
+    "name": "In-flight produce model",
+    "area": "Broker data and Fetch",
+    "repo": "krabka-broker",
+    "path": "crates/broker/src/producer_state/inflight_model.rs",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/producer_state/inflight_model.rs",
+    "drives": ["check_retained", "ProducerSnapshotEntry::add_data_batch", "ProducerSnapshotEntry::find_duplicate_batch", "committed_entry"],
+    "bounds": "Two producers on one partition, the first with two batches and the second with one, every batch sent at most twice, and a log of single-record slots.",
+    "properties": ["no_duplicate_append", "decision_matches_kafka"],
+    "pinned_states": [
+      { "config": "PINNED_UNIQUE_STATES", "count": 8175 },
+      { "config": "PINNED_UNIQUE_STATES_GATE_ONLY", "count": 15315 }
+    ],
+    "outside": "Leader changes, transactions, and multi-record batches remain outside the model; producer_state_model covers the multi-record retained window.",
+    "summary": "Splits one acks=all produce into the steps the broker runs apart: the early dedup gate, the partition writer's lookup among the producer's retained batches, the commit of the writer's answer into the tracker, and the high-watermark gate. A retry over a new connection can pass the early gate while the original still waits. It requires that no producer ID, epoch and sequence appear in the log twice and that every batch is answered as Kafka would answer it. The GateOnly regression configuration, the orchestration from before #1947, must reproduce the Jepsen workload's duplicate records at depth 4."
+  },
+  {
     "id": "replica_state_model",
     "name": "Replica state model",
     "area": "Broker data and Fetch",
@@ -179,6 +196,23 @@
     "summary": "Composes a producer client's failover routing and retry bookkeeping with the production idempotent-producer check over every interleaving of send, retry, replication, high-watermark advance, acknowledgement, leader death, clean election, and metadata refresh. Eleven always properties require that an acknowledged batch is committed and stays durable, that no log holds the batch twice, that a reroute never skips a sequence, that every leader holds the committed prefix, and that the attempt and refresh caps hold."
   },
   {
+    "id": "metadata_application_model",
+    "name": "Metadata application model",
+    "area": "Broker failover and placement",
+    "repo": "krabka-broker",
+    "path": "crates/broker/src/metadata_application_model.rs",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/metadata_application_model.rs",
+    "drives": ["encode_record", "decode_committed_value", "validate", "apply", "compute_reregistration_changes", "handle_partition_with_recovery", "ElrPublisher::extend", "replica_fetch_mutation"],
+    "bounds": "Three nodes host one partition with replication factor 2 and unclean.leader.election.enable=true, a controller that never crashes, two crash-restarts and a four-batch log.",
+    "properties": [],
+    "pinned_states": [
+      { "config": "PINNED_UNIQUE_STATES", "count": 62322 },
+      { "config": "PINNED_UNIQUE_STATES_LOG_START_REPLAY", "count": 61297 }
+    ],
+    "outside": "The controller's own restart, the session-timeout failover scan, ELR, retention pruning, the lag-driven ISR shrink, multiple partitions, and high-watermark arithmetic remain outside the model.",
+    "summary": "Checks that every replica installs the committed leader and leader epoch after crash-restarts, running each metadata transition through production code on a real MetadataImage. Two quiescence properties require that once no step can change anything, every replica has installed the committed target. A regression configuration restates the restart replay from before #1940 and must reach the 12-action counterexample the Jepsen workload found: the unclean election's leader-epoch bump applied twice, leaving a follower stuck on UNKNOWN_LEADER_EPOCH."
+  },
+  {
     "id": "quorum_wal_model",
     "name": "Quorum WAL model",
     "area": "Broker quorum WAL",
@@ -311,6 +345,22 @@
     "summary": "Runs two transactional producers and an advancing high watermark over one partition, driving the EndTxn cores and the production visibility window while modeling the LSO rule and the abort filter. Properties are checked against oracles derived by producer and control marker: the real window equals min(first unstable offset, hw), every committed record below it is visible, nothing above the HWM is visible, and no offset in an aborted range is visible."
   },
   {
+    "id": "marker_delivery_model",
+    "name": "Transaction marker delivery model",
+    "area": "Broker groups and transactions",
+    "repo": "krabka-broker",
+    "path": "crates/broker/src/txn/marker_delivery_model.rs",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/txn/marker_delivery_model.rs",
+    "drives": ["decide_phase1_transition", "prepare_completion_identities_with_fresh", "should_abort_idle_txn", "completion_for", "classify_marker_failure", "completion_decision", "apply_completion", "transaction_marker_materialization_decision"],
+    "bounds": "One transactional id over two data partitions, up to producer epoch 2, with one failed commit wait and one coordinator crash (basic) or two of each (wide), and faults ended by Heal.",
+    "properties": ["every_marker_delivered", "outcome_is_atomic"],
+    "pinned_states": [
+      { "config": "PINNED_UNIQUE_STATES_BASIC", "count": 73076 },
+      { "config": "PINNED_UNIQUE_STATES_WIDE", "count": 390552 }
+    ],
+    "summary": "Runs a transaction-version-2 producer, the timeout reaper, the completion task and the partition leaders' late appends under bounded faults: lost or late __transaction_state writes, coordinator crashes, and retriable or unexpected marker answers. Once the cluster has healed and nothing can make progress, every partition holding a transaction's data must have its marker, except one that keeps answering an unexpected code, and one generation's markers must all agree. Restoring the old fan-out failure order fails delivery on the Jepsen subscribe-txn-kill shape."
+  },
+  {
     "id": "two_pc_model",
     "name": "KIP-939 timeout model",
     "area": "Broker groups and transactions",
@@ -325,6 +375,23 @@
       { "config": "wide", "count": 80914 }
     ],
     "summary": "Runs InitProducerId with and without enable2Pc, AddPartitionsToTxn, EndTxn, completion, and the idle reaper over a clock that meets every timeout's start + timeout and start + timeout + 1. The headline property keys on the request's enable2Pc flag so a wrong encoding fails it, and the reaper properties compare every sweep with Kafka's timedOutTransactions rule in exact arithmetic."
+  },
+  {
+    "id": "completion_model",
+    "name": "Transaction completion model",
+    "area": "Broker groups and transactions",
+    "repo": "krabka-broker",
+    "path": "crates/broker/src/txn/completion_model.rs",
+    "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/txn/completion_model.rs",
+    "drives": ["registration_decision", "end_txn_decision", "decide_phase1_transition", "apply_end_txn_prepare", "decide_end_txn_completion", "apply_completion", "reaper_step", "completion_decision"],
+    "bounds": "One transactional id at TV_2 over two data partitions and its __transaction_state coordinator, EndTxn sent at most twice, and at most two faults (stall, failover, leader move, refusal, abandonment) ended by Heal, with and without marker refusals.",
+    "properties": ["every_transaction_ends_when_quiescent", "one_outcome_per_transaction", "projection_exact"],
+    "pinned_states": [
+      { "config": "PINNED_UNIQUE_STATES_NO_REFUSALS", "count": 89478 },
+      { "config": "PINNED_UNIQUE_STATES_REFUSALS", "count": 104970 }
+    ],
+    "outside": "A stale coordinator fenced by a newer one, data-partition replication, a partial commit of the state tail, and transaction versions below TV_2 remain outside the model.",
+    "summary": "Runs the coordinator one operation at a time, split at its awaits, with state writes that can time out and still commit or be truncated, failovers that rebuild the cache from the log, and marker fan-outs to moving leaders. Both headline properties fail on the current code, the Jepsen workload's hanging-transaction failure, and are pinned as known failures. In one path a load publishes an uncommitted registration or PrepareCommit and a later failover truncates it, so the reaper never ends the transaction or aborts it on one partition after a commit on the other; in another an unexpected marker answer ends a PrepareCommit's fan-out and the reaper resumes only PrepareAbort."
   },
   {
     "id": "share_group_model",
