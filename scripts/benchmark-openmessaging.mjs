@@ -85,9 +85,19 @@ export function ombWorkload(source, smoke, durationMinutes) {
   return { yaml: effective, config, sha256: createHash('sha256').update(source).digest('hex') };
 }
 
+// How long one OMB run may take before the harness kills it. A backlog
+// workload first fills the backlog (about 17 minutes for 100 GB at 100K 1 KiB
+// records/s) and then drains it at the consume rate less the producer's. The
+// drain rate follows the runner's disk: on 2026-10-31 two GCE runners of the
+// same type drained 15 to 35% slower than on 2026-10-30, and Redpanda's RF3
+// single-partition backlog, which drained at 155K records/s on the earlier
+// runner, managed 115K, needed about 140 minutes and was killed at 95 twice.
+// The allowance also sets the consumers' max.poll.interval.ms, which only
+// decides when a paused consumer is dropped, so it does not change a result.
 export function ombTimeoutMs(config, smoke) {
   return (
-    (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 90 : 30)) * 60_000
+    (config.testDurationMinutes + (smoke ? 5 : config.consumerBacklogSizeGB > 0 ? 180 : 30)) *
+    60_000
   );
 }
 

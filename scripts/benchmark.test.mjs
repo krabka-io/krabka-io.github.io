@@ -677,7 +677,7 @@ test('OpenMessaging catalog and smoke configuration keep comparison settings con
   const full = ombWorkload(source, false);
   assert.equal(full.config.consumerBacklogSizeGB, 100);
   assert.equal(full.config.testDurationMinutes, 15);
-  assert.equal(ombTimeoutMs(full.config, false), 105 * 60_000);
+  assert.equal(ombTimeoutMs(full.config, false), 195 * 60_000);
   assert.match(full.yaml, /payloadFile: "\/src\/payload\/payload-1Kb.data"/);
   const smoke = ombWorkload(source, true);
   assert.equal(smoke.config.consumerBacklogSizeGB, 0);
@@ -690,7 +690,7 @@ test('OpenMessaging catalog and smoke configuration keep comparison settings con
     const driver = ombDriver(vendor, 3);
     assert.doesNotMatch(driver, /max.poll.interval.ms/);
     const backlogDriver = ombDriver(vendor, 3, ombTimeoutMs(full.config, false));
-    assert.match(backlogDriver, /^ {2}max.poll.interval.ms=6300000$/m);
+    assert.match(backlogDriver, /^ {2}max.poll.interval.ms=11700000$/m);
     assert.match(driver, /acks=all\n {2}enable.idempotence=true/);
     assert.match(driver, /replicationFactor: 3/);
     assert.match(driver, /batch.size=1048576/);
