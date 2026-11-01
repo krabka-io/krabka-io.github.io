@@ -169,10 +169,11 @@
     "path": "crates/broker/src/client_server_failover_model.rs",
     "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/client_server_failover_model.rs",
     "drives": ["check_pure"],
-    "bounds": "Three brokers, one producer identity with one batch, logs of at most one batch, a high watermark through 1, at most four send attempts and four metadata refreshes.",
+    "bounds": "Three brokers, one producer identity with one batch, logs of at most two batches, a high watermark through 1, at most four send attempts and four metadata refreshes.",
     "properties": [],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES", "count": 38131 }
+      { "config": "PINNED_UNIQUE_STATES", "count": 85084 },
+      { "config": "PINNED_UNIQUE_STATES_GATE_ONLY", "count": 187373 }
     ],
     "outside": "The wire client, transactions, and unclean election remain outside the model.",
     "summary": "Composes a producer client's failover routing and retry bookkeeping with the production idempotent-producer check over every interleaving of send, retry, replication, high-watermark advance, acknowledgement, leader death, clean election, and metadata refresh. Eleven always properties require that an acknowledged batch is committed and stays durable, that no log holds the batch twice, that a reroute never skips a sequence, that every leader holds the committed prefix, and that the attempt and refresh caps hold."
@@ -301,11 +302,11 @@
     "path": "crates/broker/src/txn/eos_composition_model.rs",
     "source_url": "https://github.com/krabka-io/krabka-broker/blob/main/crates/broker/src/txn/eos_composition_model.rs",
     "drives": ["EndTxn cores (Proceed path)", "compute_visibility_window"],
-    "bounds": "Two transactional producers over one partition with one (basic, logs of 5 batches, depth 13) or two (wide, logs of 7 batches, depth 19) generations per producer.",
+    "bounds": "Two transactional producers over one partition with one (basic, logs of 5 batches) or two (wide, logs of 7 batches) generations per producer.",
     "properties": ["window_is_min_lso_hw", "committed_prefix_complete", "nothing_visible_above_hw", "no_visible_aborted", "only_committed_visible", "no_transition_violation"],
     "pinned_states": [
-      { "config": "basic", "count": 1228 },
-      { "config": "wide", "count": 58524 }
+      { "config": "basic", "count": 958 },
+      { "config": "wide", "count": 38300 }
     ],
     "summary": "Runs two transactional producers and an advancing high watermark over one partition, driving the EndTxn cores and the production visibility window while modeling the LSO rule and the abort filter. Properties are checked against oracles derived by producer and control marker: the real window equals min(first unstable offset, hw), every committed record below it is visible, nothing above the HWM is visible, and no offset in an aborted range is visible."
   },

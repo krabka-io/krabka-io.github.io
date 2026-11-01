@@ -1,98 +1,95 @@
-[Dated report and per-trial results](openmessaging/omb-local-2026-10-14/summary.md)
+[Dated report and per-trial results](openmessaging/gh-41260722312-1/summary.md)
 
 # OpenMessaging broker comparison
 
-Run: omb-local-2026-10-14. Mode: full. Status: complete.
+Run: gh-41260722312-1. Mode: full. Status: complete.
 
 Upstream: https://github.com/openmessaging/benchmark.git at 5b1fa70951a323da26bd587174b58bb2c65b0b5c; Kafka client 3.6.1 for every broker.
 
 Shared host, sequential fresh clusters; 4 logical CPUs and 10 GiB per broker. Buffered acknowledgments; Redpanda uses Raft majorities.
 OMB reports latency and rates, not exact delivery/duplicate verification. Resource windows include client startup, warm-up, probing, measurement and shutdown.
 
-- krabka: ghcr.io/krabka-io/krabka-broker@sha256:2a81d1ba38de4e8ffb032fedf67952845185158a7607ac76ba38fa162dc37e50
+- krabka: ghcr.io/krabka-io/krabka-broker@sha256:577a686c1b24a5a655ec8a2a82c877e119e3dd3f07b5fa617e91d05851714e1e
 - kafka: apache/kafka@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
 - redpanda: docker.redpanda.com/redpandadata/redpanda@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96
 
 | Workload | RF | Broker | Round | Publish msg/s | Consume msg/s | Publish p99 ms | End-to-end p99 ms | CPU seconds | Peak RSS MiB |
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|
-| simple-workload | 1 | krabka | 1 | 10002 | 10002 | 1.25 | 2.00 | 86.48 | 45.38 |
-| 1-topic-1-partition-1kb | 1 | krabka | 1 | 50004 | 50004 | 1.30 | 2.00 | 250.32 | 302.84 |
-| 1-topic-1-partition-100b | 1 | krabka | 1 | 50006 | 50006 | 1.25 | 2.00 | 210.54 | 256.04 |
-| 1-topic-16-partitions-1kb | 1 | krabka | 1 | 50003 | 50003 | 1.31 | 2.00 | 273.94 | 294.61 |
-| backlog-1-topic-1-partition-1kb | 1 | krabka | 1 | 100005 | 99989 | 10.26 | 1037762.56 | 296.05 | 220.57 |
-| backlog-1-topic-16-partitions-1kb | 1 | krabka | 1 | 100007 | 99989 | 5.07 | 1076977.66 | 335.58 | 275.51 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | krabka | 1 | 1139780 | 1139781 | 103.50 | 104.00 | 329.00 | 74.47 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 1 | krabka | 1 | 3593900 | 3593884 | 110.75 | 111.00 | 151.57 | 71.02 |
-| 1-topic-3-partition-100b-3producers | 1 | krabka | 1 | 1620371 | 1620343 | 131.28 | 197.00 | 537.35 | 566.39 |
-| max-rate-1-topic-16-partitions-1kb | 1 | krabka | 1 | 741306 | 741313 | 175.35 | 177.00 | 233.36 | 78.41 |
-| max-rate-1-topic-16-partitions-100b | 1 | krabka | 1 | 628123 | 628130 | 1.72 | 41.00 | 61.41 | 53.23 |
-| max-rate-1-topic-100-partitions-1kb | 1 | krabka | 1 | 818326 | 818326 | 144.21 | 146.00 | 286.18 | 78.31 |
-| max-rate-1-topic-100-partitions-100b | 1 | krabka | 1 | 2229882 | 2229852 | 137.03 | 141.00 | 159.84 | 62.81 |
-| simple-workload | 1 | kafka | 1 | 10002 | 10002 | 1.22 | 2.00 | 88.23 | 962.41 |
-| 1-topic-1-partition-1kb | 1 | kafka | 1 | 50004 | 50004 | 1.32 | 2.00 | 254.34 | 1013.13 |
-| 1-topic-1-partition-100b | 1 | kafka | 1 | 50003 | 50003 | 1.23 | 2.00 | 229.26 | 988.98 |
-| 1-topic-16-partitions-1kb | 1 | kafka | 1 | 50004 | 50004 | 1.35 | 2.00 | 271.35 | 1026.95 |
-| backlog-1-topic-1-partition-1kb | 1 | kafka | 1 | 100004 | 99987 | 45.39 | 1038172.16 | 317.74 | 1154.75 |
-| backlog-1-topic-16-partitions-1kb | 1 | kafka | 1 | 100004 | 99988 | 9.26 | 1038213.12 | 303.39 | 1078.29 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | kafka | 1 | 1016551 | 1016534 | 93.53 | 96.00 | 373.56 | 716.55 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 1 | kafka | 1 | 3497974 | 3497963 | 77.21 | 79.00 | 194.99 | 991.66 |
-| 1-topic-3-partition-100b-3producers | 1 | kafka | 1 | 1748596 | 1748647 | 172.75 | 273.00 | 540.95 | 1225.39 |
-| max-rate-1-topic-16-partitions-1kb | 1 | kafka | 1 | 697199 | 697201 | 174.07 | 177.00 | 277.54 | 1207.82 |
-| max-rate-1-topic-16-partitions-100b | 1 | kafka | 1 | 1178434 | 1178421 | 79.01 | 89.00 | 104.12 | 1075.06 |
-| max-rate-1-topic-100-partitions-1kb | 1 | kafka | 1 | 729900 | 729896 | 150.29 | 153.00 | 311.03 | 1200.49 |
-| max-rate-1-topic-100-partitions-100b | 1 | kafka | 1 | 1353444 | 1353442 | 66.79 | 72.00 | 127.78 | 1129.53 |
-| simple-workload | 1 | redpanda | 1 | 10003 | 10003 | 1.26 | 2.00 | 180.84 | 5099.21 |
-| 1-topic-1-partition-1kb | 1 | redpanda | 1 | 50005 | 50005 | 1.33 | 2.00 | 303.68 | 2622.54 |
-| 1-topic-1-partition-100b | 1 | redpanda | 1 | 50004 | 50004 | 1.24 | 2.00 | 380.95 | 2626.30 |
-| 1-topic-16-partitions-1kb | 1 | redpanda | 1 | 50004 | 50004 | 1.30 | 2.00 | 539.24 | 7318.03 |
-| backlog-1-topic-1-partition-1kb | 1 | redpanda | 1 | 100006 | 99983 | 1.40 | 1037959.17 | 426.39 | 2683.94 |
-| backlog-1-topic-16-partitions-1kb | 1 | redpanda | 1 | 100005 | 99971 | 1.48 | 1038163.97 | 476.03 | 7414.72 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | redpanda | 1 | 1054932 | 1054928 | 39.35 | 43.00 | 457.51 | 2734.08 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 1 | redpanda | 1 | 3973941 | 3973941 | 43.81 | 45.00 | 255.34 | 2640.35 |
-| 1-topic-3-partition-100b-3producers | 1 | redpanda | 1 | 2057763 | 2057775 | 2.62 | 50.00 | 642.28 | 5800.03 |
-| max-rate-1-topic-16-partitions-1kb | 1 | redpanda | 1 | 908991 | 908991 | 47.90 | 52.00 | 457.83 | 7391.48 |
-| max-rate-1-topic-16-partitions-100b | 1 | redpanda | 1 | 594485 | 594499 | 1.47 | 33.00 | 92.13 | 7360.96 |
-| max-rate-1-topic-100-partitions-1kb | 1 | redpanda | 1 | 897697 | 897700 | 48.05 | 53.00 | 500.81 | 7403.07 |
-| max-rate-1-topic-100-partitions-100b | 1 | redpanda | 1 | 625489 | 625496 | 1.61 | 17.00 | 115.13 | 7362.15 |
-| simple-workload | 3 | krabka | 1 | 10003 | 10003 | 1.76 | 2.00 | 348.86 | 141.50 |
-| 1-topic-1-partition-1kb | 3 | krabka | 1 | 50004 | 50005 | 457.44 | 476.00 | 1013.78 | 851.19 |
-| 1-topic-1-partition-100b | 3 | krabka | 1 | 50004 | 50004 | 1.72 | 2.00 | 944.57 | 907.61 |
-| 1-topic-16-partitions-1kb | 3 | krabka | 1 | 50004 | 50004 | 36.30 | 60.00 | 1067.38 | 1004.18 |
-| backlog-1-topic-1-partition-1kb | 3 | krabka | 1 | 100009 | 99964 | 700.51 | 1037574.14 | 1181.15 | 368.76 |
-| backlog-1-topic-16-partitions-1kb | 3 | krabka | 1 | 100006 | 99915 | 215.13 | 1037156.35 | 1403.41 | 506.02 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | krabka | 1 | 377487 | 377487 | 693.15 | 694.00 | 438.64 | 160.14 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 3 | krabka | 1 | 2108784 | 2108783 | 672.90 | 674.00 | 289.55 | 167.51 |
-| 1-topic-3-partition-100b-3producers | 3 | krabka | 1 | 1531034 | 1531032 | 845.75 | 1702.01 | 1956.28 | 928.66 |
-| simple-workload | 3 | kafka | 1 | 10003 | 10003 | 1.60 | 2.00 | 325.27 | 2938.30 |
-| 1-topic-1-partition-1kb | 3 | kafka | 1 | 50004 | 50004 | 475.20 | 508.00 | 861.79 | 3242.01 |
-| 1-topic-1-partition-100b | 3 | kafka | 1 | 50004 | 50004 | 1.56 | 2.00 | 757.32 | 2967.52 |
-| 1-topic-16-partitions-1kb | 3 | kafka | 1 | 50004 | 50004 | 47.88 | 76.00 | 927.45 | 3151.89 |
-| backlog-1-topic-1-partition-1kb | 3 | kafka | 1 | 100008 | 99897 | 871.62 | 1038852.09 | 1090.56 | 3645.90 |
-| backlog-1-topic-16-partitions-1kb | 3 | kafka | 1 | 100007 | 99956 | 146.45 | 1037017.09 | 1195.63 | 3621.94 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | kafka | 1 | 374241 | 374241 | 712.27 | 713.00 | 520.07 | 2256.92 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 3 | kafka | 1 | 2203941 | 2203941 | 490.40 | 491.00 | 377.61 | 2406.90 |
-| 1-topic-3-partition-100b-3producers | 3 | kafka | 1 | 1622371 | 1621663 | 819.50 | 1488.01 | 1856.11 | 3671.66 |
-| simple-workload | 3 | redpanda | 1 | 10002 | 10002 | 1.42 | 2.00 | 308.11 | 15211.46 |
-| 1-topic-1-partition-1kb | 3 | redpanda | 1 | 50004 | 50004 | 1.54 | 2.00 | 844.26 | 7917.11 |
-| 1-topic-1-partition-100b | 3 | redpanda | 1 | 50007 | 50006 | 1.36 | 2.00 | 686.76 | 7665.69 |
-| 1-topic-16-partitions-1kb | 3 | redpanda | 1 | 50004 | 50004 | 1.59 | 2.00 | 909.47 | 22063.89 |
-| backlog-1-topic-1-partition-1kb | 3 | redpanda | 1 | 100004 | 99977 | 1.69 | 1037684.73 | 1225.88 | 8024.83 |
-| backlog-1-topic-16-partitions-1kb | 3 | redpanda | 1 | 100006 | 99980 | 2.07 | 1037332.48 | 1190.51 | 22510.00 |
-| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | redpanda | 1 | 387738 | 387740 | 103.78 | 105.00 | 577.40 | 7931.41 |
-| max-rate-1-topic-1-partition-1p-1c-100b | 3 | redpanda | 1 | 2859077 | 2859077 | 133.66 | 134.00 | 497.83 | 7923.63 |
-| max-rate-1-topic-16-partitions-1kb | 3 | krabka | 1 | 292399 | 292409 | 302.75 | 315.00 | 506.99 | 266.59 |
-| max-rate-1-topic-16-partitions-100b | 3 | krabka | 1 | 313798 | 313946 | 3.10 | 439.00 | 303.32 | 196.50 |
-| max-rate-1-topic-100-partitions-1kb | 3 | krabka | 1 | 336115 | 336107 | 363.80 | 368.00 | 626.72 | 272.42 |
-| max-rate-1-topic-100-partitions-100b | 3 | krabka | 1 | 287511 | 287517 | 3.00 | 303.00 | 404.00 | 190.75 |
-| max-rate-1-topic-16-partitions-1kb | 3 | kafka | 1 | 281411 | 281396 | 316.36 | 333.00 | 543.90 | 3646.03 |
-| max-rate-1-topic-16-partitions-100b | 3 | kafka | 1 | 271813 | 271813 | 20.22 | 468.00 | 298.14 | 3025.86 |
-| max-rate-1-topic-100-partitions-1kb | 3 | kafka | 1 | 325701 | 325699 | 318.50 | 325.00 | 654.50 | 3665.69 |
-| max-rate-1-topic-100-partitions-100b | 3 | kafka | 1 | 331275 | 331370 | 50.53 | 297.00 | 323.41 | 3283.93 |
-| max-rate-1-topic-16-partitions-1kb | 3 | redpanda | 1 | 371910 | 371910 | 60.58 | 102.00 | 702.58 | 22207.52 |
-| max-rate-1-topic-16-partitions-100b | 3 | redpanda | 1 | 350888 | 351028 | 2.02 | 385.00 | 257.23 | 22057.76 |
-| max-rate-1-topic-100-partitions-1kb | 3 | redpanda | 1 | 380969 | 380971 | 173.82 | 184.00 | 786.89 | 22277.30 |
-| max-rate-1-topic-100-partitions-100b | 3 | redpanda | 1 | 364312 | 364267 | 2.12 | 262.00 | 263.24 | 22037.31 |
-
-## Not measured
-
-- 1-topic-3-partition-100b-3producers, RF3, redpanda: Redpanda's trial reached the runner's 20 GiB disk reserve before its 15 minutes ended: with unlimited retention at RF3, its three brokers filled the about 670 GiB that was free above the reserve. The trial was not run again.
+| backlog-1-topic-1-partition-1kb | 1 | krabka | 1 | 100017 | 99887 | 2.16 | 1038249.98 | 696.27 | 178.43 |
+| backlog-1-topic-1-partition-1kb | 1 | kafka | 1 | 100013 | 99918 | 19.50 | 1038692.35 | 1188.34 | 1145.17 |
+| backlog-1-topic-1-partition-1kb | 1 | redpanda | 1 | 100011 | 99984 | 2.69 | 1039249.41 | 1931.77 | 2669.71 |
+| simple-workload | 1 | krabka | 1 | 10006 | 10006 | 1.74 | 2.00 | 134.23 | 39.50 |
+| simple-workload | 1 | kafka | 1 | 10009 | 10009 | 2.04 | 2.00 | 289.98 | 967.92 |
+| simple-workload | 1 | redpanda | 1 | 10008 | 10008 | 2.06 | 2.00 | 432.36 | 4992.80 |
+| 1-topic-1-partition-100b | 1 | krabka | 1 | 50010 | 50011 | 1.77 | 2.00 | 325.03 | 47.47 |
+| 1-topic-1-partition-100b | 1 | kafka | 1 | 50015 | 50015 | 2.06 | 2.00 | 745.79 | 981.40 |
+| 1-topic-1-partition-100b | 1 | redpanda | 1 | 50014 | 50014 | 2.00 | 2.00 | 840.05 | 2618.11 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | krabka | 1 | 378130 | 378134 | 116.18 | 123.00 | 248.86 | 89.18 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | kafka | 1 | 292190 | 292187 | 196.38 | 199.00 | 387.47 | 727.42 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 1 | redpanda | 1 | 275434 | 275436 | 151.74 | 155.00 | 436.97 | 2642.73 |
+| 1-topic-3-partition-100b-3producers | 1 | krabka | 1 | 974338 | 974335 | 8.54 | 96.00 | 640.18 | 103.15 |
+| 1-topic-3-partition-100b-3producers | 1 | kafka | 1 | 605899 | 605881 | 25.78 | 203.00 | 1024.80 | 1150.15 |
+| 1-topic-3-partition-100b-3producers | 1 | redpanda | 1 | 579686 | 579650 | 6.02 | 165.00 | 1105.91 | 5796.17 |
+| max-rate-1-topic-16-partitions-100b | 1 | krabka | 1 | 1049692 | 1049693 | 17.95 | 27.00 | 185.93 | 47.35 |
+| max-rate-1-topic-16-partitions-100b | 1 | kafka | 1 | 470239 | 470253 | 17.45 | 54.00 | 223.28 | 1045.09 |
+| max-rate-1-topic-16-partitions-100b | 1 | redpanda | 1 | 345424 | 345444 | 4.27 | 60.00 | 225.12 | 7356.73 |
+| max-rate-1-topic-100-partitions-100b | 1 | krabka | 1 | 861953 | 861954 | 12.50 | 34.00 | 209.75 | 51.32 |
+| max-rate-1-topic-100-partitions-100b | 1 | kafka | 1 | 211987 | 211992 | 5.68 | 50.00 | 225.12 | 999.53 |
+| max-rate-1-topic-100-partitions-100b | 1 | redpanda | 1 | 220456 | 220456 | 3.54 | 51.00 | 245.27 | 7334.43 |
+| backlog-1-topic-1-partition-1kb | 3 | krabka | 1 | 100012 | 99894 | 3.08 | 1037881.34 | 2827.26 | 382.92 |
+| backlog-1-topic-1-partition-1kb | 3 | kafka | 1 | 95059 | 94771 | 788.05 | 1039228.93 | 2485.31 | 3633.01 |
+| backlog-1-topic-1-partition-1kb | 3 | redpanda | 1 | 100009 | 99960 | 5.34 | 1039273.98 | 6506.36 | 8105.09 |
+| simple-workload | 3 | krabka | 1 | 10006 | 10006 | 2.83 | 3.00 | 538.94 | 123.07 |
+| simple-workload | 3 | kafka | 1 | 10009 | 10009 | 5.27 | 6.00 | 872.63 | 2937.19 |
+| simple-workload | 3 | redpanda | 1 | 10006 | 10006 | 2.86 | 3.00 | 761.22 | 14923.25 |
+| 1-topic-1-partition-100b | 3 | krabka | 1 | 50010 | 50010 | 2.75 | 3.00 | 1434.42 | 155.30 |
+| 1-topic-1-partition-100b | 3 | kafka | 1 | 50011 | 50011 | 3.06 | 3.00 | 1867.16 | 2921.22 |
+| 1-topic-1-partition-100b | 3 | redpanda | 1 | 50019 | 50019 | 2.59 | 3.00 | 1721.40 | 7847.47 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | krabka | 1 | 172798 | 172795 | 229.15 | 231.00 | 466.25 | 172.21 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | kafka | 1 | 138589 | 138589 | 498.49 | 500.00 | 640.29 | 2144.15 |
+| max-rate-1-topic-1-partition-1p-1c-1kb | 3 | redpanda | 1 | 150438 | 150438 | 260.26 | 261.00 | 675.73 | 7912.91 |
+| 1-topic-3-partition-100b-3producers | 3 | krabka | 1 | 1013074 | 1013045 | 63.94 | 1202.01 | 2563.53 | 323.36 |
+| 1-topic-3-partition-100b-3producers | 3 | kafka | 1 | 810623 | 810591 | 832.34 | 1674.01 | 3097.97 | 3665.21 |
+| 1-topic-3-partition-100b-3producers | 3 | redpanda | 1 | 505846 | 505853 | 38.26 | 503.00 | 2968.24 | 17425.52 |
+| max-rate-1-topic-16-partitions-100b | 3 | krabka | 1 | 1016357 | 1016351 | 71.08 | 96.00 | 481.02 | 174.12 |
+| max-rate-1-topic-16-partitions-100b | 3 | kafka | 1 | 134570 | 134597 | 12.55 | 497.00 | 745.51 | 2964.63 |
+| max-rate-1-topic-16-partitions-100b | 3 | redpanda | 1 | 134058 | 134068 | 4.21 | 498.00 | 641.22 | 20275.97 |
+| max-rate-1-topic-100-partitions-100b | 3 | krabka | 1 | 869846 | 869839 | 51.51 | 95.00 | 565.98 | 171.00 |
+| max-rate-1-topic-100-partitions-100b | 3 | kafka | 1 | 131669 | 131669 | 16.91 | 482.00 | 807.06 | 3012.12 |
+| max-rate-1-topic-100-partitions-100b | 3 | redpanda | 1 | 147860 | 147934 | 4.48 | 484.00 | 691.57 | 21115.30 |
+| backlog-1-topic-16-partitions-1kb | 1 | krabka | 1 | 100010 | 99934 | 2.91 | 1038553.09 | 832.66 | 542.29 |
+| backlog-1-topic-16-partitions-1kb | 1 | kafka | 1 | 100010 | 99968 | 17.31 | 1039572.99 | 1587.12 | 1120.78 |
+| backlog-1-topic-16-partitions-1kb | 1 | redpanda | 1 | 100009 | 99968 | 6.97 | 1040556.03 | 1962.40 | 7426.35 |
+| 1-topic-1-partition-1kb | 1 | krabka | 1 | 50009 | 50009 | 2.54 | 3.00 | 520.51 | 60.89 |
+| 1-topic-1-partition-1kb | 1 | kafka | 1 | 50007 | 50008 | 4.58 | 6.00 | 953.82 | 1006.62 |
+| 1-topic-1-partition-1kb | 1 | redpanda | 1 | 50011 | 50011 | 3.58 | 4.00 | 867.14 | 2628.50 |
+| 1-topic-16-partitions-1kb | 1 | krabka | 1 | 50008 | 50008 | 2.57 | 3.00 | 566.30 | 60.57 |
+| 1-topic-16-partitions-1kb | 1 | kafka | 1 | 50009 | 50009 | 3.88 | 6.00 | 1032.19 | 1008.42 |
+| 1-topic-16-partitions-1kb | 1 | redpanda | 1 | 50011 | 50012 | 3.71 | 6.00 | 1392.28 | 7347.06 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 1 | krabka | 1 | 1787607 | 1787606 | 130.71 | 135.00 | 161.70 | 75.00 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 1 | kafka | 1 | 1457213 | 1457195 | 143.29 | 149.00 | 285.91 | 912.58 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 1 | redpanda | 1 | 1495069 | 1495079 | 196.46 | 204.00 | 306.80 | 2637.74 |
+| max-rate-1-topic-16-partitions-1kb | 1 | krabka | 1 | 374726 | 374724 | 167.60 | 172.00 | 312.91 | 81.79 |
+| max-rate-1-topic-16-partitions-1kb | 1 | kafka | 1 | 273323 | 273324 | 238.15 | 245.00 | 458.38 | 1218.25 |
+| max-rate-1-topic-16-partitions-1kb | 1 | redpanda | 1 | 241297 | 241297 | 232.48 | 240.00 | 500.99 | 7383.25 |
+| max-rate-1-topic-100-partitions-1kb | 1 | krabka | 1 | 379419 | 379421 | 147.91 | 153.00 | 337.40 | 90.45 |
+| max-rate-1-topic-100-partitions-1kb | 1 | kafka | 1 | 290795 | 290795 | 194.04 | 202.00 | 474.09 | 1210.12 |
+| max-rate-1-topic-100-partitions-1kb | 1 | redpanda | 1 | 234591 | 234588 | 228.59 | 238.00 | 568.14 | 7390.20 |
+| backlog-1-topic-16-partitions-1kb | 3 | krabka | 1 | 100014 | 99797 | 3.33 | 1037959.17 | 2665.75 | 1250.68 |
+| backlog-1-topic-16-partitions-1kb | 3 | kafka | 1 | 100017 | 99823 | 102.18 | 1037635.58 | 2919.48 | 3656.93 |
+| backlog-1-topic-16-partitions-1kb | 3 | redpanda | 1 | 100024 | 99794 | 6.88 | 1038172.16 | 3572.09 | 22647.12 |
+| 1-topic-1-partition-1kb | 3 | krabka | 1 | 50012 | 50012 | 2.96 | 3.00 | 1725.89 | 183.91 |
+| 1-topic-1-partition-1kb | 3 | kafka | 1 | 50021 | 50021 | 199.40 | 201.00 | 2142.53 | 3530.84 |
+| 1-topic-1-partition-1kb | 3 | redpanda | 1 | 50015 | 50015 | 3.20 | 3.00 | 1755.32 | 7897.82 |
+| 1-topic-16-partitions-1kb | 3 | krabka | 1 | 50012 | 50012 | 2.95 | 3.00 | 1745.79 | 201.65 |
+| 1-topic-16-partitions-1kb | 3 | kafka | 1 | 50013 | 50013 | 36.50 | 68.00 | 2100.36 | 3252.08 |
+| 1-topic-16-partitions-1kb | 3 | redpanda | 1 | 50012 | 50012 | 3.83 | 5.00 | 2555.74 | 22045.29 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 3 | krabka | 1 | 937624 | 937626 | 355.58 | 358.00 | 300.39 | 175.98 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 3 | kafka | 1 | 713340 | 713340 | 384.81 | 388.00 | 425.30 | 2298.62 |
+| max-rate-1-topic-1-partition-1p-1c-100b | 3 | redpanda | 1 | 876187 | 876164 | 37.17 | 40.00 | 464.97 | 7909.30 |
+| max-rate-1-topic-16-partitions-1kb | 3 | krabka | 1 | 178195 | 178197 | 397.69 | 402.00 | 515.50 | 198.95 |
+| max-rate-1-topic-16-partitions-1kb | 3 | kafka | 1 | 172145 | 172151 | 147.05 | 234.00 | 887.84 | 3349.16 |
+| max-rate-1-topic-16-partitions-1kb | 3 | redpanda | 1 | 162278 | 162263 | 151.80 | 265.00 | 932.26 | 22279.57 |
+| max-rate-1-topic-100-partitions-1kb | 3 | krabka | 1 | 176346 | 176343 | 708.60 | 716.00 | 630.22 | 213.18 |
+| max-rate-1-topic-100-partitions-1kb | 3 | kafka | 1 | 177590 | 177586 | 418.72 | 434.00 | 967.37 | 3644.10 |
+| max-rate-1-topic-100-partitions-1kb | 3 | redpanda | 1 | 168555 | 168559 | 401.18 | 422.00 | 909.35 | 22371.74 |
