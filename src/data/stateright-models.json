@@ -46,8 +46,8 @@
     "bounds": "Two producers on one partition, the first with two batches and the second with one, every batch sent at most twice, and a log of single-record slots.",
     "properties": ["no_duplicate_append", "decision_matches_kafka"],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES", "count": 8175 },
-      { "config": "PINNED_UNIQUE_STATES_GATE_ONLY", "count": 15315 }
+      { "config": "PINNED_UNIQUE_STATES", "count": 28998 },
+      { "config": "PINNED_UNIQUE_STATES_GATE_ONLY", "count": 110892 }
     ],
     "outside": "Leader changes, transactions, and multi-record batches remain outside the model; producer_state_model covers the multi-record retained window.",
     "summary": "Splits one acks=all produce into the steps the broker runs apart: the early dedup gate, the partition writer's lookup among the producer's retained batches, the commit of the writer's answer into the tracker, and the high-watermark gate. A retry over a new connection can pass the early gate while the original still waits. It requires that no producer ID, epoch and sequence appear in the log twice and that every batch is answered as Kafka would answer it. The GateOnly regression configuration, the orchestration from before #1947, must reproduce the Jepsen workload's duplicate records at depth 4."
@@ -355,8 +355,8 @@
     "bounds": "One transactional id over two data partitions, up to producer epoch 2, with one failed commit wait and one coordinator crash (basic) or two of each (wide), and faults ended by Heal.",
     "properties": ["every_marker_delivered", "outcome_is_atomic"],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES_BASIC", "count": 73076 },
-      { "config": "PINNED_UNIQUE_STATES_WIDE", "count": 390552 }
+      { "config": "PINNED_UNIQUE_STATES_BASIC", "count": 67094 },
+      { "config": "PINNED_UNIQUE_STATES_WIDE", "count": 362541 }
     ],
     "summary": "Runs a transaction-version-2 producer, the timeout reaper, the completion task and the partition leaders' late appends under bounded faults: lost or late __transaction_state writes, coordinator crashes, and retriable or unexpected marker answers. Once the cluster has healed and nothing can make progress, every partition holding a transaction's data must have its marker, except one that keeps answering an unexpected code, and one generation's markers must all agree. Restoring the old fan-out failure order fails delivery on the Jepsen subscribe-txn-kill shape."
   },
@@ -387,8 +387,8 @@
     "bounds": "One transactional id at TV_2 over two data partitions and its __transaction_state coordinator, EndTxn sent at most twice, and at most two faults (stall, failover, leader move, refusal, abandonment) ended by Heal, with and without marker refusals.",
     "properties": ["every_transaction_ends_when_quiescent", "one_outcome_per_transaction", "projection_exact"],
     "pinned_states": [
-      { "config": "PINNED_UNIQUE_STATES_NO_REFUSALS", "count": 89478 },
-      { "config": "PINNED_UNIQUE_STATES_REFUSALS", "count": 104970 }
+      { "config": "PINNED_UNIQUE_STATES_NO_REFUSALS", "count": 50631 },
+      { "config": "PINNED_UNIQUE_STATES_REFUSALS", "count": 60467 }
     ],
     "outside": "A stale coordinator fenced by a newer one, data-partition replication, a partial commit of the state tail, and transaction versions below TV_2 remain outside the model.",
     "summary": "Runs the coordinator one operation at a time, split at its awaits, with state writes that can time out and still commit or be truncated, failovers that rebuild the cache from the log, and marker fan-outs to moving leaders. Both headline properties fail on the current code, the Jepsen workload's hanging-transaction failure, and are pinned as known failures. In one path a load publishes an uncommitted registration or PrepareCommit and a later failover truncates it, so the reaper never ends the transaction or aborts it on one partition after a commit on the other; in another an unexpected marker answer ends a PrepareCommit's fan-out and the reaper resumes only PrepareAbort."
