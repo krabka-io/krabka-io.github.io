@@ -7,6 +7,9 @@ import { selectChecks } from './ci-changes.mjs';
 const workflow = load(
   fs.readFileSync(new URL('../.github/workflows/snippets.yml', import.meta.url), 'utf8'),
 );
+const caller = load(
+  fs.readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
+);
 function contract(doc) {
   const { changes, snippets } = doc.jobs;
   assert.equal(changes.if, undefined);
@@ -47,20 +50,23 @@ function contract(doc) {
   );
   assert.equal(execute['continue-on-error'], undefined);
   assert.equal(execute.if, undefined);
-  assert.deepEqual(doc.on.pull_request.types, [
+  assert.ok(Object.hasOwn(doc.on, 'workflow_call'));
+  assert.equal(caller.jobs.snippets.uses, './.github/workflows/snippets.yml');
+  assert.ok(caller.jobs.gate.needs.includes('snippets'));
+  assert.deepEqual(caller.on.pull_request.types, [
     'opened',
     'synchronize',
     'reopened',
     'ready_for_review',
     'converted_to_draft',
   ]);
-  assert.deepEqual(doc.on.pull_request.branches, ['main']);
-  assert.deepEqual(doc.on.push.branches, ['main']);
+  assert.deepEqual(caller.on.pull_request.branches, ['main']);
+  assert.deepEqual(caller.on.push.branches, ['main']);
   assert.deepEqual(doc.on.repository_dispatch.types, ['release-published']);
   assert.ok(doc.on.schedule.length);
   assert.ok(Object.hasOwn(doc.on, 'workflow_dispatch'));
-  assert.equal(doc.on.pull_request.paths, undefined);
-  assert.equal(doc.on.pull_request['paths-ignore'], undefined);
+  assert.equal(caller.on.pull_request.paths, undefined);
+  assert.equal(caller.on.pull_request['paths-ignore'], undefined);
   assert.equal(doc.concurrency['cancel-in-progress'], "${{ github.event_name == 'pull_request' }}");
   assert.equal(
     doc.concurrency.group,
@@ -70,8 +76,8 @@ function contract(doc) {
 test('snippet coverage always runs; only execution shards are conditional', () =>
   contract(workflow));
 for (const [name, mutate] of Object.entries({
-  'missing ready event': (doc) => {
-    doc.on.pull_request.types = ['opened'];
+  'missing callable trigger': (doc) => {
+    delete doc.on.workflow_call;
   },
   'skipped extraction': (doc) => {
     doc.jobs.changes.if = 'false';
