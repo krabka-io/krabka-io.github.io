@@ -24,6 +24,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
+  snippets:
+    uses: ./.github/workflows/snippets.yml
+    secrets: inherit
+
+  bridge:
+    uses: ./.github/workflows/kafkactl-lab-ci.yml
+    secrets: inherit
+
+  playground:
+    uses: ./.github/workflows/playground.yml
+    secrets: inherit
+
   # Always report false outside a main push. A failed lookup/transfer falls back
   # to build; it must not suppress the required check through dependency skips.
   promote:
@@ -387,3 +399,15 @@ jobs:
         run: |
           node scripts/check-production.mjs https://krabka.io deployed-inventory/sitemap-inventory.json
           node scripts/check-api-links.mjs
+
+  gate:
+    name: gate
+    if: always()
+    needs: [promote, build, snippets, bridge, playground]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: krabka-io/tooling/actions/gate@a42cceef18200f4f282ae5a090856f63125a12ff
+        with:
+          results: ${{ toJSON(needs) }}
+          allow-skipped: build
