@@ -143,15 +143,22 @@ test('gate rejects failed, cancelled, missing or unexpectedly skipped required w
   }
 });
 
+const caller = load(
+  fs.readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
+);
+
 test('workflow handles ready/draft transitions and queue without path filters or write permissions', () => {
   assert.deepEqual(workflow.permissions, { contents: 'read' });
+  assert.ok(Object.hasOwn(workflow.on, 'workflow_call'));
+  assert.equal(caller.jobs.bridge.uses, './.github/workflows/kafkactl-lab-ci.yml');
+  assert.ok(caller.jobs.gate.needs.includes('bridge'));
   for (const event of ['pull_request', 'push', 'merge_group']) {
-    assert.deepEqual(workflow.on[event].branches, ['main']);
-    assert.equal(workflow.on[event].paths, undefined);
-    assert.equal(workflow.on[event]['paths-ignore'], undefined);
+    assert.deepEqual(caller.on[event].branches, ['main']);
+    assert.equal(caller.on[event].paths, undefined);
+    assert.equal(caller.on[event]['paths-ignore'], undefined);
   }
-  assert.ok(workflow.on.pull_request.types.includes('ready_for_review'));
-  assert.ok(workflow.on.pull_request.types.includes('converted_to_draft'));
+  assert.ok(caller.on.pull_request.types.includes('ready_for_review'));
+  assert.ok(caller.on.pull_request.types.includes('converted_to_draft'));
   assert.equal(workflow.jobs.changes.steps[0].with['fetch-depth'], 0);
   assert.equal(workflow.jobs['test-build'].if, "needs.changes.outputs.bridge == 'true'");
   assert.equal(workflow.jobs['test-build'].env.CGO_ENABLED, '0');

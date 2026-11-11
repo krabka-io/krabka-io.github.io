@@ -38,7 +38,8 @@ echo "==> OCaml libraries"
 # them would downgrade and rebuild half the switch for nothing.
 opam install -y dune dune-site dune-build-info menhir ocamlgraph zarith camlzip re ppxlib yojson \
   ppx_deriving ppx_blob logs fmt seq result stdlib-shims cmdliner data-encoding lwt_ppx \
-  dolmen dolmen_type dolmen_loop ocplib-simplex psmt2-frontend \
+  "dolmen.${DOLMEN_VERSION}" "dolmen_type.${DOLMEN_VERSION}" "dolmen_loop.${DOLMEN_VERSION}" \
+  ocplib-simplex psmt2-frontend \
   "js_of_ocaml.${JS_OF_OCAML_VERSION}" "js_of_ocaml-compiler.${JS_OF_OCAML_VERSION}" \
   "js_of_ocaml-ppx.${JS_OF_OCAML_VERSION}" "js_of_ocaml-lwt.${JS_OF_OCAML_VERSION}" zarith_stubs_js
 
