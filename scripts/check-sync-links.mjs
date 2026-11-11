@@ -47,6 +47,15 @@ const nested = {
   sourceFile: 'operations/runbooks/restore.md',
   sourceRef: 'abc123',
 };
+for (const label of ['`[remote_storage.s3]`', '``[remote_storage.s3]``', '`[x](y.md)`']) {
+  assert.equal(
+    rewriteDocLinks(`[${label}](../config-reference.md#remote_storages3)`, {
+      ...nested,
+      sourceFile: 'operations/backup-restore.md',
+    }),
+    `[${label}](/docs/broker/config-reference#remote_storages3)`,
+  );
+}
 assert.equal(
   rewriteDocLinks(
     '[backup](../backup-restore.md#recover) [config](../../config-reference.md) [code](../../../crates/broker.rs) ![diagram](../figures/flow.svg) [guide](../KIP_MATRIX.md)',
